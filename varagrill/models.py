@@ -1,0 +1,407 @@
+from django.conf import settings
+from django.contrib.auth.models import AbstractUser
+from django.core.validators import MinValueValidator
+from django.db import models
+
+
+# ---------------------------------------------------------------------------
+# Auditoría reutilizable (creado_por / fecha_creacion / actualizado_por / fecha_actualizacion)
+# ---------------------------------------------------------------------------
+class VGAuditoria(models.Model):
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="%(class)s_creados",
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    actualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="%(class)s_actualizados",
+    )
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+# ---------------------------------------------------------------------------
+# Usuarios y roles — extiende auth.User en vez de reemplazarlo
+# ---------------------------------------------------------------------------
+class VGRol(VGAuditoria):
+    nombre_role = models.CharField(max_length=50, unique=True)
+    descripcion = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_roles"
+        verbose_name = "Rol"
+        verbose_name_plural = "Roles"
+
+    def __str__(self):
+        return self.nombre_role
+
+
+class VGUsuario(AbstractUser):
+    """
+    Reemplaza a auth.User. Hereda username, first_name, last_name, email,
+    password, is_staff, is_active, is_superuser, date_joined, etc., y le
+    agrega los campos propios del restaurante en la misma tabla.
+    Requiere AUTH_USER_MODEL = "<tu_app>.VGUsuario" en settings.py, definido
+    ANTES de correr la primera migración del proyecto.
+    """
+    cedula = models.CharField(max_length=20, unique=True)
+    telefono = models.CharField(max_length=20, blank=True)
+    fecha_nacimiento = models.DateField(null=True, blank=True)
+    id_role = models.ForeignKey(
+        VGRol, on_delete=models.PROTECT, null=True, blank=True, related_name="usuarios",
+    )
+
+    class Meta:
+        db_table = "vg_usuarios"
+        verbose_name = "Usuario"
+        verbose_name_plural = "Usuarios"
+
+    def __str__(self):
+        return self.get_full_name() or self.username
+
+
+# ---------------------------------------------------------------------------
+# Mesas y clientes
+# ---------------------------------------------------------------------------
+class VGMesa(VGAuditoria):
+    ESTADOS = [
+        ("libre", "Libre"),
+        ("ocupada", "Ocupada"),
+        ("reservada", "Reservada"),
+        ("mantenimiento", "Mantenimiento"),
+    ]
+    numero = models.PositiveIntegerField(unique=True)
+    capacidad = models.PositiveSmallIntegerField(default=4)
+    ubicacion = models.CharField(max_length=100, blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="libre")
+
+    class Meta:
+        db_table = "vg_mesas"
+
+    def __str__(self):
+        return f"Mesa {self.numero}"
+
+
+class VGCliente(models.Model):
+    nombre = models.CharField(max_length=150)
+    telefono = models.CharField(max_length=20, blank=True)
+    correo = models.EmailField(blank=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vg_clientes"
+
+    def __str__(self):
+        return self.nombre
+
+
+# ---------------------------------------------------------------------------
+# Menú
+# ---------------------------------------------------------------------------
+class VGCategoriaProducto(VGAuditoria):
+    nombre = models.CharField(max_length=100, unique=True)
+    descripcion = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_categorias_productos"
+        verbose_name = "Categoría de producto"
+        verbose_name_plural = "Categorías de productos"
+
+    def __str__(self):
+        return self.nombre
+
+
+class VGProducto(VGAuditoria):
+    nombre = models.CharField(max_length=150)
+    descripcion = models.TextField(blank=True)
+    categoria = models.ForeignKey(VGCategoriaProducto, on_delete=models.PROTECT, related_name="productos")
+    precio_venta = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    costo_estimado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    imagen_url = models.URLField(blank=True)
+    disponible = models.BooleanField(default=True)
+    tiempo_preparacion_min = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "vg_productos"
+
+    def __str__(self):
+        return self.nombre
+
+
+# ---------------------------------------------------------------------------
+# Inventario
+# ---------------------------------------------------------------------------
+class VGIngrediente(VGAuditoria):
+    UNIDADES = [
+        ("kg", "Kilogramos"),
+        ("g", "Gramos"),
+        ("l", "Litros"),
+        ("ml", "Mililitros"),
+        ("unidad", "Unidad"),
+    ]
+    nombre = models.CharField(max_length=150)
+    unidad_medida = models.CharField(max_length=10, choices=UNIDADES)
+    stock_actual = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    stock_minimo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    costo_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    ultimo_proveedor = models.CharField(
+        max_length=150, blank=True,
+        help_text="Nombre del último proveedor que despachó este ingrediente (sin tabla propia: los proveedores cambian seguido).",
+    )
+
+    class Meta:
+        db_table = "vg_ingredientes"
+
+    def __str__(self):
+        return self.nombre
+
+
+class VGPreparacion(VGAuditoria):
+    """
+    Una elaboración intermedia (salsa, base, marinado, aderezo...) que no se
+    vende directamente, pero tiene su propia receta y se usa como componente
+    dentro de la receta de un producto — o dentro de otra preparación.
+    """
+    nombre = models.CharField(max_length=150)
+    rendimiento_cantidad = models.DecimalField(
+        max_digits=10, decimal_places=3,
+        help_text="Cuánto produce una tanda de esta receta (ej: 1 tanda = 2 litros de salsa).",
+    )
+    rendimiento_unidad = models.CharField(max_length=10, choices=VGIngrediente.UNIDADES)
+
+    class Meta:
+        db_table = "vg_preparaciones"
+        verbose_name = "Preparación"
+        verbose_name_plural = "Preparaciones"
+
+    def __str__(self):
+        return self.nombre
+
+
+class VGRecetaPreparacion(models.Model):
+    """
+    Componentes de una VGPreparacion. Cada fila es un ingrediente crudo O
+    otra preparación (nunca ambos) — así una salsa puede llevar otra
+    sub-salsa dentro, con la profundidad de anidado que haga falta.
+    """
+    preparacion = models.ForeignKey(VGPreparacion, on_delete=models.CASCADE, related_name="componentes")
+    ingrediente = models.ForeignKey(
+        VGIngrediente, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en_preparaciones",
+    )
+    sub_preparacion = models.ForeignKey(
+        VGPreparacion, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en",
+    )
+    cantidad_requerida = models.DecimalField(max_digits=10, decimal_places=3)
+
+    class Meta:
+        db_table = "vg_receta_preparacion"
+        verbose_name = "Componente de preparación"
+        verbose_name_plural = "Componentes de preparación"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ingrediente__isnull=False, sub_preparacion__isnull=True)
+                    | models.Q(ingrediente__isnull=True, sub_preparacion__isnull=False)
+                ),
+                name="receta_preparacion_un_solo_componente",
+            ),
+        ]
+
+    def __str__(self):
+        componente = self.ingrediente or self.sub_preparacion
+        return f"{self.preparacion} — {componente} ({self.cantidad_requerida})"
+
+
+class VGRecetaProducto(models.Model):
+    """
+    Componentes de un VGProducto. Igual que en VGRecetaPreparacion: cada
+    fila es un ingrediente crudo O una preparación (nunca ambos) — un plato
+    puede llevar arroz directo y, aparte, una cucharada de una salsa que ya
+    tiene su propia receta.
+    """
+    producto = models.ForeignKey(VGProducto, on_delete=models.CASCADE, related_name="receta")
+    ingrediente = models.ForeignKey(
+        VGIngrediente, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en",
+    )
+    preparacion = models.ForeignKey(
+        VGPreparacion, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en_productos",
+    )
+    cantidad_requerida = models.DecimalField(max_digits=10, decimal_places=3)
+
+    class Meta:
+        db_table = "vg_receta_producto"
+        verbose_name = "Ingrediente de receta"
+        verbose_name_plural = "Recetas de productos"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ingrediente__isnull=False, preparacion__isnull=True)
+                    | models.Q(ingrediente__isnull=True, preparacion__isnull=False)
+                ),
+                name="receta_producto_un_solo_componente",
+            ),
+            models.UniqueConstraint(
+                fields=["producto", "ingrediente"], condition=models.Q(ingrediente__isnull=False),
+                name="uniq_producto_ingrediente",
+            ),
+            models.UniqueConstraint(
+                fields=["producto", "preparacion"], condition=models.Q(preparacion__isnull=False),
+                name="uniq_producto_preparacion",
+            ),
+        ]
+
+    def __str__(self):
+        componente = self.ingrediente or self.preparacion
+        return f"{self.producto} — {componente} ({self.cantidad_requerida})"
+
+
+class VGCompra(VGAuditoria):
+    ESTADOS = [
+        ("pendiente", "Pendiente"),
+        ("recibido", "Recibido"),
+        ("cancelado", "Cancelado"),
+    ]
+    proveedor_nombre = models.CharField(max_length=150)
+    fecha_compra = models.DateTimeField(auto_now_add=True)
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+
+    class Meta:
+        db_table = "vg_compras"
+
+    def __str__(self):
+        return f"Compra #{self.pk} — {self.proveedor_nombre}"
+
+
+class VGDetalleCompra(models.Model):
+    compra = models.ForeignKey(VGCompra, on_delete=models.CASCADE, related_name="detalles")
+    ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.PROTECT, related_name="compras")
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2)
+    costo_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        db_table = "vg_detalle_compras"
+
+    @property
+    def subtotal(self):
+        return self.cantidad * self.costo_unitario
+
+    def __str__(self):
+        return f"{self.ingrediente} x {self.cantidad}"
+
+
+class VGMovimientoInventario(models.Model):
+    TIPOS = [
+        ("entrada", "Entrada"),
+        ("salida", "Salida"),
+        ("ajuste", "Ajuste"),
+    ]
+    ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.PROTECT, related_name="movimientos")
+    tipo_movimiento = models.CharField(max_length=10, choices=TIPOS)
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2)
+    motivo = models.CharField(max_length=255, blank=True)
+    id_referencia = models.PositiveIntegerField(null=True, blank=True)
+    fecha_movimiento = models.DateTimeField(auto_now_add=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+
+    class Meta:
+        db_table = "vg_movimientos_inventario"
+
+    def __str__(self):
+        return f"{self.tipo_movimiento} — {self.ingrediente} ({self.cantidad})"
+
+
+# ---------------------------------------------------------------------------
+# Pedidos y pagos
+# ---------------------------------------------------------------------------
+class VGPedido(VGAuditoria):
+    TIPOS = [
+        ("local", "Local"),
+        ("llevar", "Para llevar"),
+        ("delivery", "Delivery"),
+    ]
+    ESTADOS = [
+        ("pendiente", "Pendiente"),
+        ("en_preparacion", "En preparación"),
+        ("listo", "Listo"),
+        ("entregado", "Entregado"),
+        ("pagado", "Pagado"),
+        ("cancelado", "Cancelado"),
+    ]
+    mesa = models.ForeignKey(VGMesa, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos")
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pedidos_atendidos",
+    )
+    cliente = models.ForeignKey(VGCliente, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos")
+    tipo_pedido = models.CharField(max_length=10, choices=TIPOS, default="local")
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    impuesto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    descuento = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    propina = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "vg_pedidos"
+
+    def __str__(self):
+        return f"Pedido #{self.pk}"
+
+
+class VGDetallePedido(models.Model):
+    ESTADOS = [
+        ("pendiente", "Pendiente"),
+        ("en_preparacion", "En preparación"),
+        ("listo", "Listo"),
+        ("entregado", "Entregado"),
+    ]
+    pedido = models.ForeignKey(VGPedido, on_delete=models.CASCADE, related_name="detalles")
+    producto = models.ForeignKey(VGProducto, on_delete=models.PROTECT, related_name="detalles_pedido")
+    cantidad = models.PositiveSmallIntegerField(default=1)
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+    notas = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_detalle_pedidos"
+
+    @property
+    def subtotal(self):
+        return self.cantidad * self.precio_unitario
+
+    def __str__(self):
+        return f"{self.producto} x {self.cantidad}"
+
+
+class VGPago(models.Model):
+    METODOS = [
+        ("efectivo", "Efectivo"),
+        ("tarjeta", "Tarjeta"),
+        ("transferencia", "Transferencia"),
+        ("pago_movil", "Pago móvil"),
+    ]
+    ESTADOS = [
+        ("completado", "Completado"),
+        ("anulado", "Anulado"),
+    ]
+    pedido = models.ForeignKey(VGPedido, on_delete=models.PROTECT, related_name="pagos")
+    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    metodo_pago = models.CharField(max_length=20, choices=METODOS)
+    fecha_pago = models.DateTimeField(auto_now_add=True)
+    referencia = models.CharField(max_length=100, blank=True)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="completado")
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+
+    class Meta:
+        db_table = "vg_pagos"
+
+    def __str__(self):
+        return f"Pago {self.monto} — Pedido #{self.pedido_id}"

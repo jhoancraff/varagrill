@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-import useKitchenSocket from '../hooks/useKitchenSocket';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const ACTIVE_FILTER = 'activos';
 const ALL_FILTER = 'todos';
@@ -20,7 +18,19 @@ const nextActionsByState = {
   ],
 };
 
-function KitchenOrdersPage({ isMobile, onBack }) {
+function KitchenOrdersPage({
+  isMobile,
+  onBack,
+  isSocketConnected,
+  alertPermission,
+  audioUnlocked,
+  alertDiagnostics,
+  alertMessage,
+  onUnlockAudio,
+  onRunDiagnostics,
+  onRequestPermission,
+  lastKitchenEvent,
+}) {
   const [orders, setOrders] = useState([]);
   const [counts, setCounts] = useState({ pendiente: 0, en_preparacion: 0, listo: 0 });
   const [loading, setLoading] = useState(true);
@@ -29,13 +39,6 @@ function KitchenOrdersPage({ isMobile, onBack }) {
   const [statusFilter, setStatusFilter] = useState(ACTIVE_FILTER);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [mobileColumn, setMobileColumn] = useState('pendiente');
-  const [alertPermission, setAlertPermission] = useState('default');
-  const [alertsEnabled, setAlertsEnabled] = useState(true);
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [alertMessage, setAlertMessage] = useState('Toca “Probar sonido” una vez para activar el aviso en este teléfono.');
-  const audioContextRef = useRef(null);
-  const audioUnlockedRef = useRef(false);
-  const lastAlertAtRef = useRef(0);
 
   const fetchOrders = useCallback(async (controller) => {
     try {
@@ -65,162 +68,16 @@ function KitchenOrdersPage({ isMobile, onBack }) {
     }
   }, [statusFilter]);
 
-  const ensureAudioContext = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) {
-      return null;
-    }
-
-    if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContextCtor();
-    }
-
-    if (audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume().catch(() => {});
-    }
-
-    return audioContextRef.current;
-  }, []);
-
-  const playKitchenAlertSound = useCallback(() => {
-    if (!alertsEnabled || !audioUnlockedRef.current) {
-      return;
-    }
-
-    const audioContext = ensureAudioContext();
-    if (!audioContext) {
-      return;
-    }
-
-    const now = audioContext.currentTime;
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-
-    oscillator.type = 'triangle';
-    oscillator.frequency.setValueAtTime(880, now);
-    oscillator.frequency.exponentialRampToValueAtTime(1280, now + 0.16);
-
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.24, now + 0.02);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
-
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-
-    oscillator.start(now);
-    oscillator.stop(now + 0.48);
-  }, [alertsEnabled, ensureAudioContext]);
-
-  const showKitchenNotification = useCallback((message) => {
-    if (!alertsEnabled) {
-      return;
-    }
-
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      return;
-    }
-
-    if (alertPermission !== 'granted') {
-      return;
-    }
-
-    if (document.visibilityState === 'visible') {
-      return;
-    }
-
-    const payload = message?.payload || {};
-    const pedidoId = payload.pedido_id || payload.order_id || 'N/A';
-    const mesaLabel = payload.mesa ? `Mesa ${payload.mesa}` : 'Sin mesa';
-
-    new Notification('Nueva orden en cocina', {
-      body: `Pedido #${pedidoId} · ${mesaLabel}`,
-      icon: '/assets/varagrill-logo.jpg',
-      tag: 'kitchen-order-alert',
-      renotify: true,
-    });
-  }, [alertPermission, alertsEnabled]);
-
-  const triggerKitchenAlert = useCallback((message) => {
-    if (!alertsEnabled) {
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastAlertAtRef.current < 4000) {
-      return;
-    }
-
-    lastAlertAtRef.current = now;
-    playKitchenAlertSound();
-    showKitchenNotification(message);
-
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      navigator.vibrate([140, 60, 140]);
-    }
-  }, [alertsEnabled, playKitchenAlertSound, showKitchenNotification]);
-
-  const unlockAudioAndTest = useCallback(async () => {
-    const audioContext = ensureAudioContext();
-    if (audioContext && audioContext.state === 'suspended') {
-      await audioContext.resume().catch(() => {});
-    }
-
-    audioUnlockedRef.current = true;
-    setAudioUnlocked(true);
-    setAlertMessage('Sonido desbloqueado. El aviso sonará cuando llegue una nueva orden.');
-    playKitchenAlertSound();
-
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-      const permission = await Notification.requestPermission();
-      setAlertPermission(permission);
-      setAlertsEnabled(permission !== 'denied');
-      if (permission === 'granted') {
-        setAlertMessage('Sonido desbloqueado y notificaciones activadas.');
-      }
-    }
-  }, [ensureAudioContext, playKitchenAlertSound]);
-
-  const requestAlertPermission = useCallback(async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    setAlertPermission(permission);
-    setAlertsEnabled(permission !== 'denied');
-    setAlertMessage(permission === 'granted' ? 'Notificaciones activadas.' : 'Las notificaciones están bloqueadas en este navegador.');
-  }, []);
-
-  const handleKitchenSocketEvent = useCallback((message) => {
-    if (!message?.event) {
-      return;
-    }
-
-    if (message.event === 'NUEVA_COMANDAS' || message.event === 'PEDIDO_ACTUALIZADO') {
-      triggerKitchenAlert(message);
-      fetchOrders();
-    }
-  }, [fetchOrders, triggerKitchenAlert]);
-
-  const { isConnected: isKitchenSocketConnected } = useKitchenSocket({
-    socketPath: '/ws/pedidos/',
-    onEvent: handleKitchenSocketEvent,
-  });
-
+  // Alerts (sound/notification/vibration) and the socket connection now live
+  // in the parent (WelcomeScreen) so they keep working from any view, not
+  // just while this board is mounted. This effect just reacts to events the
+  // parent already received and forwards to us via `lastKitchenEvent`.
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      const permission = Notification.permission;
-      setAlertPermission(permission);
-      setAlertsEnabled(permission !== 'denied');
-      if (permission === 'granted') {
-        setAlertMessage('Notificaciones activadas. Toca “Probar sonido” para verificar el aviso.');
-      }
+    if (!lastKitchenEvent) {
+      return;
     }
-  }, []);
+    fetchOrders();
+  }, [lastKitchenEvent, fetchOrders]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -316,7 +173,7 @@ function KitchenOrdersPage({ isMobile, onBack }) {
 
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={unlockAudioAndTest} style={floatingAlertButtonStyle(isMobile)}>
+      <button type="button" onClick={onUnlockAudio} style={floatingAlertButtonStyle(isMobile)}>
         {audioUnlocked ? 'Aviso listo' : 'Probar sonido'}
       </button>
 
@@ -353,13 +210,19 @@ function KitchenOrdersPage({ isMobile, onBack }) {
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" onClick={unlockAudioAndTest} style={primaryAlertButtonStyle(isMobile)}>
+          <button type="button" onClick={onUnlockAudio} style={primaryAlertButtonStyle(isMobile)}>
             Probar sonido
           </button>
-          <button type="button" onClick={requestAlertPermission} style={secondaryAlertButtonStyle(isMobile)}>
+          <button type="button" onClick={onRunDiagnostics} style={secondaryAlertButtonStyle(isMobile)}>
+            Prueba completa
+          </button>
+          <button type="button" onClick={onRequestPermission} style={secondaryAlertButtonStyle(isMobile)}>
             {alertPermission === 'granted' ? 'Alertas activas' : 'Activar notificaciones'}
           </button>
           <button type="button" onClick={() => fetchOrders()} style={secondaryAlertButtonStyle(isMobile)}>Actualizar</button>
+        </div>
+        <div style={{ color: '#a8a8a8', fontSize: 11, lineHeight: 1.4 }}>
+          {alertDiagnostics}
         </div>
       </div>
 
@@ -367,7 +230,7 @@ function KitchenOrdersPage({ isMobile, onBack }) {
         <div>Pendientes: {counts.pendiente || 0}</div>
         <div>En preparación: {counts.en_preparacion || 0}</div>
         <div>Listos: {counts.listo || 0}</div>
-        <div>WebSocket: {isKitchenSocketConnected ? 'Conectado' : 'Reconectando'}</div>
+        <div>WebSocket: {isSocketConnected ? 'Conectado' : 'Reconectando'}</div>
       </div>
 
       {lastUpdate && (

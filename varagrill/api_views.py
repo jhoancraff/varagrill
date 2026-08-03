@@ -15,13 +15,19 @@ from rest_framework import generics
 from .models import (
     VGCategoriaProducto,
     VGCliente,
+    VGCompra,
+    VGDetalleCompra,
     VGDetallePedido,
     VGIngrediente,
     VGMesa,
+    VGMovimientoInventario,
     VGPedido,
     VGPreparacion,
     VGProducto,
+    VGRecetaProducto,
     VGRecetaPreparacion,
+    VGRol,
+    VGUsuario,
 )
 from .notifications import send_whatsapp_new_order_alert
 from .serializers import MesaSerializer, ProductoSerializer
@@ -42,6 +48,76 @@ def _get_role_name(user):
 
 def _is_mesero_user(user):
     return _get_role_name(user).lower() == 'mesero'
+
+
+def _is_admin_user(user):
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    role_name = _get_role_name(user).lower()
+    return role_name == 'administrador' or bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
+
+
+def _serialize_role(role):
+    return {
+        'id': role.id,
+        'nombre_role': role.nombre_role,
+        'descripcion': role.descripcion,
+    }
+
+
+def _serialize_user(user):
+    birth_date = user.fecha_nacimiento
+    return {
+        'id': user.id,
+        'username': user.username,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'email': user.email,
+        'cedula': user.cedula,
+        'telefono': user.telefono,
+        'fecha_nacimiento': birth_date.isoformat() if hasattr(birth_date, 'isoformat') else str(birth_date or ''),
+        'is_active': user.is_active,
+        'is_staff': user.is_staff,
+        'role': _serialize_role(user.id_role) if user.id_role else None,
+    }
+
+
+def _serialize_recipe_component(component):
+    ingredient = component.ingrediente
+    preparation = component.preparacion
+    if ingredient is not None:
+        return {
+            'id': component.id,
+            'tipo': 'ingrediente',
+            'referencia_id': ingredient.id,
+            'nombre': ingredient.nombre,
+            'unidad': ingredient.unidad_medida,
+            'cantidad': str(component.cantidad_requerida),
+        }
+    return {
+        'id': component.id,
+        'tipo': 'sub_preparacion',
+        'referencia_id': preparation.id if preparation else None,
+        'nombre': preparation.nombre if preparation else '',
+        'unidad': preparation.rendimiento_unidad if preparation else 'unidad',
+        'cantidad': str(component.cantidad_requerida),
+    }
+
+
+def _serialize_recipe_product(product):
+    components = [
+        _serialize_recipe_component(component)
+        for component in product.receta.select_related('ingrediente', 'preparacion').order_by('id')
+    ]
+    return {
+        'id': product.id,
+        'nombre': product.nombre,
+        'descripcion': product.descripcion,
+        'categoria': product.categoria.nombre if product.categoria else '',
+        'disponible': product.disponible,
+        'componentes': components,
+        'componentes_total': len(components),
+    }
 
 
 def _notify_cocina_event(event_name, pedido, actor_user):
@@ -228,16 +304,42 @@ def admin_catalog_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
-    if not request.user.is_authenticated or not request.user.is_staff:
+    if not _is_admin_user(request.user):
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
 
     if request.method == 'GET':
+        recipe_components_by_preparation = {}
+        for component in VGRecetaPreparacion.objects.select_related('preparacion', 'ingrediente', 'sub_preparacion').order_by('id'):
+            preparation_id = component.preparacion_id
+            if preparation_id not in recipe_components_by_preparation:
+                recipe_components_by_preparation[preparation_id] = []
+
+            if component.ingrediente_id:
+                recipe_components_by_preparation[preparation_id].append({
+                    'tipo': 'ingrediente',
+                    'referencia_id': component.ingrediente_id,
+                    'nombre': component.ingrediente.nombre if component.ingrediente else '',
+                    'cantidad': str(component.cantidad_requerida),
+                })
+            elif component.sub_preparacion_id:
+                recipe_components_by_preparation[preparation_id].append({
+                    'tipo': 'sub_preparacion',
+                    'referencia_id': component.sub_preparacion_id,
+                    'nombre': component.sub_preparacion.nombre if component.sub_preparacion else '',
+                    'cantidad': str(component.cantidad_requerida),
+                })
+
         inventory = list(
-            VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario')
+            VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario', 'stock_minimo')
         )
-        recipes = list(
-            VGPreparacion.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'rendimiento_cantidad', 'rendimiento_unidad')
-        )
+        recipes = []
+        for preparation in VGPreparacion.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'rendimiento_cantidad', 'rendimiento_unidad'):
+            components = recipe_components_by_preparation.get(preparation['id'], [])
+            recipes.append({
+                **preparation,
+                'componentes': components,
+                'componentes_total': len(components),
+            })
         beverages = list(
             VGProducto.objects.filter(disponible=True).select_related('categoria').order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'precio_venta', 'categoria__nombre')
         )
@@ -282,21 +384,235 @@ def admin_catalog_view(request):
         beverage.delete()
         return _auth_response({'ok': True, 'message': 'Bebida eliminada correctamente.'})
 
+    if tipo == 'crear_ingrediente':
+        nombre = str(data.get('nombre', '')).strip()
+        if not nombre:
+            return _auth_response({'ok': False, 'message': 'El nombre del ingrediente es obligatorio.'}, status=400)
+
+        unidad = str(data.get('unidad', '')).strip() or 'unidad'
+        proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
+        stock_actual = data.get('stock_actual', 0)
+        stock_minimo = data.get('stock_minimo', 0)
+        costo_unitario = data.get('costo_unitario', 0)
+
+        try:
+            stock_actual_value = Decimal(str(stock_actual or 0))
+            stock_minimo_value = Decimal(str(stock_minimo or 0))
+            costo_unitario_value = Decimal(str(costo_unitario or 0))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
+
+        existing = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+        if existing is not None:
+            return _auth_response({'ok': False, 'message': 'Ya existe un ingrediente con ese nombre.'}, status=400)
+
+        ingredient = VGIngrediente.objects.create(
+            nombre=nombre,
+            unidad_medida=unidad,
+            stock_actual=stock_actual_value,
+            stock_minimo=stock_minimo_value,
+            costo_unitario=costo_unitario_value,
+            ultimo_proveedor=proveedor,
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+
+        return _auth_response({'ok': True, 'message': 'Ingrediente creado correctamente.', 'item': {'id': ingredient.id, 'nombre': ingredient.nombre}}, status=201)
+
+    if tipo == 'actualizar_ingrediente':
+        ingredient_id = data.get('id')
+        try:
+            ingredient = VGIngrediente.objects.get(pk=int(ingredient_id))
+        except (ValueError, TypeError, VGIngrediente.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El ingrediente a actualizar no existe.'}, status=400)
+
+        nombre = str(data.get('nombre', '')).strip()
+        if not nombre:
+            return _auth_response({'ok': False, 'message': 'El nombre del ingrediente es obligatorio.'}, status=400)
+
+        unidad = str(data.get('unidad', '')).strip() or 'unidad'
+        proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
+        stock_actual = data.get('stock_actual', ingredient.stock_actual)
+        stock_minimo = data.get('stock_minimo', ingredient.stock_minimo)
+        costo_unitario = data.get('costo_unitario', ingredient.costo_unitario)
+
+        try:
+            stock_actual_value = Decimal(str(stock_actual or 0))
+            stock_minimo_value = Decimal(str(stock_minimo or 0))
+            costo_unitario_value = Decimal(str(costo_unitario or 0))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
+
+        duplicate = VGIngrediente.objects.filter(nombre__iexact=nombre).exclude(pk=ingredient.pk).exists()
+        if duplicate:
+            return _auth_response({'ok': False, 'message': 'Ya existe otro ingrediente con ese nombre.'}, status=400)
+
+        ingredient.nombre = nombre
+        ingredient.unidad_medida = unidad
+        ingredient.ultimo_proveedor = proveedor
+        ingredient.stock_actual = stock_actual_value
+        ingredient.stock_minimo = stock_minimo_value
+        ingredient.costo_unitario = costo_unitario_value
+        ingredient.actualizado_por = request.user
+        ingredient.save(update_fields=['nombre', 'unidad_medida', 'ultimo_proveedor', 'stock_actual', 'stock_minimo', 'costo_unitario', 'actualizado_por', 'fecha_actualizacion'])
+
+        return _auth_response({'ok': True, 'message': 'Ingrediente actualizado correctamente.', 'item': {'id': ingredient.id, 'nombre': ingredient.nombre}})
+
+    if tipo == 'crear_preparacion':
+        nombre = str(data.get('nombre', '')).strip()
+        if not nombre:
+            return _auth_response({'ok': False, 'message': 'El nombre de la subreceta es obligatorio.'}, status=400)
+
+        rendimiento_cantidad = data.get('rendimiento_cantidad', '1')
+        rendimiento_unidad = str(data.get('rendimiento_unidad', 'unidad')).strip() or 'unidad'
+        componentes = data.get('componentes') or []
+
+        try:
+            rendimiento = Decimal(str(rendimiento_cantidad))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El rendimiento de la subreceta es inválido.'}, status=400)
+
+        if rendimiento <= 0:
+            return _auth_response({'ok': False, 'message': 'El rendimiento debe ser mayor a cero.'}, status=400)
+
+        if VGPreparacion.objects.filter(nombre__iexact=nombre).exists():
+            return _auth_response({'ok': False, 'message': 'Ya existe una subreceta con ese nombre.'}, status=400)
+
+        with transaction.atomic():
+            preparation = VGPreparacion.objects.create(
+                nombre=nombre,
+                rendimiento_cantidad=rendimiento,
+                rendimiento_unidad=rendimiento_unidad,
+                creado_por=request.user,
+                actualizado_por=request.user,
+            )
+
+            for component in componentes:
+                if not isinstance(component, dict):
+                    continue
+                component_type = str(component.get('tipo', '')).strip().lower()
+                reference_id = component.get('referencia_id')
+                try:
+                    amount = Decimal(str(component.get('cantidad', '0') or '0'))
+                except InvalidOperation:
+                    return _auth_response({'ok': False, 'message': 'Hay una cantidad inválida en la subreceta.'}, status=400)
+                if amount <= 0:
+                    return _auth_response({'ok': False, 'message': 'Todas las cantidades deben ser mayores a cero.'}, status=400)
+
+                if component_type == 'ingrediente':
+                    try:
+                        ingredient = VGIngrediente.objects.get(pk=int(reference_id))
+                    except (ValueError, TypeError, VGIngrediente.DoesNotExist):
+                        return _auth_response({'ok': False, 'message': 'Uno de los ingredientes seleccionados no existe.'}, status=400)
+                    VGRecetaPreparacion.objects.create(
+                        preparacion=preparation,
+                        ingrediente=ingredient,
+                        cantidad_requerida=amount,
+                    )
+                elif component_type == 'sub_preparacion':
+                    try:
+                        sub_preparation = VGPreparacion.objects.get(pk=int(reference_id))
+                    except (ValueError, TypeError, VGPreparacion.DoesNotExist):
+                        return _auth_response({'ok': False, 'message': 'Una subreceta seleccionada no existe.'}, status=400)
+                    VGRecetaPreparacion.objects.create(
+                        preparacion=preparation,
+                        sub_preparacion=sub_preparation,
+                        cantidad_requerida=amount,
+                    )
+
+        return _auth_response({'ok': True, 'message': 'Subreceta creada correctamente.', 'item': {'id': preparation.id, 'nombre': preparation.nombre}}, status=201)
+
+    if tipo == 'actualizar_preparacion':
+        preparation_id = data.get('id')
+        try:
+            preparation = VGPreparacion.objects.get(pk=int(preparation_id))
+        except (ValueError, TypeError, VGPreparacion.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La subreceta a actualizar no existe.'}, status=400)
+
+        nombre = str(data.get('nombre', '')).strip()
+        if not nombre:
+            return _auth_response({'ok': False, 'message': 'El nombre de la subreceta es obligatorio.'}, status=400)
+
+        rendimiento_cantidad = data.get('rendimiento_cantidad', preparation.rendimiento_cantidad)
+        rendimiento_unidad = str(data.get('rendimiento_unidad', preparation.rendimiento_unidad or 'unidad')).strip() or 'unidad'
+        componentes = data.get('componentes') or []
+
+        try:
+            rendimiento = Decimal(str(rendimiento_cantidad))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El rendimiento de la subreceta es inválido.'}, status=400)
+
+        if rendimiento <= 0:
+            return _auth_response({'ok': False, 'message': 'El rendimiento debe ser mayor a cero.'}, status=400)
+
+        if VGPreparacion.objects.filter(nombre__iexact=nombre).exclude(pk=preparation.pk).exists():
+            return _auth_response({'ok': False, 'message': 'Ya existe otra subreceta con ese nombre.'}, status=400)
+
+        with transaction.atomic():
+            preparation.nombre = nombre
+            preparation.rendimiento_cantidad = rendimiento
+            preparation.rendimiento_unidad = rendimiento_unidad
+            preparation.actualizado_por = request.user
+            preparation.save(update_fields=['nombre', 'rendimiento_cantidad', 'rendimiento_unidad', 'actualizado_por', 'fecha_actualizacion'])
+
+            preparation.componentes.all().delete()
+
+            for component in componentes:
+                if not isinstance(component, dict):
+                    continue
+                component_type = str(component.get('tipo', '')).strip().lower()
+                reference_id = component.get('referencia_id')
+                try:
+                    amount = Decimal(str(component.get('cantidad', '0') or '0'))
+                except InvalidOperation:
+                    return _auth_response({'ok': False, 'message': 'Hay una cantidad inválida en la subreceta.'}, status=400)
+                if amount <= 0:
+                    return _auth_response({'ok': False, 'message': 'Todas las cantidades deben ser mayores a cero.'}, status=400)
+
+                if component_type == 'ingrediente':
+                    try:
+                        ingredient = VGIngrediente.objects.get(pk=int(reference_id))
+                    except (ValueError, TypeError, VGIngrediente.DoesNotExist):
+                        return _auth_response({'ok': False, 'message': 'Uno de los ingredientes seleccionados no existe.'}, status=400)
+                    VGRecetaPreparacion.objects.create(
+                        preparacion=preparation,
+                        ingrediente=ingredient,
+                        cantidad_requerida=amount,
+                    )
+                elif component_type == 'sub_preparacion':
+                    try:
+                        sub_preparation = VGPreparacion.objects.get(pk=int(reference_id))
+                    except (ValueError, TypeError, VGPreparacion.DoesNotExist):
+                        return _auth_response({'ok': False, 'message': 'Una subreceta seleccionada no existe.'}, status=400)
+                    VGRecetaPreparacion.objects.create(
+                        preparacion=preparation,
+                        sub_preparacion=sub_preparation,
+                        cantidad_requerida=amount,
+                    )
+
+        return _auth_response({'ok': True, 'message': 'Subreceta actualizada correctamente.', 'item': {'id': preparation.id, 'nombre': preparation.nombre}})
+
     if tipo == 'inventario':
+        ingredient_id = data.get('ingrediente_id') or data.get('id')
         nombre = str(data.get('nombre', '')).strip()
         if not nombre:
             return _auth_response({'ok': False, 'message': 'El nombre del insumo es obligatorio.'}, status=400)
 
-        categoria = str(data.get('categoria', '')).strip() or 'Otros'
         unidad = str(data.get('unidad', '')).strip() or 'unidad'
         proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
         cantidad = data.get('cantidad', 0)
+        stock_minimo = data.get('stock_minimo', 0)
+        costo_unitario = data.get('costo_unitario', 0)
         try:
             cantidad_value = Decimal(str(cantidad))
+            stock_minimo_value = Decimal(str(stock_minimo or 0))
+            costo_unitario_value = Decimal(str(costo_unitario or 0))
         except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'La cantidad del insumo es inválida.'}, status=400)
+            return _auth_response({'ok': False, 'message': 'Los datos numéricos del insumo son inválidos.'}, status=400)
 
-        ingredient_id = data.get('id')
+        if cantidad_value <= 0:
+            return _auth_response({'ok': False, 'message': 'La cantidad del ingreso debe ser mayor a cero.'}, status=400)
+
         ingredient = None
         if ingredient_id not in [None, '']:
             try:
@@ -304,35 +620,74 @@ def admin_catalog_view(request):
             except (ValueError, TypeError, VGIngrediente.DoesNotExist):
                 return _auth_response({'ok': False, 'message': 'El insumo a editar no existe.'}, status=400)
 
-        if ingredient is None:
-            ingredient, created = VGIngrediente.objects.get_or_create(
-                nombre__iexact=nombre,
-                defaults={
-                    'nombre': nombre,
-                    'unidad_medida': unidad,
-                    'stock_actual': cantidad_value,
-                    'stock_minimo': 0,
-                    'costo_unitario': 0,
-                    'ultimo_proveedor': proveedor,
-                    'creado_por': request.user,
-                    'actualizado_por': request.user,
-                },
-            )
-            if not created:
+        with transaction.atomic():
+            if ingredient is None:
+                ingredient, created = VGIngrediente.objects.get_or_create(
+                    nombre__iexact=nombre,
+                    defaults={
+                        'nombre': nombre,
+                        'unidad_medida': unidad,
+                        'stock_actual': 0,
+                        'stock_minimo': stock_minimo_value,
+                        'costo_unitario': costo_unitario_value,
+                        'ultimo_proveedor': proveedor,
+                        'creado_por': request.user,
+                        'actualizado_por': request.user,
+                    },
+                )
+                if not created:
+                    ingredient.nombre = nombre
+                    ingredient.unidad_medida = unidad
+                    ingredient.stock_minimo = stock_minimo_value
+                    ingredient.costo_unitario = costo_unitario_value
+                    ingredient.ultimo_proveedor = proveedor
+                    ingredient.actualizado_por = request.user
+                    ingredient.save(update_fields=['nombre', 'unidad_medida', 'stock_minimo', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
+            else:
+                ingredient.nombre = nombre
                 ingredient.unidad_medida = unidad
-                ingredient.stock_actual = cantidad_value
+                ingredient.stock_minimo = stock_minimo_value
+                ingredient.costo_unitario = costo_unitario_value
                 ingredient.ultimo_proveedor = proveedor
                 ingredient.actualizado_por = request.user
-                ingredient.save(update_fields=['unidad_medida', 'stock_actual', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
-        else:
-            ingredient.nombre = nombre
-            ingredient.unidad_medida = unidad
-            ingredient.stock_actual = cantidad_value
-            ingredient.ultimo_proveedor = proveedor
-            ingredient.actualizado_por = request.user
-            ingredient.save(update_fields=['nombre', 'unidad_medida', 'stock_actual', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
+                ingredient.save(update_fields=['nombre', 'unidad_medida', 'stock_minimo', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
 
-        return _auth_response({'ok': True, 'message': 'Insumo guardado correctamente.', 'item': {'id': ingredient.id, 'nombre': ingredient.nombre}})
+            ingredient.stock_actual = Decimal(str(ingredient.stock_actual)) + cantidad_value
+            ingredient.actualizado_por = request.user
+            ingredient.save(update_fields=['stock_actual', 'actualizado_por', 'fecha_actualizacion'])
+
+            total_compra = cantidad_value * costo_unitario_value
+            compra = VGCompra.objects.create(
+                proveedor_nombre=proveedor,
+                total=total_compra,
+                estado='recibido',
+                creado_por=request.user,
+                actualizado_por=request.user,
+            )
+            VGDetalleCompra.objects.create(
+                compra=compra,
+                ingrediente=ingredient,
+                cantidad=cantidad_value,
+                costo_unitario=costo_unitario_value,
+            )
+            VGMovimientoInventario.objects.create(
+                ingrediente=ingredient,
+                tipo_movimiento='entrada',
+                cantidad=cantidad_value,
+                motivo=f'Compra registrada #{compra.id}',
+                id_referencia=compra.id,
+                creado_por=request.user,
+            )
+
+        return _auth_response({
+            'ok': True,
+            'message': 'Ingreso de inventario registrado correctamente.',
+            'item': {
+                'id': ingredient.id,
+                'nombre': ingredient.nombre,
+                'stock_actual': str(ingredient.stock_actual),
+            },
+        })
 
     if tipo == 'recetas':
         nombre = str(data.get('nombre', '')).strip()
@@ -479,6 +834,300 @@ def admin_catalog_view(request):
         return _auth_response({'ok': True, 'message': 'Bebida guardada correctamente.', 'item': {'id': beverage.id, 'nombre': beverage.nombre}})
 
     return _auth_response({'ok': False, 'message': 'Tipo de catálogo inválido.'}, status=400)
+
+
+@csrf_exempt
+def admin_users_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        roles = VGRol.objects.order_by('nombre_role')
+        users = VGUsuario.objects.select_related('id_role').order_by('username')
+        return _auth_response({
+            'ok': True,
+            'roles': [_serialize_role(role) for role in roles],
+            'users': [_serialize_user(user) for user in users],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+
+    if action == 'delete':
+        user_id = data.get('id')
+        try:
+            target_user = VGUsuario.objects.get(pk=int(user_id))
+        except (ValueError, TypeError, VGUsuario.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El usuario a eliminar no existe.'}, status=400)
+
+        if target_user.id == request.user.id:
+            return _auth_response({'ok': False, 'message': 'No puedes eliminar tu propio usuario.'}, status=400)
+
+        target_user.delete()
+        return _auth_response({'ok': True, 'message': 'Usuario eliminado correctamente.'})
+
+    if action not in {'create', 'update'}:
+        return _auth_response({'ok': False, 'message': 'Accion de usuarios inválida.'}, status=400)
+
+    username = str(data.get('username', '')).strip()
+    cedula = str(data.get('cedula', '')).strip()
+    password = str(data.get('password', '') or '')
+    first_name = str(data.get('first_name', '') or '').strip()
+    last_name = str(data.get('last_name', '') or '').strip()
+    email = str(data.get('email', '') or '').strip()
+    telefono = str(data.get('telefono', '') or '').strip()
+    fecha_nacimiento = data.get('fecha_nacimiento') or None
+    role_id = data.get('role_id')
+    is_active = bool(data.get('is_active', True))
+
+    if not username:
+        return _auth_response({'ok': False, 'message': 'El nombre de usuario es obligatorio.'}, status=400)
+    if not cedula:
+        return _auth_response({'ok': False, 'message': 'La cédula es obligatoria.'}, status=400)
+    if action == 'create' and not password:
+        return _auth_response({'ok': False, 'message': 'La contraseña es obligatoria para crear el usuario.'}, status=400)
+
+    role = None
+    if role_id not in [None, '']:
+        try:
+            role = VGRol.objects.get(pk=int(role_id))
+        except (ValueError, TypeError, VGRol.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El rol seleccionado no existe.'}, status=400)
+
+    target_user = None
+    if action == 'update':
+        user_id = data.get('id')
+        try:
+            target_user = VGUsuario.objects.get(pk=int(user_id))
+        except (ValueError, TypeError, VGUsuario.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El usuario a editar no existe.'}, status=400)
+
+    username_query = VGUsuario.objects.filter(username__iexact=username)
+    cedula_query = VGUsuario.objects.filter(cedula__iexact=cedula)
+    if target_user is not None:
+        username_query = username_query.exclude(pk=target_user.pk)
+        cedula_query = cedula_query.exclude(pk=target_user.pk)
+
+    if username_query.exists():
+        return _auth_response({'ok': False, 'message': 'Ya existe un usuario con ese nombre.'}, status=400)
+    if cedula_query.exists():
+        return _auth_response({'ok': False, 'message': 'Ya existe un usuario con esa cédula.'}, status=400)
+
+    role_name = str(role.nombre_role if role else '').strip().lower()
+    should_be_staff = role_name == 'administrador'
+
+    if action == 'create':
+        target_user = VGUsuario.objects.create_user(
+            username=username,
+            password=password,
+            cedula=cedula,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            telefono=telefono,
+            fecha_nacimiento=fecha_nacimiento or None,
+            id_role=role,
+            is_active=is_active,
+            is_staff=should_be_staff,
+        )
+        message = 'Usuario creado correctamente.'
+    else:
+        target_user.username = username
+        target_user.cedula = cedula
+        target_user.first_name = first_name
+        target_user.last_name = last_name
+        target_user.email = email
+        target_user.telefono = telefono
+        target_user.fecha_nacimiento = fecha_nacimiento or None
+        target_user.id_role = role
+        target_user.is_active = is_active
+        target_user.is_staff = should_be_staff or target_user.is_superuser
+        if password:
+            target_user.set_password(password)
+        target_user.save()
+        message = 'Usuario actualizado correctamente.'
+
+    return _auth_response({
+        'ok': True,
+        'message': message,
+        'user': _serialize_user(target_user),
+    }, status=201 if action == 'create' else 200)
+
+
+@csrf_exempt
+def admin_recipes_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        recipes = VGProducto.objects.filter(categoria__nombre__iexact='Recetas').select_related('categoria').prefetch_related('receta__ingrediente', 'receta__preparacion').order_by('nombre')
+        inventory = list(
+            VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual')
+        )
+        preparations = list(
+            VGPreparacion.objects.order_by('nombre').values('id', 'nombre', 'rendimiento_unidad', 'rendimiento_cantidad')
+        )
+        return _auth_response({
+            'ok': True,
+            'recipes': [_serialize_recipe_product(recipe) for recipe in recipes],
+            'ingredients': inventory,
+            'preparations': preparations,
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+
+    if action == 'delete':
+        recipe_id = data.get('id')
+        try:
+            recipe = VGProducto.objects.filter(categoria__nombre__iexact='Recetas').get(pk=int(recipe_id))
+        except (ValueError, TypeError, VGProducto.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La receta a eliminar no existe.'}, status=400)
+
+        recipe.delete()
+        return _auth_response({'ok': True, 'message': 'Receta eliminada correctamente.'})
+
+    if action not in {'create', 'update'}:
+        return _auth_response({'ok': False, 'message': 'Accion de receta invalida.'}, status=400)
+
+    nombre = str(data.get('nombre', '') or '').strip()
+    descripcion = str(data.get('descripcion', '') or '').strip()
+    componentes = data.get('componentes') or []
+
+    if not nombre:
+        return _auth_response({'ok': False, 'message': 'El nombre de la receta es obligatorio.'}, status=400)
+    if not isinstance(componentes, list) or len(componentes) == 0:
+        return _auth_response({'ok': False, 'message': 'Debes agregar al menos un ingrediente o subreceta.'}, status=400)
+
+    recipe = None
+    if action == 'update':
+        recipe_id = data.get('id')
+        try:
+            recipe = VGProducto.objects.filter(categoria__nombre__iexact='Recetas').get(pk=int(recipe_id))
+        except (ValueError, TypeError, VGProducto.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La receta a editar no existe.'}, status=400)
+
+    existing_name_query = VGProducto.objects.filter(categoria__nombre__iexact='Recetas', nombre__iexact=nombre)
+    if recipe is not None:
+        existing_name_query = existing_name_query.exclude(pk=recipe.pk)
+    if existing_name_query.exists():
+        return _auth_response({'ok': False, 'message': 'Ya existe una receta con ese nombre.'}, status=400)
+
+    parsed_components = []
+    duplicate_guard = set()
+    for raw_component in componentes:
+        if not isinstance(raw_component, dict):
+            continue
+
+        component_type = str(raw_component.get('tipo', '')).strip().lower()
+        reference_id = raw_component.get('referencia_id')
+        try:
+            amount = Decimal(str(raw_component.get('cantidad', '0') or '0'))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'Hay una cantidad inválida en los componentes de la receta.'}, status=400)
+
+        if amount <= 0:
+            return _auth_response({'ok': False, 'message': 'Todas las cantidades de la receta deben ser mayores a cero.'}, status=400)
+
+        if component_type not in {'ingrediente', 'sub_preparacion'}:
+            return _auth_response({'ok': False, 'message': 'Tipo de componente inválido en la receta.'}, status=400)
+
+        if reference_id in [None, '']:
+            return _auth_response({'ok': False, 'message': 'Falta seleccionar un ingrediente o subreceta.'}, status=400)
+
+        try:
+            reference_id = int(reference_id)
+        except (TypeError, ValueError):
+            return _auth_response({'ok': False, 'message': 'Referencia inválida en los componentes de la receta.'}, status=400)
+
+        duplicate_key = f'{component_type}:{reference_id}'
+        if duplicate_key in duplicate_guard:
+            return _auth_response({'ok': False, 'message': 'No puedes repetir el mismo componente en la receta.'}, status=400)
+        duplicate_guard.add(duplicate_key)
+
+        parsed_components.append({
+            'tipo': component_type,
+            'referencia_id': reference_id,
+            'cantidad': amount,
+        })
+
+    if len(parsed_components) == 0:
+        return _auth_response({'ok': False, 'message': 'No se encontraron componentes válidos para la receta.'}, status=400)
+
+    category, _ = VGCategoriaProducto.objects.get_or_create(
+        nombre='Recetas',
+        defaults={'descripcion': 'Recetas administrativas de producción'},
+    )
+
+    with transaction.atomic():
+        if recipe is None:
+            recipe = VGProducto.objects.create(
+                nombre=nombre,
+                descripcion=descripcion,
+                categoria=category,
+                precio_venta=Decimal('0'),
+                costo_estimado=Decimal('0'),
+                disponible=False,
+                tiempo_preparacion_min=0,
+                creado_por=request.user,
+                actualizado_por=request.user,
+            )
+            message = 'Receta creada correctamente.'
+            status_code = 201
+        else:
+            recipe.nombre = nombre
+            recipe.descripcion = descripcion
+            recipe.categoria = category
+            recipe.disponible = False
+            recipe.actualizado_por = request.user
+            recipe.save(update_fields=['nombre', 'descripcion', 'categoria', 'disponible', 'actualizado_por', 'fecha_actualizacion'])
+            message = 'Receta actualizada correctamente.'
+            status_code = 200
+
+        recipe.receta.all().delete()
+
+        for component in parsed_components:
+            if component['tipo'] == 'ingrediente':
+                try:
+                    ingredient = VGIngrediente.objects.get(pk=component['referencia_id'])
+                except VGIngrediente.DoesNotExist:
+                    return _auth_response({'ok': False, 'message': 'Uno de los ingredientes seleccionados no existe.'}, status=400)
+                VGRecetaProducto.objects.create(
+                    producto=recipe,
+                    ingrediente=ingredient,
+                    cantidad_requerida=component['cantidad'],
+                )
+            else:
+                try:
+                    preparation = VGPreparacion.objects.get(pk=component['referencia_id'])
+                except VGPreparacion.DoesNotExist:
+                    return _auth_response({'ok': False, 'message': 'Una de las subrecetas seleccionadas no existe.'}, status=400)
+                VGRecetaProducto.objects.create(
+                    producto=recipe,
+                    preparacion=preparation,
+                    cantidad_requerida=component['cantidad'],
+                )
+
+    recipe = VGProducto.objects.filter(pk=recipe.pk).select_related('categoria').prefetch_related('receta__ingrediente', 'receta__preparacion').first()
+    return _auth_response({
+        'ok': True,
+        'message': message,
+        'recipe': _serialize_recipe_product(recipe),
+    }, status=status_code)
 
 
 def kitchen_orders_view(request):
@@ -655,6 +1304,7 @@ class LoginView(generics.GenericAPIView):
                 'username': user.username,
                 'email': user.email,
                 'role': _get_role_name(user),
+                'is_admin': _is_admin_user(user),
             },
         })
 
@@ -670,6 +1320,7 @@ class SessionStatusView(generics.GenericAPIView):
                     'username': request.user.username,
                     'email': request.user.email,
                     'role': _get_role_name(request.user),
+                    'is_admin': _is_admin_user(request.user),
                 },
             })
 

@@ -1,9 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import AdminPanelPage from './AdminPanelPage';
+import AnalystEditUserPage from './AnalystEditUserPage';
+import AnalystEditIngredientPage from './AnalystEditIngredientPage';
+import AnalystEditRecipePage from './AnalystEditRecipePage';
+import AnalystEditPreparationPage from './AnalystEditPreparationPage';
+import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
+import AnalystNewIngredientPage from './AnalystNewIngredientPage';
+import AnalystNewPreparationPage from './AnalystNewPreparationPage';
+import AnalystNewUserPage from './AnalystNewUserPage';
+import AnalystNewRecipePage from './AnalystNewRecipePage';
+import AnalystPreparationsReportPage from './AnalystPreparationsReportPage';
+import AnalystRecipesPage from './AnalystRecipesPage';
+import AnalystUsersPage from './AnalystUsersPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import NewOrderPage from './NewOrderPage';
+import useKitchenSocket from '../hooks/useKitchenSocket';
+import useKitchenAlerts from './useKitchenAlerts';
 
-function WelcomeScreen({ name, role, onBack }) {
+function WelcomeScreen({ name, role, isAdmin, onBack }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -13,6 +27,7 @@ function WelcomeScreen({ name, role, onBack }) {
   const [loadingData, setLoadingData] = useState(true);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
+  const [lastKitchenEvent, setLastKitchenEvent] = useState(null);
 
   useEffect(() => {
     const handleEscapeClose = (event) => {
@@ -51,6 +66,11 @@ function WelcomeScreen({ name, role, onBack }) {
 
   const handleHomeClick = () => {
     setActiveView('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleAnalystNavigation = (view) => {
+    setActiveView(view);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -117,85 +137,57 @@ function WelcomeScreen({ name, role, onBack }) {
     };
   }, []);
 
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  const isKitchenRole = normalizedRole === 'cocinero';
+
   useEffect(() => {
-    const normalizedRole = String(role || '').trim().toLowerCase();
-    const shouldTrySocket = normalizedRole === 'cocinero';
-    if (!shouldTrySocket) {
-      return () => {};
+    if (!isAdmin && activeView.startsWith('admin')) {
+      setActiveView('home');
+    }
+  }, [activeView, isAdmin]);
+
+  const {
+    alertPermission,
+    alertsEnabled,
+    audioUnlocked,
+    alertDiagnostics,
+    alertMessage,
+    triggerKitchenAlert,
+    runAlertDiagnostics,
+    unlockAudioAndTest,
+    requestAlertPermission,
+  } = useKitchenAlerts();
+
+  const handleKitchenSocketEvent = useCallback((message) => {
+    if (!message?.event || !message.payload) {
+      return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/pedidos/`;
+    if (message.event === 'NUEVA_COMANDAS' || message.event === 'PEDIDO_ACTUALIZADO') {
+      triggerKitchenAlert(message);
+      setLastKitchenEvent({ ...message, receivedAt: Date.now() });
+    }
 
-    let socket = null;
-    let reconnectTimer = null;
-    let shouldReconnect = true;
-    let openedAtLeastOnce = false;
-    let retryCount = 0;
+    if (message.event === 'NUEVA_COMANDAS') {
+      const payload = message.payload;
+      const mesaLabel = payload.mesa ? `Mesa ${payload.mesa}` : 'Sin mesa';
+      setLiveNotice(`Alerta cocina: pedido #${payload.pedido_id} (${mesaLabel}) registrado por ${payload.actor}.`);
+      setPendingOrdersCount((current) => current + 1);
 
-    const connect = () => {
-      socket = new WebSocket(wsUrl);
+      window.setTimeout(() => {
+        setLiveNotice('');
+      }, 8000);
+    }
+  }, [triggerKitchenAlert]);
 
-      socket.onopen = () => {
-        openedAtLeastOnce = true;
-        retryCount = 0;
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data || '{}');
-          const eventName = String(message.event || message.payload?.event || '').toUpperCase();
-          if (!message.payload || eventName !== 'NUEVA_COMANDAS') {
-            return;
-          }
-
-          const payload = message.payload;
-          const mesaLabel = payload.mesa ? `Mesa ${payload.mesa}` : 'Sin mesa';
-          setLiveNotice(`Alerta cocina: pedido #${payload.pedido_id} (${mesaLabel}) registrado por ${payload.actor}.`);
-          setPendingOrdersCount((current) => current + 1);
-
-          window.setTimeout(() => {
-            setLiveNotice('');
-          }, 8000);
-        } catch (parseError) {
-          // Ignore malformed events.
-        }
-      };
-
-      socket.onclose = () => {
-        if (!shouldReconnect) {
-          return;
-        }
-
-        // If the socket never opened, avoid infinite reconnect loops caused by stale auth/role state.
-        if (!openedAtLeastOnce) {
-          retryCount += 1;
-          if (retryCount > 3) {
-            shouldReconnect = false;
-            return;
-          }
-        }
-
-        reconnectTimer = window.setTimeout(connect, 2000);
-      };
-
-      socket.onerror = () => {
-        socket.close();
-      };
-    };
-
-    connect();
-
-    return () => {
-      shouldReconnect = false;
-      if (reconnectTimer) {
-        window.clearTimeout(reconnectTimer);
-      }
-      if (socket) {
-        socket.close();
-      }
-    };
-  }, [role]);
+  // Single, always-on socket connection for the whole dashboard, so alerts
+  // (sound/notification/vibration) fire no matter which view is on screen,
+  // instead of only inside the kitchen board.
+  const { isConnected: isKitchenSocketConnected } = useKitchenSocket({
+    socketPath: '/ws/pedidos/',
+    onEvent: handleKitchenSocketEvent,
+    enabled: isKitchenRole,
+  });
 
   const sidebarWidth = isMobile ? 'min(84vw, 320px)' : '300px';
   const desktopContentOffset = isSidebarOpen && !isMobile ? '332px' : '0px';
@@ -386,19 +378,21 @@ function WelcomeScreen({ name, role, onBack }) {
           </span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveView('admin')}
-          style={sidebarButtonStyle(activeView === 'admin')}
-        >
-          <span aria-hidden="true" style={sidebarIconWrapStyle}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-            </svg>
-          </span>
-          <span>Panel administrativo</span>
-        </button>
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => setActiveView('admin')}
+            style={sidebarButtonStyle(activeView.startsWith('admin'))}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+              </svg>
+            </span>
+            <span>Panel analista</span>
+          </button>
+        ) : null}
 
         <div style={{ flex: 1 }} />
 
@@ -613,11 +607,100 @@ function WelcomeScreen({ name, role, onBack }) {
           <AdminPanelPage
             isMobile={isMobile}
             onBack={() => setActiveView('home')}
+            onNavigate={handleAnalystNavigation}
+          />
+        ) : activeView === 'admin-users' ? (
+          <AnalystUsersPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+            onCreateNewUser={() => setActiveView('admin-users-new')}
+            onEditUser={(userId) => setActiveView(`admin-users-edit:${userId}`)}
+          />
+        ) : activeView.startsWith('admin-users-edit:') ? (
+          <AnalystEditUserPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            userId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-users')}
+          />
+        ) : activeView === 'admin-users-new' ? (
+          <AnalystNewUserPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin-users')}
+          />
+        ) : activeView === 'admin-ingredients' ? (
+          <AnalystIngredientsReportPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin')}
+            onCreateNew={() => setActiveView('admin-ingredients-new')}
+            onEdit={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
+          />
+        ) : activeView.startsWith('admin-ingredients-edit:') ? (
+          <AnalystEditIngredientPage
+            isMobile={isMobile}
+            ingredientId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-ingredients')}
+          />
+        ) : activeView === 'admin-ingredients-new' ? (
+          <AnalystNewIngredientPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-ingredients')}
+          />
+        ) : activeView === 'admin-preparations' ? (
+          <AnalystPreparationsReportPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin')}
+            onCreateNew={() => setActiveView('admin-preparations-new')}
+            onEdit={(preparationId) => setActiveView(`admin-preparations-edit:${preparationId}`)}
+          />
+        ) : activeView.startsWith('admin-preparations-edit:') ? (
+          <AnalystEditPreparationPage
+            isMobile={isMobile}
+            preparationId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-preparations')}
+          />
+        ) : activeView === 'admin-preparations-new' ? (
+          <AnalystNewPreparationPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-preparations')}
+          />
+        ) : activeView === 'admin-recipes' ? (
+          <AnalystRecipesPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+            onCreateNewRecipe={() => setActiveView('admin-recipes-new')}
+            onEditRecipe={(recipeId) => setActiveView(`admin-recipes-edit:${recipeId}`)}
+          />
+        ) : activeView.startsWith('admin-recipes-edit:') ? (
+          <AnalystEditRecipePage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            recipeId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-recipes')}
+          />
+        ) : activeView === 'admin-recipes-new' ? (
+          <AnalystNewRecipePage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin-recipes')}
           />
         ) : (
           <KitchenOrdersPage
             isMobile={isMobile}
             onBack={() => setActiveView('home')}
+            isSocketConnected={isKitchenSocketConnected}
+            alertPermission={alertPermission}
+            alertsEnabled={alertsEnabled}
+            audioUnlocked={audioUnlocked}
+            alertDiagnostics={alertDiagnostics}
+            alertMessage={alertMessage}
+            onUnlockAudio={unlockAudioAndTest}
+            onRunDiagnostics={runAlertDiagnostics}
+            onRequestPermission={requestAlertPermission}
+            lastKitchenEvent={lastKitchenEvent}
           />
         )}
       </div>

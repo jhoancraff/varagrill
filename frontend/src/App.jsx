@@ -6,6 +6,7 @@ import WelcomeScreen from './components/WelcomeScreen';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -14,6 +15,7 @@ function App() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [welcomeName, setWelcomeName] = useState('');
+  const [welcomeRole, setWelcomeRole] = useState('');
 
   useEffect(() => {
     const installedStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
@@ -42,17 +44,49 @@ function App() {
     };
   }, []);
 
-  const getApiBase = () => {
-    if (import.meta.env.VITE_API_BASE_URL) {
-      return import.meta.env.VITE_API_BASE_URL;
-    }
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const response = await fetch('/api/auth/status/', {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store',
+        });
 
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://127.0.0.1:8000';
-    }
-    return `http://${host}:8000`;
-  };
+        if (!response.ok) {
+          setIsLoggedIn(false);
+          setWelcomeName('');
+          setWelcomeRole('');
+          return;
+        }
+
+        const data = await response.json();
+        if (!data.authenticated) {
+          setIsLoggedIn(false);
+          setWelcomeName('');
+          setWelcomeRole('');
+          return;
+        }
+
+        const formattedName = (data.user?.username || '')
+          .trim()
+          .toLowerCase()
+          .replace(/^(.)/, (match) => match.toUpperCase());
+
+        setWelcomeName(formattedName || 'Usuario');
+        setWelcomeRole(data.user?.role || '');
+        setIsLoggedIn(true);
+      } catch (error) {
+        setIsLoggedIn(false);
+        setWelcomeName('');
+        setWelcomeRole('');
+      } finally {
+        setCheckingSession(false);
+      }
+    };
+
+    restoreSession();
+  }, []);
 
   const handleInstall = async () => {
     if (deferredPrompt) {
@@ -81,7 +115,7 @@ function App() {
     setMessage('');
 
     try {
-      const response = await fetch(`${getApiBase()}/api/auth/login/`, {
+      const response = await fetch('/api/auth/login/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -104,6 +138,7 @@ function App() {
 
       setIsLoggedIn(true);
       setWelcomeName(formattedName);
+      setWelcomeRole(data.user?.role || '');
       setMessage(`Acceso concedido, bienvenido ${formattedName}.`);
       setPassword('');
       setUsername('');
@@ -114,19 +149,39 @@ function App() {
     }
   };
 
-  const handleBackToLogin = () => {
+  const handleLogout = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/auth/logout/', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        setMessage('No se pudo cerrar la sesión. Intenta nuevamente.');
+        return;
+      }
+    } catch (error) {
+      setMessage('No se pudo cerrar la sesión. Intenta nuevamente.');
+      return;
+    } finally {
+      setLoading(false);
+    }
+
     setIsLoggedIn(false);
-    setMessage('');
+    setWelcomeName('');
+    setWelcomeRole('');
+    setMessage('Sesion cerrada.');
     setPassword('');
     setUsername('');
   };
 
-  if (showSplash) {
+  if (showSplash || checkingSession) {
     return <SplashScreen />;
   }
 
   if (isLoggedIn) {
-    return <WelcomeScreen name={welcomeName} onBack={handleBackToLogin} />;
+    return <WelcomeScreen name={welcomeName} role={welcomeRole} onBack={handleLogout} />;
   }
 
   return (

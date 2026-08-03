@@ -1,0 +1,20 @@
+[Unit]
+Description=ASGI (Uvicorn) for Varagrill Django + WebSockets
+After=network.target
+
+[Service]
+User=mariadb
+Group=mariadb
+WorkingDirectory=/home/mariadb/app
+EnvironmentFile=/home/mariadb/app/.env
+ExecStart=/home/mariadb/app/venv/bin/uvicorn config.asgi:application \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 1 \
+    --proxy-headers
+
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

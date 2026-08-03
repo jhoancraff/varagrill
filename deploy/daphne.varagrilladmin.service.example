@@ -1,0 +1,15 @@
+[Unit]
+Description=Daphne ASGI server for Varagrill WebSockets
+After=network.target
+
+[Service]
+User=mariadb
+Group=mariadb
+WorkingDirectory=/home/mariadb/app
+EnvironmentFile=/home/mariadb/app/.env
+ExecStart=/home/mariadb/app/venv/bin/daphne -b 127.0.0.1 -p 9000 config.asgi:application
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

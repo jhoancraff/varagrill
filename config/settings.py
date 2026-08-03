@@ -40,6 +40,11 @@ def _get_bool_env(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def _get_list_env(name: str) -> list[str]:
+    raw_value = os.getenv(name, '')
+    return [item.strip() for item in raw_value.split(',') if item.strip()]
+
+
 _load_env_file(BASE_DIR / '.env')
 
 
@@ -59,11 +64,25 @@ ALLOWED_HOSTS = [
     host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',') if host.strip()
 ]
 
+DEFAULT_ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '192.168.68.65',
+    'varagrilladmin.com',
+    '.varagrilladmin.com',
+]
+
+for host in DEFAULT_ALLOWED_HOSTS:
+    if host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(host)
+
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'varagrill',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -106,6 +125,25 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+CHANNEL_REDIS_URL = os.getenv('DJANGO_CHANNEL_REDIS_URL', '').strip()
+
+if CHANNEL_REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [CHANNEL_REDIS_URL],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 
 # Database
@@ -159,6 +197,27 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_SSL_REDIRECT = _get_bool_env('DJANGO_SECURE_SSL_REDIRECT', not DEBUG)
+
+CSRF_TRUSTED_ORIGINS = _get_list_env('DJANGO_CSRF_TRUSTED_ORIGINS')
+CORS_ALLOWED_ORIGINS = _get_list_env('DJANGO_CORS_ALLOWED_ORIGINS')
+DEFAULT_CORS_ALLOWED_ORIGINS = [
+    'http://localhost',
+    'http://127.0.0.1',
+    'http://192.168.68.65',
+    'https://varagrilladmin.com',
+    'https://www.varagrilladmin.com',
+]
+
+for origin in DEFAULT_CORS_ALLOWED_ORIGINS:
+    if origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(origin)
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r'^http://localhost(:\d+)?$',

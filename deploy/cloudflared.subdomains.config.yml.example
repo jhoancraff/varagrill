@@ -1,0 +1,9 @@
+tunnel: varagrilladmin
+credentials-file: /etc/cloudflared/varagrilladmin.json
+
+ingress:
+  - hostname: app.varagrilladmin.com
+    service: http://127.0.0.1:80
+  - hostname: api.varagrilladmin.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404

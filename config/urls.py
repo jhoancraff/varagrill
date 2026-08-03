@@ -19,12 +19,29 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path
 
-from varagrill.api_views import LoginView, MesaListView
+from varagrill.api_views import (
+    LoginView,
+    LogoutView,
+    MesaListView,
+    ProductoListView,
+    SessionStatusView,
+    admin_catalog_view,
+    kitchen_order_status_update_view,
+    kitchen_orders_view,
+    pedido_create_view,
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/mesas/', MesaListView.as_view(), name='mesa-list'),
+    path('api/productos/', ProductoListView.as_view(), name='producto-list'),
+    path('api/pedidos/', pedido_create_view, name='pedido-create'),
+    path('api/admin/catalogo/', admin_catalog_view, name='admin-catalog'),
+    path('api/pedidos/cocina/', kitchen_orders_view, name='kitchen-orders'),
+    path('api/pedidos/<int:pedido_id>/estado/', kitchen_order_status_update_view, name='kitchen-order-status-update'),
     path('api/auth/login/', LoginView.as_view(), name='login'),
+    path('api/auth/status/', SessionStatusView.as_view(), name='session-status'),
+    path('api/auth/logout/', LogoutView.as_view(), name='logout'),
 ]
 
 if settings.DEBUG:

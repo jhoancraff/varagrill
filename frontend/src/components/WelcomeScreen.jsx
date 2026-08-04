@@ -18,6 +18,8 @@ import AnalystPromotionsPage from './AnalystPromotionsPage';
 import AnalystRecipesPage from './AnalystRecipesPage';
 import AnalystUsersPage from './AnalystUsersPage';
 import ChefRecommendationsPage from './ChefRecommendationsPage';
+import CheckoutPage from './CheckoutPage';
+import EditOrderPage from './EditOrderPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import NewOrderPage from './NewOrderPage';
 import PromotionsPage from './PromotionsPage';
@@ -39,6 +41,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
   const [products, setProducts] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
+  const [readyToBillCount, setReadyToBillCount] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
   const [lastKitchenEvent, setLastKitchenEvent] = useState(null);
 
@@ -171,6 +174,45 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
 
     loadPendingOrders();
     const pollId = window.setInterval(loadPendingOrders, 12000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadReadyToBill = async () => {
+      try {
+        const response = await fetch('/api/pedidos/cobro/', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok || cancelled) {
+          return;
+        }
+
+        const count = Array.isArray(data.pedidos) ? data.pedidos.length : 0;
+        setReadyToBillCount(count);
+      } catch (error) {
+        // Keep the last known value when there is a temporary network error.
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadReadyToBill();
+      }
+    };
+
+    loadReadyToBill();
+    const pollId = window.setInterval(loadReadyToBill, 15000);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
@@ -429,8 +471,27 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           </span>
           <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
           <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
-          
-          
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveView('checkout');
+            if (isSidebarOverlayMode) {
+              setIsSidebarOpen(false);
+            }
+          }}
+          style={sidebarButtonStyle(activeView === 'checkout')}
+        >
+          <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="20" height="14" rx="2" />
+              <path d="M2 10h20" />
+              <path d="M6 15h4" />
+            </svg>
+          </span>
+          <span style={{ flex: 1, textAlign: 'left' }}>Cobro</span>
+          <span style={pendingBadgeStyle(readyToBillCount > 0)}>{readyToBillCount}</span>
         </button>
 
         {isAdmin ? (
@@ -665,6 +726,21 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             waiterName={displayName}
             onBack={() => setActiveView('home')}
           />
+        ) : activeView.startsWith('orders-edit:') ? (
+          <EditOrderPage
+            isMobile={isMobile}
+            mesas={mesas}
+            products={products}
+            loadingData={loadingData}
+            orderId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('kitchen')}
+          />
+        ) : activeView === 'checkout' ? (
+          <CheckoutPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('home')}
+            lastKitchenEvent={lastKitchenEvent}
+          />
         ) : activeView === 'admin' ? (
           <AdminPanelPage
             isMobile={isMobile}
@@ -798,6 +874,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             onRunDiagnostics={runAlertDiagnostics}
             onRequestPermission={requestAlertPermission}
             lastKitchenEvent={lastKitchenEvent}
+            onEditOrder={(orderId) => setActiveView(`orders-edit:${orderId}`)}
           />
         )}
       </div>

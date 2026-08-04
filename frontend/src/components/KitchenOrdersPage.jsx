@@ -30,6 +30,7 @@ function KitchenOrdersPage({
   onRunDiagnostics,
   onRequestPermission,
   lastKitchenEvent,
+  onEditOrder,
 }) {
   const [orders, setOrders] = useState([]);
   const [counts, setCounts] = useState({ pendiente: 0, en_preparacion: 0, listo: 0 });
@@ -293,8 +294,17 @@ function KitchenOrdersPage({
 
                       {!!order.notas && <p style={orderNoteStyle}>Nota general: {order.notas}</p>}
 
-                      {(nextActionsByState[order.estado] || []).length > 0 && (
+                      {(order.estado === 'pendiente' || (nextActionsByState[order.estado] || []).length > 0) && (
                         <div style={actionsWrapStyle(isMobile)}>
+                          {order.estado === 'pendiente' && onEditOrder ? (
+                            <button
+                              type="button"
+                              onClick={() => onEditOrder(order.id)}
+                              style={editButtonStyle(isMobile)}
+                            >
+                              Editar pedido
+                            </button>
+                          ) : null}
                           {(nextActionsByState[order.estado] || []).map((action) => (
                             <button
                               key={action.next}
@@ -610,6 +620,18 @@ const actionButtonStyle = (nextState, isMobile) => ({
   background: nextState === 'entregado'
     ? 'linear-gradient(90deg, #065f46 0%, #10b981 100%)'
     : 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  minHeight: isMobile ? 42 : 36,
+  width: isMobile ? '100%' : 'auto',
+});
+
+const editButtonStyle = (isMobile) => ({
+  border: '1px solid rgba(255, 255, 255, 0.2)',
+  borderRadius: 999,
+  padding: isMobile ? '10px 14px' : '8px 12px',
+  background: 'rgba(255, 255, 255, 0.04)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

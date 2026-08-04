@@ -183,6 +183,124 @@ class ProductoListView(generics.ListAPIView):
     serializer_class = ProductoSerializer
 
 
+def _parse_order_payload(data):
+    """Valida cabecera + items de un pedido. Compartido entre alta y edición."""
+    items = data.get('items', [])
+    if not isinstance(items, list) or len(items) == 0:
+        return None, 'Debes enviar al menos un item en el pedido.'
+
+    tipo_pedido = str(data.get('tipo_pedido', 'local')).strip().lower()
+    tipo_keys = {tipo for tipo, _ in VGPedido.TIPOS}
+    if tipo_pedido not in tipo_keys:
+        return None, 'Tipo de pedido invalido.'
+
+    mesa = None
+    mesa_id = data.get('mesa_id')
+    if mesa_id not in [None, '']:
+        try:
+            mesa = VGMesa.objects.get(pk=int(mesa_id))
+        except (ValueError, TypeError, VGMesa.DoesNotExist):
+            return None, 'La mesa seleccionada no existe.'
+
+    try:
+        impuesto = Decimal(str(data.get('impuesto', '0') or '0'))
+        descuento = Decimal(str(data.get('descuento', '0') or '0'))
+        propina = Decimal(str(data.get('propina', '0') or '0'))
+    except InvalidOperation:
+        return None, 'Hay montos invalidos en impuesto, descuento o propina.'
+
+    parsed_lines = []
+    product_ids = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            return None, f'El item #{index} tiene formato invalido.'
+
+        raw_product_id = item.get('product_id')
+        try:
+            product_id = int(raw_product_id)
+        except (TypeError, ValueError):
+            return None, f'El item #{index} no tiene producto valido.'
+
+        raw_quantity = item.get('cantidad', 1)
+        try:
+            quantity = int(raw_quantity)
+        except (TypeError, ValueError):
+            return None, f'La cantidad del item #{index} es invalida.'
+
+        if quantity <= 0:
+            return None, f'La cantidad del item #{index} debe ser mayor a cero.'
+
+        notes = str(item.get('notas', '') or '').strip()
+        parsed_lines.append({'product_id': product_id, 'cantidad': quantity, 'notas': notes})
+        product_ids.append(product_id)
+
+    products_map = {
+        product.id: product
+        for product in VGProducto.objects.filter(id__in=product_ids, disponible=True)
+    }
+
+    for index, line in enumerate(parsed_lines, start=1):
+        if line['product_id'] not in products_map:
+            return None, f'El producto del item #{index} no existe o no esta disponible.'
+
+    return {
+        'parsed_lines': parsed_lines,
+        'products_map': products_map,
+        'tipo_pedido': tipo_pedido,
+        'mesa': mesa,
+        'impuesto': impuesto,
+        'descuento': descuento,
+        'propina': propina,
+    }, None
+
+
+def _build_order_lines(parsed_lines, products_map):
+    """Aplica promociones activas y arma las lineas listas para guardar. Devuelve (lineas, subtotal)."""
+    active_promotions = _active_promotions_by_product(list(products_map.keys()))
+    subtotal = Decimal('0')
+    built_lines = []
+    for line in parsed_lines:
+        product = products_map[line['product_id']]
+        promotion = active_promotions.get(product.id)
+        unit_price = _compute_discounted_price(product.precio_venta, promotion) if promotion else product.precio_venta
+        subtotal += unit_price * line['cantidad']
+        built_lines.append({
+            'producto': product,
+            'cantidad': line['cantidad'],
+            'precio_unitario': unit_price,
+            'notas': line['notas'],
+        })
+    return built_lines, subtotal
+
+
+def _serialize_order_detail(pedido):
+    return {
+        'id': pedido.id,
+        'estado': pedido.estado,
+        'tipo_pedido': pedido.tipo_pedido,
+        'mesa_id': pedido.mesa_id,
+        'mesa': pedido.mesa.numero if pedido.mesa else None,
+        'cliente_nombre': pedido.cliente.nombre if pedido.cliente else '',
+        'notas': pedido.notas,
+        'impuesto': str(pedido.impuesto),
+        'descuento': str(pedido.descuento),
+        'propina': str(pedido.propina),
+        'subtotal': str(pedido.subtotal),
+        'total': str(pedido.total),
+        'items': [
+            {
+                'id': detalle.id,
+                'product_id': detalle.producto_id,
+                'producto_nombre': detalle.producto.nombre,
+                'cantidad': detalle.cantidad,
+                'precio_unitario': str(detalle.precio_unitario),
+                'notas': detalle.notas,
+            }
+            for detalle in pedido.detalles.all()
+        ],
+    }
+
+
 @csrf_exempt
 def pedido_create_view(request):
     if request.method != 'POST':
@@ -196,67 +314,9 @@ def pedido_create_view(request):
     except json.JSONDecodeError:
         return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
 
-    items = data.get('items', [])
-    if not isinstance(items, list) or len(items) == 0:
-        return _auth_response({'ok': False, 'message': 'Debes enviar al menos un item en el pedido.'}, status=400)
-
-    tipo_pedido = str(data.get('tipo_pedido', 'local')).strip().lower()
-    tipo_keys = {tipo for tipo, _ in VGPedido.TIPOS}
-    if tipo_pedido not in tipo_keys:
-        return _auth_response({'ok': False, 'message': 'Tipo de pedido invalido.'}, status=400)
-
-    mesa = None
-    mesa_id = data.get('mesa_id')
-    if mesa_id not in [None, '']:
-        try:
-            mesa = VGMesa.objects.get(pk=int(mesa_id))
-        except (ValueError, TypeError, VGMesa.DoesNotExist):
-            return _auth_response({'ok': False, 'message': 'La mesa seleccionada no existe.'}, status=400)
-
-    try:
-        impuesto = Decimal(str(data.get('impuesto', '0') or '0'))
-        descuento = Decimal(str(data.get('descuento', '0') or '0'))
-        propina = Decimal(str(data.get('propina', '0') or '0'))
-    except InvalidOperation:
-        return _auth_response({'ok': False, 'message': 'Hay montos invalidos en impuesto, descuento o propina.'}, status=400)
-
-    parsed_lines = []
-    product_ids = []
-    for index, item in enumerate(items, start=1):
-        if not isinstance(item, dict):
-            return _auth_response({'ok': False, 'message': f'El item #{index} tiene formato invalido.'}, status=400)
-
-        raw_product_id = item.get('product_id')
-        try:
-            product_id = int(raw_product_id)
-        except (TypeError, ValueError):
-            return _auth_response({'ok': False, 'message': f'El item #{index} no tiene producto valido.'}, status=400)
-
-        raw_quantity = item.get('cantidad', 1)
-        try:
-            quantity = int(raw_quantity)
-        except (TypeError, ValueError):
-            return _auth_response({'ok': False, 'message': f'La cantidad del item #{index} es invalida.'}, status=400)
-
-        if quantity <= 0:
-            return _auth_response({'ok': False, 'message': f'La cantidad del item #{index} debe ser mayor a cero.'}, status=400)
-
-        notes = str(item.get('notas', '') or '').strip()
-        parsed_lines.append({'product_id': product_id, 'cantidad': quantity, 'notas': notes})
-        product_ids.append(product_id)
-
-    products_map = {
-        product.id: product
-        for product in VGProducto.objects.filter(id__in=product_ids, disponible=True)
-    }
-    active_promotions = _active_promotions_by_product(product_ids)
-
-    for index, line in enumerate(parsed_lines, start=1):
-        if line['product_id'] not in products_map:
-            return _auth_response(
-                {'ok': False, 'message': f'El producto del item #{index} no existe o no esta disponible.'},
-                status=400,
-            )
+    parsed, error = _parse_order_payload(data)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
 
     cliente = None
     cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
@@ -267,36 +327,31 @@ def pedido_create_view(request):
 
     with transaction.atomic():
         pedido = VGPedido.objects.create(
-            mesa=mesa,
+            mesa=parsed['mesa'],
             usuario=request.user,
             cliente=cliente,
-            tipo_pedido=tipo_pedido,
+            tipo_pedido=parsed['tipo_pedido'],
             estado='pendiente',
             notas=notas,
-            impuesto=impuesto,
-            descuento=descuento,
-            propina=propina,
+            impuesto=parsed['impuesto'],
+            descuento=parsed['descuento'],
+            propina=parsed['propina'],
             creado_por=request.user,
             actualizado_por=request.user,
         )
 
-        subtotal = Decimal('0')
-        for line in parsed_lines:
-            product = products_map[line['product_id']]
-            promotion = active_promotions.get(product.id)
-            unit_price = _compute_discounted_price(product.precio_venta, promotion) if promotion else product.precio_venta
-            line_total = unit_price * line['cantidad']
-            subtotal += line_total
+        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'])
+        for line in built_lines:
             VGDetallePedido.objects.create(
                 pedido=pedido,
-                producto=product,
+                producto=line['producto'],
                 cantidad=line['cantidad'],
-                precio_unitario=unit_price,
+                precio_unitario=line['precio_unitario'],
                 estado='pendiente',
                 notas=line['notas'],
             )
 
-        total = subtotal + impuesto + propina - descuento
+        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
         pedido.subtotal = subtotal
         pedido.total = total
         pedido.actualizado_por = request.user
@@ -315,11 +370,104 @@ def pedido_create_view(request):
                 'tipo_pedido': pedido.tipo_pedido,
                 'subtotal': str(pedido.subtotal),
                 'total': str(pedido.total),
-                'items': len(parsed_lines),
+                'items': len(parsed['parsed_lines']),
             },
         },
         status=201,
     )
+
+
+def pedido_detail_view(request, pedido_id):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    try:
+        pedido = (
+            VGPedido.objects
+            .select_related('mesa', 'cliente')
+            .prefetch_related('detalles__producto')
+            .get(pk=pedido_id)
+        )
+    except VGPedido.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+    return _auth_response({'ok': True, 'pedido': _serialize_order_detail(pedido)})
+
+
+@csrf_exempt
+def pedido_update_view(request, pedido_id):
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para editar pedidos.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    parsed, error = _parse_order_payload(data)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
+    cliente = None
+    cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
+    if cliente_nombre:
+        cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
+
+    notas = str(data.get('notas', '') or '').strip()
+
+    with transaction.atomic():
+        try:
+            pedido = VGPedido.objects.select_for_update().get(pk=pedido_id)
+        except VGPedido.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+        if pedido.estado != 'pendiente':
+            return _auth_response(
+                {'ok': False, 'message': 'Solo se pueden editar pedidos en estado pendiente. Este pedido ya avanzó a cocina.'},
+                status=409,
+            )
+
+        pedido.mesa = parsed['mesa']
+        pedido.tipo_pedido = parsed['tipo_pedido']
+        pedido.cliente = cliente
+        pedido.notas = notas
+        pedido.impuesto = parsed['impuesto']
+        pedido.descuento = parsed['descuento']
+        pedido.propina = parsed['propina']
+
+        pedido.detalles.all().delete()
+
+        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'])
+        for line in built_lines:
+            VGDetallePedido.objects.create(
+                pedido=pedido,
+                producto=line['producto'],
+                cantidad=line['cantidad'],
+                precio_unitario=line['precio_unitario'],
+                estado='pendiente',
+                notas=line['notas'],
+            )
+
+        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
+        pedido.subtotal = subtotal
+        pedido.total = total
+        pedido.actualizado_por = request.user
+        pedido.save()
+
+    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto').get(pk=pedido.id)
+    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Pedido actualizado correctamente.',
+        'pedido': _serialize_order_detail(pedido),
+    })
 
 
 @csrf_exempt
@@ -1677,11 +1825,6 @@ def kitchen_order_status_update_view(request, pedido_id):
     if next_state not in allowed_states:
         return _auth_response({'ok': False, 'message': 'Estado de destino invalido.'}, status=400)
 
-    try:
-        pedido = VGPedido.objects.prefetch_related('detalles').get(pk=pedido_id)
-    except VGPedido.DoesNotExist:
-        return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
-
     transitions = {
         'pendiente': {'en_preparacion', 'cancelado'},
         'en_preparacion': {'listo', 'cancelado'},
@@ -1691,14 +1834,19 @@ def kitchen_order_status_update_view(request, pedido_id):
         'cancelado': set(),
     }
 
-    allowed_next = transitions.get(pedido.estado, set())
-    if next_state not in allowed_next:
-        return _auth_response(
-            {'ok': False, 'message': f'No se puede cambiar de {pedido.estado} a {next_state}.'},
-            status=400,
-        )
-
     with transaction.atomic():
+        try:
+            pedido = VGPedido.objects.select_for_update().prefetch_related('detalles').get(pk=pedido_id)
+        except VGPedido.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+        allowed_next = transitions.get(pedido.estado, set())
+        if next_state not in allowed_next:
+            return _auth_response(
+                {'ok': False, 'message': f'No se puede cambiar de {pedido.estado} a {next_state}.'},
+                status=400,
+            )
+
         pedido.estado = next_state
         pedido.actualizado_por = request.user
         pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
@@ -1720,6 +1868,124 @@ def kitchen_order_status_update_view(request, pedido_id):
             'estado': pedido.estado,
         },
     })
+
+
+BILLABLE_ORDER_STATES = ['listo', 'entregado']
+
+
+@csrf_exempt
+def pedidos_cobro_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    if request.method == 'GET':
+        pedidos = (
+            VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
+            .select_related('mesa', 'cliente', 'usuario')
+            .prefetch_related('detalles__producto')
+            .order_by('mesa__numero', 'fecha_creacion')
+        )
+        return _auth_response({
+            'ok': True,
+            'pedidos': [
+                {
+                    'id': pedido.id,
+                    'mesa_id': pedido.mesa_id,
+                    'mesa': pedido.mesa.numero if pedido.mesa else None,
+                    'tipo_pedido': pedido.tipo_pedido,
+                    'estado': pedido.estado,
+                    'cliente': pedido.cliente.nombre if pedido.cliente else '',
+                    'mesero': pedido.usuario.username,
+                    'notas': pedido.notas,
+                    'subtotal': str(pedido.subtotal),
+                    'impuesto': str(pedido.impuesto),
+                    'descuento': str(pedido.descuento),
+                    'propina': str(pedido.propina),
+                    'total': str(pedido.total),
+                    'creado_en': pedido.fecha_creacion.isoformat(),
+                    'items': [
+                        {
+                            'id': detalle.id,
+                            'producto': detalle.producto.nombre,
+                            'cantidad': detalle.cantidad,
+                            'precio_unitario': str(detalle.precio_unitario),
+                            'notas': detalle.notas,
+                        }
+                        for detalle in pedido.detalles.all()
+                    ],
+                }
+                for pedido in pedidos
+            ],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    raw_ids = data.get('pedido_ids')
+    if not isinstance(raw_ids, list) or len(raw_ids) == 0:
+        return _auth_response({'ok': False, 'message': 'Debes seleccionar al menos un pedido para cobrar.'}, status=400)
+
+    try:
+        pedido_ids = sorted({int(raw_id) for raw_id in raw_ids})
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'Hay un pedido invalido en la selección.'}, status=400)
+
+    metodo_pago = str(data.get('metodo_pago', '')).strip().lower()
+    metodo_keys = {metodo for metodo, _ in VGPago.METODOS}
+    if metodo_pago not in metodo_keys:
+        return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
+
+    referencia = f'COBRO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{pedido_ids[0]}'
+
+    with transaction.atomic():
+        pedidos = list(VGPedido.objects.select_for_update().filter(pk__in=pedido_ids))
+        found_ids = {pedido.id for pedido in pedidos}
+        missing_ids = sorted(set(pedido_ids) - found_ids)
+        if missing_ids:
+            return _auth_response(
+                {'ok': False, 'message': f'Los pedidos {missing_ids} no existen.'},
+                status=400,
+            )
+
+        not_billable = sorted(pedido.id for pedido in pedidos if pedido.estado not in BILLABLE_ORDER_STATES)
+        if not_billable:
+            return _auth_response(
+                {
+                    'ok': False,
+                    'message': f'Los pedidos {not_billable} ya no están listos para cobrar (revisa su estado actual).',
+                },
+                status=409,
+            )
+
+        total_cobrado = Decimal('0')
+        for pedido in pedidos:
+            VGPago.objects.create(
+                pedido=pedido,
+                monto=pedido.total,
+                metodo_pago=metodo_pago,
+                referencia=referencia,
+                estado='completado',
+                creado_por=request.user,
+            )
+            pedido.estado = 'pagado'
+            pedido.actualizado_por = request.user
+            pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+            total_cobrado += pedido.total
+
+    return _auth_response({
+        'ok': True,
+        'message': f'Se cobraron {len(pedidos)} pedido(s) correctamente.',
+        'factura': {
+            'referencia': referencia,
+            'total': str(total_cobrado),
+            'pedidos': [pedido.id for pedido in pedidos],
+        },
+    }, status=201)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from asgiref.sync import async_to_sync
@@ -23,6 +24,7 @@ from .models import (
     VGMovimientoInventario,
     VGPedido,
     VGPreparacion,
+    VGPromocion,
     VGProducto,
     VGRecetaProducto,
     VGRecetaPreparacion,
@@ -960,7 +962,7 @@ def admin_users_view(request):
         'user': _serialize_user(target_user),
     }, status=201 if action == 'create' else 200)
 
-
+"""Datos para servir el reporte de las recetas creadas al administrador"""
 @csrf_exempt
 def admin_recipes_view(request):
     if request.method not in ['GET', 'POST']:
@@ -1130,6 +1132,189 @@ def admin_recipes_view(request):
     }, status=status_code)
 
 
+def _parse_promotion_discount_fields(data):
+    """Valida tipo_descuento/valor_descuento/duracion_dias, compartido entre alta individual y masiva."""
+    tipo_descuento = str(data.get('tipo_descuento', '')).strip().lower()
+    tipo_keys = {tipo for tipo, _ in VGPromocion.TIPOS_DESCUENTO}
+    if tipo_descuento not in tipo_keys:
+        return None, 'El tipo de descuento es invalido.'
+
+    try:
+        valor_descuento = Decimal(str(data.get('valor_descuento', '')))
+    except InvalidOperation:
+        return None, 'El valor del descuento es invalido.'
+
+    if valor_descuento <= 0:
+        return None, 'El valor del descuento debe ser mayor a cero.'
+
+    if tipo_descuento == 'porcentaje' and valor_descuento > 100:
+        return None, 'El porcentaje de descuento no puede superar 100.'
+
+    try:
+        duracion_dias = int(data.get('duracion_dias', 0))
+    except (TypeError, ValueError):
+        return None, 'La duracion de la promocion es invalida.'
+
+    if duracion_dias <= 0:
+        return None, 'La duracion de la promocion debe ser de al menos 1 dia.'
+
+    return {
+        'tipo_descuento': tipo_descuento,
+        'valor_descuento': valor_descuento,
+        'duracion_dias': duracion_dias,
+    }, None
+
+"""Reporte y logica para mostrar, actualizar e insertar promociones calculando segun el dia"""
+@csrf_exempt
+def admin_promotions_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        today = timezone.localdate()
+        active_product_ids = set(
+            VGPromocion.objects.filter(
+                activo=True, fecha_inicio__lte=today, fecha_fin__gte=today,
+            ).values_list('producto_id', flat=True)
+        )
+        products = (
+            VGProducto.objects.filter(disponible=True)
+            .select_related('categoria')
+            .order_by('nombre')
+        )
+        return _auth_response({
+            'ok': True,
+            'products': [
+                {
+                    'id': product.id,
+                    'nombre': product.nombre,
+                    'categoria': product.categoria.nombre if product.categoria else '',
+                    'precio_venta': str(product.precio_venta),
+                    'promocion_activa': product.id in active_product_ids,
+                }
+                for product in products
+            ],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+    if action not in {'create', 'create_bulk'}:
+        return _auth_response({'ok': False, 'message': 'Accion de promocion invalida.'}, status=400)
+
+    fields, error = _parse_promotion_discount_fields(data)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
+    descripcion = str(data.get('descripcion', '') or '').strip()
+    fecha_inicio = timezone.localdate()
+    fecha_fin = fecha_inicio + timedelta(days=fields['duracion_dias'])
+
+    if action == 'create':
+        product_id = data.get('producto_id')
+        try:
+            product = VGProducto.objects.get(pk=int(product_id), disponible=True)
+        except (ValueError, TypeError, VGProducto.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El producto seleccionado no existe.'}, status=400)
+
+        titulo = str(data.get('titulo', '') or '').strip() or f'Promoción {product.nombre}'
+
+        promotion = VGPromocion.objects.create(
+            titulo=titulo,
+            descripcion=descripcion,
+            producto=product,
+            tipo_descuento=fields['tipo_descuento'],
+            valor_descuento=fields['valor_descuento'],
+            duracion_dias=fields['duracion_dias'],
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            activo=True,
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+
+        return _auth_response({
+            'ok': True,
+            'message': 'Promoción creada correctamente.',
+            'item': {
+                'id': promotion.id,
+                'producto_id': product.id,
+                'fecha_inicio': promotion.fecha_inicio.isoformat(),
+                'fecha_fin': promotion.fecha_fin.isoformat(),
+            },
+        }, status=201)
+
+    # action == 'create_bulk'
+    raw_ids = data.get('producto_ids')
+    if not isinstance(raw_ids, list) or len(raw_ids) == 0:
+        return _auth_response({'ok': False, 'message': 'Debes seleccionar al menos un producto.'}, status=400)
+
+    try:
+        product_ids = sorted({int(raw_id) for raw_id in raw_ids})
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'Hay un producto invalido en la selección.'}, status=400)
+
+    products_by_id = {
+        product.id: product
+        for product in VGProducto.objects.filter(id__in=product_ids, disponible=True)
+    }
+    active_product_ids = set(
+        VGPromocion.objects.filter(
+            producto_id__in=product_ids, activo=True, fecha_inicio__lte=fecha_inicio, fecha_fin__gte=fecha_inicio,
+        ).values_list('producto_id', flat=True)
+    )
+
+    omitted = []
+    to_create = []
+    for product_id in product_ids:
+        product = products_by_id.get(product_id)
+        if product is None:
+            omitted.append({'id': product_id, 'nombre': '', 'motivo': 'Producto no encontrado o no disponible.'})
+            continue
+        if product_id in active_product_ids:
+            omitted.append({'id': product_id, 'nombre': product.nombre, 'motivo': 'Ya tiene una promoción activa.'})
+            continue
+        to_create.append(product)
+
+    if not to_create:
+        return _auth_response({
+            'ok': False,
+            'message': 'Ningún producto seleccionado pudo recibir la promoción.',
+            'omitidas': omitted,
+        }, status=400)
+
+    created_items = []
+    with transaction.atomic():
+        for product in to_create:
+            promotion = VGPromocion.objects.create(
+                titulo=f'Promoción {product.nombre}',
+                descripcion=descripcion,
+                producto=product,
+                tipo_descuento=fields['tipo_descuento'],
+                valor_descuento=fields['valor_descuento'],
+                duracion_dias=fields['duracion_dias'],
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                activo=True,
+                creado_por=request.user,
+                actualizado_por=request.user,
+            )
+            created_items.append({'id': promotion.id, 'producto_id': product.id, 'nombre': product.nombre})
+
+    return _auth_response({
+        'ok': True,
+        'message': f'{len(created_items)} promoción(es) creada(s) correctamente.',
+        'creadas': created_items,
+        'omitidas': omitted,
+    }, status=201)
+
+"""Reporte de los datos de los pedidos en preparacion"""
 def kitchen_orders_view(request):
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1214,7 +1399,7 @@ def kitchen_orders_view(request):
         'orders': payload_orders,
     })
 
-
+"""Actualizar el estado de los pedidos"""
 @csrf_exempt
 def kitchen_order_status_update_view(request, pedido_id):
     if request.method not in ['POST', 'PATCH']:

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AdminPanelPage from './AdminPanelPage';
+import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
+import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
 import AnalystEditUserPage from './AnalystEditUserPage';
 import AnalystEditIngredientPage from './AnalystEditIngredientPage';
 import AnalystEditRecipePage from './AnalystEditRecipePage';
@@ -7,13 +9,17 @@ import AnalystEditPreparationPage from './AnalystEditPreparationPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
 import AnalystNewIngredientPage from './AnalystNewIngredientPage';
 import AnalystNewPreparationPage from './AnalystNewPreparationPage';
+import AnalystNewPromotionPage from './AnalystNewPromotionPage';
 import AnalystNewUserPage from './AnalystNewUserPage';
 import AnalystNewRecipePage from './AnalystNewRecipePage';
 import AnalystPreparationsReportPage from './AnalystPreparationsReportPage';
+import AnalystPromotionsPage from './AnalystPromotionsPage';
 import AnalystRecipesPage from './AnalystRecipesPage';
 import AnalystUsersPage from './AnalystUsersPage';
+import ChefRecommendationsPage from './ChefRecommendationsPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import NewOrderPage from './NewOrderPage';
+import PromotionsPage from './PromotionsPage';
 import useKitchenSocket from '../hooks/useKitchenSocket';
 import useKitchenAlerts from './useKitchenAlerts';
 
@@ -596,57 +602,59 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
 
             <section style={{
               display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
+              gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
               gap: 16,
             }}>
               {[
                 {
-                  title: 'Pedidos',
-                  text: 'Visualiza ordenes nuevas y detecta retrasos antes de que impacten el servicio.',
+                  view: 'promotions',
+                  title: 'Promociones',
+                  text: 'Consulta el catalogo de promociones vigentes para ofrecer al cliente.',
                   icon: (
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M6 2h12" />
-                      <path d="M12 12v8" />
-                      <path d="M6 22h12" />
-                      <path d="M8 2v6a4 4 0 0 0 8 0V2" />
+                      <path d="M20.59 13.41 12 22l-9-9V4a1 1 0 0 1 1-1h9l8.59 8.59a2 2 0 0 1 0 2.82Z" />
+                      <path d="M7 7h.01" />
                     </svg>
                   ),
                 },
                 {
-                  title: 'Cocina',
-                  text: 'Ordena produccion por prioridad y manten visible el estado de preparacion.',
+                  view: 'chef-recommendations',
+                  title: 'Recomendación del chef',
+                  text: 'Descubre los platos que el chef sugiere destacar durante el servicio de hoy.',
                   icon: (
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M8 3v8" />
-                      <path d="M16 3v8" />
-                      <path d="M4 11h16" />
-                      <path d="M6 21h12" />
-                      <path d="M9 15h6" />
-                    </svg>
-                  ),
-                },
-                {
-                  title: 'Servicio',
-                  text: 'Deja a mano accesos para mesas, atencion al cliente y seguimiento en sala.',
-                  icon: (
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M4 19h16" />
-                      <path d="M7 19v-6a5 5 0 0 1 10 0v6" />
-                      <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+                      <path d="M17 21v-8a5 5 0 0 0-10 0v8" />
+                      <path d="M4 21h16" />
+                      <path d="M12 3a4 4 0 0 1 4 4c0 1.5-1 2-1 3H9c0-1-1-1.5-1-3a4 4 0 0 1 4-4Z" />
                     </svg>
                   ),
                 },
               ].map((item) => (
-                <article key={item.title} style={featureCardStyle}>
+                <button
+                  key={item.view}
+                  type="button"
+                  onClick={() => setActiveView(item.view)}
+                  style={featureCardButtonStyle}
+                >
                   <div style={{ display: 'inline-grid', placeItems: 'center', width: 44, height: 44, borderRadius: 14, background: 'rgba(255, 88, 88, 0.12)', color: '#ff7d7d', marginBottom: 18 }}>
                     {item.icon}
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 10 }}>{item.title}</div>
                   <div style={{ color: '#c7c7c7', lineHeight: 1.6, fontSize: 14 }}>{item.text}</div>
-                </article>
+                </button>
               ))}
             </section>
           </>
+        ) : activeView === 'promotions' ? (
+          <PromotionsPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('home')}
+          />
+        ) : activeView === 'chef-recommendations' ? (
+          <ChefRecommendationsPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('home')}
+          />
         ) : activeView === 'orders' ? (
           <NewOrderPage
             isMobile={isMobile}
@@ -740,6 +748,34 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isAdmin={isAdmin}
             onBack={() => setActiveView('admin-recipes')}
           />
+        ) : activeView === 'admin-promotions' ? (
+          <AnalystPromotionsPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+            onSelectProduct={(productId) => setActiveView(`admin-promotions-new:${productId}`)}
+            onSelectBulk={(productIds) => setActiveView(`admin-promotions-bulk:${productIds.join(',')}`)}
+          />
+        ) : activeView.startsWith('admin-promotions-new:') ? (
+          <AnalystNewPromotionPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            productId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-promotions')}
+          />
+        ) : activeView.startsWith('admin-promotions-bulk:') ? (
+          <AnalystBulkPromotionPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            productIds={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-promotions')}
+          />
+        ) : activeView === 'admin-chef-recommendations' ? (
+          <AnalystChefRecommendationsPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+          />
         ) : (
           <KitchenOrdersPage
             isMobile={isMobile}
@@ -805,6 +841,16 @@ const featureCardStyle = {
   borderRadius: 24,
   padding: 22,
   boxShadow: '0 12px 32px rgba(0,0,0,0.24)',
+};
+
+const featureCardButtonStyle = {
+  ...featureCardStyle,
+  display: 'block',
+  width: '100%',
+  textAlign: 'left',
+  cursor: 'pointer',
+  color: 'inherit',
+  font: 'inherit',
 };
 
 const userActionButtonStyle = {

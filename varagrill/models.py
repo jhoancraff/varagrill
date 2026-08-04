@@ -379,6 +379,65 @@ class VGDetallePedido(models.Model):
         return f"{self.producto} x {self.cantidad}"
 
 
+# ---------------------------------------------------------------------------
+# Promociones y recomendaciones del chef
+# ---------------------------------------------------------------------------
+class VGPromocion(VGAuditoria):
+    TIPOS_DESCUENTO = [
+        ("porcentaje", "Porcentaje"),
+        ("monto_fijo", "Monto fijo"),
+    ]
+    titulo = models.CharField(max_length=150)
+    descripcion = models.TextField(blank=True)
+    producto = models.ForeignKey(
+        VGProducto, on_delete=models.SET_NULL, null=True, blank=True, related_name="promociones",
+    )
+    imagen_url = models.URLField(blank=True)
+    tipo_descuento = models.CharField(max_length=20, choices=TIPOS_DESCUENTO, default="porcentaje")
+    valor_descuento = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    duracion_dias = models.PositiveIntegerField(
+        default=1, validators=[MinValueValidator(1)],
+        help_text="Cantidad de días que el analista definió para la promoción, contados desde fecha_inicio.",
+    )
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField(
+        null=True, blank=True,
+        help_text="Calculada como fecha_inicio + duracion_dias.",
+    )
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "vg_promociones"
+        verbose_name = "Promoción"
+        verbose_name_plural = "Promociones"
+
+    def __str__(self):
+        return self.titulo
+
+
+class VGRecomendacionChef(VGAuditoria):
+    producto = models.ForeignKey(
+        VGProducto, on_delete=models.CASCADE, related_name="recomendaciones_chef",
+    )
+    comentario_chef = models.TextField(blank=True)
+    imagen_url = models.URLField(blank=True)
+    fecha = models.DateField(help_text="Día para el que aplica esta recomendación.")
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "vg_recomendaciones_chef"
+        verbose_name = "Recomendación del chef"
+        verbose_name_plural = "Recomendaciones del chef"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["producto", "fecha"], name="uniq_recomendacion_producto_fecha",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.producto} — {self.fecha}"
+
+
 class VGPago(models.Model):
     METODOS = [
         ("efectivo", "Efectivo"),

@@ -19,6 +19,16 @@ const analystSections = [
     title: 'Creación de recetas',
     description: 'Redirige a la página en blanco destinada a la construcción de recetas.',
   },
+   {
+    id: 'admin-promotions',
+    title: 'Promociones',
+    description: 'Redirige a la página en blanco destinada a la gestión de promociones.',
+  },
+  {
+    id: 'admin-chef-recommendations',
+    title: 'Recomendaciones del chef',
+    description: 'Redirige a la página en blanco destinada a la gestión de recomendaciones del chef.',
+  },
 ];
 
 function AdminPanelPage({ isMobile, onBack, onNavigate }) {

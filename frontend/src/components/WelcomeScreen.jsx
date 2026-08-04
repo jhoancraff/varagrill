@@ -18,8 +18,14 @@ import useKitchenSocket from '../hooks/useKitchenSocket';
 import useKitchenAlerts from './useKitchenAlerts';
 
 function WelcomeScreen({ name, role, isAdmin, onBack }) {
+  const isCompactNavigationViewport = () => (
+    window.matchMedia('(max-width: 1024px)').matches
+    || window.matchMedia('(pointer: coarse)').matches
+  );
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
+  const [isSidebarOverlayMode, setIsSidebarOverlayMode] = useState(isCompactNavigationViewport);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState('home');
   const [mesas, setMesas] = useState([]);
@@ -56,21 +62,51 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
   }, []);
 
   useEffect(() => {
-    if (isMobile) {
+    const widthQuery = window.matchMedia('(max-width: 1024px)');
+    const pointerQuery = window.matchMedia('(pointer: coarse)');
+
+    const syncOverlayMode = () => {
+      setIsSidebarOverlayMode(widthQuery.matches || pointerQuery.matches);
+    };
+
+    syncOverlayMode();
+    widthQuery.addEventListener('change', syncOverlayMode);
+    pointerQuery.addEventListener('change', syncOverlayMode);
+
+    return () => {
+      widthQuery.removeEventListener('change', syncOverlayMode);
+      pointerQuery.removeEventListener('change', syncOverlayMode);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
       return;
     }
 
     setIsSidebarOpen(true);
-  }, [isMobile]);
+  }, [isSidebarOverlayMode]);
+
+  useEffect(() => {
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
+  }, [activeView, isSidebarOverlayMode]);
 
   const handleHomeClick = () => {
     setActiveView('home');
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleAnalystNavigation = (view) => {
     setActiveView(view);
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -189,8 +225,8 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
     enabled: isKitchenRole,
   });
 
-  const sidebarWidth = isMobile ? 'min(84vw, 320px)' : '300px';
-  const desktopContentOffset = isSidebarOpen && !isMobile ? '332px' : '0px';
+  const sidebarWidth = isSidebarOverlayMode ? 'min(84vw, 320px)' : '300px';
+  const desktopContentOffset = isSidebarOpen && !isSidebarOverlayMode ? '332px' : '0px';
   const displayName = name || 'Usuario';
   const todayLabel = new Intl.DateTimeFormat('es-ES', {
     day: '2-digit',
@@ -221,7 +257,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           {liveNotice}
         </div>
       )}
-      {isSidebarOpen && isMobile && (
+      {isSidebarOpen && isSidebarOverlayMode && (
         <button
           type="button"
           onClick={() => setIsSidebarOpen(false)}
@@ -344,7 +380,12 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
 
         <button
           type="button"
-          onClick={() => setActiveView('orders')}
+          onClick={() => {
+            setActiveView('orders');
+            if (isSidebarOverlayMode) {
+              setIsSidebarOpen(false);
+            }
+          }}
           style={sidebarButtonStyle(activeView === 'orders')}
         >
           <span aria-hidden="true" style={sidebarIconWrapStyle}>
@@ -359,11 +400,14 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
 
         <button
           type="button"
-          onClick={() => setActiveView('kitchen')}
+          onClick={() => {
+            setActiveView('kitchen');
+            if (isSidebarOverlayMode) {
+              setIsSidebarOpen(false);
+            }
+          }}
           style={sidebarButtonStyle(activeView === 'kitchen')}
         >
-          <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
-          <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
           <span aria-hidden="true" style={sidebarIconWrapStyle}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M8 2h8" />
@@ -376,12 +420,21 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
               <path d="M8 18h5" />
             </svg>
           </span>
+          <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
+          <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
+          
+          
         </button>
 
         {isAdmin ? (
           <button
             type="button"
-            onClick={() => setActiveView('admin')}
+            onClick={() => {
+              setActiveView('admin');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
             style={sidebarButtonStyle(activeView.startsWith('admin'))}
           >
             <span aria-hidden="true" style={sidebarIconWrapStyle}>

@@ -16,6 +16,36 @@ function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBa
   const [queuedCount, setQueuedCount] = useState(() => getQueuedOrders().length);
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [promotionsByProductId, setPromotionsByProductId] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPromotions = async () => {
+      try {
+        const response = await fetch('/api/promociones/', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok || cancelled) {
+          return;
+        }
+        const map = {};
+        (Array.isArray(data.promotions) ? data.promotions : []).forEach((promotion) => {
+          map[promotion.producto_id] = promotion;
+        });
+        setPromotionsByProductId(map);
+      } catch (error) {
+        // Sin promociones disponibles no bloquea la toma de pedidos.
+      }
+    };
+
+    loadPromotions();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const catalogOptions = useMemo(() => (
     [
@@ -27,8 +57,8 @@ function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBa
   ), []);
 
   const subtotal = useMemo(
-    () => lines.reduce((accumulator, line) => accumulator + getLineSubtotal(line, products), 0),
-    [lines, products],
+    () => lines.reduce((accumulator, line) => accumulator + getLineSubtotal(line, products, promotionsByProductId), 0),
+    [lines, products, promotionsByProductId],
   );
 
   const selectedMesa = useMemo(
@@ -411,12 +441,18 @@ function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBa
               product.nombre.toLowerCase().includes(line.search.toLowerCase())
               || (product.categoria_nombre || '').toLowerCase().includes(line.search.toLowerCase())
             ));
-            const lineSubtotal = getLineSubtotal(line, products);
+            const lineSubtotal = getLineSubtotal(line, products, promotionsByProductId);
+            const linePromotion = line.productId ? promotionsByProductId[line.productId] : null;
 
             return (
-              <article key={line.id} style={lineCardStyle(isCompact)}>
+              <article key={line.id} style={lineCardStyle(isCompact, Boolean(linePromotion))}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ color: '#fff', fontWeight: 600 }}>Plato #{index + 1}</div>
+                  <div style={{ color: '#fff', fontWeight: 600 }}>
+                    Plato #{index + 1}
+                    {linePromotion ? (
+                      <span style={promoInlineBadgeStyle}>En promoción -{linePromotion.porcentaje_descuento}%</span>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     onClick={() => removeLine(line.id)}
@@ -444,17 +480,34 @@ function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBa
                     {line.isOpen && (
                       <div style={resultsPanelStyle(isCompact)}>
                         {filteredProducts.length > 0 ? (
-                          filteredProducts.map((product) => (
-                            <button
-                              key={product.id}
-                              type="button"
-                              onClick={() => handleSelectProduct(line.id, product)}
-                              style={resultRowButtonStyle(isCompact)}
-                            >
-                              <span style={{ color: '#fff', fontWeight: 600 }}>{product.nombre}</span>
-                              <span style={{ color: '#e8bcbc', fontSize: 12 }}>{product.categoria_nombre} - ${Number(product.precio_venta).toFixed(2)}</span>
-                            </button>
-                          ))
+                          filteredProducts.map((product) => {
+                            const promotion = promotionsByProductId[product.id];
+                            return (
+                              <button
+                                key={product.id}
+                                type="button"
+                                onClick={() => handleSelectProduct(line.id, product)}
+                                style={resultRowButtonStyle(isCompact, Boolean(promotion))}
+                              >
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{ color: '#fff', fontWeight: 600 }}>{product.nombre}</span>
+                                  {promotion ? <span style={promoInlineBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
+                                </span>
+                                {promotion ? (
+                                  <span style={{ fontSize: 12 }}>
+                                    <span style={{ color: '#8f7676', textDecoration: 'line-through', marginRight: 6 }}>
+                                      ${Number(product.precio_venta).toFixed(2)}
+                                    </span>
+                                    <span style={{ color: '#7dffa0', fontWeight: 700 }}>
+                                      ${Number(promotion.precio_descuento).toFixed(2)}
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#e8bcbc', fontSize: 12 }}>{product.categoria_nombre} - ${Number(product.precio_venta).toFixed(2)}</span>
+                                )}
+                              </button>
+                            );
+                          })
                         ) : (
                           <div style={{ color: '#d8b9b9', padding: 12, fontSize: 13 }}>No hay resultados para esa busqueda.</div>
                         )}
@@ -488,7 +541,16 @@ function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBa
                 </label>
 
                 <div style={{ marginTop: 10, color: '#ffdede', fontSize: 13 }}>
-                  Subtotal del plato: ${lineSubtotal.toFixed(2)}
+                  {linePromotion ? (
+                    <>
+                      Subtotal del plato: <span style={{ textDecoration: 'line-through', color: '#c79f9f', marginRight: 4 }}>
+                        ${(Number(products.find((item) => String(item.id) === String(line.productId))?.precio_venta || 0) * Number(line.quantity || 1)).toFixed(2)}
+                      </span>
+                      <span style={{ color: '#7dffa0', fontWeight: 700 }}>${lineSubtotal.toFixed(2)}</span>
+                    </>
+                  ) : (
+                    <>Subtotal del plato: ${lineSubtotal.toFixed(2)}</>
+                  )}
                 </div>
               </article>
             );
@@ -521,12 +583,14 @@ function createEmptyLine() {
   };
 }
 
-function getLineSubtotal(line, products) {
+function getLineSubtotal(line, products, promotionsByProductId = {}) {
   const product = products.find((item) => String(item.id) === String(line.productId));
   if (!product) {
     return 0;
   }
-  return Number(product.precio_venta) * Number(line.quantity || 1);
+  const promotion = promotionsByProductId[product.id];
+  const unitPrice = promotion ? Number(promotion.precio_descuento) : Number(product.precio_venta);
+  return unitPrice * Number(line.quantity || 1);
 }
 
 function matchesCatalogType(product, catalogType) {
@@ -640,12 +704,24 @@ const ghostButtonStyle = (isCompact) => ({
   minHeight: 44,
 });
 
-const lineCardStyle = (isCompact) => ({
+const lineCardStyle = (isCompact, hasPromotion) => ({
   borderRadius: 18,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.03)',
+  border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.12)',
+  background: hasPromotion ? 'rgba(70, 200, 120, 0.08)' : 'rgba(255,255,255,0.03)',
   padding: isCompact ? 12 : 14,
 });
+
+const promoInlineBadgeStyle = {
+  display: 'inline-flex',
+  marginLeft: 8,
+  padding: '2px 8px',
+  borderRadius: 999,
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontSize: 11,
+  fontWeight: 800,
+  verticalAlign: 'middle',
+};
 
 const miniActionStyle = (isCompact) => ({
   border: '1px solid rgba(255,255,255,0.2)',
@@ -671,11 +747,11 @@ const resultsPanelStyle = (isCompact) => ({
   zIndex: 2,
 });
 
-const resultRowButtonStyle = (isCompact) => ({
-  border: '1px solid rgba(255,255,255,0.08)',
+const resultRowButtonStyle = (isCompact, hasPromotion) => ({
+  border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.08)',
   borderRadius: 10,
   padding: isCompact ? '12px 10px' : '10px 10px',
-  background: 'rgba(255,255,255,0.05)',
+  background: hasPromotion ? 'rgba(70, 200, 120, 0.1)' : 'rgba(255,255,255,0.05)',
   textAlign: 'left',
   display: 'grid',
   gap: 4,

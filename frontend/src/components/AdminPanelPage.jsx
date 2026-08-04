@@ -19,15 +19,15 @@ const analystSections = [
     title: 'Creación de recetas',
     description: 'Redirige a la página en blanco destinada a la construcción de recetas.',
   },
-   {
+  {
     id: 'admin-promotions',
     title: 'Promociones',
-    description: 'Redirige a la página en blanco destinada a la gestión de promociones.',
+    description: 'Abre el reporte de productos para aplicar descuentos, uno por uno o en bloque.',
   },
   {
     id: 'admin-chef-recommendations',
     title: 'Recomendaciones del chef',
-    description: 'Redirige a la página en blanco destinada a la gestión de recomendaciones del chef.',
+    description: 'Abre el reporte de platos recomendados y permite agregar nuevas recomendaciones.',
   },
 ];
 

@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from asgiref.sync import async_to_sync
@@ -28,6 +28,7 @@ from .models import (
     VGProducto,
     VGRecetaProducto,
     VGRecetaPreparacion,
+    VGRecomendacionChef,
     VGRol,
     VGUsuario,
 )
@@ -155,6 +156,23 @@ def _notify_cocina_event(event_name, pedido, actor_user):
             pass
 
 
+def _active_promotions_by_product(product_ids=None):
+    today = timezone.localdate()
+    queryset = VGPromocion.objects.filter(activo=True, fecha_inicio__lte=today, fecha_fin__gte=today)
+    if product_ids is not None:
+        queryset = queryset.filter(producto_id__in=product_ids)
+    return {promotion.producto_id: promotion for promotion in queryset}
+
+
+def _compute_discounted_price(precio_original, promotion):
+    if promotion.tipo_descuento == 'porcentaje':
+        descuento = precio_original * promotion.valor_descuento / Decimal('100')
+    else:
+        descuento = promotion.valor_descuento
+    precio_final = precio_original - descuento
+    return precio_final if precio_final > 0 else Decimal('0')
+
+
 class MesaListView(generics.ListAPIView):
     queryset = VGMesa.objects.all().order_by('numero')
     serializer_class = MesaSerializer
@@ -231,6 +249,7 @@ def pedido_create_view(request):
         product.id: product
         for product in VGProducto.objects.filter(id__in=product_ids, disponible=True)
     }
+    active_promotions = _active_promotions_by_product(product_ids)
 
     for index, line in enumerate(parsed_lines, start=1):
         if line['product_id'] not in products_map:
@@ -264,13 +283,15 @@ def pedido_create_view(request):
         subtotal = Decimal('0')
         for line in parsed_lines:
             product = products_map[line['product_id']]
-            line_total = product.precio_venta * line['cantidad']
+            promotion = active_promotions.get(product.id)
+            unit_price = _compute_discounted_price(product.precio_venta, promotion) if promotion else product.precio_venta
+            line_total = unit_price * line['cantidad']
             subtotal += line_total
             VGDetallePedido.objects.create(
                 pedido=pedido,
                 producto=product,
                 cantidad=line['cantidad'],
-                precio_unitario=product.precio_venta,
+                precio_unitario=unit_price,
                 estado='pendiente',
                 notas=line['notas'],
             )
@@ -962,7 +983,7 @@ def admin_users_view(request):
         'user': _serialize_user(target_user),
     }, status=201 if action == 'create' else 200)
 
-"""Datos para servir el reporte de las recetas creadas al administrador"""
+
 @csrf_exempt
 def admin_recipes_view(request):
     if request.method not in ['GET', 'POST']:
@@ -1164,7 +1185,20 @@ def _parse_promotion_discount_fields(data):
         'duracion_dias': duracion_dias,
     }, None
 
-"""Reporte y logica para mostrar, actualizar e insertar promociones calculando segun el dia"""
+
+def _serialize_promotion(promotion):
+    return {
+        'id': promotion.id,
+        'titulo': promotion.titulo,
+        'descripcion': promotion.descripcion,
+        'tipo_descuento': promotion.tipo_descuento,
+        'valor_descuento': str(promotion.valor_descuento),
+        'duracion_dias': promotion.duracion_dias,
+        'fecha_inicio': promotion.fecha_inicio.isoformat(),
+        'fecha_fin': promotion.fecha_fin.isoformat() if promotion.fecha_fin else None,
+    }
+
+
 @csrf_exempt
 def admin_promotions_view(request):
     if request.method not in ['GET', 'POST']:
@@ -1175,16 +1209,17 @@ def admin_promotions_view(request):
 
     if request.method == 'GET':
         today = timezone.localdate()
-        active_product_ids = set(
-            VGPromocion.objects.filter(
-                activo=True, fecha_inicio__lte=today, fecha_fin__gte=today,
-            ).values_list('producto_id', flat=True)
-        )
         products = (
             VGProducto.objects.filter(disponible=True)
             .select_related('categoria')
             .order_by('nombre')
         )
+        active_promotions = {
+            promotion.producto_id: promotion
+            for promotion in VGPromocion.objects.filter(
+                activo=True, fecha_inicio__lte=today, fecha_fin__gte=today,
+            )
+        }
         return _auth_response({
             'ok': True,
             'products': [
@@ -1193,7 +1228,11 @@ def admin_promotions_view(request):
                     'nombre': product.nombre,
                     'categoria': product.categoria.nombre if product.categoria else '',
                     'precio_venta': str(product.precio_venta),
-                    'promocion_activa': product.id in active_product_ids,
+                    'promocion_activa': product.id in active_promotions,
+                    'promocion': (
+                        _serialize_promotion(active_promotions[product.id])
+                        if product.id in active_promotions else None
+                    ),
                 }
                 for product in products
             ],
@@ -1205,8 +1244,18 @@ def admin_promotions_view(request):
         return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
 
     action = str(data.get('action', '')).strip().lower()
-    if action not in {'create', 'create_bulk'}:
+    if action not in {'create', 'create_bulk', 'update', 'delete'}:
         return _auth_response({'ok': False, 'message': 'Accion de promocion invalida.'}, status=400)
+
+    if action == 'delete':
+        promotion_id = data.get('id')
+        try:
+            promotion = VGPromocion.objects.get(pk=int(promotion_id))
+        except (ValueError, TypeError, VGPromocion.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La promoción a eliminar no existe.'}, status=400)
+
+        promotion.delete()
+        return _auth_response({'ok': True, 'message': 'Promoción eliminada correctamente.'})
 
     fields, error = _parse_promotion_discount_fields(data)
     if error:
@@ -1215,6 +1264,40 @@ def admin_promotions_view(request):
     descripcion = str(data.get('descripcion', '') or '').strip()
     fecha_inicio = timezone.localdate()
     fecha_fin = fecha_inicio + timedelta(days=fields['duracion_dias'])
+
+    if action == 'update':
+        promotion_id = data.get('id')
+        try:
+            promotion = VGPromocion.objects.get(pk=int(promotion_id))
+        except (ValueError, TypeError, VGPromocion.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La promoción a actualizar no existe.'}, status=400)
+
+        titulo = str(data.get('titulo', '') or '').strip() or promotion.titulo
+
+        promotion.titulo = titulo
+        promotion.descripcion = descripcion
+        promotion.tipo_descuento = fields['tipo_descuento']
+        promotion.valor_descuento = fields['valor_descuento']
+        promotion.duracion_dias = fields['duracion_dias']
+        promotion.fecha_inicio = fecha_inicio
+        promotion.fecha_fin = fecha_fin
+        promotion.activo = True
+        promotion.actualizado_por = request.user
+        promotion.save(update_fields=[
+            'titulo', 'descripcion', 'tipo_descuento', 'valor_descuento', 'duracion_dias',
+            'fecha_inicio', 'fecha_fin', 'activo', 'actualizado_por', 'fecha_actualizacion',
+        ])
+
+        return _auth_response({
+            'ok': True,
+            'message': 'Promoción actualizada correctamente.',
+            'item': {
+                'id': promotion.id,
+                'producto_id': promotion.producto_id,
+                'fecha_inicio': promotion.fecha_inicio.isoformat(),
+                'fecha_fin': promotion.fecha_fin.isoformat(),
+            },
+        })
 
     if action == 'create':
         product_id = data.get('producto_id')
@@ -1314,7 +1397,183 @@ def admin_promotions_view(request):
         'omitidas': omitted,
     }, status=201)
 
-"""Reporte de los datos de los pedidos en preparacion"""
+
+def promociones_activas_view(request):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    today = timezone.localdate()
+    promotions = (
+        VGPromocion.objects
+        .filter(activo=True, fecha_inicio__lte=today, fecha_fin__gte=today, producto__isnull=False)
+        .select_related('producto', 'producto__categoria')
+        .order_by('-fecha_creacion')
+    )
+
+    payload = []
+    for promotion in promotions:
+        product = promotion.producto
+        precio_original = product.precio_venta
+        precio_descuento = _compute_discounted_price(precio_original, promotion)
+
+        if promotion.tipo_descuento == 'porcentaje':
+            porcentaje = promotion.valor_descuento
+        else:
+            porcentaje = (
+                (promotion.valor_descuento / precio_original * Decimal('100'))
+                if precio_original else Decimal('0')
+            )
+
+        payload.append({
+            'id': promotion.id,
+            'titulo': promotion.titulo,
+            'descripcion': promotion.descripcion,
+            'producto_id': product.id,
+            'producto_nombre': product.nombre,
+            'categoria': product.categoria.nombre if product.categoria else '',
+            'precio_original': str(precio_original.quantize(Decimal('0.01'))),
+            'precio_descuento': str(precio_descuento.quantize(Decimal('0.01'))),
+            'porcentaje_descuento': str(porcentaje.quantize(Decimal('0.1'))),
+            'fecha_fin': promotion.fecha_fin.isoformat() if promotion.fecha_fin else None,
+        })
+
+    return _auth_response({'ok': True, 'promotions': payload})
+
+
+def recomendaciones_chef_activas_view(request):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    today = timezone.localdate()
+    recommendations = (
+        VGRecomendacionChef.objects
+        .filter(activo=True, fecha=today, producto__isnull=False)
+        .select_related('producto', 'producto__categoria')
+        .order_by('producto__nombre')
+    )
+
+    payload = [
+        {
+            'id': recommendation.id,
+            'producto_id': recommendation.producto.id,
+            'producto_nombre': recommendation.producto.nombre,
+            'categoria': recommendation.producto.categoria.nombre if recommendation.producto.categoria else '',
+            'precio_venta': str(recommendation.producto.precio_venta),
+            'comentario_chef': recommendation.comentario_chef,
+            'fecha': recommendation.fecha.isoformat(),
+        }
+        for recommendation in recommendations
+    ]
+
+    return _auth_response({'ok': True, 'recommendations': payload})
+
+
+@csrf_exempt
+def admin_chef_recommendations_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        recommendations = (
+            VGRecomendacionChef.objects
+            .select_related('producto', 'producto__categoria')
+            .order_by('-fecha', 'producto__nombre')
+        )
+        products = list(
+            VGProducto.objects.filter(disponible=True).order_by('nombre').values('id', 'nombre', 'precio_venta')
+        )
+        return _auth_response({
+            'ok': True,
+            'recommendations': [
+                {
+                    'id': recommendation.id,
+                    'producto_id': recommendation.producto_id,
+                    'producto_nombre': recommendation.producto.nombre if recommendation.producto else '',
+                    'categoria': (
+                        recommendation.producto.categoria.nombre
+                        if recommendation.producto and recommendation.producto.categoria else ''
+                    ),
+                    'comentario_chef': recommendation.comentario_chef,
+                    'fecha': recommendation.fecha.isoformat(),
+                    'activo': recommendation.activo,
+                }
+                for recommendation in recommendations
+            ],
+            'products': [
+                {**product, 'precio_venta': str(product['precio_venta'])}
+                for product in products
+            ],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+
+    if action == 'delete':
+        recommendation_id = data.get('id')
+        try:
+            recommendation = VGRecomendacionChef.objects.get(pk=int(recommendation_id))
+        except (ValueError, TypeError, VGRecomendacionChef.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La recomendación a eliminar no existe.'}, status=400)
+
+        recommendation.delete()
+        return _auth_response({'ok': True, 'message': 'Recomendación eliminada correctamente.'})
+
+    if action != 'create':
+        return _auth_response({'ok': False, 'message': 'Accion de recomendacion invalida.'}, status=400)
+
+    product_id = data.get('producto_id')
+    try:
+        product = VGProducto.objects.get(pk=int(product_id), disponible=True)
+    except (ValueError, TypeError, VGProducto.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'El producto seleccionado no existe.'}, status=400)
+
+    fecha_raw = str(data.get('fecha', '') or '').strip()
+    try:
+        fecha = date.fromisoformat(fecha_raw) if fecha_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'La fecha indicada es invalida.'}, status=400)
+
+    comentario_chef = str(data.get('comentario_chef', '') or '').strip()
+
+    if VGRecomendacionChef.objects.filter(producto=product, fecha=fecha).exists():
+        return _auth_response(
+            {'ok': False, 'message': 'Ese producto ya tiene una recomendación registrada para esa fecha.'},
+            status=400,
+        )
+
+    recommendation = VGRecomendacionChef.objects.create(
+        producto=product,
+        comentario_chef=comentario_chef,
+        fecha=fecha,
+        activo=True,
+        creado_por=request.user,
+        actualizado_por=request.user,
+    )
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Recomendación creada correctamente.',
+        'item': {
+            'id': recommendation.id,
+            'producto_id': product.id,
+            'fecha': recommendation.fecha.isoformat(),
+        },
+    }, status=201)
+
+
 def kitchen_orders_view(request):
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1399,7 +1658,7 @@ def kitchen_orders_view(request):
         'orders': payload_orders,
     })
 
-"""Actualizar el estado de los pedidos"""
+
 @csrf_exempt
 def kitchen_order_status_update_view(request, pedido_id):
     if request.method not in ['POST', 'PATCH']:

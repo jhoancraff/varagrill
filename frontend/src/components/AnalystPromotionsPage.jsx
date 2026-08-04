@@ -3,9 +3,29 @@ import { useEffect, useMemo, useState } from 'react';
 function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onSelectBulk }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+
+  const loadProducts = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/promociones/', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo cargar el reporte de productos.');
+      }
+      setProducts(Array.isArray(data.products) ? data.products : []);
+    } catch (error) {
+      setMessage(error.message || 'No se pudo cargar el reporte de productos.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!isAdmin) {
@@ -13,27 +33,38 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
       return;
     }
 
-    const loadProducts = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch('/api/admin/promociones/', {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          throw new Error(data.message || 'No se pudo cargar el reporte de productos.');
-        }
-        setProducts(Array.isArray(data.products) ? data.products : []);
-      } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el reporte de productos.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
+
+  const handleDeletePromotion = async (product) => {
+    if (!product.promocion) {
+      return;
+    }
+    if (!window.confirm(`¿Deseas eliminar la promoción de ${product.nombre}?`)) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch('/api/admin/promociones/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id: product.promocion.id }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo eliminar la promoción.');
+      }
+      setMessage(data.message || 'Promoción eliminada correctamente.');
+      await loadProducts();
+    } catch (error) {
+      setMessage(error.message || 'No se pudo eliminar la promoción.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -179,9 +210,25 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
                     </span>
                   </div>
                   <div key={`actions-${product.id}`} style={tableCellActionStyle}>
-                    <button type="button" onClick={() => onSelectProduct(product.id)} style={primaryButtonStyle}>
-                      Aplicar descuento
-                    </button>
+                    {product.promocion_activa ? (
+                      <>
+                        <button type="button" onClick={() => onSelectProduct(product.id)} style={primaryButtonStyle}>
+                          Editar promoción
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePromotion(product)}
+                          style={dangerButtonStyle}
+                          disabled={saving}
+                        >
+                          Eliminar
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={() => onSelectProduct(product.id)} style={primaryButtonStyle}>
+                        Aplicar descuento
+                      </button>
+                    )}
                   </div>
                 </>
               ))}
@@ -364,6 +411,16 @@ const primaryButtonStyle = {
   padding: '10px 16px',
   background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
   color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+const dangerButtonStyle = {
+  border: '1px solid rgba(255, 126, 126, 0.4)',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'rgba(145, 33, 33, 0.25)',
+  color: '#ffd3d3',
   fontWeight: 700,
   cursor: 'pointer',
 };

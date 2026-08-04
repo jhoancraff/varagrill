@@ -26,12 +26,15 @@ from varagrill.api_views import (
     ProductoListView,
     SessionStatusView,
     admin_catalog_view,
+    admin_chef_recommendations_view,
     admin_promotions_view,
     admin_recipes_view,
     admin_users_view,
     kitchen_order_status_update_view,
     kitchen_orders_view,
     pedido_create_view,
+    promociones_activas_view,
+    recomendaciones_chef_activas_view,
 )
 
 urlpatterns = [
@@ -42,6 +45,9 @@ urlpatterns = [
     path('api/admin/catalogo/', admin_catalog_view, name='admin-catalog'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),
     path('api/admin/promociones/', admin_promotions_view, name='admin-promotions'),
+    path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
+    path('api/promociones/', promociones_activas_view, name='promociones-activas'),
+    path('api/recomendaciones-chef/', recomendaciones_chef_activas_view, name='recomendaciones-chef-activas'),
     path('api/admin/usuarios/', admin_users_view, name='admin-users'),
     path('api/pedidos/cocina/', kitchen_orders_view, name='kitchen-orders'),
     path('api/pedidos/<int:pedido_id>/estado/', kitchen_order_status_update_view, name='kitchen-order-status-update'),

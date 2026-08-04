@@ -1,14 +1,95 @@
+import { useEffect, useMemo, useState } from 'react';
+
 function ChefRecommendationsPage({ isMobile, onBack }) {
+  const [recommendations, setRecommendations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRecommendations = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/recomendaciones-chef/', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || 'No se pudieron cargar las recomendaciones.');
+        }
+        if (!cancelled) {
+          setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error.message || 'No se pudieron cargar las recomendaciones.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadRecommendations();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredRecommendations = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return recommendations;
+    }
+    return recommendations.filter((recommendation) => {
+      const source = `${recommendation.producto_nombre || ''} ${recommendation.categoria || ''}`.toLowerCase();
+      return source.includes(query);
+    });
+  }, [recommendations, search]);
+
   return (
     <section style={containerStyle(isMobile)}>
       <div style={badgeStyle}>Recomendación del chef</div>
       <h2 style={titleStyle(isMobile)}>Platos recomendados de hoy</h2>
-      <p style={subtitleStyle}>
-        Esta sección mostrará los platos que el chef sugiere destacar durante el servicio de hoy.
-        El contenido se cargará próximamente desde el panel del analista.
-      </p>
+      <p style={subtitleStyle}>Busca un producto para saber si el chef lo recomienda hoy.</p>
 
-      <div style={emptyStateStyle}>Todavía no hay recomendaciones cargadas.</div>
+      <input
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Buscar producto o categoría recomendada"
+        style={searchInputStyle}
+      />
+
+      {message ? <div style={noticeStyle}>{message}</div> : null}
+
+      {loading ? <div style={emptyStateStyle}>Cargando recomendaciones...</div> : null}
+
+      {!loading && recommendations.length === 0 ? (
+        <div style={emptyStateStyle}>Todavía no hay recomendaciones para hoy.</div>
+      ) : null}
+
+      {!loading && recommendations.length > 0 && filteredRecommendations.length === 0 ? (
+        <div style={emptyStateStyle}>No se encontraron recomendaciones para esa búsqueda.</div>
+      ) : null}
+
+      {!loading && filteredRecommendations.length > 0 ? (
+        <div style={gridStyle(isMobile)}>
+          {filteredRecommendations.map((recommendation) => (
+            <article key={recommendation.id} style={cardStyle}>
+              <div style={productNameStyle}>{recommendation.producto_nombre}</div>
+              <div style={categoryStyle}>{recommendation.categoria || 'Sin categoría'}</div>
+              <div style={priceStyle}>${recommendation.precio_venta}</div>
+              {recommendation.comentario_chef ? (
+                <div style={commentStyle}>&ldquo;{recommendation.comentario_chef}&rdquo;</div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
 
       <button type="button" onClick={onBack} style={backButtonStyle}>
         Volver al inicio
@@ -19,7 +100,7 @@ function ChefRecommendationsPage({ isMobile, onBack }) {
 
 const containerStyle = (isMobile) => ({
   display: 'grid',
-  gap: 18,
+  gap: 16,
   padding: isMobile ? 6 : 10,
 });
 
@@ -49,8 +130,63 @@ const subtitleStyle = {
   maxWidth: 760,
 };
 
+const searchInputStyle = {
+  width: '100%',
+  maxWidth: 420,
+  boxSizing: 'border-box',
+  borderRadius: 999,
+  border: '1px solid rgba(255, 255, 255, 0.14)',
+  background: '#161010',
+  padding: '12px 16px',
+  color: '#fff4f4',
+  fontSize: 14,
+};
+
+const gridStyle = (isMobile) => ({
+  display: 'grid',
+  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))',
+  gap: 14,
+});
+
+const cardStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: '16px 18px',
+  borderRadius: 20,
+  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.94) 0%, rgba(10, 10, 10, 0.96) 100%)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  boxShadow: '0 12px 28px rgba(0,0,0,0.24)',
+};
+
+const productNameStyle = {
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 16,
+  lineHeight: 1.3,
+};
+
+const categoryStyle = {
+  color: '#b89999',
+  fontSize: 12,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+};
+
+const priceStyle = {
+  color: '#ffcf7d',
+  fontSize: 18,
+  fontWeight: 800,
+};
+
+const commentStyle = {
+  color: '#c7c7c7',
+  fontSize: 13,
+  lineHeight: 1.5,
+  fontStyle: 'italic',
+};
+
 const emptyStateStyle = {
-  minHeight: 160,
+  minHeight: 120,
   display: 'grid',
   placeItems: 'center',
   borderRadius: 24,
@@ -59,6 +195,14 @@ const emptyStateStyle = {
   color: '#c8bbbb',
   textAlign: 'center',
   padding: 20,
+};
+
+const noticeStyle = {
+  padding: '12px 14px',
+  borderRadius: 16,
+  border: '1px solid rgba(255, 145, 145, 0.22)',
+  background: 'rgba(255, 98, 98, 0.12)',
+  color: '#ffd8d8',
 };
 
 const backButtonStyle = {

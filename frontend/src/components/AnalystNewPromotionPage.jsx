@@ -15,37 +15,48 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
+  const isEditMode = Boolean(product?.promocion);
+
+  const loadProduct = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/promociones/', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo cargar el producto seleccionado.');
+      }
+      const products = Array.isArray(data.products) ? data.products : [];
+      const found = products.find((item) => String(item.id) === String(productId)) || null;
+      setProduct(found);
+      if (found?.promocion) {
+        setForm({
+          titulo: found.promocion.titulo || `Promoción ${found.nombre}`,
+          descripcion: found.promocion.descripcion || '',
+          tipo_descuento: found.promocion.tipo_descuento || 'porcentaje',
+          valor_descuento: found.promocion.valor_descuento || '',
+          duracion_dias: String(found.promocion.duracion_dias || ''),
+        });
+      } else if (found) {
+        setForm((current) => ({ ...current, titulo: `Promoción ${found.nombre}` }));
+      }
+    } catch (error) {
+      setMessage(error.message || 'No se pudo cargar el producto seleccionado.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!isAdmin) {
       setLoading(false);
       return;
     }
 
-    const loadProduct = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch('/api/admin/promociones/', {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          throw new Error(data.message || 'No se pudo cargar el producto seleccionado.');
-        }
-        const products = Array.isArray(data.products) ? data.products : [];
-        const found = products.find((item) => String(item.id) === String(productId)) || null;
-        setProduct(found);
-        if (found) {
-          setForm((current) => ({ ...current, titulo: `Promoción ${found.nombre}` }));
-        }
-      } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el producto seleccionado.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadProduct();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, productId]);
 
   const handleChange = (field, value) => {
@@ -89,7 +100,15 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(isEditMode ? {
+          action: 'update',
+          id: product.promocion.id,
+          titulo: form.titulo,
+          descripcion: form.descripcion,
+          tipo_descuento: form.tipo_descuento,
+          valor_descuento: form.valor_descuento,
+          duracion_dias: form.duracion_dias,
+        } : {
           action: 'create',
           producto_id: product.id,
           titulo: form.titulo,
@@ -104,10 +123,39 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
         throw new Error(data.message || 'No se pudo guardar la promoción.');
       }
 
-      setMessage(data.message || 'Promoción creada correctamente.');
-      setForm({ ...emptyForm, titulo: `Promoción ${product.nombre}` });
+      setMessage(data.message || (isEditMode ? 'Promoción actualizada correctamente.' : 'Promoción creada correctamente.'));
+      await loadProduct();
     } catch (error) {
       setMessage(error.message || 'No se pudo guardar la promoción.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!product?.promocion) {
+      return;
+    }
+    if (!window.confirm(`¿Deseas eliminar la promoción de ${product.nombre}?`)) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch('/api/admin/promociones/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id: product.promocion.id }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo eliminar la promoción.');
+      }
+      setMessage(data.message || 'Promoción eliminada correctamente.');
+      onBack();
+    } catch (error) {
+      setMessage(error.message || 'No se pudo eliminar la promoción.');
     } finally {
       setSaving(false);
     }
@@ -128,11 +176,15 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
 
   return (
     <section style={containerStyle(isMobile)}>
-      <div style={badgeStyle}>Nueva promoción</div>
+      <div style={badgeStyle}>{isEditMode ? 'Editar promoción' : 'Nueva promoción'}</div>
       <div style={headerRowStyle(isMobile)}>
         <div>
-          <h2 style={titleStyle(isMobile)}>Aplicar descuento</h2>
-          <p style={subtitleStyle}>Define el descuento y cuántos días estará vigente la promoción para este producto.</p>
+          <h2 style={titleStyle(isMobile)}>{isEditMode ? 'Actualizar descuento' : 'Aplicar descuento'}</h2>
+          <p style={subtitleStyle}>
+            {isEditMode
+              ? 'Modifica el descuento o la duración: el cambio aplica de inmediato para este producto.'
+              : 'Define el descuento y cuántos días estará vigente la promoción para este producto.'}
+          </p>
         </div>
       </div>
 
@@ -224,8 +276,13 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button type="submit" style={primaryButtonStyle} disabled={saving}>
-              {saving ? 'Guardando...' : 'Guardar promoción'}
+              {saving ? 'Guardando...' : isEditMode ? 'Guardar cambios' : 'Guardar promoción'}
             </button>
+            {isEditMode ? (
+              <button type="button" onClick={handleDelete} style={dangerButtonStyle} disabled={saving}>
+                Eliminar promoción
+              </button>
+            ) : null}
             <button type="button" onClick={onBack} style={secondaryButtonStyle}>
               Volver al reporte
             </button>
@@ -392,6 +449,16 @@ const secondaryButtonStyle = {
   padding: '10px 16px',
   background: 'rgba(255, 255, 255, 0.04)',
   color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+const dangerButtonStyle = {
+  border: '1px solid rgba(255, 126, 126, 0.4)',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'rgba(145, 33, 33, 0.25)',
+  color: '#ffd3d3',
   fontWeight: 700,
   cursor: 'pointer',
 };

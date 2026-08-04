@@ -7,6 +7,7 @@ import AnalystEditIngredientPage from './AnalystEditIngredientPage';
 import AnalystEditRecipePage from './AnalystEditRecipePage';
 import AnalystEditPreparationPage from './AnalystEditPreparationPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
+import AnalystNewChefRecommendationPage from './AnalystNewChefRecommendationPage';
 import AnalystNewIngredientPage from './AnalystNewIngredientPage';
 import AnalystNewPreparationPage from './AnalystNewPreparationPage';
 import AnalystNewPromotionPage from './AnalystNewPromotionPage';
@@ -775,6 +776,13 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             isAdmin={isAdmin}
             onBack={() => setActiveView('admin')}
+            onCreateNew={() => setActiveView('admin-chef-recommendations-new')}
+          />
+        ) : activeView === 'admin-chef-recommendations-new' ? (
+          <AnalystNewChefRecommendationPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin-chef-recommendations')}
           />
         ) : (
           <KitchenOrdersPage

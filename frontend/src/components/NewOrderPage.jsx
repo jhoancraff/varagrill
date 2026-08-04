@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { printKitchenTicket } from '../utils/kitchenTicket';
 
 function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBack }) {
   const [orderHeader, setOrderHeader] = useState({
@@ -287,6 +288,21 @@ function NewOrderPage({ isMobile, mesas, products, loadingData, waiterName, onBa
       const mesaLabel = selectedMesa ? `Mesa ${selectedMesa.numero}` : 'Sin mesa';
       setFeedbackType('success');
       setFeedback(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${data.pedido.total}.`);
+
+      printKitchenTicket({
+        pedidoId: data.pedido.id,
+        mesa: selectedMesa ? selectedMesa.numero : null,
+        tipoPedido: orderHeader.tipoPedido,
+        mesero: waiterName,
+        creadoEn: new Date().toISOString(),
+        notasGenerales: orderHeader.notas,
+        items: validLines.map((line) => ({
+          cantidad: Number(line.quantity || 1),
+          producto: products.find((product) => String(product.id) === String(line.productId))?.nombre || line.productName,
+          notas: line.notes,
+        })),
+      });
+
       setLines([createEmptyLine()]);
       setOrderHeader((current) => ({ ...current, notas: '' }));
     } catch (error) {

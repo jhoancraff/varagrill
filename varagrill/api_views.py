@@ -1,13 +1,15 @@
 import json
+import mimetypes
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.utils.text import get_valid_filename
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import authenticate, login, logout
-from django.http import JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
@@ -1291,8 +1293,41 @@ def _serialize_product(product):
         'costo_estimado': str(product.costo_estimado) if product.costo_estimado is not None else '',
         'disponible': product.disponible,
         'tiempo_preparacion_min': product.tiempo_preparacion_min,
-        'imagen_url': product.imagen_url or '',
+        'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
     }
+
+
+def _resolve_media_path_from_url(image_url):
+    if not image_url:
+        return None
+
+    media_url = settings.MEDIA_URL or '/media/'
+    if not image_url.startswith(media_url):
+        return None
+
+    relative_path = image_url[len(media_url):].lstrip('/')
+    media_root = Path(settings.MEDIA_ROOT).resolve()
+    candidate = (media_root / relative_path).resolve()
+
+    if media_root not in candidate.parents and candidate != media_root:
+        return None
+    return candidate
+
+
+def product_image_view(request, product_id):
+    try:
+        product = VGProducto.objects.get(pk=int(product_id))
+    except (ValueError, TypeError, VGProducto.DoesNotExist):
+        raise Http404('Producto no encontrado.')
+
+    file_path = _resolve_media_path_from_url(product.imagen_url)
+    if file_path is None or not file_path.is_file():
+        raise Http404('Imagen no disponible.')
+
+    content_type, _ = mimetypes.guess_type(str(file_path))
+    response = FileResponse(file_path.open('rb'), content_type=content_type or 'application/octet-stream')
+    response['Cache-Control'] = 'public, max-age=3600'
+    return response
 
 
 @csrf_exempt

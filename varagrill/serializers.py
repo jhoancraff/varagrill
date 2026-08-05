@@ -10,7 +10,13 @@ class MesaSerializer(serializers.ModelSerializer):
 
 class ProductoSerializer(serializers.ModelSerializer):
     categoria_nombre = serializers.CharField(source='categoria.nombre', read_only=True)
+    imagen_url = serializers.SerializerMethodField()
+
+    def get_imagen_url(self, obj):
+        if not obj.imagen_url:
+            return ''
+        return f'/api/productos/{obj.id}/imagen/'
 
     class Meta:
         model = VGProducto
-        fields = ['id', 'nombre', 'precio_venta', 'tiempo_preparacion_min', 'categoria_nombre', 'imagen_url']
+        fields = ['id', 'nombre', 'descripcion', 'precio_venta', 'tiempo_preparacion_min', 'categoria_nombre', 'imagen_url']

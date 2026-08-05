@@ -39,6 +39,7 @@ from varagrill.api_views import (
     pedido_update_view,
     pedidos_cobro_view,
     promociones_activas_view,
+    product_image_view,
     recomendaciones_chef_activas_view,
 )
 
@@ -46,6 +47,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/mesas/', MesaListView.as_view(), name='mesa-list'),
     path('api/productos/', ProductoListView.as_view(), name='producto-list'),
+    path('api/productos/<int:product_id>/imagen/', product_image_view, name='producto-imagen'),
     path('api/pedidos/', pedido_create_view, name='pedido-create'),
     path('api/admin/catalogo/', admin_catalog_view, name='admin-catalog'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),

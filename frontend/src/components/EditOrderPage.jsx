@@ -7,25 +7,17 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
     cliente: '',
     notas: '',
   });
-  const [lines, setLines] = useState([]);
+  const [cartItems, setCartItems] = useState([]);
   const [originalEstado, setOriginalEstado] = useState('');
   const [loadingOrder, setLoadingOrder] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
-  const [catalogType, setCatalogType] = useState('Comida');
+  const [catalogType, setCatalogType] = useState('Todos');
+  const [searchTerm, setSearchTerm] = useState('');
   const [isTablet, setIsTablet] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [promotionsByProductId, setPromotionsByProductId] = useState({});
-
-  const catalogOptions = useMemo(() => (
-    [
-      { key: 'Comida', label: 'Comida' },
-      { key: 'Jugos', label: 'Jugos' },
-      { key: 'Licores', label: 'Licores' },
-      { key: 'Todos', label: 'Todos' },
-    ]
-  ), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,15 +75,11 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
           cliente: pedido.cliente_nombre || '',
           notas: pedido.notas || '',
         });
-        setLines(pedido.items.length > 0 ? pedido.items.map((item) => ({
-          id: `line-${item.id}`,
+        setCartItems(pedido.items.map((item) => ({
           productId: String(item.product_id),
-          productName: item.producto_nombre,
-          search: item.producto_nombre,
           quantity: item.cantidad,
           notes: item.notas || '',
-          isOpen: false,
-        })) : [createEmptyLine()]);
+        })));
       } catch (error) {
         if (!cancelled) {
           setLoadError(error.message || 'No se pudo cargar el pedido.');
@@ -120,87 +108,86 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
   const isCompact = isMobile || isTablet;
   const canEdit = originalEstado === 'pendiente';
 
-  const subtotal = useMemo(
-    () => lines.reduce((accumulator, line) => accumulator + getLineSubtotal(line, products, promotionsByProductId), 0),
-    [lines, products, promotionsByProductId],
-  );
-
-  const selectedMesa = useMemo(
-    () => mesas.find((mesa) => String(mesa.id) === String(orderHeader.mesaId)),
-    [mesas, orderHeader.mesaId],
-  );
-
-  const categoryFilteredProducts = useMemo(
-    () => products.filter((product) => matchesCatalogType(product, catalogType)),
-    [products, catalogType],
-  );
-
-  useEffect(() => {
-    setFeedback('');
-    setFeedbackType('success');
-    setLines((current) => current.map((line) => ({ ...line, isOpen: false })));
-  }, [catalogType]);
-
-  const handleLineProductSearch = (lineId, search) => {
-    setLines((current) => current.map((line) => (
-      line.id === lineId ? { ...line, search, isOpen: true } : line
-    )));
-  };
-
-  const handleSelectProduct = (lineId, product) => {
-    setLines((current) => current.map((line) => (
-      line.id === lineId
-        ? {
-          ...line,
-          productId: product.id,
-          productName: product.nombre,
-          search: product.nombre,
-          isOpen: false,
-        }
-        : line
-    )));
-  };
-
-  const handleLineQtyChange = (lineId, quantity) => {
-    const parsed = Number(quantity);
-    setLines((current) => current.map((line) => (
-      line.id === lineId
-        ? { ...line, quantity: Number.isFinite(parsed) && parsed > 0 ? parsed : 1 }
-        : line
-    )));
-  };
-
-  const handleLineNotesChange = (lineId, notes) => {
-    setLines((current) => current.map((line) => (
-      line.id === lineId ? { ...line, notes } : line
-    )));
-  };
-
-  const handleCloseOptions = (lineId) => {
-    setLines((current) => current.map((line) => (
-      line.id === lineId ? { ...line, isOpen: false } : line
-    )));
-  };
-
-  const addLine = () => {
-    setLines((current) => [...current, createEmptyLine()]);
-  };
-
-  const removeLine = (lineId) => {
-    setLines((current) => {
-      if (current.length === 1) {
-        return current;
+  const categories = useMemo(() => {
+    const names = new Set();
+    products.forEach((product) => {
+      if (product.categoria_nombre) {
+        names.add(product.categoria_nombre);
       }
-      return current.filter((line) => line.id !== lineId);
     });
+    return ['Todos', ...Array.from(names).sort((a, b) => a.localeCompare(b))];
+  }, [products]);
+
+  const visibleProducts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return products.filter((product) => {
+      const matchesCategory = catalogType === 'Todos' || product.categoria_nombre === catalogType;
+      const matchesSearch = !term || product.nombre.toLowerCase().includes(term);
+      return matchesCategory && matchesSearch;
+    });
+  }, [products, catalogType, searchTerm]);
+
+  const cartCount = useMemo(
+    () => cartItems.reduce((total, item) => total + item.quantity, 0),
+    [cartItems],
+  );
+
+  const subtotal = useMemo(
+    () => cartItems.reduce((total, item) => {
+      const product = products.find((entry) => String(entry.id) === String(item.productId));
+      if (!product) {
+        return total;
+      }
+      return total + getUnitPrice(product, promotionsByProductId) * item.quantity;
+    }, 0),
+    [cartItems, products, promotionsByProductId],
+  );
+
+  const addToCart = (product) => {
+    setCartItems((current) => {
+      const existing = current.find((item) => item.productId === String(product.id));
+      if (existing) {
+        return current.map((item) => (
+          item.productId === String(product.id) ? { ...item, quantity: item.quantity + 1 } : item
+        ));
+      }
+      return [...current, { productId: String(product.id), quantity: 1, notes: '' }];
+    });
+  };
+
+  const changeCartQuantity = (productId, delta) => {
+    setCartItems((current) => current
+      .map((item) => (item.productId === productId ? { ...item, quantity: item.quantity + delta } : item))
+      .filter((item) => item.quantity > 0));
+  };
+
+  const updateCartNotes = (productId, notes) => {
+    setCartItems((current) => current.map((item) => (
+      item.productId === productId ? { ...item, notes } : item
+    )));
+  };
+
+  const removeCartItem = (productId) => {
+    setCartItems((current) => current.filter((item) => item.productId !== productId));
+  };
+
+  const getCartQuantity = (productId) => {
+    const item = cartItems.find((entry) => entry.productId === String(productId));
+    return item ? item.quantity : 0;
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const validLines = lines.filter((line) => line.productId);
-    if (validLines.length === 0) {
+
+    if (orderHeader.tipoPedido === 'local' && !orderHeader.mesaId) {
       setFeedbackType('error');
-      setFeedback('Selecciona al menos un plato para el pedido.');
+      setFeedback('Selecciona una mesa antes de guardar el pedido.');
+      return;
+    }
+
+    if (cartItems.length === 0) {
+      setFeedbackType('error');
+      setFeedback('Agrega al menos un plato para el pedido.');
       return;
     }
 
@@ -217,10 +204,10 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
         tipo_pedido: orderHeader.tipoPedido,
         cliente_nombre: orderHeader.cliente,
         notas: orderHeader.notas,
-        items: validLines.map((line) => ({
-          product_id: Number(line.productId),
-          cantidad: Number(line.quantity || 1),
-          notas: line.notes,
+        items: cartItems.map((item) => ({
+          product_id: Number(item.productId),
+          cantidad: Number(item.quantity || 1),
+          notas: item.notes,
         })),
       };
 
@@ -305,7 +292,7 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: isCompact ? 14 : 16, marginTop: 18, paddingBottom: isCompact ? 84 : 0 }}>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: isCompact ? 14 : 16, marginTop: 18 }}>
         <div style={{
           display: 'grid',
           gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))',
@@ -317,6 +304,7 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
               value={orderHeader.mesaId}
               onChange={(event) => setOrderHeader((current) => ({ ...current, mesaId: event.target.value }))}
               style={inputStyle(isCompact)}
+              required={orderHeader.tipoPedido === 'local'}
             >
               <option value="">Seleccionar mesa</option>
               {mesas.map((mesa) => (
@@ -352,214 +340,174 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
           </label>
         </div>
 
-        <label style={fieldWrapStyle}>
-          <span style={labelStyle}>Notas generales</span>
-          <textarea
-            rows={2}
-            placeholder="Sin cebolla, poco picante, retirar ingredientes, etc."
-            value={orderHeader.notas}
-            onChange={(event) => setOrderHeader((current) => ({ ...current, notas: event.target.value }))}
-            style={{ ...inputStyle(isCompact), resize: 'vertical', minHeight: isCompact ? 72 : 64 }}
-          />
-        </label>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 4, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 14, color: '#f2c5c5' }}>Productos del pedido</div>
-          <button type="button" onClick={addLine} style={primaryButtonStyle(isCompact)}>
-            + Agregar plato
-          </button>
-        </div>
-
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          overflowX: isCompact ? 'auto' : 'visible',
-          paddingBottom: 2,
-          scrollbarWidth: 'thin',
-        }}>
-          {catalogOptions.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => setCatalogType(option.key)}
-              style={catalogTypeChipStyle(catalogType === option.key, isCompact)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: 'grid', gap: 12 }}>
-          {lines.map((line, index) => {
-            const filteredProducts = categoryFilteredProducts.filter((product) => (
-              product.nombre.toLowerCase().includes(line.search.toLowerCase())
-              || (product.categoria_nombre || '').toLowerCase().includes(line.search.toLowerCase())
-            ));
-            const lineSubtotal = getLineSubtotal(line, products, promotionsByProductId);
-            const linePromotion = line.productId ? promotionsByProductId[line.productId] : null;
-
-            return (
-              <article key={line.id} style={lineCardStyle(isCompact, Boolean(linePromotion))}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                  <div style={{ color: '#fff', fontWeight: 600 }}>
-                    Plato #{index + 1}
-                    {linePromotion ? (
-                      <span style={promoInlineBadgeStyle}>En promoción -{linePromotion.porcentaje_descuento}%</span>
-                    ) : null}
-                  </div>
+        <div style={workspaceStyle(isCompact)}>
+          <div style={menuColumnStyle}>
+            <div style={catalogBarStyle}>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Buscar plato o bebida..."
+                style={searchInputStyle(isCompact)}
+              />
+              <div style={categoryScrollStyle}>
+                {categories.map((category) => (
                   <button
+                    key={category}
                     type="button"
-                    onClick={() => removeLine(line.id)}
-                    style={miniActionStyle(isCompact)}
-                    disabled={lines.length === 1}
+                    onClick={() => setCatalogType(category)}
+                    style={catalogTypeChipStyle(catalogType === category, isCompact)}
                   >
-                    Quitar
+                    {category}
                   </button>
-                </div>
+                ))}
+              </div>
+            </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: isCompact ? '1fr' : '2fr 1fr', gap: 12, marginTop: 10 }}>
-                  <div style={{ position: 'relative' }}>
-                    <label style={fieldWrapStyle}>
-                      <span style={labelStyle}>Buscar plato</span>
+            <div style={productGridStyle}>
+              {loadingData ? (
+                <div style={emptyGridStateStyle}>Cargando platos...</div>
+              ) : visibleProducts.length === 0 ? (
+                <div style={emptyGridStateStyle}>No hay productos en esta categoría.</div>
+              ) : (
+                visibleProducts.map((product) => {
+                  const promotion = promotionsByProductId[product.id];
+                  const quantityInCart = getCartQuantity(product.id);
+
+                  return (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => addToCart(product)}
+                      style={productCardStyle(Boolean(promotion))}
+                    >
+                      {quantityInCart > 0 ? <span style={cardQuantityBadgeStyle}>{quantityInCart}</span> : null}
+                      <div style={productImageWrapStyle}>
+                        {product.imagen_url ? (
+                          <img src={product.imagen_url} alt={product.nombre} style={productImageStyle} loading="lazy" />
+                        ) : (
+                          <div style={productImagePlaceholderStyle}>{product.nombre.charAt(0).toUpperCase()}</div>
+                        )}
+                        {promotion ? <span style={cardPromoBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
+                      </div>
+                      <div style={productCardBodyStyle}>
+                        <div style={productCardNameStyle}>{product.nombre}</div>
+                        {product.descripcion ? (
+                          <div style={productCardDescStyle}>{product.descripcion}</div>
+                        ) : null}
+                        <div style={productCardFooterStyle}>
+                          {promotion ? (
+                            <span style={productCardPriceGroupStyle}>
+                              <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                              <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+                            </span>
+                          ) : (
+                            <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                          )}
+                          <span style={addIconStyle} aria-hidden="true">+</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <aside id="cart-panel" style={cartPanelStyle(isCompact)}>
+            <div style={cartHeaderStyle}>
+              <div style={cartTitleStyle}>Pedido actual</div>
+              <span style={cartCountBadgeStyle}>{cartCount} {cartCount === 1 ? 'plato' : 'platos'}</span>
+            </div>
+
+            <div style={cartListStyle(isCompact)}>
+              {cartItems.length === 0 ? (
+                <div style={cartEmptyStyle}>Toca un plato del menú para agregarlo aquí.</div>
+              ) : (
+                cartItems.map((item) => {
+                  const product = products.find((entry) => String(entry.id) === String(item.productId));
+                  if (!product) {
+                    return null;
+                  }
+                  const promotion = promotionsByProductId[product.id];
+                  const unitPrice = getUnitPrice(product, promotionsByProductId);
+
+                  return (
+                    <div key={item.productId} style={cartLineStyle}>
+                      <div style={cartLineTopStyle}>
+                        <div style={cartLineNameStyle}>
+                          {product.nombre}
+                          {promotion ? <span style={promoInlineBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
+                        </div>
+                        <button type="button" onClick={() => removeCartItem(item.productId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${product.nombre}`}>
+                          ×
+                        </button>
+                      </div>
+                      <div style={cartLineControlsStyle}>
+                        <div style={qtyStepperStyle}>
+                          <button type="button" onClick={() => changeCartQuantity(item.productId, -1)} style={qtyButtonStyle}>−</button>
+                          <span style={qtyValueStyle}>{item.quantity}</span>
+                          <button type="button" onClick={() => changeCartQuantity(item.productId, 1)} style={qtyButtonStyle}>+</button>
+                        </div>
+                        <div style={cartLineSubtotalStyle}>${(unitPrice * item.quantity).toFixed(2)}</div>
+                      </div>
                       <input
                         type="text"
-                        value={line.search}
-                        onChange={(event) => handleLineProductSearch(line.id, event.target.value)}
-                        onFocus={() => setLines((current) => current.map((entry) => (entry.id === line.id ? { ...entry, isOpen: true } : entry)))}
-                        placeholder="Ejemplo: arepa, pabellon, cachapa..."
-                        style={inputStyle(isCompact)}
+                        value={item.notes}
+                        onChange={(event) => updateCartNotes(item.productId, event.target.value)}
+                        placeholder="Indicaciones (sin cebolla, término medio...)"
+                        style={cartNotesInputStyle}
                       />
-                    </label>
+                    </div>
+                  );
+                })
+              )}
+            </div>
 
-                    {line.isOpen && (
-                      <div style={resultsPanelStyle(isCompact)}>
-                        {filteredProducts.length > 0 ? (
-                          filteredProducts.map((product) => {
-                            const promotion = promotionsByProductId[product.id];
-                            return (
-                              <button
-                                key={product.id}
-                                type="button"
-                                onClick={() => handleSelectProduct(line.id, product)}
-                                style={resultRowButtonStyle(isCompact, Boolean(promotion))}
-                              >
-                                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <span style={{ color: '#fff', fontWeight: 600 }}>{product.nombre}</span>
-                                  {promotion ? <span style={promoInlineBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
-                                </span>
-                                {promotion ? (
-                                  <span style={{ fontSize: 12 }}>
-                                    <span style={{ color: '#8f7676', textDecoration: 'line-through', marginRight: 6 }}>
-                                      ${Number(product.precio_venta).toFixed(2)}
-                                    </span>
-                                    <span style={{ color: '#7dffa0', fontWeight: 700 }}>
-                                      ${Number(promotion.precio_descuento).toFixed(2)}
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <span style={{ color: '#e8bcbc', fontSize: 12 }}>{product.categoria_nombre} - ${Number(product.precio_venta).toFixed(2)}</span>
-                                )}
-                              </button>
-                            );
-                          })
-                        ) : (
-                          <div style={{ color: '#d8b9b9', padding: 12, fontSize: 13 }}>No hay resultados para esa busqueda.</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+            <label style={fieldWrapStyle}>
+              <span style={labelStyle}>Notas generales</span>
+              <textarea
+                rows={2}
+                placeholder="Sin cebolla, poco picante, retirar ingredientes, etc."
+                value={orderHeader.notas}
+                onChange={(event) => setOrderHeader((current) => ({ ...current, notas: event.target.value }))}
+                style={{ ...inputStyle(isCompact), resize: 'vertical', minHeight: 56 }}
+              />
+            </label>
 
-                  <label style={fieldWrapStyle}>
-                    <span style={labelStyle}>Cantidad</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={line.quantity}
-                      onChange={(event) => handleLineQtyChange(line.id, event.target.value)}
-                      style={inputStyle(isCompact)}
-                    />
-                  </label>
-                </div>
+            <div style={cartTotalRowStyle}>
+              <span>Total estimado</span>
+              <span style={cartTotalValueStyle}>${subtotal.toFixed(2)}</span>
+            </div>
 
-                <label style={{ ...fieldWrapStyle, marginTop: 10 }}>
-                  <span style={labelStyle}>Indicaciones del plato</span>
-                  <input
-                    type="text"
-                    value={line.notes}
-                    onChange={(event) => handleLineNotesChange(line.id, event.target.value)}
-                    onBlur={() => handleCloseOptions(line.id)}
-                    placeholder="Sin salsa, termino medio, extra queso..."
-                    style={inputStyle(isCompact)}
-                  />
-                </label>
+            <button type="submit" style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
+              {isSubmitting ? 'Guardando...' : 'Guardar cambios'}
+            </button>
 
-                <div style={{ marginTop: 10, color: '#ffdede', fontSize: 13 }}>
-                  Subtotal del plato: ${lineSubtotal.toFixed(2)}
-                </div>
-              </article>
-            );
-          })}
+            {feedback && <div style={feedbackStyle(feedbackType)}>{feedback}</div>}
+          </aside>
         </div>
+      </form>
 
-        <div style={checkoutBarStyle(isCompact)}>
-          <div style={{ color: '#fff', fontWeight: 700 }}>Total estimado: ${subtotal.toFixed(2)}</div>
-          <button type="submit" style={primaryButtonStyle(isCompact)} disabled={isSubmitting}>
-            {isSubmitting ? 'Guardando...' : 'Guardar cambios'}
+      {isCompact && cartItems.length > 0 ? (
+        <div style={mobileCartBarStyle}>
+          <div style={{ color: '#fff', fontWeight: 700 }}>{cartCount} {cartCount === 1 ? 'plato' : 'platos'} · ${subtotal.toFixed(2)}</div>
+          <button
+            type="button"
+            onClick={() => document.getElementById('cart-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            style={mobileCartButtonStyle}
+          >
+            Ver pedido
           </button>
         </div>
-
-        {loadingData && <div style={{ color: '#ffd2d2', fontSize: 13 }}>Cargando mesas y platos...</div>}
-        {feedback && <div style={feedbackStyle(feedbackType)}>{feedback}</div>}
-      </form>
+      ) : null}
     </section>
   );
 }
 
-function createEmptyLine() {
-  return {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    productId: '',
-    productName: '',
-    search: '',
-    quantity: 1,
-    notes: '',
-    isOpen: false,
-  };
-}
-
-function getLineSubtotal(line, products, promotionsByProductId = {}) {
-  const product = products.find((item) => String(item.id) === String(line.productId));
-  if (!product) {
-    return 0;
-  }
+function getUnitPrice(product, promotionsByProductId = {}) {
   const promotion = promotionsByProductId[product.id];
-  const unitPrice = promotion ? Number(promotion.precio_descuento) : Number(product.precio_venta);
-  return unitPrice * Number(line.quantity || 1);
-}
-
-function matchesCatalogType(product, catalogType) {
-  const category = String(product.categoria_nombre || '').toLowerCase();
-
-  if (catalogType === 'Todos') {
-    return true;
-  }
-
-  if (catalogType === 'Jugos') {
-    return category.includes('jugo');
-  }
-
-  if (catalogType === 'Licores') {
-    return (
-      category.includes('licor')
-      || category.includes('trago')
-      || category.includes('coctel')
-      || category.includes('cocktail')
-    );
-  }
-
-  return !category.includes('jugo') && !category.includes('licor') && !category.includes('trago') && !category.includes('coctel');
+  return promotion ? Number(promotion.precio_descuento) : Number(product.precio_venta);
 }
 
 function getCookie(name) {
@@ -577,6 +525,7 @@ const orderContainerStyle = (isCompact) => ({
   borderRadius: 24,
   padding: isCompact ? 14 : 20,
   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 30px rgba(0,0,0,0.32)',
+  paddingBottom: isCompact ? 76 : 20,
 });
 
 const fieldWrapStyle = {
@@ -629,13 +578,6 @@ const ghostButtonStyle = (isCompact) => ({
   minHeight: 44,
 });
 
-const lineCardStyle = (isCompact, hasPromotion) => ({
-  borderRadius: 18,
-  border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.12)',
-  background: hasPromotion ? 'rgba(70, 200, 120, 0.08)' : 'rgba(255,255,255,0.03)',
-  padding: isCompact ? 12 : 14,
-});
-
 const promoInlineBadgeStyle = {
   display: 'inline-flex',
   marginLeft: 8,
@@ -643,46 +585,10 @@ const promoInlineBadgeStyle = {
   borderRadius: 999,
   background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
   color: '#fff',
-  fontSize: 11,
+  fontSize: 10,
   fontWeight: 800,
   verticalAlign: 'middle',
 };
-
-const miniActionStyle = (isCompact) => ({
-  border: '1px solid rgba(255,255,255,0.2)',
-  borderRadius: 10,
-  background: 'transparent',
-  color: '#f2c9c9',
-  padding: isCompact ? '8px 12px' : '6px 10px',
-  cursor: 'pointer',
-  minHeight: 40,
-});
-
-const resultsPanelStyle = (isCompact) => ({
-  marginTop: 8,
-  border: '1px solid rgba(255,255,255,0.12)',
-  borderRadius: 12,
-  background: 'rgba(8, 8, 8, 0.98)',
-  maxHeight: isCompact ? 260 : 220,
-  overflowY: 'auto',
-  display: 'grid',
-  gap: 6,
-  padding: 8,
-  boxShadow: '0 12px 30px rgba(0,0,0,0.35)',
-  zIndex: 2,
-});
-
-const resultRowButtonStyle = (isCompact, hasPromotion) => ({
-  border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.08)',
-  borderRadius: 10,
-  padding: isCompact ? '12px 10px' : '10px 10px',
-  background: hasPromotion ? 'rgba(70, 200, 120, 0.1)' : 'rgba(255,255,255,0.05)',
-  textAlign: 'left',
-  display: 'grid',
-  gap: 4,
-  cursor: 'pointer',
-  minHeight: 44,
-});
 
 const catalogTypeChipStyle = (active, isCompact) => ({
   border: active ? '1px solid rgba(255, 106, 106, 0.6)' : '1px solid rgba(255,255,255,0.18)',
@@ -695,28 +601,7 @@ const catalogTypeChipStyle = (active, isCompact) => ({
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   minHeight: 40,
-});
-
-const checkoutBarStyle = (isCompact) => ({
-  borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-  paddingTop: 12,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  flexWrap: 'wrap',
-  gap: 10,
-  ...(isCompact
-    ? {
-      position: 'sticky',
-      bottom: 8,
-      padding: '12px 10px',
-      borderRadius: 14,
-      background: 'rgba(18, 8, 8, 0.94)',
-      backdropFilter: 'blur(2px)',
-      border: '1px solid rgba(255,255,255,0.12)',
-      zIndex: 4,
-    }
-    : {}),
+  flexShrink: 0,
 });
 
 const feedbackStyle = (feedbackType) => ({
@@ -728,5 +613,382 @@ const feedbackStyle = (feedbackType) => ({
   padding: '10px 12px',
   fontSize: 13,
 });
+
+// --- Workspace: menú (izquierda) + pedido actual (derecha / abajo) ---
+
+const workspaceStyle = (isCompact) => (
+  isCompact
+    ? { display: 'grid', gap: 14 }
+    : { display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, alignItems: 'start' }
+);
+
+const menuColumnStyle = {
+  display: 'grid',
+  gap: 10,
+  minWidth: 0,
+};
+
+const catalogBarStyle = {
+  position: 'sticky',
+  top: 0,
+  zIndex: 3,
+  display: 'grid',
+  gap: 8,
+  padding: '8px 0',
+  background: 'linear-gradient(180deg, rgba(16, 7, 7, 0.98) 0%, rgba(16, 7, 7, 0.94) 80%, rgba(16, 7, 7, 0) 100%)',
+};
+
+const searchInputStyle = (isCompact) => ({
+  ...inputStyle(isCompact),
+  minHeight: isCompact ? 44 : 38,
+});
+
+const categoryScrollStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  overflowX: 'auto',
+  paddingBottom: 2,
+  scrollbarWidth: 'thin',
+};
+
+// --- Grid de platos ---
+
+const productGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(136px, 1fr))',
+  gap: 10,
+};
+
+const emptyGridStateStyle = {
+  gridColumn: '1 / -1',
+  minHeight: 100,
+  display: 'grid',
+  placeItems: 'center',
+  borderRadius: 16,
+  border: '1px dashed rgba(255,255,255,0.14)',
+  color: '#c8bbbb',
+  fontSize: 13,
+};
+
+const productCardStyle = (hasPromotion) => ({
+  position: 'relative',
+  display: 'grid',
+  textAlign: 'left',
+  padding: 0,
+  overflow: 'hidden',
+  borderRadius: 16,
+  border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.12)',
+  background: hasPromotion ? 'rgba(70, 200, 120, 0.06)' : 'rgba(255,255,255,0.03)',
+  cursor: 'pointer',
+});
+
+const cardQuantityBadgeStyle = {
+  position: 'absolute',
+  top: 6,
+  right: 6,
+  zIndex: 2,
+  minWidth: 20,
+  height: 20,
+  padding: '0 6px',
+  borderRadius: 999,
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontSize: 12,
+  fontWeight: 800,
+  display: 'grid',
+  placeItems: 'center',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+};
+
+const productImageWrapStyle = {
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '4 / 3',
+  background: 'rgba(255,255,255,0.04)',
+};
+
+const productImageStyle = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  display: 'block',
+};
+
+const productImagePlaceholderStyle = {
+  width: '100%',
+  height: '100%',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 26,
+  fontWeight: 800,
+  color: '#7a5f5f',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+};
+
+const cardPromoBadgeStyle = {
+  position: 'absolute',
+  bottom: 6,
+  left: 6,
+  padding: '2px 7px',
+  borderRadius: 999,
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontSize: 10,
+  fontWeight: 800,
+};
+
+const productCardBodyStyle = {
+  display: 'grid',
+  gap: 3,
+  padding: '8px 9px 10px',
+};
+
+const productCardNameStyle = {
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 12.5,
+  lineHeight: 1.25,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+};
+
+const productCardDescStyle = {
+  color: '#c2adad',
+  fontSize: 10.5,
+  lineHeight: 1.3,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
+};
+
+const productCardFooterStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginTop: 4,
+};
+
+const productCardPriceGroupStyle = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 5,
+};
+
+const priceStyle = {
+  color: '#ffd9d9',
+  fontWeight: 700,
+  fontSize: 12.5,
+};
+
+const priceStrikeStyle = {
+  color: '#8f7676',
+  textDecoration: 'line-through',
+  fontSize: 10.5,
+};
+
+const pricePromoStyle = {
+  color: '#7dffa0',
+  fontWeight: 800,
+  fontSize: 12.5,
+};
+
+const addIconStyle = {
+  width: 20,
+  height: 20,
+  borderRadius: '50%',
+  background: 'rgba(255,255,255,0.08)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  color: '#fff',
+  fontWeight: 800,
+  fontSize: 14,
+  display: 'grid',
+  placeItems: 'center',
+  lineHeight: 1,
+};
+
+// --- Panel de "Pedido actual" (carrito / reporte) ---
+
+const cartPanelStyle = (isCompact) => ({
+  display: 'grid',
+  gap: 10,
+  padding: 14,
+  borderRadius: 18,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(255,255,255,0.03)',
+  ...(isCompact ? {} : { position: 'sticky', top: 8, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }),
+});
+
+const cartHeaderStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+};
+
+const cartTitleStyle = {
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 16,
+};
+
+const cartCountBadgeStyle = {
+  padding: '4px 10px',
+  borderRadius: 999,
+  background: 'rgba(255, 141, 141, 0.14)',
+  border: '1px solid rgba(255, 141, 141, 0.22)',
+  color: '#ffc5c5',
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const cartListStyle = (isCompact) => ({
+  display: 'grid',
+  gap: 8,
+  maxHeight: isCompact ? 'none' : 320,
+  overflowY: isCompact ? 'visible' : 'auto',
+});
+
+const cartEmptyStyle = {
+  padding: '18px 10px',
+  textAlign: 'center',
+  borderRadius: 12,
+  border: '1px dashed rgba(255,255,255,0.14)',
+  color: '#c8bbbb',
+  fontSize: 13,
+};
+
+const cartLineStyle = {
+  display: 'grid',
+  gap: 6,
+  padding: 10,
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(0,0,0,0.2)',
+};
+
+const cartLineTopStyle = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 8,
+};
+
+const cartLineNameStyle = {
+  color: '#fff',
+  fontWeight: 600,
+  fontSize: 13,
+};
+
+const cartRemoveButtonStyle = {
+  border: 'none',
+  background: 'transparent',
+  color: '#e8a9a9',
+  fontSize: 18,
+  lineHeight: 1,
+  cursor: 'pointer',
+  padding: 0,
+  minWidth: 22,
+};
+
+const cartLineControlsStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+};
+
+const qtyStepperStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  border: '1px solid rgba(255,255,255,0.14)',
+  borderRadius: 999,
+  padding: '2px 6px',
+};
+
+const qtyButtonStyle = {
+  border: 'none',
+  background: 'transparent',
+  color: '#fff',
+  fontSize: 16,
+  fontWeight: 700,
+  cursor: 'pointer',
+  width: 22,
+  height: 22,
+  lineHeight: 1,
+};
+
+const qtyValueStyle = {
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 13,
+  minWidth: 14,
+  textAlign: 'center',
+};
+
+const cartLineSubtotalStyle = {
+  color: '#ffd9d9',
+  fontWeight: 700,
+  fontSize: 13,
+};
+
+const cartNotesInputStyle = {
+  width: '100%',
+  boxSizing: 'border-box',
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(255,255,255,0.03)',
+  color: '#fff',
+  padding: '7px 9px',
+  fontSize: 12,
+  outline: 'none',
+};
+
+const cartTotalRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingTop: 8,
+  borderTop: '1px solid rgba(255,255,255,0.1)',
+  color: '#fff',
+  fontWeight: 700,
+};
+
+const cartTotalValueStyle = {
+  fontSize: 18,
+};
+
+// --- Barra flotante de resumen en móvil ---
+
+const mobileCartBarStyle = {
+  position: 'sticky',
+  bottom: 8,
+  marginTop: 12,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 10,
+  padding: '12px 14px',
+  borderRadius: 14,
+  background: 'rgba(18, 8, 8, 0.96)',
+  backdropFilter: 'blur(2px)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  boxShadow: '0 12px 30px rgba(0,0,0,0.4)',
+  zIndex: 5,
+};
+
+const mobileCartButtonStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  minHeight: 40,
+};
 
 export default EditOrderPage;

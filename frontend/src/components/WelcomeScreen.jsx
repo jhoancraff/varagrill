@@ -859,6 +859,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           <AnalystNewIngredientPage
             isMobile={isMobile}
             onBack={() => setActiveView('admin-ingredients')}
+            onEditExisting={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
           />
         ) : activeView === 'admin-preparations' ? (
           <AnalystPreparationsReportPage

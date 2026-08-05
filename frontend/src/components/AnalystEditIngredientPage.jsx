@@ -10,6 +10,14 @@ const emptyForm = {
   proveedor: '',
 };
 
+const unidadOptions = [
+  { value: 'kg', label: 'Kilogramos (kg)' },
+  { value: 'g', label: 'Gramos (g)' },
+  { value: 'l', label: 'Litros (l)' },
+  { value: 'ml', label: 'Mililitros (ml)' },
+  { value: 'unidad', label: 'Unidad' },
+];
+
 function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
@@ -101,7 +109,14 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           <>
             <div style={gridStyle(isMobile)}>
               <label style={fieldStyle}><span style={labelStyle}>Nombre</span><input value={form.nombre} onChange={(e) => handleChange('nombre', e.target.value)} style={inputStyle} /></label>
-              <label style={fieldStyle}><span style={labelStyle}>Unidad</span><input value={form.unidad} onChange={(e) => handleChange('unidad', e.target.value)} style={inputStyle} /></label>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Unidad</span>
+                <select value={form.unidad} onChange={(e) => handleChange('unidad', e.target.value)} style={inputStyle}>
+                  {unidadOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
               <label style={fieldStyle}><span style={labelStyle}>Stock actual</span><input type="number" step="0.001" value={form.stock_actual} onChange={(e) => handleChange('stock_actual', e.target.value)} style={inputStyle} /></label>
               <label style={fieldStyle}><span style={labelStyle}>Stock minimo</span><input type="number" step="0.001" value={form.stock_minimo} onChange={(e) => handleChange('stock_minimo', e.target.value)} style={inputStyle} /></label>
               <label style={fieldStyle}><span style={labelStyle}>Costo unitario</span><input type="number" step="0.01" value={form.costo_unitario} onChange={(e) => handleChange('costo_unitario', e.target.value)} style={inputStyle} /></label>

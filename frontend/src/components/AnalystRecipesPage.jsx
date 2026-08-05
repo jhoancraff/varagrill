@@ -121,6 +121,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
               <div style={tableHeadStyle}>Receta</div>
               <div style={tableHeadStyle}>Descripción</div>
               <div style={tableHeadStyle}>Componentes</div>
+              <div style={tableHeadStyle}>Costo</div>
               <div style={tableHeadStyle}>Acciones</div>
 
               {filteredRecipes.map((recipe) => (
@@ -137,6 +138,9 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
                     <div style={componentPreviewStyle}>
                       {(recipe.componentes || []).slice(0, 3).map((component) => component.nombre).join(', ') || 'Sin componentes'}
                     </div>
+                  </div>
+                  <div key={`cost-${recipe.id}`} style={tableCellStyle}>
+                    <div style={{ color: '#7dffa0', fontWeight: 700 }}>${recipe.costo_calculado || '0.00'}</div>
                   </div>
                   <div key={`actions-${recipe.id}`} style={tableCellActionStyle}>
                     <button type="button" onClick={() => onEditRecipe(recipe.id)} style={secondaryButtonStyle}>
@@ -249,12 +253,12 @@ const tableWrapStyle = {
 
 const tableStyle = {
   display: 'grid',
-  gridTemplateColumns: 'minmax(180px, 1fr) minmax(260px, 1.2fr) minmax(220px, 1fr) minmax(220px, 0.9fr)',
+  gridTemplateColumns: 'minmax(180px, 1fr) minmax(240px, 1.1fr) minmax(200px, 1fr) minmax(120px, 0.7fr) minmax(220px, 0.9fr)',
   alignItems: 'stretch',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   borderRadius: 18,
   overflow: 'hidden',
-  minWidth: 920,
+  minWidth: 1040,
 };
 
 const tableHeadStyle = {

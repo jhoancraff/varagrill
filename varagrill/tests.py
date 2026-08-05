@@ -42,6 +42,40 @@ class LoginViewTests(TestCase):
         self.assertEqual(response.json()['user']['role'], 'Mesero')
         self.assertIn('_auth_user_id', self.client.session)
 
+    def test_login_accepts_email_identifier(self):
+        VGUsuario.objects.create_user(
+            username='meseroemail',
+            password='claveSegura789',
+            cedula='12345670',
+            email='mesero.email@varagrill.test',
+        )
+
+        response = self.client.post('/api/auth/login/', {
+            'username': 'mesero.email@varagrill.test',
+            'password': 'claveSegura789',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['authenticated'])
+        self.assertEqual(response.json()['user']['username'], 'meseroemail')
+
+    def test_login_accepts_case_insensitive_username(self):
+        VGUsuario.objects.create_user(
+            username='Jhoan',
+            password='claveJhoan789',
+            cedula='12345671',
+            email='jhoan@varagrill.test',
+        )
+
+        response = self.client.post('/api/auth/login/', {
+            'username': 'jhoan',
+            'password': 'claveJhoan789',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['authenticated'])
+        self.assertEqual(response.json()['user']['username'], 'Jhoan')
+
     def test_session_status_returns_authenticated_user_after_login(self):
         VGUsuario.objects.create_user(
             username='mesero',

@@ -99,6 +99,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
               <div style={headStyle}>Subreceta</div>
               <div style={headStyle}>Rendimiento</div>
               <div style={headStyle}>Componentes</div>
+              <div style={headStyle}>Costo</div>
               <div style={headStyle}>Acciones</div>
 
               {filtered.map((item) => (
@@ -113,6 +114,10 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
                   <div key={`components-${item.id}`} style={cellStyle}>
                     <div style={{ color: '#ffcaca', fontSize: 13, fontWeight: 700 }}>{item.componentes_total || 0} componentes</div>
                     <div style={{ color: '#d2c4c4', fontSize: 13 }}>{(item.componentes || []).slice(0, 3).map((component) => component.nombre).join(', ') || 'Sin componentes'}</div>
+                  </div>
+                  <div key={`cost-${item.id}`} style={cellStyle}>
+                    <div style={{ color: '#fff', fontWeight: 700 }}>${item.costo_total || '0.00'} total</div>
+                    <div style={{ color: '#7dffa0', fontSize: 13 }}>${item.costo_unitario_calculado || '0.00'} / {item.rendimiento_unidad || 'unidad'}</div>
                   </div>
                   <div key={`actions-${item.id}`} style={cellActionsStyle}>
                     <button type="button" onClick={() => onEdit(item.id)} style={secondaryButtonStyle}>Modificar</button>
@@ -140,7 +145,7 @@ const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const searchInputStyle = (isMobile) => ({ width: isMobile ? '100%' : 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' });
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(220px,1.3fr) minmax(180px,1fr) minmax(240px,1.2fr) minmax(220px,1fr)', minWidth: 880, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(200px,1.2fr) minmax(160px,0.9fr) minmax(220px,1.1fr) minmax(160px,0.9fr) minmax(220px,1fr)', minWidth: 1080, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center', gap: 4 };
 const cellPrimaryStyle = { ...cellStyle, background: 'rgba(255,255,255,0.02)' };

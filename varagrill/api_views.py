@@ -27,6 +27,7 @@ from .models import (
     VGMesa,
     VGMovimientoInventario,
     VGPedido,
+    VGPago,
     VGPreparacion,
     VGPromocion,
     VGProducto,
@@ -175,6 +176,87 @@ def _compute_discounted_price(precio_original, promotion):
         descuento = promotion.valor_descuento
     precio_final = precio_original - descuento
     return precio_final if precio_final > 0 else Decimal('0')
+
+
+def _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation):
+    """
+    Costea cada VGPreparacion sumando (cantidad_requerida x costo) de sus ingredientes y
+    sub-preparaciones, resolviendo el árbol de forma recursiva y memoizada. Si una
+    sub-preparación se referencia a sí misma indirectamente (ciclo), esa rama se costea en 0
+    en vez de recursar infinitamente.
+
+    components_by_preparation: {prep_id: [{'tipo': 'ingrediente'|'sub_preparacion', 'referencia_id': int, 'cantidad': Decimal}, ...]}
+    ingredient_costs: {ingrediente_id: Decimal costo_unitario}
+    yields_by_preparation: {prep_id: Decimal rendimiento_cantidad}
+
+    Devuelve {prep_id: {'costo_total': Decimal, 'costo_unitario': Decimal}} para cada preparación conocida.
+    """
+    results = {}
+    resolving = set()
+
+    def resolve(prep_id):
+        if prep_id in results:
+            return results[prep_id]
+        if prep_id in resolving:
+            return {'costo_total': Decimal('0'), 'costo_unitario': Decimal('0')}
+        resolving.add(prep_id)
+
+        total = Decimal('0')
+        for component in components_by_preparation.get(prep_id, []):
+            if component['tipo'] == 'ingrediente':
+                total += component['cantidad'] * ingredient_costs.get(component['referencia_id'], Decimal('0'))
+            else:
+                total += component['cantidad'] * resolve(component['referencia_id'])['costo_unitario']
+
+        rendimiento = yields_by_preparation.get(prep_id) or Decimal('1')
+        unit_cost = (total / rendimiento) if rendimiento > 0 else Decimal('0')
+        result = {'costo_total': total, 'costo_unitario': unit_cost}
+        results[prep_id] = result
+        resolving.discard(prep_id)
+        return result
+
+    for prep_id in set(components_by_preparation.keys()) | set(yields_by_preparation.keys()):
+        resolve(prep_id)
+
+    return results
+
+
+def _load_preparation_cost_map():
+    """Consulta VGRecetaPreparacion/VGIngrediente/VGPreparacion y devuelve el costo calculado de cada subreceta."""
+    components_by_preparation = {}
+    for component in VGRecetaPreparacion.objects.all():
+        preparation_id = component.preparacion_id
+        components_by_preparation.setdefault(preparation_id, [])
+        if component.ingrediente_id:
+            components_by_preparation[preparation_id].append({
+                'tipo': 'ingrediente',
+                'referencia_id': component.ingrediente_id,
+                'cantidad': component.cantidad_requerida,
+            })
+        elif component.sub_preparacion_id:
+            components_by_preparation[preparation_id].append({
+                'tipo': 'sub_preparacion',
+                'referencia_id': component.sub_preparacion_id,
+                'cantidad': component.cantidad_requerida,
+            })
+
+    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+    yields_by_preparation = dict(VGPreparacion.objects.values_list('id', 'rendimiento_cantidad'))
+
+    return _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
+
+
+def _compute_product_recipe_cost(product, preparation_cost_map):
+    """Costea un VGProducto (receta) sumando (cantidad_requerida x costo) de sus ingredientes y subrecetas."""
+    total = Decimal('0')
+    for component in product.receta.all():
+        if component.ingrediente_id:
+            ingredient_cost = component.ingrediente.costo_unitario if component.ingrediente else Decimal('0')
+            total += component.cantidad_requerida * ingredient_cost
+        elif component.preparacion_id:
+            costs = preparation_cost_map.get(component.preparacion_id, {'costo_unitario': Decimal('0')})
+            total += component.cantidad_requerida * costs['costo_unitario']
+    return total
 
 
 class MesaListView(generics.ListAPIView):
@@ -507,13 +589,17 @@ def admin_catalog_view(request):
         inventory = list(
             VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario', 'stock_minimo')
         )
+        preparation_cost_map = _load_preparation_cost_map()
         recipes = []
         for preparation in VGPreparacion.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'rendimiento_cantidad', 'rendimiento_unidad'):
             components = recipe_components_by_preparation.get(preparation['id'], [])
+            costs = preparation_cost_map.get(preparation['id'], {'costo_total': Decimal('0'), 'costo_unitario': Decimal('0')})
             recipes.append({
                 **preparation,
                 'componentes': components,
                 'componentes_total': len(components),
+                'costo_total': str(costs['costo_total'].quantize(Decimal('0.01'))),
+                'costo_unitario_calculado': str(costs['costo_unitario'].quantize(Decimal('0.01'))),
             })
         beverages = list(
             VGProducto.objects.filter(disponible=True).select_related('categoria').order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'precio_venta', 'categoria__nombre')
@@ -1486,14 +1572,23 @@ def admin_recipes_view(request):
     if request.method == 'GET':
         recipes = VGProducto.objects.filter(categoria__nombre__iexact='Recetas').select_related('categoria').prefetch_related('receta__ingrediente', 'receta__preparacion').order_by('nombre')
         inventory = list(
-            VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual')
+            VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
         )
-        preparations = list(
-            VGPreparacion.objects.order_by('nombre').values('id', 'nombre', 'rendimiento_unidad', 'rendimiento_cantidad')
-        )
+        preparation_cost_map = _load_preparation_cost_map()
+        preparations = []
+        for preparation in VGPreparacion.objects.order_by('nombre').values('id', 'nombre', 'rendimiento_unidad', 'rendimiento_cantidad'):
+            costs = preparation_cost_map.get(preparation['id'], {'costo_unitario': Decimal('0')})
+            preparations.append({**preparation, 'costo_unitario_calculado': str(costs['costo_unitario'].quantize(Decimal('0.01')))})
+
+        recipe_payloads = []
+        for recipe in recipes:
+            payload = _serialize_recipe_product(recipe)
+            payload['costo_calculado'] = str(_compute_product_recipe_cost(recipe, preparation_cost_map).quantize(Decimal('0.01')))
+            recipe_payloads.append(payload)
+
         return _auth_response({
             'ok': True,
-            'recipes': [_serialize_recipe_product(recipe) for recipe in recipes],
+            'recipes': recipe_payloads,
             'ingredients': inventory,
             'preparations': preparations,
         })

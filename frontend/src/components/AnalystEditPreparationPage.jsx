@@ -2,6 +2,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 const emptyDraft = { ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' };
 
+const unidadOptions = [
+  { value: 'kg', label: 'Kilogramos (kg)' },
+  { value: 'g', label: 'Gramos (g)' },
+  { value: 'l', label: 'Litros (l)' },
+  { value: 'ml', label: 'Mililitros (ml)' },
+  { value: 'unidad', label: 'Unidad' },
+];
+
+const resolveCostoUnitario = (type, referenceId, inventoryList, preparationsList) => {
+  if (type === 'ingrediente') {
+    const match = inventoryList.find((item) => String(item.id) === String(referenceId));
+    return match ? Number(match.costo_unitario || 0) : 0;
+  }
+  const match = preparationsList.find((item) => String(item.id) === String(referenceId));
+  return match ? Number(match.costo_unitario_calculado || 0) : 0;
+};
+
 function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
   const ingredientPickerRef = useRef(null);
   const preparationPickerRef = useRef(null);
@@ -63,6 +80,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
           referencia_id: item.referencia_id,
           nombre: item.nombre,
           cantidad: item.cantidad,
+          costoUnitario: resolveCostoUnitario(item.tipo, item.referencia_id, data.inventory || [], data.recipes || []),
         })));
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar la data.');
@@ -91,6 +109,14 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
       .filter((item) => String(item.nombre || '').toLowerCase().includes(query));
   }, [preparations, draft.preparationSearch, form.id]);
 
+  const estimatedTotalCost = useMemo(
+    () => components.reduce((total, item) => total + Number(item.costoUnitario || 0) * Number(item.cantidad || 0), 0),
+    [components],
+  );
+
+  const rendimientoCantidad = Number(form.rendimiento_cantidad || 0);
+  const estimatedUnitCost = rendimientoCantidad > 0 ? estimatedTotalCost / rendimientoCantidad : 0;
+
   const handleAdd = (type) => {
     const isIngredient = type === 'ingrediente';
     const referenceId = isIngredient ? draft.ingredientId : draft.preparationId;
@@ -111,6 +137,8 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
       return;
     }
 
+    const costoUnitario = isIngredient ? (selected.costo_unitario || 0) : (selected.costo_unitario_calculado || 0);
+
     setComponents((current) => ([
       ...current,
       {
@@ -119,6 +147,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
         referencia_id: referenceId,
         nombre: selected.nombre,
         cantidad: draft.cantidad,
+        costoUnitario,
       },
     ]));
     setDraft((current) => ({ ...current, ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' }));
@@ -176,7 +205,14 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
             <div style={gridStyle(isMobile)}>
               <label style={fieldStyle}><span style={labelStyle}>Nombre</span><input value={form.nombre} onChange={(e) => setForm((c) => ({ ...c, nombre: e.target.value }))} style={inputStyle} /></label>
               <label style={fieldStyle}><span style={labelStyle}>Rendimiento</span><input type="number" min="0.001" step="0.001" value={form.rendimiento_cantidad} onChange={(e) => setForm((c) => ({ ...c, rendimiento_cantidad: e.target.value }))} style={inputStyle} /></label>
-              <label style={fieldStyle}><span style={labelStyle}>Unidad</span><input value={form.rendimiento_unidad} onChange={(e) => setForm((c) => ({ ...c, rendimiento_unidad: e.target.value }))} style={inputStyle} /></label>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Unidad</span>
+                <select value={form.rendimiento_unidad} onChange={(e) => setForm((c) => ({ ...c, rendimiento_unidad: e.target.value }))} style={inputStyle}>
+                  {unidadOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             <div style={helperCardStyle}>
@@ -206,10 +242,21 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
             <div style={{ display: 'grid', gap: 8 }}>
               {components.length === 0 ? <div style={emptyStyle}>Sin componentes</div> : components.map((item) => (
                 <div key={item.uid} style={componentRowStyle}>
-                  <div>{item.nombre} ({item.tipo}) - {item.cantidad}</div>
+                  <div>{item.nombre} ({item.tipo}) - {item.cantidad} · ${Number(item.costoUnitario || 0).toFixed(2)}/u</div>
                   <button type="button" onClick={() => setComponents((current) => current.filter((entry) => entry.uid !== item.uid))} style={dangerButtonStyle}>Quitar</button>
                 </div>
               ))}
+            </div>
+
+            <div style={costSummaryStyle}>
+              <div>
+                <div style={costLabelStyle}>Costo total estimado</div>
+                <div style={costValueStyle}>${estimatedTotalCost.toFixed(2)}</div>
+              </div>
+              <div>
+                <div style={costLabelStyle}>Costo por {form.rendimiento_unidad || 'unidad'}</div>
+                <div style={costValueStyle}>${estimatedUnitCost.toFixed(2)}</div>
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -238,6 +285,9 @@ const pickerWrapStyle = { position: 'relative' };
 const pickerListStyle = { position: 'absolute', zIndex: 10, top: 'calc(100% + 6px)', left: 0, right: 0, maxHeight: 220, overflowY: 'auto', borderRadius: 12, border: '1px solid rgba(255,132,132,0.4)', background: '#140d0d' };
 const pickerItemStyle = { width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: '#ffeaea', padding: '10px 12px', cursor: 'pointer' };
 const componentRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', color: '#fff' };
+const costSummaryStyle = { display: 'flex', gap: 20, flexWrap: 'wrap', padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(125,255,160,0.25)', background: 'rgba(70,200,120,0.08)' };
+const costLabelStyle = { color: '#c2f0d2', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' };
+const costValueStyle = { color: '#7dffa0', fontSize: 20, fontWeight: 800 };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

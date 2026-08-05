@@ -91,6 +91,11 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
     return preparations.filter((item) => String(item.nombre || '').toLowerCase().includes(query));
   }, [preparations, draft.preparationSearch]);
 
+  const estimatedTotalCost = useMemo(
+    () => components.reduce((total, item) => total + Number(item.costoUnitario || 0) * Number(item.cantidad || 0), 0),
+    [components],
+  );
+
   const handleFormChange = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
@@ -145,6 +150,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
         nombre: ingredient.nombre,
         unidad: ingredient.unidad_medida || 'unidad',
         cantidad: draft.cantidad,
+        costoUnitario: ingredient.costo_unitario || 0,
       },
     ]));
     setDraft((current) => ({ ...current, ingredientId: '', ingredientSearch: '', cantidad: '' }));
@@ -177,6 +183,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
         nombre: preparation.nombre,
         unidad: preparation.rendimiento_unidad || 'unidad',
         cantidad: draft.cantidad,
+        costoUnitario: preparation.costo_unitario_calculado || 0,
       },
     ]));
     setDraft((current) => ({ ...current, preparationId: '', preparationSearch: '', cantidad: '' }));
@@ -431,7 +438,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
                       <div>
                         <div style={componentTitleStyle}>{item.nombre}</div>
                         <div style={componentMetaStyle}>
-                          {item.tipo === 'ingrediente' ? 'Ingrediente' : 'Subreceta'} · {item.cantidad} {item.unidad}
+                          {item.tipo === 'ingrediente' ? 'Ingrediente' : 'Subreceta'} · {item.cantidad} {item.unidad} · ${Number(item.costoUnitario || 0).toFixed(2)}/u
                         </div>
                       </div>
                       <button type="button" onClick={() => handleRemoveComponent(item.uid)} style={dangerButtonStyle}>
@@ -442,6 +449,11 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
                 </div>
               )}
             </section>
+
+            <div style={costSummaryStyle}>
+              <div style={costLabelStyle}>Costo total estimado de la receta</div>
+              <div style={costValueStyle}>${estimatedTotalCost.toFixed(2)}</div>
+            </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
@@ -651,6 +663,30 @@ const emptyStateStyle = {
   borderRadius: 18,
   border: '1px dashed rgba(255, 255, 255, 0.12)',
   color: '#c8bbbb',
+};
+
+const costSummaryStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  flexWrap: 'wrap',
+  padding: '14px 16px',
+  borderRadius: 14,
+  border: '1px solid rgba(125,255,160,0.25)',
+  background: 'rgba(70,200,120,0.08)',
+};
+
+const costLabelStyle = {
+  color: '#c2f0d2',
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const costValueStyle = {
+  color: '#7dffa0',
+  fontSize: 22,
+  fontWeight: 800,
 };
 
 const noticeStyle = {

@@ -5,6 +5,16 @@ const analystSections = [
     description: 'Gestiona el acceso del personal y entra al espacio de trabajo de usuarios.',
   },
   {
+    id: 'admin-mesas',
+    title: 'Mesas',
+    description: 'Registra mesas nuevas, actualiza su capacidad y estado para el flujo de pedidos.',
+  },
+  {
+    id: 'admin-products',
+    title: 'Productos',
+    description: 'Crea platos y bebidas con imagen y categoría, y edítalos desde el reporte del menú.',
+  },
+  {
     id: 'admin-ingredients',
     title: 'Reporte de ingredientes',
     description: 'Abre el reporte con buscador para modificar, eliminar o agregar ingredientes.',

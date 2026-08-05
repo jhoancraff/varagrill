@@ -55,6 +55,12 @@ server {
         expires 30d;
     }
 
+    location /media/ {
+        alias /var/www/varagrilladmin/media/;
+        access_log off;
+        expires 30d;
+    }
+    
     location /assets/ {
         alias /var/www/varagrilladmin/dist/assets/;
         access_log off;

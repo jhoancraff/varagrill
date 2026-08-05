@@ -1,7 +1,9 @@
 import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
-
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.utils.text import get_valid_filename
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import authenticate, login, logout
@@ -1129,6 +1131,312 @@ def admin_users_view(request):
         'ok': True,
         'message': message,
         'user': _serialize_user(target_user),
+    }, status=201 if action == 'create' else 200)
+
+
+def _serialize_mesa(mesa):
+    return MesaSerializer(mesa).data
+
+
+@csrf_exempt
+def admin_mesas_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        mesas = VGMesa.objects.all().order_by('numero')
+        return _auth_response({
+            'ok': True,
+            'mesas': [_serialize_mesa(mesa) for mesa in mesas],
+            'estados': [{'value': value, 'label': label} for value, label in VGMesa.ESTADOS],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+
+    if action == 'delete':
+        mesa_id = data.get('id')
+        try:
+            mesa = VGMesa.objects.get(pk=int(mesa_id))
+        except (ValueError, TypeError, VGMesa.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La mesa a eliminar no existe.'}, status=400)
+
+        mesa.delete()
+        return _auth_response({'ok': True, 'message': 'Mesa eliminada correctamente.'})
+
+    if action not in {'create', 'update'}:
+        return _auth_response({'ok': False, 'message': 'Accion de mesas invalida.'}, status=400)
+
+    numero = data.get('numero')
+    capacidad = data.get('capacidad')
+    ubicacion = str(data.get('ubicacion', '') or '').strip()
+    estado = str(data.get('estado', '') or 'libre').strip().lower()
+
+    try:
+        numero = int(numero)
+        if numero <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'El número de mesa debe ser un entero positivo.'}, status=400)
+
+    if capacidad in [None, '']:
+        capacidad = 4
+    try:
+        capacidad = int(capacidad)
+        if capacidad <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'La capacidad debe ser un entero positivo.'}, status=400)
+
+    valid_estados = {value for value, _ in VGMesa.ESTADOS}
+    if estado not in valid_estados:
+        return _auth_response({'ok': False, 'message': 'El estado de la mesa no es válido.'}, status=400)
+
+    mesa = None
+    if action == 'update':
+        mesa_id = data.get('id')
+        try:
+            mesa = VGMesa.objects.get(pk=int(mesa_id))
+        except (ValueError, TypeError, VGMesa.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La mesa a editar no existe.'}, status=400)
+
+    numero_query = VGMesa.objects.filter(numero=numero)
+    if mesa is not None:
+        numero_query = numero_query.exclude(pk=mesa.pk)
+    if numero_query.exists():
+        return _auth_response({'ok': False, 'message': 'Ya existe una mesa con ese número.'}, status=400)
+
+    if action == 'create':
+        mesa = VGMesa.objects.create(
+            numero=numero,
+            capacidad=capacidad,
+            ubicacion=ubicacion,
+            estado=estado,
+            creado_por=request.user,
+        )
+        message = 'Mesa creada correctamente.'
+    else:
+        mesa.numero = numero
+        mesa.capacidad = capacidad
+        mesa.ubicacion = ubicacion
+        mesa.estado = estado
+        mesa.actualizado_por = request.user
+        mesa.save()
+        message = 'Mesa actualizada correctamente.'
+
+    return _auth_response({
+        'ok': True,
+        'message': message,
+        'mesa': _serialize_mesa(mesa),
+    }, status=201 if action == 'create' else 200)
+
+
+
+ALLOWED_PRODUCT_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif'}
+MAX_PRODUCT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+
+
+def _save_product_image(uploaded_file):
+    safe_name = get_valid_filename(uploaded_file.name)
+    extension = safe_name.rsplit('.', 1)[-1].lower() if '.' in safe_name else ''
+    if extension not in ALLOWED_PRODUCT_IMAGE_EXTENSIONS:
+        raise ValueError('Formato de imagen no permitido. Usa JPG, PNG, WEBP o GIF.')
+    if uploaded_file.size > MAX_PRODUCT_IMAGE_SIZE_BYTES:
+        raise ValueError('La imagen no debe superar los 5MB.')
+
+    # default_storage.save agrega un sufijo automaticamente si el nombre ya existe,
+    # asi que dos productos nunca pueden pisarse el archivo de imagen entre si.
+    saved_path = default_storage.save(f'productos/{safe_name}', uploaded_file)
+    return default_storage.url(saved_path)
+
+
+def _delete_product_image(image_url):
+    if not image_url:
+        return
+
+    relative_path = image_url
+    media_url = settings.MEDIA_URL or '/media/'
+    if relative_path.startswith(media_url):
+        relative_path = relative_path[len(media_url):]
+
+    try:
+        if default_storage.exists(relative_path):
+            default_storage.delete(relative_path)
+    except Exception:
+        pass
+
+
+def _serialize_product_category(category):
+    return {
+        'id': category.id,
+        'nombre': category.nombre,
+    }
+
+
+def _serialize_product(product):
+    return {
+        'id': product.id,
+        'nombre': product.nombre,
+        'descripcion': product.descripcion,
+        'categoria_id': product.categoria_id,
+        'categoria_nombre': product.categoria.nombre if product.categoria else '',
+        'precio_venta': str(product.precio_venta),
+        'costo_estimado': str(product.costo_estimado) if product.costo_estimado is not None else '',
+        'disponible': product.disponible,
+        'tiempo_preparacion_min': product.tiempo_preparacion_min,
+        'imagen_url': product.imagen_url or '',
+    }
+
+
+@csrf_exempt
+def admin_products_view(request):
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        VGCategoriaProducto.objects.get_or_create(
+            nombre='Otros',
+            defaults={'descripcion': 'Productos que no encajan en ninguna otra categoría.'},
+        )
+        categories = VGCategoriaProducto.objects.exclude(nombre__iexact='Recetas').order_by('nombre')
+        products = (
+            VGProducto.objects.exclude(categoria__nombre__iexact='Recetas')
+            .select_related('categoria')
+            .order_by('nombre')
+        )
+        return _auth_response({
+            'ok': True,
+            'products': [_serialize_product(product) for product in products],
+            'categories': [_serialize_product_category(category) for category in categories],
+        })
+
+    is_multipart = bool(request.content_type) and request.content_type.startswith('multipart/form-data')
+    if is_multipart:
+        data = request.POST
+        uploaded_image = request.FILES.get('imagen')
+    else:
+        try:
+            data = json.loads(request.body.decode('utf-8')) if request.body else {}
+        except json.JSONDecodeError:
+            return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+        uploaded_image = None
+
+    action = str(data.get('action', '')).strip().lower()
+
+    if action == 'delete':
+        product_id = data.get('id')
+        try:
+            product = VGProducto.objects.exclude(categoria__nombre__iexact='Recetas').get(pk=int(product_id))
+        except (ValueError, TypeError, VGProducto.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El producto a eliminar no existe.'}, status=400)
+
+        _delete_product_image(product.imagen_url)
+        product.delete()
+        return _auth_response({'ok': True, 'message': 'Producto eliminado correctamente.'})
+
+    if action not in {'create', 'update'}:
+        return _auth_response({'ok': False, 'message': 'Accion de productos invalida.'}, status=400)
+
+    nombre = str(data.get('nombre', '') or '').strip()
+    descripcion = str(data.get('descripcion', '') or '').strip()
+    categoria_id = data.get('categoria_id')
+    precio_venta_raw = data.get('precio_venta')
+    costo_estimado_raw = data.get('costo_estimado')
+    disponible = str(data.get('disponible', 'true')).strip().lower() not in {'false', '0', ''}
+    tiempo_preparacion_raw = data.get('tiempo_preparacion_min') or 0
+
+    if not nombre:
+        return _auth_response({'ok': False, 'message': 'El nombre del producto es obligatorio.'}, status=400)
+
+    if categoria_id in [None, '']:
+        return _auth_response({'ok': False, 'message': 'Debes seleccionar una categoría para el producto.'}, status=400)
+    try:
+        categoria = VGCategoriaProducto.objects.exclude(nombre__iexact='Recetas').get(pk=int(categoria_id))
+    except (ValueError, TypeError, VGCategoriaProducto.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'La categoría seleccionada no existe.'}, status=400)
+
+    try:
+        precio_venta = Decimal(str(precio_venta_raw or '0'))
+        if precio_venta < 0:
+            raise InvalidOperation
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El precio de venta no es válido.'}, status=400)
+
+    costo_estimado = None
+    if costo_estimado_raw not in [None, '']:
+        try:
+            costo_estimado = Decimal(str(costo_estimado_raw))
+            if costo_estimado < 0:
+                raise InvalidOperation
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El costo estimado no es válido.'}, status=400)
+
+    try:
+        tiempo_preparacion = int(tiempo_preparacion_raw)
+        if tiempo_preparacion < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'El tiempo de preparación no es válido.'}, status=400)
+
+    product = None
+    if action == 'update':
+        product_id = data.get('id')
+        try:
+            product = VGProducto.objects.exclude(categoria__nombre__iexact='Recetas').get(pk=int(product_id))
+        except (ValueError, TypeError, VGProducto.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El producto a editar no existe.'}, status=400)
+
+    imagen_url = product.imagen_url if product else ''
+    if uploaded_image is not None:
+        try:
+            new_imagen_url = _save_product_image(uploaded_image)
+        except ValueError as error:
+            return _auth_response({'ok': False, 'message': str(error)}, status=400)
+        if product is not None:
+            _delete_product_image(product.imagen_url)
+        imagen_url = new_imagen_url
+
+    if action == 'create':
+        product = VGProducto.objects.create(
+            nombre=nombre,
+            descripcion=descripcion,
+            categoria=categoria,
+            precio_venta=precio_venta,
+            costo_estimado=costo_estimado,
+            imagen_url=imagen_url,
+            disponible=disponible,
+            tiempo_preparacion_min=tiempo_preparacion,
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+        message = 'Producto creado correctamente.'
+    else:
+        product.nombre = nombre
+        product.descripcion = descripcion
+        product.categoria = categoria
+        product.precio_venta = precio_venta
+        product.costo_estimado = costo_estimado
+        product.imagen_url = imagen_url
+        product.disponible = disponible
+        product.tiempo_preparacion_min = tiempo_preparacion
+        product.actualizado_por = request.user
+        product.save()
+        message = 'Producto actualizado correctamente.'
+
+    return _auth_response({
+        'ok': True,
+        'message': message,
+        'product': _serialize_product(product),
     }, status=201 if action == 'create' else 200)
 
 

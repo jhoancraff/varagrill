@@ -27,6 +27,8 @@ from varagrill.api_views import (
     SessionStatusView,
     admin_catalog_view,
     admin_chef_recommendations_view,
+    admin_mesas_view,
+    admin_products_view,
     admin_promotions_view,
     admin_recipes_view,
     admin_users_view,
@@ -52,6 +54,8 @@ urlpatterns = [
     path('api/promociones/', promociones_activas_view, name='promociones-activas'),
     path('api/recomendaciones-chef/', recomendaciones_chef_activas_view, name='recomendaciones-chef-activas'),
     path('api/admin/usuarios/', admin_users_view, name='admin-users'),
+    path('api/admin/mesas/', admin_mesas_view, name='admin-mesas'),
+    path('api/admin/productos/', admin_products_view, name='admin-products'),
     path('api/pedidos/cocina/', kitchen_orders_view, name='kitchen-orders'),
     path('api/pedidos/cobro/', pedidos_cobro_view, name='pedidos-cobro'),
     path('api/pedidos/<int:pedido_id>/', pedido_detail_view, name='pedido-detail'),
@@ -64,3 +68,4 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

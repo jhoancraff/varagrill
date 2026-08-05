@@ -4,16 +4,22 @@ import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
 import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
 import AnalystEditUserPage from './AnalystEditUserPage';
 import AnalystEditIngredientPage from './AnalystEditIngredientPage';
+import AnalystEditMesaPage from './AnalystEditMesaPage';
+import AnalystEditProductPage from './AnalystEditProductPage';
 import AnalystEditRecipePage from './AnalystEditRecipePage';
 import AnalystEditPreparationPage from './AnalystEditPreparationPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
+import AnalystMesasPage from './AnalystMesasPage';
 import AnalystNewChefRecommendationPage from './AnalystNewChefRecommendationPage';
 import AnalystNewIngredientPage from './AnalystNewIngredientPage';
+import AnalystNewMesaPage from './AnalystNewMesaPage';
 import AnalystNewPreparationPage from './AnalystNewPreparationPage';
+import AnalystNewProductPage from './AnalystNewProductPage';
 import AnalystNewPromotionPage from './AnalystNewPromotionPage';
 import AnalystNewUserPage from './AnalystNewUserPage';
 import AnalystNewRecipePage from './AnalystNewRecipePage';
 import AnalystPreparationsReportPage from './AnalystPreparationsReportPage';
+import AnalystProductsPage from './AnalystProductsPage';
 import AnalystPromotionsPage from './AnalystPromotionsPage';
 import AnalystRecipesPage from './AnalystRecipesPage';
 import AnalystUsersPage from './AnalystUsersPage';
@@ -119,6 +125,26 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const reloadMesas = useCallback(async () => {
+    try {
+      const mesasResponse = await fetch('/api/mesas/', { credentials: 'include', cache: 'no-store' });
+      const mesasJson = mesasResponse.ok ? await mesasResponse.json() : [];
+      setMesas(Array.isArray(mesasJson) ? mesasJson : []);
+    } catch (error) {
+      setMesas([]);
+    }
+  }, []);
+
+  const reloadProducts = useCallback(async () => {
+    try {
+      const productsResponse = await fetch('/api/productos/', { credentials: 'include', cache: 'no-store' });
+      const productsJson = productsResponse.ok ? await productsResponse.json() : [];
+      setProducts(Array.isArray(productsJson) && productsJson.length > 0 ? productsJson : fallbackProducts);
+    } catch (error) {
+      setProducts(fallbackProducts);
+    }
+  }, []);
 
   useEffect(() => {
     const loadOrderData = async () => {
@@ -767,6 +793,54 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             isAdmin={isAdmin}
             onBack={() => setActiveView('admin-users')}
+          />
+        ) : activeView === 'admin-mesas' ? (
+          <AnalystMesasPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+            onCreateNewMesa={() => setActiveView('admin-mesas-new')}
+            onEditMesa={(mesaId) => setActiveView(`admin-mesas-edit:${mesaId}`)}
+            onMesasChanged={reloadMesas}
+          />
+        ) : activeView.startsWith('admin-mesas-edit:') ? (
+          <AnalystEditMesaPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            mesaId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-mesas')}
+            onMesasChanged={reloadMesas}
+          />
+        ) : activeView === 'admin-mesas-new' ? (
+          <AnalystNewMesaPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin-mesas')}
+            onMesasChanged={reloadMesas}
+          />
+        ) : activeView === 'admin-products' ? (
+          <AnalystProductsPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+            onCreateNewProduct={() => setActiveView('admin-products-new')}
+            onEditProduct={(productId) => setActiveView(`admin-products-edit:${productId}`)}
+            onProductsChanged={reloadProducts}
+          />
+        ) : activeView.startsWith('admin-products-edit:') ? (
+          <AnalystEditProductPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            productId={activeView.split(':')[1] || ''}
+            onBack={() => setActiveView('admin-products')}
+            onProductsChanged={reloadProducts}
+          />
+        ) : activeView === 'admin-products-new' ? (
+          <AnalystNewProductPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin-products')}
+            onProductsChanged={reloadProducts}
           />
         ) : activeView === 'admin-ingredients' ? (
           <AnalystIngredientsReportPage

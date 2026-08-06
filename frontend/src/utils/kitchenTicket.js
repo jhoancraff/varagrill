@@ -2,14 +2,14 @@ const TICKET_STYLES = `
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
   html, body {
-    margin: 0;
-    padding: 0;
+    margin: 20px;
+    padding: 20px;
     width: 80mm;
     font-family: 'Courier New', Courier, monospace;
     color: #000;
     background: #fff;
   }
-  .ticket { padding: 4mm 3mm; }
+  .ticket { min-height: 80mm; padding: 4mm 3mm; box-sizing: border-box; }
   .center { text-align: center; }
   .title { font-size: 15px; font-weight: 700; text-transform: uppercase; margin: 0 0 2mm; }
   .subtitle { font-size: 11px; margin: 0 0 3mm; }
@@ -20,6 +20,7 @@ const TICKET_STYLES = `
   .item-note { font-size: 12px; padding-left: 3mm; }
   .notes { font-size: 12px; margin-top: 3mm; padding-top: 2mm; border-top: 1px dashed #000; }
   .footer { font-size: 10px; text-align: center; margin-top: 4mm; }
+  .cut-space { height: 22mm; }
 `;
 
 function escapeHtml(value) {
@@ -102,6 +103,7 @@ export function buildKitchenTicketHtml(ticket) {
       ${itemsHtml || '<div class="item-line">Sin items</div>'}
       ${normalizedTicket.notasGenerales ? `<div class="notes">Nota general: ${escapeHtml(normalizedTicket.notasGenerales)}</div>` : ''}
       <div class="footer">Impreso ${formatTicketTime(new Date())}</div>
+      <div class="cut-space"></div>
     </div>
   </body>
 </html>`;
@@ -113,7 +115,7 @@ export function printKitchenTicket(ticket) {
   iframe.style.left = '-9999px';
   iframe.style.top = '0';
   iframe.style.width = '80mm';
-  iframe.style.height = '120mm';
+  iframe.style.height = '160mm';
   iframe.style.border = '0';
   iframe.style.visibility = 'hidden';
   iframe.setAttribute('aria-hidden', 'true');

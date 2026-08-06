@@ -1,43 +1,125 @@
+const iconProps = {
+  viewBox: '0 0 24 24',
+  width: 26,
+  height: 26,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+};
+
+const UsersIcon = () => (
+  <svg {...iconProps}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+
+const TablesIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+
+const ProductsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M16.5 9.4 7.5 4.21" />
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+    <path d="M3.27 6.96 12 12.01l8.73-5.05" />
+    <path d="M12 22.08V12" />
+  </svg>
+);
+
+const IngredientsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+    <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+  </svg>
+);
+
+const PreparationsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />
+    <path d="M6.453 15h11.094" />
+    <path d="M8.5 2h7" />
+  </svg>
+);
+
+const RecipesIcon = () => (
+  <svg {...iconProps}>
+    <path d="M12 7v14" />
+    <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
+  </svg>
+);
+
+const PromotionsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+    <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const ChefHatIcon = () => (
+  <svg {...iconProps}>
+    <path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z" />
+    <path d="M6 17h12" />
+  </svg>
+);
+
 const analystSections = [
   {
     id: 'admin-users',
-    title: 'Usuarios',
+    title: 'Gestión de Usuarios',
     description: 'Gestiona el acceso del personal y entra al espacio de trabajo de usuarios.',
+    icon: UsersIcon,
   },
   {
     id: 'admin-mesas',
-    title: 'Mesas',
+    title: 'Gestión de Mesas',
     description: 'Registra mesas nuevas, actualiza su capacidad y estado para el flujo de pedidos.',
+    icon: TablesIcon,
   },
   {
     id: 'admin-products',
-    title: 'Productos',
+    title: 'Catálogo de Productos',
     description: 'Crea platos y bebidas con imagen y categoría, y edítalos desde el reporte del menú.',
+    icon: ProductsIcon,
   },
   {
     id: 'admin-ingredients',
-    title: 'Reporte de ingredientes',
+    title: 'Inventario de Ingredientes',
     description: 'Abre el reporte con buscador para modificar, eliminar o agregar ingredientes.',
+    icon: IngredientsIcon,
   },
   {
     id: 'admin-preparations',
-    title: 'Reporte de subrecetas',
+    title: 'Subrecetas y Preparaciones',
     description: 'Abre el reporte con buscador para modificar, eliminar o agregar subrecetas.',
+    icon: PreparationsIcon,
   },
   {
     id: 'admin-recipes',
-    title: 'Creación de recetas',
+    title: 'Gestión de Recetas',
     description: 'Redirige a la página en blanco destinada a la construcción de recetas.',
+    icon: RecipesIcon,
   },
   {
     id: 'admin-promotions',
-    title: 'Promociones',
+    title: 'Promociones y Descuentos',
     description: 'Abre el reporte de productos para aplicar descuentos, uno por uno o en bloque.',
+    icon: PromotionsIcon,
   },
   {
     id: 'admin-chef-recommendations',
-    title: 'Recomendaciones del chef',
+    title: 'Recomendaciones del Chef',
     description: 'Abre el reporte de platos recomendados y permite agregar nuevas recomendaciones.',
+    icon: ChefHatIcon,
   },
 ];
 
@@ -54,18 +136,26 @@ function AdminPanelPage({ isMobile, onBack, onNavigate }) {
       </div>
 
       <div style={gridStyle(isMobile)}>
-        {analystSections.map((section) => (
-          <button
-            key={section.id}
-            type="button"
-            onClick={() => onNavigate(section.id)}
-            style={cardButtonStyle}
-          >
-            <div style={cardTitleStyle}>{section.title}</div>
-            <div style={cardDescriptionStyle}>{section.description}</div>
-            <span style={cardLinkStyle}>Abrir sección</span>
-          </button>
-        ))}
+        {analystSections.map((section) => {
+          const SectionIcon = section.icon;
+          return (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => onNavigate(section.id)}
+              style={cardButtonStyle}
+            >
+              <div style={cardHeaderStyle}>
+                <span style={cardIconWrapStyle} aria-hidden="true">
+                  <SectionIcon />
+                </span>
+                <div style={cardTitleStyle}>{section.title}</div>
+              </div>
+              <div style={cardDescriptionStyle}>{section.description}</div>
+              <span style={cardLinkStyle}>Abrir sección</span>
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -140,6 +230,24 @@ const cardButtonStyle = {
   color: '#fff',
   cursor: 'pointer',
   boxShadow: '0 12px 30px rgba(0, 0, 0, 0.24)',
+};
+
+const cardHeaderStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 14,
+};
+
+const cardIconWrapStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 44,
+  height: 44,
+  flexShrink: 0,
+  borderRadius: 14,
+  background: 'rgba(255, 102, 102, 0.14)',
+  color: '#ff8f8f',
 };
 
 const cardTitleStyle = {

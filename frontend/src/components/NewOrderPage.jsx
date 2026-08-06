@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { printKitchenTicket } from '../utils/kitchenTicket';
 
 function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, waiterName, onBack }) {
   const [orderHeader, setOrderHeader] = useState({
@@ -343,25 +342,6 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       const mesaLabel = selectedMesa ? `Mesa ${selectedMesa.numero}` : 'Sin mesa';
       setFeedbackType('success');
       setFeedback(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${data.pedido.total}.`);
-
-      printKitchenTicket({
-        pedidoId: data.pedido.id,
-        mesa: selectedMesa ? selectedMesa.numero : null,
-        tipoPedido: orderHeader.tipoPedido,
-        mesero: waiterName,
-        creadoEn: new Date().toISOString(),
-        notasGenerales: orderHeader.notas,
-        items: cartItems.map((item) => {
-          const product = products.find((entry) => String(entry.id) === String(item.productId));
-          return {
-            cantidad: item.quantity,
-            producto: product?.nombre || '',
-            notas: item.notes,
-            adicionales: (item.adicionales || []).map((addon) => ({ cantidad: addon.cantidad, nombre: addon.nombre })),
-            composicion: product?.composicion || [],
-          };
-        }),
-      });
 
       setCartItems([]);
       setOrderHeader((current) => ({ ...current, notas: '' }));

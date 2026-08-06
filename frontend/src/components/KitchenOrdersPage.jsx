@@ -147,6 +147,11 @@ function KitchenOrdersPage({
         return;
       }
 
+      const orderBeingUpdated = orders.find((order) => order.id === orderId);
+      if (nextState === 'en_preparacion' && orderBeingUpdated?.estado === 'pendiente') {
+        handlePrintOrder(orderBeingUpdated);
+      }
+
       setOrders((current) => {
         if (nextState === 'entregado' && statusFilter === ACTIVE_FILTER) {
           return current.filter((order) => order.id !== orderId);

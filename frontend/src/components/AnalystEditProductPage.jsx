@@ -9,10 +9,14 @@ const emptyForm = {
   costo_estimado: '',
   tiempo_preparacion_min: '0',
   disponible: true,
+  vinculo_tipo: '',
+  vinculo_id: '',
 };
 
 function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProductsChanged }) {
   const [categories, setCategories] = useState([]);
+  const [recetas, setRecetas] = useState([]);
+  const [subrecetas, setSubrecetas] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [currentImageUrl, setCurrentImageUrl] = useState('');
   const [imageFile, setImageFile] = useState(null);
@@ -46,6 +50,9 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
         }
 
         setCategories(Array.isArray(data.categories) ? data.categories : []);
+        setRecetas(Array.isArray(data.recetas) ? data.recetas : []);
+        setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
+        const vinculoTipo = selectedProduct.receta_vinculada_id ? 'receta' : selectedProduct.subreceta_vinculada_id ? 'subreceta' : '';
         setForm({
           id: selectedProduct.id,
           nombre: selectedProduct.nombre || '',
@@ -55,6 +62,12 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
           costo_estimado: selectedProduct.costo_estimado || '',
           tiempo_preparacion_min: String(selectedProduct.tiempo_preparacion_min ?? '0'),
           disponible: Boolean(selectedProduct.disponible),
+          vinculo_tipo: vinculoTipo,
+          vinculo_id: vinculoTipo === 'receta'
+            ? String(selectedProduct.receta_vinculada_id)
+            : vinculoTipo === 'subreceta'
+              ? String(selectedProduct.subreceta_vinculada_id)
+              : '',
         });
         setCurrentImageUrl(selectedProduct.imagen_url || '');
       } catch (error) {
@@ -97,6 +110,8 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
       formData.append('costo_estimado', form.costo_estimado);
       formData.append('tiempo_preparacion_min', form.tiempo_preparacion_min || '0');
       formData.append('disponible', form.disponible ? 'true' : 'false');
+      formData.append('vinculo_tipo', form.vinculo_tipo);
+      formData.append('vinculo_id', form.vinculo_id);
       if (imageFile) {
         formData.append('imagen', imageFile);
       }
@@ -187,6 +202,36 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                 <input type="checkbox" checked={form.disponible} onChange={(event) => handleChange('disponible', event.target.checked)} />
                 <span>Producto disponible</span>
               </label>
+            </div>
+
+            <div style={linkCardStyle}>
+              <div style={labelStyle}>Vincular con Receta o Subreceta (opcional)</div>
+              <p style={linkHintStyle}>Así, cuando el mesero pida este producto, cocina verá también de qué está compuesto.</p>
+              <div style={formGridStyle(isMobile)}>
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Tipo de vínculo</span>
+                  <select
+                    value={form.vinculo_tipo}
+                    onChange={(event) => setForm((current) => ({ ...current, vinculo_tipo: event.target.value, vinculo_id: '' }))}
+                    style={inputStyle}
+                  >
+                    <option value="">Ninguno</option>
+                    <option value="receta">Receta</option>
+                    <option value="subreceta">Subreceta</option>
+                  </select>
+                </label>
+                {form.vinculo_tipo ? (
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>{form.vinculo_tipo === 'receta' ? 'Receta' : 'Subreceta'}</span>
+                    <select value={form.vinculo_id} onChange={(event) => handleChange('vinculo_id', event.target.value)} style={inputStyle}>
+                      <option value="">Selecciona...</option>
+                      {(form.vinculo_tipo === 'receta' ? recetas : subrecetas).map((item) => (
+                        <option key={item.id} value={item.id}>{item.nombre}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
             </div>
 
             <label style={fieldStyle}>
@@ -324,6 +369,21 @@ const toggleRowStyle = {
   color: '#fff',
   fontWeight: 600,
   minHeight: 42,
+};
+
+const linkCardStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: 14,
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(255,255,255,0.02)',
+};
+
+const linkHintStyle = {
+  margin: 0,
+  color: '#c2adad',
+  fontSize: 12.5,
 };
 
 const previewRowStyle = {

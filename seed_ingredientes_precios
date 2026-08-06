@@ -1,0 +1,137 @@
+from decimal import Decimal
+
+from django.core.management.base import BaseCommand
+from django.db import transaction
+
+from varagrill.models import (
+    VGCompra,
+    VGDetalleCompra,
+    VGIngrediente,
+    VGMovimientoInventario,
+    VGRol,
+    VGUsuario,
+)
+
+
+class Command(BaseCommand):
+    help = "Carga/actualiza ingredientes de vegetales, lacteos-huevos y viveres-granos con sus precios de referencia"
+
+    def handle(self, *args, **options):
+        with transaction.atomic():
+            operator = self._ensure_operator_user()
+            ingredients = self._seed_ingredients(operator)
+
+        self.stdout.write(self.style.SUCCESS("Ingredientes de precios insertados/actualizados correctamente."))
+        self.stdout.write(f"Ingredientes: {len(ingredients)}")
+
+    def _ensure_operator_user(self):
+        role, _ = VGRol.objects.get_or_create(
+            nombre_role="Administrador",
+            defaults={"descripcion": "Usuario operador para cargas iniciales"},
+        )
+        user, created = VGUsuario.objects.get_or_create(
+            username="operador_inventario",
+            defaults={
+                "cedula": "V30000001",
+                "email": "inventario@varagrill.local",
+                "first_name": "Operador",
+                "last_name": "Inventario",
+                "id_role": role,
+                "is_staff": True,
+            },
+        )
+        if created:
+            user.set_password("Varagrill123!")
+            user.save(update_fields=["password"])
+        elif user.id_role_id != role.id:
+            user.id_role = role
+            user.save(update_fields=["id_role"])
+        return user
+
+    def _seed_ingredients(self, operator):
+        # (nombre, unidad_medida, cantidad_inicial, stock_minimo, costo_unitario)
+        # costo_unitario esta expresado por "unidad_medida": precio por kilo para
+        # los ingredientes en "kg", precio por unidad para los que van en "unidad".
+        purchase_batches = [
+            {
+                "provider": "Distribuidora de Vegetales Frescos",
+                "items": [
+                    ("Lechuga Romana", "kg", "15.00", "3.00", "2.50"),
+                    ("Limon", "kg", "15.00", "3.00", "2.00"),
+                    ("Pepinillos", "kg", "8.00", "2.00", "4.50"),
+                    ("Pepino", "kg", "15.00", "3.00", "1.50"),
+                    ("Perejil", "kg", "5.00", "1.00", "2.00"),
+                    ("Pimenton", "kg", "12.00", "3.00", "3.00"),
+                    ("Platano Verde", "kg", "20.00", "4.00", "1.50"),
+                    ("Tomate", "kg", "20.00", "4.00", "2.20"),
+                    ("Yuca", "kg", "20.00", "4.00", "1.20"),
+                ],
+            },
+            {
+                "provider": "Lacteos y Huevos del Valle",
+                "items": [
+                    ("Huevos", "unidad", "180.00", "30.00", "0.1667"),
+                    ("Lata Queso Fundido / Cheez Whiz", "kg", "9.00", "3.00", "7.00"),
+                    ("Queso Blanco Llanero / Duro", "kg", "10.00", "2.00", "6.50"),
+                    ("Queso Pecorino / Parmesano", "kg", "4.00", "1.00", "18.00"),
+                ],
+            },
+            {
+                "provider": "Viveres y Granos La Cosecha",
+                "items": [
+                    ("Croton de Pan", "kg", "6.00", "1.50", "5.00"),
+                    ("Harina de Maiz Precocida", "kg", "25.00", "5.00", "1.30"),
+                    ("Harina de Trigo", "kg", "20.00", "4.00", "1.40"),
+                    ("Tortillas de Maiz", "unidad", "100.00", "20.00", "0.20"),
+                ],
+            },
+        ]
+
+        ingredients = {}
+        for batch in purchase_batches:
+            purchase = VGCompra.objects.create(
+                proveedor_nombre=batch["provider"],
+                estado="recibido",
+                creado_por=operator,
+                actualizado_por=operator,
+            )
+            total = Decimal("0")
+            for name, unit, quantity, minimum, cost in batch["items"]:
+                ingredient, _ = VGIngrediente.objects.update_or_create(
+                    nombre=name,
+                    defaults={
+                        "unidad_medida": unit,
+                        "stock_minimo": Decimal(minimum),
+                        "costo_unitario": Decimal(cost),
+                        "ultimo_proveedor": batch["provider"],
+                        "creado_por": operator,
+                        "actualizado_por": operator,
+                    },
+                )
+                ingredient.stock_actual = Decimal(quantity)
+                ingredient.costo_unitario = Decimal(cost)
+                ingredient.ultimo_proveedor = batch["provider"]
+                ingredient.actualizado_por = operator
+                ingredient.save(update_fields=["stock_actual", "costo_unitario", "ultimo_proveedor", "actualizado_por"])
+
+                detail = VGDetalleCompra.objects.create(
+                    compra=purchase,
+                    ingrediente=ingredient,
+                    cantidad=Decimal(quantity),
+                    costo_unitario=Decimal(cost),
+                )
+                total += detail.subtotal
+                VGMovimientoInventario.objects.create(
+                    ingrediente=ingredient,
+                    tipo_movimiento="entrada",
+                    cantidad=Decimal(quantity),
+                    motivo=f"Compra inicial de proveedor {batch['provider']}",
+                    id_referencia=purchase.id,
+                    creado_por=operator,
+                )
+                ingredients[name] = ingredient
+
+            purchase.total = total
+            purchase.save(update_fields=["total"])
+
+        return ingredients

@@ -301,6 +301,12 @@ function KitchenOrdersPage({
                           <div key={item.id} style={itemRowStyle}>
                             <span style={{ color: '#fff' }}>{item.cantidad}x {item.producto}</span>
                             {!!item.notas && <span style={itemNoteStyle}>{item.notas}</span>}
+                            {(item.adicionales || []).map((addon) => (
+                              <span key={addon.id} style={itemAddonStyle}>+ {addon.cantidad}x {addon.nombre}</span>
+                            ))}
+                            {(item.composicion || []).length > 0 && (
+                              <span style={itemNoteStyle}>Lleva: {item.composicion.join(', ')}</span>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -624,6 +630,12 @@ const itemRowStyle = {
 const itemNoteStyle = {
   color: '#e8bcbc',
   fontSize: 12,
+};
+
+const itemAddonStyle = {
+  color: '#ffcf85',
+  fontSize: 12,
+  fontWeight: 700,
 };
 
 const orderNoteStyle = {

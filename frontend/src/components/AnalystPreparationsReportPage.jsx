@@ -118,6 +118,11 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
                   <div key={`cost-${item.id}`} style={cellStyle}>
                     <div style={{ color: '#fff', fontWeight: 700 }}>${item.costo_total || '0.00'} total</div>
                     <div style={{ color: '#7dffa0', fontSize: 13 }}>${item.costo_unitario_calculado || '0.00'} / {item.rendimiento_unidad || 'unidad'}</div>
+                    {item.es_adicional ? (
+                      <div style={addonBadgeStyle}>
+                        Adicional · margen {item.margen_ganancia || '0'}% · vende ${item.precio_venta_calculado || '0.00'}
+                      </div>
+                    ) : null}
                   </div>
                   <div key={`actions-${item.id}`} style={cellActionsStyle}>
                     <button type="button" onClick={() => onEdit(item.id)} style={secondaryButtonStyle}>Modificar</button>
@@ -154,5 +159,6 @@ const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '10px 16px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
+const addonBadgeStyle = { marginTop: 2, padding: '3px 8px', borderRadius: 999, border: '1px solid rgba(255,196,110,0.35)', background: 'rgba(255,166,0,0.12)', color: '#ffcf85', fontSize: 12, fontWeight: 700, width: 'fit-content' };
 
 export default AnalystPreparationsReportPage;

@@ -24,7 +24,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
   const preparationPickerRef = useRef(null);
   const [inventory, setInventory] = useState([]);
   const [preparations, setPreparations] = useState([]);
-  const [form, setForm] = useState({ id: '', nombre: '', rendimiento_cantidad: '1', rendimiento_unidad: 'unidad' });
+  const [form, setForm] = useState({ id: '', nombre: '', rendimiento_cantidad: '1', rendimiento_unidad: 'unidad', es_adicional: false, margen_ganancia: '' });
   const [draft, setDraft] = useState(emptyDraft);
   const [components, setComponents] = useState([]);
   const [showIngredientResults, setShowIngredientResults] = useState(false);
@@ -73,6 +73,8 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
           nombre: selected.nombre || '',
           rendimiento_cantidad: selected.rendimiento_cantidad || '1',
           rendimiento_unidad: selected.rendimiento_unidad || 'unidad',
+          es_adicional: !!selected.es_adicional,
+          margen_ganancia: selected.margen_ganancia != null ? String(selected.margen_ganancia) : '',
         });
         setComponents((selected.componentes || []).map((item) => ({
           uid: `${item.tipo}-${item.referencia_id}`,
@@ -116,6 +118,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
 
   const rendimientoCantidad = Number(form.rendimiento_cantidad || 0);
   const estimatedUnitCost = rendimientoCantidad > 0 ? estimatedTotalCost / rendimientoCantidad : 0;
+  const estimatedSalePrice = estimatedUnitCost * (1 + Number(form.margen_ganancia || 0) / 100);
 
   const handleAdd = (type) => {
     const isIngredient = type === 'ingrediente';
@@ -164,6 +167,10 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
       setMessage('Debes agregar al menos un componente.');
       return;
     }
+    if (form.es_adicional && form.margen_ganancia === '') {
+      setMessage('Debes indicar el margen de ganancia del adicional.');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -177,6 +184,8 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
           nombre: form.nombre,
           rendimiento_cantidad: form.rendimiento_cantidad,
           rendimiento_unidad: form.rendimiento_unidad,
+          es_adicional: form.es_adicional,
+          margen_ganancia: form.es_adicional ? form.margen_ganancia : null,
           componentes: components.map((item) => ({ tipo: item.tipo, referencia_id: item.referencia_id, cantidad: item.cantidad })),
         }),
       });
@@ -213,6 +222,31 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
                   ))}
                 </select>
               </label>
+            </div>
+
+            <div style={helperCardStyle}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={form.es_adicional}
+                  onChange={(e) => setForm((c) => ({ ...c, es_adicional: e.target.checked }))}
+                />
+                ¿Es un adicional que el mesero puede ofrecer al cliente en cualquier plato?
+              </label>
+              {form.es_adicional ? (
+                <label style={{ ...fieldStyle, maxWidth: 260 }}>
+                  <span style={labelStyle}>Margen de ganancia (%)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.margen_ganancia}
+                    onChange={(e) => setForm((c) => ({ ...c, margen_ganancia: e.target.value }))}
+                    placeholder="Ej: 40"
+                    style={inputStyle}
+                  />
+                </label>
+              ) : null}
             </div>
 
             <div style={helperCardStyle}>
@@ -257,6 +291,12 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
                 <div style={costLabelStyle}>Costo por {form.rendimiento_unidad || 'unidad'}</div>
                 <div style={costValueStyle}>${estimatedUnitCost.toFixed(2)}</div>
               </div>
+              {form.es_adicional ? (
+                <div>
+                  <div style={costLabelStyle}>Precio de venta al cliente</div>
+                  <div style={costValueStyle}>${estimatedSalePrice.toFixed(2)}</div>
+                </div>
+              ) : null}
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

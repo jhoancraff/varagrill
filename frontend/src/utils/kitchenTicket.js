@@ -61,6 +61,11 @@ function normalizeTicket(ticket = {}) {
       cantidad: item.cantidad ?? item.qty ?? 1,
       producto: item.producto ?? item.producto_nombre ?? item.nombre ?? '',
       notas: item.notas ?? item.notes ?? '',
+      adicionales: Array.isArray(item.adicionales) ? item.adicionales.map((addon) => ({
+        cantidad: addon.cantidad ?? 1,
+        nombre: addon.nombre ?? '',
+      })) : [],
+      composicion: Array.isArray(item.composicion) ? item.composicion : [],
     })),
   };
 }
@@ -73,6 +78,8 @@ export function buildKitchenTicketHtml(ticket) {
     <div class="item">
       <div class="item-line">${escapeHtml(item.cantidad)}x ${escapeHtml(item.producto)}</div>
       ${item.notas ? `<div class="item-note">- ${escapeHtml(item.notas)}</div>` : ''}
+      ${item.adicionales.map((addon) => `<div class="item-note">+ ${escapeHtml(addon.cantidad)}x ${escapeHtml(addon.nombre)}</div>`).join('')}
+      ${item.composicion.length > 0 ? `<div class="item-note">Lleva: ${escapeHtml(item.composicion.join(', '))}</div>` : ''}
     </div>
   `).join('');
 

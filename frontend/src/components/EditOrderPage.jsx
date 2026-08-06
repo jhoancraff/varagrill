@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack }) {
+function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, orderId, onBack }) {
   const [orderHeader, setOrderHeader] = useState({
     mesaId: '',
     tipoPedido: 'local',
@@ -79,6 +79,12 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
           productId: String(item.product_id),
           quantity: item.cantidad,
           notes: item.notas || '',
+          adicionales: (item.adicionales || []).map((addon) => ({
+            preparacionId: addon.preparacion_id,
+            nombre: addon.nombre,
+            cantidad: addon.cantidad,
+            precioUnitario: addon.precio_unitario,
+          })),
         })));
       } catch (error) {
         if (!cancelled) {
@@ -138,7 +144,8 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
       if (!product) {
         return total;
       }
-      return total + getUnitPrice(product, promotionsByProductId) * item.quantity;
+      const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
+      return total + getUnitPrice(product, promotionsByProductId) * item.quantity + addonsTotal;
     }, 0),
     [cartItems, products, promotionsByProductId],
   );
@@ -151,8 +158,61 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
           item.productId === String(product.id) ? { ...item, quantity: item.quantity + 1 } : item
         ));
       }
-      return [...current, { productId: String(product.id), quantity: 1, notes: '' }];
+      return [...current, { productId: String(product.id), quantity: 1, notes: '', adicionales: [] }];
     });
+  };
+
+  const addAddonToCartItem = (productId, addonId) => {
+    if (!addonId) {
+      return;
+    }
+    const addonInfo = adicionales.find((entry) => String(entry.id) === String(addonId));
+    if (!addonInfo) {
+      return;
+    }
+    setCartItems((current) => current.map((item) => {
+      if (item.productId !== productId) {
+        return item;
+      }
+      const existingAddon = (item.adicionales || []).find((entry) => String(entry.preparacionId) === String(addonId));
+      if (existingAddon) {
+        return {
+          ...item,
+          adicionales: item.adicionales.map((entry) => (
+            String(entry.preparacionId) === String(addonId) ? { ...entry, cantidad: entry.cantidad + 1 } : entry
+          )),
+        };
+      }
+      return {
+        ...item,
+        adicionales: [
+          ...(item.adicionales || []),
+          { preparacionId: addonInfo.id, nombre: addonInfo.nombre, cantidad: 1, precioUnitario: addonInfo.precio },
+        ],
+      };
+    }));
+  };
+
+  const changeAddonQuantity = (productId, addonId, delta) => {
+    setCartItems((current) => current.map((item) => {
+      if (item.productId !== productId) {
+        return item;
+      }
+      return {
+        ...item,
+        adicionales: item.adicionales
+          .map((entry) => (String(entry.preparacionId) === String(addonId) ? { ...entry, cantidad: entry.cantidad + delta } : entry))
+          .filter((entry) => entry.cantidad > 0),
+      };
+    }));
+  };
+
+  const removeAddonFromCartItem = (productId, addonId) => {
+    setCartItems((current) => current.map((item) => (
+      item.productId === productId
+        ? { ...item, adicionales: item.adicionales.filter((entry) => String(entry.preparacionId) !== String(addonId)) }
+        : item
+    )));
   };
 
   const changeCartQuantity = (productId, delta) => {
@@ -208,6 +268,10 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
           product_id: Number(item.productId),
           cantidad: Number(item.quantity || 1),
           notas: item.notes,
+          adicionales: (item.adicionales || []).map((addon) => ({
+            preparacion_id: Number(addon.preparacionId),
+            cantidad: Number(addon.cantidad || 1),
+          })),
         })),
       };
 
@@ -458,6 +522,37 @@ function EditOrderPage({ isMobile, mesas, products, loadingData, orderId, onBack
                         placeholder="Indicaciones (sin cebolla, término medio...)"
                         style={cartNotesInputStyle}
                       />
+
+                      {adicionales.length > 0 ? (
+                        <div style={addonSectionStyle}>
+                          {(item.adicionales || []).map((addon) => (
+                            <div key={addon.preparacionId} style={addonChipStyle}>
+                              <span>{addon.nombre}</span>
+                              <div style={qtyStepperStyle}>
+                                <button type="button" onClick={() => changeAddonQuantity(item.productId, addon.preparacionId, -1)} style={qtyButtonStyle}>−</button>
+                                <span style={qtyValueStyle}>{addon.cantidad}</span>
+                                <button type="button" onClick={() => changeAddonQuantity(item.productId, addon.preparacionId, 1)} style={qtyButtonStyle}>+</button>
+                              </div>
+                              <span style={addonPriceStyle}>${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}</span>
+                              <button type="button" onClick={() => removeAddonFromCartItem(item.productId, addon.preparacionId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${addon.nombre}`}>
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <select
+                            value=""
+                            onChange={(event) => addAddonToCartItem(item.productId, event.target.value)}
+                            style={addonSelectStyle}
+                          >
+                            <option value="">+ Agregar adicional (extra pagado)...</option>
+                            {adicionales.map((addon) => (
+                              <option key={addon.id} value={addon.id}>
+                                {addon.nombre} — ${Number(addon.precio || 0).toFixed(2)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })
@@ -936,6 +1031,44 @@ const cartLineSubtotalStyle = {
 };
 
 const cartNotesInputStyle = {
+  width: '100%',
+  boxSizing: 'border-box',
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(255,255,255,0.03)',
+  color: '#fff',
+  padding: '7px 9px',
+  fontSize: 12,
+  outline: 'none',
+};
+
+const addonSectionStyle = {
+  display: 'grid',
+  gap: 6,
+  paddingTop: 4,
+  borderTop: '1px dashed rgba(255,255,255,0.12)',
+};
+
+const addonChipStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  padding: '4px 8px',
+  borderRadius: 999,
+  border: '1px solid rgba(255,196,110,0.3)',
+  background: 'rgba(255,166,0,0.08)',
+  color: '#ffcf85',
+  fontSize: 12,
+};
+
+const addonPriceStyle = {
+  color: '#ffcf85',
+  fontWeight: 700,
+  fontSize: 12,
+};
+
+const addonSelectStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 10,

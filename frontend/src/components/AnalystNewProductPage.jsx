@@ -8,10 +8,14 @@ const emptyForm = {
   costo_estimado: '',
   tiempo_preparacion_min: '0',
   disponible: true,
+  vinculo_tipo: '',
+  vinculo_id: '',
 };
 
 function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged }) {
   const [categories, setCategories] = useState([]);
+  const [recetas, setRecetas] = useState([]);
+  const [subrecetas, setSubrecetas] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -38,6 +42,8 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
           throw new Error(data.message || 'No se pudieron cargar las categorías.');
         }
         setCategories(Array.isArray(data.categories) ? data.categories : []);
+        setRecetas(Array.isArray(data.recetas) ? data.recetas : []);
+        setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
       } catch (error) {
         setMessage(error.message || 'No se pudieron cargar las categorías.');
       } finally {
@@ -77,6 +83,8 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       formData.append('costo_estimado', form.costo_estimado);
       formData.append('tiempo_preparacion_min', form.tiempo_preparacion_min || '0');
       formData.append('disponible', form.disponible ? 'true' : 'false');
+      formData.append('vinculo_tipo', form.vinculo_tipo);
+      formData.append('vinculo_id', form.vinculo_id);
       if (imageFile) {
         formData.append('imagen', imageFile);
       }
@@ -167,6 +175,36 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
                 <input type="checkbox" checked={form.disponible} onChange={(event) => handleChange('disponible', event.target.checked)} />
                 <span>Producto disponible</span>
               </label>
+            </div>
+
+            <div style={linkCardStyle}>
+              <div style={labelStyle}>Vincular con Receta o Subreceta (opcional)</div>
+              <p style={linkHintStyle}>Así, cuando el mesero pida este producto, cocina verá también de qué está compuesto.</p>
+              <div style={formGridStyle(isMobile)}>
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Tipo de vínculo</span>
+                  <select
+                    value={form.vinculo_tipo}
+                    onChange={(event) => setForm((current) => ({ ...current, vinculo_tipo: event.target.value, vinculo_id: '' }))}
+                    style={inputStyle}
+                  >
+                    <option value="">Ninguno</option>
+                    <option value="receta">Receta</option>
+                    <option value="subreceta">Subreceta</option>
+                  </select>
+                </label>
+                {form.vinculo_tipo ? (
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>{form.vinculo_tipo === 'receta' ? 'Receta' : 'Subreceta'}</span>
+                    <select value={form.vinculo_id} onChange={(event) => handleChange('vinculo_id', event.target.value)} style={inputStyle}>
+                      <option value="">Selecciona...</option>
+                      {(form.vinculo_tipo === 'receta' ? recetas : subrecetas).map((item) => (
+                        <option key={item.id} value={item.id}>{item.nombre}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
             </div>
 
             <label style={fieldStyle}>
@@ -293,6 +331,21 @@ const toggleRowStyle = {
   color: '#fff',
   fontWeight: 600,
   minHeight: 42,
+};
+
+const linkCardStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: 14,
+  borderRadius: 14,
+  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(255,255,255,0.02)',
+};
+
+const linkHintStyle = {
+  margin: 0,
+  color: '#c2adad',
+  fontSize: 12.5,
 };
 
 const previewWrapStyle = {

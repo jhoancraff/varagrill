@@ -123,12 +123,41 @@ class VGProducto(VGAuditoria):
     imagen_url = models.URLField(blank=True)
     disponible = models.BooleanField(default=True)
     tiempo_preparacion_min = models.PositiveSmallIntegerField(default=0)
+    receta_vinculada = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="productos_vinculados",
+        help_text="Receta del catálogo (VGProducto de categoría 'Recetas') que compone este producto vendible.",
+    )
+    subreceta_vinculada = models.ForeignKey(
+        "VGPreparacion", on_delete=models.SET_NULL, null=True, blank=True, related_name="productos_vinculados",
+        help_text="Subreceta que compone este producto vendible.",
+    )
 
     class Meta:
         db_table = "vg_productos"
+        constraints = [
+            models.CheckConstraint(
+                condition=~(
+                    models.Q(receta_vinculada__isnull=False) & models.Q(subreceta_vinculada__isnull=False)
+                ),
+                name="producto_vinculo_unico",
+            ),
+        ]
 
     def __str__(self):
         return self.nombre
+
+    def nombres_composicion(self):
+        if self.receta_vinculada_id:
+            return [
+                (componente.ingrediente.nombre if componente.ingrediente_id else componente.preparacion.nombre)
+                for componente in self.receta_vinculada.receta.all()
+            ]
+        if self.subreceta_vinculada_id:
+            return [
+                (componente.ingrediente.nombre if componente.ingrediente_id else componente.sub_preparacion.nombre)
+                for componente in self.subreceta_vinculada.componentes.all()
+            ]
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +200,14 @@ class VGPreparacion(VGAuditoria):
         help_text="Cuánto produce una tanda de esta receta (ej: 1 tanda = 2 litros de salsa).",
     )
     rendimiento_unidad = models.CharField(max_length=10, choices=VGIngrediente.UNIDADES)
+    es_adicional = models.BooleanField(
+        default=False,
+        help_text="Si está activo, el mesero puede ofrecer esta preparación como un extra pagado en cualquier plato.",
+    )
+    margen_ganancia = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Porcentaje de ganancia sobre el costo unitario (ej: 40.00 = 40%). Solo aplica cuando es_adicional=True.",
+    )
 
     class Meta:
         db_table = "vg_preparaciones"
@@ -377,6 +414,31 @@ class VGDetallePedido(models.Model):
 
     def __str__(self):
         return f"{self.producto} x {self.cantidad}"
+
+
+class VGDetallePedidoAdicional(models.Model):
+    """
+    Un adicional (VGPreparacion con es_adicional=True) que el mesero agregó a una
+    línea de pedido, ej. "100g de salsa rosada extra" sobre un plato. El precio_unitario
+    se guarda como snapshot del precio de venta calculado al momento del pedido, para
+    que un cambio posterior de costo/margen no altere pedidos ya facturados.
+    """
+    detalle_pedido = models.ForeignKey(VGDetallePedido, on_delete=models.CASCADE, related_name="adicionales")
+    preparacion = models.ForeignKey(VGPreparacion, on_delete=models.PROTECT, related_name="usado_en_pedidos")
+    cantidad = models.PositiveSmallIntegerField(default=1)
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        db_table = "vg_detalle_pedido_adicional"
+        verbose_name = "Adicional de pedido"
+        verbose_name_plural = "Adicionales de pedido"
+
+    @property
+    def subtotal(self):
+        return self.cantidad * self.precio_unitario
+
+    def __str__(self):
+        return f"{self.preparacion} x {self.cantidad}"
 
 
 # ---------------------------------------------------------------------------

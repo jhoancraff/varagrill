@@ -139,6 +139,11 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
                   <div key={`product-${product.id}`} style={tableCellPrimaryStyle}>
                     <div style={nameStyle}>{product.nombre || 'Sin nombre'}</div>
                     <div style={metaStyle}>{product.descripcion || 'Sin descripción'}</div>
+                    {product.receta_vinculada_nombre || product.subreceta_vinculada_nombre ? (
+                      <div style={linkBadgeStyle}>
+                        {product.receta_vinculada_nombre ? `Receta: ${product.receta_vinculada_nombre}` : `Subreceta: ${product.subreceta_vinculada_nombre}`}
+                      </div>
+                    ) : null}
                   </div>
                   <div key={`category-${product.id}`} style={tableCellStyle}>
                     <span style={pillStyle}>{product.categoria_nombre || 'Sin categoría'}</span>
@@ -338,6 +343,18 @@ const nameStyle = {
 const metaStyle = {
   color: '#c7b8b8',
   fontSize: 13,
+};
+
+const linkBadgeStyle = {
+  marginTop: 4,
+  padding: '3px 8px',
+  borderRadius: 999,
+  border: '1px solid rgba(255,196,110,0.35)',
+  background: 'rgba(255,166,0,0.12)',
+  color: '#ffcf85',
+  fontSize: 12,
+  fontWeight: 700,
+  width: 'fit-content',
 };
 
 const pillStyle = {

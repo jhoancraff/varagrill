@@ -45,6 +45,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
   const [activeView, setActiveView] = useState('home');
   const [mesas, setMesas] = useState([]);
   const [products, setProducts] = useState([]);
+  const [adicionales, setAdicionales] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [readyToBillCount, setReadyToBillCount] = useState(0);
@@ -140,28 +141,32 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
     try {
       const productsResponse = await fetch('/api/productos/', { credentials: 'include', cache: 'no-store' });
       const productsJson = productsResponse.ok ? await productsResponse.json() : [];
-      setProducts(Array.isArray(productsJson) && productsJson.length > 0 ? productsJson : fallbackProducts);
+      setProducts(Array.isArray(productsJson) ? productsJson : []);
     } catch (error) {
-      setProducts(fallbackProducts);
+      setProducts([]);
     }
   }, []);
 
   useEffect(() => {
     const loadOrderData = async () => {
       try {
-        const [mesasResponse, productsResponse] = await Promise.all([
+        const [mesasResponse, productsResponse, adicionalesResponse] = await Promise.all([
           fetch('/api/mesas/', { credentials: 'include', cache: 'no-store' }),
           fetch('/api/productos/', { credentials: 'include', cache: 'no-store' }),
+          fetch('/api/adicionales/', { credentials: 'include', cache: 'no-store' }),
         ]);
 
         const mesasJson = mesasResponse.ok ? await mesasResponse.json() : [];
         const productsJson = productsResponse.ok ? await productsResponse.json() : [];
+        const adicionalesJson = adicionalesResponse.ok ? await adicionalesResponse.json().catch(() => ({})) : {};
 
         setMesas(Array.isArray(mesasJson) ? mesasJson : []);
-        setProducts(Array.isArray(productsJson) && productsJson.length > 0 ? productsJson : fallbackProducts);
+        setProducts(Array.isArray(productsJson) ? productsJson : []);
+        setAdicionales(Array.isArray(adicionalesJson.adicionales) ? adicionalesJson.adicionales : []);
       } catch (error) {
-        setProducts(fallbackProducts);
+        setProducts([]);
         setMesas([]);
+        setAdicionales([]);
       } finally {
         setLoadingData(false);
       }
@@ -748,6 +753,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             mesas={mesas}
             products={products}
+            adicionales={adicionales}
             loadingData={loadingData}
             waiterName={displayName}
             onBack={() => setActiveView('home')}
@@ -757,6 +763,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             mesas={mesas}
             products={products}
+            adicionales={adicionales}
             loadingData={loadingData}
             orderId={activeView.split(':')[1] || ''}
             onBack={() => setActiveView('kitchen')}
@@ -1077,27 +1084,5 @@ const liveNoticeStyle = {
   fontWeight: 700,
   boxShadow: '0 14px 30px rgba(0, 0, 0, 0.34)',
 };
-
-const fallbackProducts = [
-  { id: 'f1', nombre: 'Arepa reina pepiada', precio_venta: 6.5, categoria_nombre: 'Arepas' },
-  { id: 'f2', nombre: 'Arepa pelua', precio_venta: 6.8, categoria_nombre: 'Arepas' },
-  { id: 'f3', nombre: 'Arepa domino', precio_venta: 5.9, categoria_nombre: 'Arepas' },
-  { id: 'f4', nombre: 'Cachapa con queso de mano', precio_venta: 7.2, categoria_nombre: 'Cachapas' },
-  { id: 'f5', nombre: 'Cachapa con pernil BBQ', precio_venta: 8.9, categoria_nombre: 'Cachapas' },
-  { id: 'f6', nombre: 'Pabellon criollo', precio_venta: 11.5, categoria_nombre: 'Platos' },
-  { id: 'f7', nombre: 'Bowl criollo de pollo', precio_venta: 9.75, categoria_nombre: 'Platos' },
-  { id: 'f8', nombre: 'Yuca con salsa rosada y tocineta', precio_venta: 7.4, categoria_nombre: 'Platos' },
-  { id: 'f9', nombre: 'Arepa desayuno perico', precio_venta: 6.1, categoria_nombre: 'Desayunos' },
-  { id: 'f10', nombre: 'Arepa sifrina', precio_venta: 7.8, categoria_nombre: 'Arepas' },
-  { id: 'f11', nombre: 'Jugo de naranja natural', precio_venta: 3.8, categoria_nombre: 'Jugos' },
-  { id: 'f12', nombre: 'Jugo de parchita', precio_venta: 4.2, categoria_nombre: 'Jugos' },
-  { id: 'f13', nombre: 'Jugo de guanabana', precio_venta: 4.4, categoria_nombre: 'Jugos' },
-  { id: 'f14', nombre: 'Jugo tropical mixto', precio_venta: 4.9, categoria_nombre: 'Jugos' },
-  { id: 'f15', nombre: 'Cuba libre', precio_venta: 7.2, categoria_nombre: 'Licores' },
-  { id: 'f16', nombre: 'Mojito clasico', precio_venta: 8.1, categoria_nombre: 'Licores' },
-  { id: 'f17', nombre: 'Gin tonic citrico', precio_venta: 8.5, categoria_nombre: 'Licores' },
-  { id: 'f18', nombre: 'Vodka tropical', precio_venta: 8.8, categoria_nombre: 'Licores' },
-  { id: 'f19', nombre: 'Sangria tropical', precio_venta: 9.2, categoria_nombre: 'Licores' },
-];
 
 export default WelcomeScreen;

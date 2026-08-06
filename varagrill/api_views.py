@@ -23,6 +23,7 @@ from .models import (
     VGCompra,
     VGDetalleCompra,
     VGDetallePedido,
+    VGDetallePedidoAdicional,
     VGIngrediente,
     VGMesa,
     VGMovimientoInventario,
@@ -178,6 +179,13 @@ def _compute_discounted_price(precio_original, promotion):
     return precio_final if precio_final > 0 else Decimal('0')
 
 
+def _compute_addon_sale_price(costo_unitario, margen_ganancia):
+    """Precio de venta de un adicional: costo_unitario + margen_ganancia% de ganancia sobre ese costo."""
+    margen = margen_ganancia if margen_ganancia is not None else Decimal('0')
+    precio = costo_unitario * (Decimal('1') + margen / Decimal('100'))
+    return precio.quantize(Decimal('0.01'))
+
+
 def _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation):
     """
     Costea cada VGPreparacion sumando (cantidad_requerida x costo) de sus ingredientes y
@@ -265,8 +273,37 @@ class MesaListView(generics.ListAPIView):
 
 
 class ProductoListView(generics.ListAPIView):
-    queryset = VGProducto.objects.filter(disponible=True).select_related('categoria').order_by('nombre')
+    queryset = (
+        VGProducto.objects.filter(disponible=True)
+        .select_related('categoria')
+        .prefetch_related(
+            'receta_vinculada__receta__ingrediente',
+            'receta_vinculada__receta__preparacion',
+            'subreceta_vinculada__componentes__ingrediente',
+            'subreceta_vinculada__componentes__sub_preparacion',
+        )
+        .order_by('nombre')
+    )
     serializer_class = ProductoSerializer
+
+
+def adicionales_disponibles_view(request):
+    """Catálogo de subrecetas marcadas como adicional, con su precio de venta ya calculado, para que el mesero las ofrezca en cualquier plato."""
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    preparation_cost_map = _load_preparation_cost_map()
+    adicionales = []
+    for preparation in VGPreparacion.objects.filter(es_adicional=True).order_by('nombre'):
+        costo_unitario = preparation_cost_map.get(preparation.id, {'costo_unitario': Decimal('0')})['costo_unitario']
+        adicionales.append({
+            'id': preparation.id,
+            'nombre': preparation.nombre,
+            'unidad': preparation.rendimiento_unidad,
+            'precio': str(_compute_addon_sale_price(costo_unitario, preparation.margen_ganancia)),
+        })
+
+    return _auth_response({'ok': True, 'adicionales': adicionales})
 
 
 def _parse_order_payload(data):
@@ -297,6 +334,7 @@ def _parse_order_payload(data):
 
     parsed_lines = []
     product_ids = []
+    preparacion_ids = []
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
             return None, f'El item #{index} tiene formato invalido.'
@@ -317,21 +355,51 @@ def _parse_order_payload(data):
             return None, f'La cantidad del item #{index} debe ser mayor a cero.'
 
         notes = str(item.get('notas', '') or '').strip()
-        parsed_lines.append({'product_id': product_id, 'cantidad': quantity, 'notas': notes})
+
+        raw_addons = item.get('adicionales') or []
+        if not isinstance(raw_addons, list):
+            return None, f'Los adicionales del item #{index} tienen formato invalido.'
+
+        parsed_addons = []
+        for addon_index, addon in enumerate(raw_addons, start=1):
+            if not isinstance(addon, dict):
+                return None, f'Un adicional del item #{index} tiene formato invalido.'
+            try:
+                addon_preparacion_id = int(addon.get('preparacion_id'))
+            except (TypeError, ValueError):
+                return None, f'El adicional #{addon_index} del item #{index} no tiene subreceta valida.'
+            try:
+                addon_quantity = int(addon.get('cantidad', 1))
+            except (TypeError, ValueError):
+                return None, f'La cantidad del adicional #{addon_index} del item #{index} es invalida.'
+            if addon_quantity <= 0:
+                return None, f'La cantidad del adicional #{addon_index} del item #{index} debe ser mayor a cero.'
+            parsed_addons.append({'preparacion_id': addon_preparacion_id, 'cantidad': addon_quantity})
+            preparacion_ids.append(addon_preparacion_id)
+
+        parsed_lines.append({'product_id': product_id, 'cantidad': quantity, 'notas': notes, 'adicionales': parsed_addons})
         product_ids.append(product_id)
 
     products_map = {
         product.id: product
         for product in VGProducto.objects.filter(id__in=product_ids, disponible=True)
     }
+    preparaciones_map = {
+        preparacion.id: preparacion
+        for preparacion in VGPreparacion.objects.filter(id__in=preparacion_ids, es_adicional=True)
+    }
 
     for index, line in enumerate(parsed_lines, start=1):
         if line['product_id'] not in products_map:
             return None, f'El producto del item #{index} no existe o no esta disponible.'
+        for addon in line['adicionales']:
+            if addon['preparacion_id'] not in preparaciones_map:
+                return None, f'Un adicional del item #{index} no existe o ya no esta disponible como adicional.'
 
     return {
         'parsed_lines': parsed_lines,
         'products_map': products_map,
+        'preparaciones_map': preparaciones_map,
         'tipo_pedido': tipo_pedido,
         'mesa': mesa,
         'impuesto': impuesto,
@@ -340,23 +408,57 @@ def _parse_order_payload(data):
     }, None
 
 
-def _build_order_lines(parsed_lines, products_map):
-    """Aplica promociones activas y arma las lineas listas para guardar. Devuelve (lineas, subtotal)."""
+def _build_order_lines(parsed_lines, products_map, preparaciones_map):
+    """
+    Aplica promociones activas y calcula el precio de cada adicional (server-side, nunca
+    confiando en lo que mande el cliente) para armar las lineas listas para guardar.
+    Devuelve (lineas, subtotal).
+    """
     active_promotions = _active_promotions_by_product(list(products_map.keys()))
+    preparation_cost_map = _load_preparation_cost_map()
     subtotal = Decimal('0')
     built_lines = []
     for line in parsed_lines:
         product = products_map[line['product_id']]
         promotion = active_promotions.get(product.id)
         unit_price = _compute_discounted_price(product.precio_venta, promotion) if promotion else product.precio_venta
-        subtotal += unit_price * line['cantidad']
+        line_subtotal = unit_price * line['cantidad']
+
+        built_addons = []
+        for addon in line['adicionales']:
+            preparation = preparaciones_map[addon['preparacion_id']]
+            costo_unitario = preparation_cost_map.get(preparation.id, {'costo_unitario': Decimal('0')})['costo_unitario']
+            addon_price = _compute_addon_sale_price(costo_unitario, preparation.margen_ganancia)
+            line_subtotal += addon_price * addon['cantidad']
+            built_addons.append({
+                'preparacion': preparation,
+                'cantidad': addon['cantidad'],
+                'precio_unitario': addon_price,
+            })
+
+        subtotal += line_subtotal
         built_lines.append({
             'producto': product,
             'cantidad': line['cantidad'],
             'precio_unitario': unit_price,
             'notas': line['notas'],
+            'adicionales': built_addons,
         })
     return built_lines, subtotal
+
+
+def _serialize_detalle_adicionales(detalle):
+    return [
+        {
+            'id': adicional.id,
+            'preparacion_id': adicional.preparacion_id,
+            'nombre': adicional.preparacion.nombre,
+            'cantidad': adicional.cantidad,
+            'precio_unitario': str(adicional.precio_unitario),
+            'subtotal': str(adicional.subtotal),
+        }
+        for adicional in detalle.adicionales.all()
+    ]
 
 
 def _serialize_order_detail(pedido):
@@ -381,6 +483,7 @@ def _serialize_order_detail(pedido):
                 'cantidad': detalle.cantidad,
                 'precio_unitario': str(detalle.precio_unitario),
                 'notas': detalle.notas,
+                'adicionales': _serialize_detalle_adicionales(detalle),
             }
             for detalle in pedido.detalles.all()
         ],
@@ -426,9 +529,9 @@ def pedido_create_view(request):
             actualizado_por=request.user,
         )
 
-        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'])
+        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         for line in built_lines:
-            VGDetallePedido.objects.create(
+            detalle = VGDetallePedido.objects.create(
                 pedido=pedido,
                 producto=line['producto'],
                 cantidad=line['cantidad'],
@@ -436,6 +539,13 @@ def pedido_create_view(request):
                 estado='pendiente',
                 notas=line['notas'],
             )
+            for addon in line['adicionales']:
+                VGDetallePedidoAdicional.objects.create(
+                    detalle_pedido=detalle,
+                    preparacion=addon['preparacion'],
+                    cantidad=addon['cantidad'],
+                    precio_unitario=addon['precio_unitario'],
+                )
 
         total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
         pedido.subtotal = subtotal
@@ -474,7 +584,7 @@ def pedido_detail_view(request, pedido_id):
         pedido = (
             VGPedido.objects
             .select_related('mesa', 'cliente')
-            .prefetch_related('detalles__producto')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion')
             .get(pk=pedido_id)
         )
     except VGPedido.DoesNotExist:
@@ -529,9 +639,9 @@ def pedido_update_view(request, pedido_id):
 
         pedido.detalles.all().delete()
 
-        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'])
+        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         for line in built_lines:
-            VGDetallePedido.objects.create(
+            detalle = VGDetallePedido.objects.create(
                 pedido=pedido,
                 producto=line['producto'],
                 cantidad=line['cantidad'],
@@ -539,6 +649,13 @@ def pedido_update_view(request, pedido_id):
                 estado='pendiente',
                 notas=line['notas'],
             )
+            for addon in line['adicionales']:
+                VGDetallePedidoAdicional.objects.create(
+                    detalle_pedido=detalle,
+                    preparacion=addon['preparacion'],
+                    cantidad=addon['cantidad'],
+                    precio_unitario=addon['precio_unitario'],
+                )
 
         total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
         pedido.subtotal = subtotal
@@ -546,7 +663,7 @@ def pedido_update_view(request, pedido_id):
         pedido.actualizado_por = request.user
         pedido.save()
 
-    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto').get(pk=pedido.id)
+    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion').get(pk=pedido.id)
     _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
 
     return _auth_response({
@@ -591,15 +708,22 @@ def admin_catalog_view(request):
         )
         preparation_cost_map = _load_preparation_cost_map()
         recipes = []
-        for preparation in VGPreparacion.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'rendimiento_cantidad', 'rendimiento_unidad'):
+        for preparation in VGPreparacion.objects.order_by('-fecha_creacion', 'nombre').values(
+            'id', 'nombre', 'rendimiento_cantidad', 'rendimiento_unidad', 'es_adicional', 'margen_ganancia',
+        ):
             components = recipe_components_by_preparation.get(preparation['id'], [])
             costs = preparation_cost_map.get(preparation['id'], {'costo_total': Decimal('0'), 'costo_unitario': Decimal('0')})
+            costo_unitario = costs['costo_unitario']
             recipes.append({
                 **preparation,
                 'componentes': components,
                 'componentes_total': len(components),
                 'costo_total': str(costs['costo_total'].quantize(Decimal('0.01'))),
-                'costo_unitario_calculado': str(costs['costo_unitario'].quantize(Decimal('0.01'))),
+                'costo_unitario_calculado': str(costo_unitario.quantize(Decimal('0.01'))),
+                'precio_venta_calculado': (
+                    str(_compute_addon_sale_price(costo_unitario, preparation['margen_ganancia']))
+                    if preparation['es_adicional'] else None
+                ),
             })
         beverages = list(
             VGProducto.objects.filter(disponible=True).select_related('categoria').order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'precio_venta', 'categoria__nombre')
@@ -727,6 +851,7 @@ def admin_catalog_view(request):
         rendimiento_cantidad = data.get('rendimiento_cantidad', '1')
         rendimiento_unidad = str(data.get('rendimiento_unidad', 'unidad')).strip() or 'unidad'
         componentes = data.get('componentes') or []
+        es_adicional = bool(data.get('es_adicional', False))
 
         try:
             rendimiento = Decimal(str(rendimiento_cantidad))
@@ -736,6 +861,15 @@ def admin_catalog_view(request):
         if rendimiento <= 0:
             return _auth_response({'ok': False, 'message': 'El rendimiento debe ser mayor a cero.'}, status=400)
 
+        margen_ganancia = None
+        if es_adicional:
+            try:
+                margen_ganancia = Decimal(str(data.get('margen_ganancia', '0') or '0'))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El margen de ganancia es inválido.'}, status=400)
+            if margen_ganancia < 0:
+                return _auth_response({'ok': False, 'message': 'El margen de ganancia no puede ser negativo.'}, status=400)
+
         if VGPreparacion.objects.filter(nombre__iexact=nombre).exists():
             return _auth_response({'ok': False, 'message': 'Ya existe una subreceta con ese nombre.'}, status=400)
 
@@ -744,6 +878,8 @@ def admin_catalog_view(request):
                 nombre=nombre,
                 rendimiento_cantidad=rendimiento,
                 rendimiento_unidad=rendimiento_unidad,
+                es_adicional=es_adicional,
+                margen_ganancia=margen_ganancia,
                 creado_por=request.user,
                 actualizado_por=request.user,
             )
@@ -797,6 +933,7 @@ def admin_catalog_view(request):
         rendimiento_cantidad = data.get('rendimiento_cantidad', preparation.rendimiento_cantidad)
         rendimiento_unidad = str(data.get('rendimiento_unidad', preparation.rendimiento_unidad or 'unidad')).strip() or 'unidad'
         componentes = data.get('componentes') or []
+        es_adicional = bool(data.get('es_adicional', preparation.es_adicional))
 
         try:
             rendimiento = Decimal(str(rendimiento_cantidad))
@@ -806,6 +943,15 @@ def admin_catalog_view(request):
         if rendimiento <= 0:
             return _auth_response({'ok': False, 'message': 'El rendimiento debe ser mayor a cero.'}, status=400)
 
+        margen_ganancia = None
+        if es_adicional:
+            try:
+                margen_ganancia = Decimal(str(data.get('margen_ganancia', preparation.margen_ganancia or '0') or '0'))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El margen de ganancia es inválido.'}, status=400)
+            if margen_ganancia < 0:
+                return _auth_response({'ok': False, 'message': 'El margen de ganancia no puede ser negativo.'}, status=400)
+
         if VGPreparacion.objects.filter(nombre__iexact=nombre).exclude(pk=preparation.pk).exists():
             return _auth_response({'ok': False, 'message': 'Ya existe otra subreceta con ese nombre.'}, status=400)
 
@@ -813,8 +959,10 @@ def admin_catalog_view(request):
             preparation.nombre = nombre
             preparation.rendimiento_cantidad = rendimiento
             preparation.rendimiento_unidad = rendimiento_unidad
+            preparation.es_adicional = es_adicional
+            preparation.margen_ganancia = margen_ganancia
             preparation.actualizado_por = request.user
-            preparation.save(update_fields=['nombre', 'rendimiento_cantidad', 'rendimiento_unidad', 'actualizado_por', 'fecha_actualizacion'])
+            preparation.save(update_fields=['nombre', 'rendimiento_cantidad', 'rendimiento_unidad', 'es_adicional', 'margen_ganancia', 'actualizado_por', 'fecha_actualizacion'])
 
             preparation.componentes.all().delete()
 
@@ -1380,6 +1528,10 @@ def _serialize_product(product):
         'disponible': product.disponible,
         'tiempo_preparacion_min': product.tiempo_preparacion_min,
         'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
+        'receta_vinculada_id': product.receta_vinculada_id,
+        'receta_vinculada_nombre': product.receta_vinculada.nombre if product.receta_vinculada_id else '',
+        'subreceta_vinculada_id': product.subreceta_vinculada_id,
+        'subreceta_vinculada_nombre': product.subreceta_vinculada.nombre if product.subreceta_vinculada_id else '',
     }
 
 
@@ -1432,13 +1584,19 @@ def admin_products_view(request):
         categories = VGCategoriaProducto.objects.exclude(nombre__iexact='Recetas').order_by('nombre')
         products = (
             VGProducto.objects.exclude(categoria__nombre__iexact='Recetas')
-            .select_related('categoria')
+            .select_related('categoria', 'receta_vinculada', 'subreceta_vinculada')
             .order_by('nombre')
         )
+        recetas = list(
+            VGProducto.objects.filter(categoria__nombre__iexact='Recetas').order_by('nombre').values('id', 'nombre')
+        )
+        subrecetas = list(VGPreparacion.objects.order_by('nombre').values('id', 'nombre'))
         return _auth_response({
             'ok': True,
             'products': [_serialize_product(product) for product in products],
             'categories': [_serialize_product_category(category) for category in categories],
+            'recetas': recetas,
+            'subrecetas': subrecetas,
         })
 
     is_multipart = bool(request.content_type) and request.content_type.startswith('multipart/form-data')
@@ -1509,6 +1667,21 @@ def admin_products_view(request):
     except (TypeError, ValueError):
         return _auth_response({'ok': False, 'message': 'El tiempo de preparación no es válido.'}, status=400)
 
+    vinculo_tipo = str(data.get('vinculo_tipo', '') or '').strip().lower()
+    vinculo_id = data.get('vinculo_id')
+    receta_vinculada = None
+    subreceta_vinculada = None
+    if vinculo_tipo == 'receta':
+        try:
+            receta_vinculada = VGProducto.objects.filter(categoria__nombre__iexact='Recetas').get(pk=int(vinculo_id))
+        except (ValueError, TypeError, VGProducto.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La receta seleccionada no existe.'}, status=400)
+    elif vinculo_tipo == 'subreceta':
+        try:
+            subreceta_vinculada = VGPreparacion.objects.get(pk=int(vinculo_id))
+        except (ValueError, TypeError, VGPreparacion.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La subreceta seleccionada no existe.'}, status=400)
+
     product = None
     if action == 'update':
         product_id = data.get('id')
@@ -1537,6 +1710,8 @@ def admin_products_view(request):
             imagen_url=imagen_url,
             disponible=disponible,
             tiempo_preparacion_min=tiempo_preparacion,
+            receta_vinculada=receta_vinculada,
+            subreceta_vinculada=subreceta_vinculada,
             creado_por=request.user,
             actualizado_por=request.user,
         )
@@ -1550,6 +1725,8 @@ def admin_products_view(request):
         product.imagen_url = imagen_url
         product.disponible = disponible
         product.tiempo_preparacion_min = tiempo_preparacion
+        product.receta_vinculada = receta_vinculada
+        product.subreceta_vinculada = subreceta_vinculada
         product.actualizado_por = request.user
         product.save()
         message = 'Producto actualizado correctamente.'
@@ -2207,7 +2384,14 @@ def kitchen_orders_view(request):
     pedidos = (
         base_queryset
         .select_related('mesa', 'usuario')
-        .prefetch_related('detalles__producto')
+        .prefetch_related(
+            'detalles__producto',
+            'detalles__adicionales__preparacion',
+            'detalles__producto__receta_vinculada__receta__ingrediente',
+            'detalles__producto__receta_vinculada__receta__preparacion',
+            'detalles__producto__subreceta_vinculada__componentes__ingrediente',
+            'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
+        )
         .order_by('fecha_creacion')[:limit]
     )
 
@@ -2232,6 +2416,8 @@ def kitchen_orders_view(request):
                     'cantidad': detalle.cantidad,
                     'estado': detalle.estado,
                     'notas': detalle.notas,
+                    'adicionales': _serialize_detalle_adicionales(detalle),
+                    'composicion': detalle.producto.nombres_composicion(),
                 }
                 for detalle in pedido.detalles.all()
             ],
@@ -2323,7 +2509,7 @@ def pedidos_cobro_view(request):
         pedidos = (
             VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
             .select_related('mesa', 'cliente', 'usuario')
-            .prefetch_related('detalles__producto')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion')
             .order_by('mesa__numero', 'fecha_creacion')
         )
         return _auth_response({
@@ -2351,6 +2537,7 @@ def pedidos_cobro_view(request):
                             'cantidad': detalle.cantidad,
                             'precio_unitario': str(detalle.precio_unitario),
                             'notas': detalle.notas,
+                            'adicionales': _serialize_detalle_adicionales(detalle),
                         }
                         for detalle in pedido.detalles.all()
                     ],

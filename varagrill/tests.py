@@ -9,12 +9,14 @@ from varagrill.models import (
     VGCompra,
     VGDetalleCompra,
     VGDetallePedido,
+    VGDetallePedidoAdicional,
     VGIngrediente,
     VGMovimientoInventario,
     VGPedido,
     VGPreparacion,
     VGProducto,
     VGRecetaPreparacion,
+    VGRecetaProducto,
     VGRol,
     VGUsuario,
 )
@@ -568,3 +570,151 @@ class KitchenOrdersApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertFalse(notify_mock.called)
+
+
+class PedidoCobroInventoryDeductionTests(TestCase):
+    """
+    Al cobrar un pedido, el inventario debe descontarse según la receta de cada producto:
+    ingredientes directos, subrecetas prorrateadas por rendimiento (incluyendo subrecetas
+    anidadas), productos vinculados a una receta/subreceta, y adicionales.
+    """
+
+    def setUp(self):
+        self.cajero_role, _ = VGRol.objects.get_or_create(nombre_role='Cajero')
+        self.user = VGUsuario.objects.create_user(
+            username='cajera',
+            password='claveCajera123',
+            cedula='33345680',
+            email='cajera@varagrill.test',
+            id_role=self.cajero_role,
+        )
+        self.client.force_login(self.user)
+        self.category = VGCategoriaProducto.objects.create(nombre='Platos')
+
+    def _cobrar(self, pedido_ids):
+        return self.client.post(
+            '/api/pedidos/cobro/',
+            data=json.dumps({'pedido_ids': pedido_ids, 'metodo_pago': 'efectivo'}),
+            content_type='application/json',
+        )
+
+    def test_cobro_deducts_direct_ingredient_from_stock(self):
+        arroz = VGIngrediente.objects.create(
+            nombre='Arroz', unidad_medida='g', stock_actual='5000', costo_unitario='0.01',
+        )
+        plato = VGProducto.objects.create(
+            nombre='Arroz blanco', categoria=self.category, precio_venta='3.00', disponible=True,
+        )
+        VGRecetaProducto.objects.create(producto=plato, ingrediente=arroz, cantidad_requerida='150.000')
+
+        pedido = VGPedido.objects.create(
+            usuario=self.user, tipo_pedido='local', estado='listo', subtotal='6.00', total='6.00',
+        )
+        VGDetallePedido.objects.create(
+            pedido=pedido, producto=plato, cantidad=2, precio_unitario='3.00', estado='listo',
+        )
+
+        response = self._cobrar([pedido.id])
+
+        self.assertEqual(response.status_code, 201)
+        arroz.refresh_from_db()
+        # 150g x 2 platos = 300g descontados de 5000g
+        self.assertEqual(arroz.stock_actual, Decimal('4700.00'))
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, 'pagado')
+        movimiento = VGMovimientoInventario.objects.get(ingrediente=arroz, id_referencia=pedido.id)
+        self.assertEqual(movimiento.tipo_movimiento, 'salida')
+        self.assertEqual(movimiento.cantidad, Decimal('300.00'))
+
+    def test_cobro_prorates_subreceta_by_rendimiento_including_nested(self):
+        tomate = VGIngrediente.objects.create(
+            nombre='Tomate', unidad_medida='g', stock_actual='10000', costo_unitario='0.01',
+        )
+        base = VGPreparacion.objects.create(
+            nombre='Base de tomate', rendimiento_cantidad='500.000', rendimiento_unidad='g',
+        )
+        VGRecetaPreparacion.objects.create(preparacion=base, ingrediente=tomate, cantidad_requerida='500.000')
+
+        salsa = VGPreparacion.objects.create(
+            nombre='Salsa de la casa', rendimiento_cantidad='1000.000', rendimiento_unidad='g',
+        )
+        VGRecetaPreparacion.objects.create(preparacion=salsa, sub_preparacion=base, cantidad_requerida='400.000')
+
+        plato = VGProducto.objects.create(
+            nombre='Pasta con salsa', categoria=self.category, precio_venta='8.00', disponible=True,
+        )
+        # El plato lleva 200g de una salsa cuyo lote rinde 1000g (usa 1/5 del lote).
+        VGRecetaProducto.objects.create(producto=plato, preparacion=salsa, cantidad_requerida='200.000')
+
+        pedido = VGPedido.objects.create(
+            usuario=self.user, tipo_pedido='local', estado='listo', subtotal='8.00', total='8.00',
+        )
+        VGDetallePedido.objects.create(
+            pedido=pedido, producto=plato, cantidad=1, precio_unitario='8.00', estado='listo',
+        )
+
+        response = self._cobrar([pedido.id])
+
+        self.assertEqual(response.status_code, 201)
+        tomate.refresh_from_db()
+        # 200g de salsa -> 1/5 del lote de 1000g -> 1/5 de 400g de base -> 80g de base
+        # 80g de base -> 80/500 del lote de base -> 16% de 500g de tomate -> 80g de tomate
+        self.assertEqual(tomate.stock_actual, Decimal('9920.00'))
+
+    def test_cobro_deducts_ingredients_for_producto_vinculado_a_receta(self):
+        pollo = VGIngrediente.objects.create(
+            nombre='Pollo', unidad_medida='g', stock_actual='3000', costo_unitario='0.02',
+        )
+        recetas_category = VGCategoriaProducto.objects.get_or_create(nombre='Recetas')[0]
+        receta_maestra = VGProducto.objects.create(
+            nombre='Pollo a la plancha (receta)', categoria=recetas_category, precio_venta='0', disponible=False,
+        )
+        VGRecetaProducto.objects.create(producto=receta_maestra, ingrediente=pollo, cantidad_requerida='250.000')
+
+        plato_vendible = VGProducto.objects.create(
+            nombre='Pollo a la plancha', categoria=self.category, precio_venta='9.50', disponible=True,
+            receta_vinculada=receta_maestra,
+        )
+
+        pedido = VGPedido.objects.create(
+            usuario=self.user, tipo_pedido='local', estado='entregado', subtotal='9.50', total='9.50',
+        )
+        VGDetallePedido.objects.create(
+            pedido=pedido, producto=plato_vendible, cantidad=1, precio_unitario='9.50', estado='entregado',
+        )
+
+        response = self._cobrar([pedido.id])
+
+        self.assertEqual(response.status_code, 201)
+        pollo.refresh_from_db()
+        self.assertEqual(pollo.stock_actual, Decimal('2750.00'))
+
+    def test_cobro_deducts_ingredients_for_adicional(self):
+        queso = VGIngrediente.objects.create(
+            nombre='Queso', unidad_medida='g', stock_actual='2000', costo_unitario='0.03',
+        )
+        extra_queso = VGPreparacion.objects.create(
+            nombre='Queso extra', rendimiento_cantidad='1000.000', rendimiento_unidad='g', es_adicional=True,
+        )
+        VGRecetaPreparacion.objects.create(preparacion=extra_queso, ingrediente=queso, cantidad_requerida='1000.000')
+
+        plato = VGProducto.objects.create(
+            nombre='Hamburguesa', categoria=self.category, precio_venta='6.00', disponible=True,
+        )
+
+        pedido = VGPedido.objects.create(
+            usuario=self.user, tipo_pedido='local', estado='listo', subtotal='6.00', total='6.00',
+        )
+        detalle = VGDetallePedido.objects.create(
+            pedido=pedido, producto=plato, cantidad=1, precio_unitario='6.00', estado='listo',
+        )
+        VGDetallePedidoAdicional.objects.create(
+            detalle_pedido=detalle, preparacion=extra_queso, cantidad=100, precio_unitario='0.30',
+        )
+
+        response = self._cobrar([pedido.id])
+
+        self.assertEqual(response.status_code, 201)
+        queso.refresh_from_db()
+        # 100g de "queso extra" a partir de un lote 1:1 -> 100g de queso descontados.
+        self.assertEqual(queso.stock_actual, Decimal('1900.00'))

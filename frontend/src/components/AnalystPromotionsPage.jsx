@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 50;
 
 function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onSelectBulk }) {
   const [products, setProducts] = useState([]);
@@ -7,6 +10,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [page, setPage] = useState(0);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -77,9 +81,13 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
     });
   }, [products, search]);
 
+  const pageCount = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pagedProducts = filteredProducts.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+
   const selectableProducts = useMemo(
-    () => filteredProducts.filter((product) => !product.promocion_activa),
-    [filteredProducts],
+    () => pagedProducts.filter((product) => !product.promocion_activa),
+    [pagedProducts],
   );
   const allVisibleSelected = selectableProducts.length > 0
     && selectableProducts.every((product) => selectedIds.has(product.id));
@@ -115,7 +123,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al panel del analista
+          ← Volver al panel del analista
         </button>
       </section>
     );
@@ -123,6 +131,10 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
 
   return (
     <section style={containerStyle(isMobile)}>
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        ← Volver al panel del analista
+      </button>
+
       <div style={badgeStyle}>Promociones</div>
       <div style={headerRowStyle(isMobile)}>
         <div>
@@ -183,7 +195,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
               <div style={tableHeadStyle}>Estado</div>
               <div style={tableHeadStyle}>Acciones</div>
 
-              {filteredProducts.map((product) => (
+              {pagedProducts.map((product) => (
                 <>
                   <div key={`select-${product.id}`} style={tableCellStyle}>
                     <input
@@ -195,8 +207,19 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
                     />
                   </div>
                   <div key={`name-${product.id}`} style={tableCellPrimaryStyle}>
-                    <div style={productNameStyle}>{product.nombre}</div>
-                    <div style={productMetaStyle}>ID #{product.id}</div>
+                    <div style={productRowStyle}>
+                      <div style={productThumbWrapStyle}>
+                        {product.imagen_url ? (
+                          <img src={product.imagen_url} alt={product.nombre} style={productThumbImgStyle} loading="lazy" />
+                        ) : (
+                          <div style={productThumbPlaceholderStyle}>{(product.nombre || '?').charAt(0).toUpperCase()}</div>
+                        )}
+                      </div>
+                      <div>
+                        <div style={productNameStyle}>{product.nombre}</div>
+                        <div style={productMetaStyle}>ID #{product.id}</div>
+                      </div>
+                    </div>
                   </div>
                   <div key={`category-${product.id}`} style={tableCellStyle}>
                     {product.categoria || 'Sin categoría'}
@@ -235,11 +258,17 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
             </div>
           </div>
         ) : null}
-      </section>
 
-      <button type="button" onClick={onBack} style={backButtonStyle}>
-        Volver al panel del analista
-      </button>
+        <Pagination
+          page={currentPage}
+          pageCount={pageCount}
+          totalCount={filteredProducts.length}
+          pageSize={PAGE_SIZE}
+          isMobile={isMobile}
+          onPrev={() => setPage((current) => Math.max(0, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+        />
+      </section>
     </section>
   );
 }
@@ -374,6 +403,39 @@ const tableCellActionStyle = {
   flexWrap: 'wrap',
 };
 
+const productRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+};
+
+const productThumbWrapStyle = {
+  width: 44,
+  height: 44,
+  borderRadius: 10,
+  overflow: 'hidden',
+  flexShrink: 0,
+  background: 'rgba(255,255,255,0.04)',
+};
+
+const productThumbImgStyle = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  display: 'block',
+};
+
+const productThumbPlaceholderStyle = {
+  width: '100%',
+  height: '100%',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 16,
+  fontWeight: 800,
+  color: '#7a5f5f',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+};
+
 const productNameStyle = {
   color: '#fff',
   fontWeight: 700,
@@ -453,14 +515,19 @@ const bulkTextStyle = {
 };
 
 const backButtonStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
   justifySelf: 'flex-start',
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  width: 'fit-content',
+  border: 'none',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
+  background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
+  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
 };
 
 export default AnalystPromotionsPage;

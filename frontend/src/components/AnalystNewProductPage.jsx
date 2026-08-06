@@ -58,6 +58,10 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
     setForm((current) => ({ ...current, [field]: value }));
   };
 
+  const selectedVinculo = form.vinculo_id
+    ? (form.vinculo_tipo === 'receta' ? recetas : subrecetas).find((item) => String(item.id) === String(form.vinculo_id))
+    : null;
+
   const handleImageChange = (event) => {
     const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
     setImageFile(file);
@@ -199,12 +203,33 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
                     <select value={form.vinculo_id} onChange={(event) => handleChange('vinculo_id', event.target.value)} style={inputStyle}>
                       <option value="">Selecciona...</option>
                       {(form.vinculo_tipo === 'receta' ? recetas : subrecetas).map((item) => (
-                        <option key={item.id} value={item.id}>{item.nombre}</option>
+                        <option key={item.id} value={item.id}>
+                          {item.nombre} — costo unitario: ${Number(item.costo_unitario_calculado || 0).toFixed(2)}
+                        </option>
                       ))}
                     </select>
                   </label>
                 ) : null}
               </div>
+
+              {selectedVinculo ? (
+                <div style={costReferenceBoxStyle}>
+                  <div>
+                    <div style={costReferenceLabelStyle}>Costo unitario calculado de "{selectedVinculo.nombre}"</div>
+                    <div style={costReferenceValueStyle}>${Number(selectedVinculo.costo_unitario_calculado || 0).toFixed(2)}</div>
+                    <p style={costReferenceHintStyle}>
+                      Es la suma del costo de los ingredientes/subrecetas de esta receta. Úsalo como referencia para definir el costo real del producto (empaque, mano de obra, etc.).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleChange('costo_estimado', selectedVinculo.costo_unitario_calculado)}
+                    style={useCostButtonStyle}
+                  >
+                    Usar este valor
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <label style={fieldStyle}>
@@ -346,6 +371,51 @@ const linkHintStyle = {
   margin: 0,
   color: '#c2adad',
   fontSize: 12.5,
+};
+
+const costReferenceBoxStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 14,
+  flexWrap: 'wrap',
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid rgba(120, 220, 160, 0.35)',
+  background: 'rgba(70, 200, 120, 0.08)',
+};
+
+const costReferenceLabelStyle = {
+  color: '#bdf0cf',
+  fontSize: 12,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+};
+
+const costReferenceValueStyle = {
+  color: '#7dffa0',
+  fontSize: 22,
+  fontWeight: 800,
+  marginTop: 2,
+};
+
+const costReferenceHintStyle = {
+  margin: '4px 0 0',
+  color: '#c2adad',
+  fontSize: 12,
+  maxWidth: 480,
+};
+
+const useCostButtonStyle = {
+  border: '1px solid rgba(125, 255, 160, 0.4)',
+  borderRadius: 999,
+  padding: '9px 14px',
+  background: 'rgba(125, 255, 160, 0.12)',
+  color: '#bdf0cf',
+  fontWeight: 700,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
 
 const previewWrapStyle = {

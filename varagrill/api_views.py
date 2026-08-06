@@ -162,6 +162,31 @@ def _notify_cocina_event(event_name, pedido, actor_user):
             pass
 
 
+def _notify_usuario_event(event_name, pedido, actor_user):
+    """Avisa por el grupo personal del mesero dueño del pedido (ej: cocina lo marcó listo)."""
+    channel_layer = get_channel_layer()
+    if channel_layer is None or not pedido.usuario_id:
+        return
+
+    payload = {
+        'event': event_name,
+        'pedido_id': pedido.id,
+        'mesa': pedido.mesa.numero if pedido.mesa else None,
+        'estado': pedido.estado,
+        'tipo_pedido': pedido.tipo_pedido,
+        'actor': actor_user.username,
+        'actor_role': _get_role_name(actor_user),
+    }
+
+    async_to_sync(channel_layer.group_send)(
+        f'usuario_{pedido.usuario_id}_notifications',
+        {
+            'type': 'usuario_order_notification',
+            'payload': payload,
+        },
+    )
+
+
 def _active_promotions_by_product(product_ids=None):
     today = timezone.localdate()
     queryset = VGPromocion.objects.filter(activo=True, fecha_inicio__lte=today, fecha_fin__gte=today)
@@ -229,8 +254,14 @@ def _compute_preparation_cost_map(components_by_preparation, ingredient_costs, y
     return results
 
 
-def _load_preparation_cost_map():
-    """Consulta VGRecetaPreparacion/VGIngrediente/VGPreparacion y devuelve el costo calculado de cada subreceta."""
+def _load_preparation_structure():
+    """
+    Consulta VGRecetaPreparacion/VGPreparacion y arma la estructura del árbol de subrecetas,
+    compartida por el costeo (_load_preparation_cost_map) y el descuento de inventario al cobrar
+    (_compute_pedido_ingredient_needs).
+
+    Devuelve (components_by_preparation, yields_by_preparation).
+    """
     components_by_preparation = {}
     for component in VGRecetaPreparacion.objects.all():
         preparation_id = component.preparacion_id
@@ -248,10 +279,108 @@ def _load_preparation_cost_map():
                 'cantidad': component.cantidad_requerida,
             })
 
-    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
     yields_by_preparation = dict(VGPreparacion.objects.values_list('id', 'rendimiento_cantidad'))
+    return components_by_preparation, yields_by_preparation
 
+
+def _load_preparation_cost_map():
+    """Consulta VGRecetaPreparacion/VGIngrediente/VGPreparacion y devuelve el costo calculado de cada subreceta."""
+    components_by_preparation, yields_by_preparation = _load_preparation_structure()
+    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
     return _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
+
+
+def _product_recipe_components(product):
+    """
+    Componentes (ingrediente o subreceta) que se descuentan al vender 1 unidad de `product`.
+    Si el producto está vinculado a una receta o a una subreceta (receta_vinculada /
+    subreceta_vinculada), usa los componentes de esa receta/subreceta en vez de su propia tabla
+    `receta`, que para productos vinculados está vacía — así una misma receta maestra puede
+    venderse bajo varios productos (ej. distintas presentaciones o precios) sin duplicarla.
+    """
+    if product.receta_vinculada_id:
+        source = product.receta_vinculada.receta.all()
+        return [
+            {
+                'tipo': 'ingrediente' if component.ingrediente_id else 'preparacion',
+                'referencia_id': component.ingrediente_id or component.preparacion_id,
+                'cantidad': component.cantidad_requerida,
+            }
+            for component in source
+        ]
+    if product.subreceta_vinculada_id:
+        source = product.subreceta_vinculada.componentes.all()
+        return [
+            {
+                'tipo': 'ingrediente' if component.ingrediente_id else 'preparacion',
+                'referencia_id': component.ingrediente_id or component.sub_preparacion_id,
+                'cantidad': component.cantidad_requerida,
+            }
+            for component in source
+        ]
+    return [
+        {
+            'tipo': 'ingrediente' if component.ingrediente_id else 'preparacion',
+            'referencia_id': component.ingrediente_id or component.preparacion_id,
+            'cantidad': component.cantidad_requerida,
+        }
+        for component in product.receta.all()
+    ]
+
+
+def _add_preparation_needs(prep_id, quantity_needed, components_by_preparation, yields_by_preparation, needs, resolving):
+    """
+    Descompone `quantity_needed` unidades de la subreceta `prep_id` en ingredientes crudos,
+    prorrateando cada componente por rendimiento_cantidad (ej: si el plato lleva 200g de una
+    salsa cuyo lote rinde 1000g, se descuenta 1/5 de cada ingrediente de esa salsa), y
+    recursando en sub-subrecetas anidadas. Acumula el resultado en `needs`
+    ({ingrediente_id: Decimal}). Si hay un ciclo, esa rama se ignora en vez de recursar infinito.
+    """
+    if prep_id in resolving:
+        return
+    resolving.add(prep_id)
+
+    rendimiento = yields_by_preparation.get(prep_id) or Decimal('1')
+    factor = (quantity_needed / rendimiento) if rendimiento > 0 else Decimal('0')
+    for component in components_by_preparation.get(prep_id, []):
+        amount = factor * component['cantidad']
+        if component['tipo'] == 'ingrediente':
+            needs[component['referencia_id']] = needs.get(component['referencia_id'], Decimal('0')) + amount
+        else:
+            _add_preparation_needs(
+                component['referencia_id'], amount, components_by_preparation, yields_by_preparation, needs, resolving,
+            )
+
+    resolving.discard(prep_id)
+
+
+def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation):
+    """
+    Cuánto de cada VGIngrediente hay que descontar del inventario al cobrar `pedido`: recorre
+    cada línea (VGDetallePedido) y sus adicionales (VGDetallePedidoAdicional), expandiendo
+    recetas/subrecetas hasta llegar a ingredientes crudos.
+
+    Devuelve {ingrediente_id: Decimal cantidad}.
+    """
+    needs = {}
+    for detalle in pedido.detalles.all():
+        cantidad_platos = Decimal(detalle.cantidad)
+        for component in _product_recipe_components(detalle.producto):
+            amount = component['cantidad'] * cantidad_platos
+            if component['tipo'] == 'ingrediente':
+                needs[component['referencia_id']] = needs.get(component['referencia_id'], Decimal('0')) + amount
+            else:
+                _add_preparation_needs(
+                    component['referencia_id'], amount, components_by_preparation, yields_by_preparation, needs, set(),
+                )
+
+        for addon in detalle.adicionales.all():
+            _add_preparation_needs(
+                addon.preparacion_id, Decimal(addon.cantidad),
+                components_by_preparation, yields_by_preparation, needs, set(),
+            )
+
+    return needs
 
 
 def _compute_product_recipe_cost(product, preparation_cost_map):
@@ -1587,10 +1716,32 @@ def admin_products_view(request):
             .select_related('categoria', 'receta_vinculada', 'subreceta_vinculada')
             .order_by('nombre')
         )
-        recetas = list(
-            VGProducto.objects.filter(categoria__nombre__iexact='Recetas').order_by('nombre').values('id', 'nombre')
-        )
-        subrecetas = list(VGPreparacion.objects.order_by('nombre').values('id', 'nombre'))
+        preparation_cost_map = _load_preparation_cost_map()
+        recetas = [
+            {
+                'id': receta.id,
+                'nombre': receta.nombre,
+                'costo_unitario_calculado': str(
+                    _compute_product_recipe_cost(receta, preparation_cost_map).quantize(Decimal('0.01'))
+                ),
+            }
+            for receta in (
+                VGProducto.objects.filter(categoria__nombre__iexact='Recetas')
+                .prefetch_related('receta__ingrediente', 'receta__preparacion')
+                .order_by('nombre')
+            )
+        ]
+        subrecetas = [
+            {
+                'id': preparation['id'],
+                'nombre': preparation['nombre'],
+                'costo_unitario_calculado': str(
+                    preparation_cost_map.get(preparation['id'], {'costo_unitario': Decimal('0')})['costo_unitario']
+                    .quantize(Decimal('0.01'))
+                ),
+            }
+            for preparation in VGPreparacion.objects.order_by('nombre').values('id', 'nombre')
+        ]
         return _auth_response({
             'ok': True,
             'products': [_serialize_product(product) for product in products],
@@ -1990,6 +2141,7 @@ def admin_promotions_view(request):
                     'id': product.id,
                     'nombre': product.nombre,
                     'categoria': product.categoria.nombre if product.categoria else '',
+                    'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
                     'precio_venta': str(product.precio_venta),
                     'promocion_activa': product.id in active_promotions,
                     'promocion': (
@@ -2197,6 +2349,7 @@ def promociones_activas_view(request):
             'producto_id': product.id,
             'producto_nombre': product.nombre,
             'categoria': product.categoria.nombre if product.categoria else '',
+            'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
             'precio_original': str(precio_original.quantize(Decimal('0.01'))),
             'precio_descuento': str(precio_descuento.quantize(Decimal('0.01'))),
             'porcentaje_descuento': str(porcentaje.quantize(Decimal('0.1'))),
@@ -2227,6 +2380,7 @@ def recomendaciones_chef_activas_view(request):
             'producto_id': recommendation.producto.id,
             'producto_nombre': recommendation.producto.nombre,
             'categoria': recommendation.producto.categoria.nombre if recommendation.producto.categoria else '',
+            'imagen_url': f'/api/productos/{recommendation.producto.id}/imagen/' if recommendation.producto.imagen_url else '',
             'precio_venta': str(recommendation.producto.precio_venta),
             'comentario_chef': recommendation.comentario_chef,
             'fecha': recommendation.fecha.isoformat(),
@@ -2264,6 +2418,10 @@ def admin_chef_recommendations_view(request):
                     'categoria': (
                         recommendation.producto.categoria.nombre
                         if recommendation.producto and recommendation.producto.categoria else ''
+                    ),
+                    'imagen_url': (
+                        f'/api/productos/{recommendation.producto_id}/imagen/'
+                        if recommendation.producto and recommendation.producto.imagen_url else ''
                     ),
                     'comentario_chef': recommendation.comentario_chef,
                     'fecha': recommendation.fecha.isoformat(),
@@ -2483,6 +2641,8 @@ def kitchen_order_status_update_view(request, pedido_id):
             pedido.detalles.filter(estado='listo').update(estado='entregado')
 
     _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
+    if next_state == 'listo':
+        _notify_usuario_event('PEDIDO_LISTO', pedido, request.user)
 
     return _auth_response({
         'ok': True,
@@ -2568,7 +2728,19 @@ def pedidos_cobro_view(request):
     referencia = f'COBRO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{pedido_ids[0]}'
 
     with transaction.atomic():
-        pedidos = list(VGPedido.objects.select_for_update().filter(pk__in=pedido_ids))
+        pedidos = list(
+            VGPedido.objects.select_for_update()
+            .filter(pk__in=pedido_ids)
+            .prefetch_related(
+                'detalles__producto__receta__ingrediente',
+                'detalles__producto__receta__preparacion',
+                'detalles__producto__receta_vinculada__receta__ingrediente',
+                'detalles__producto__receta_vinculada__receta__preparacion',
+                'detalles__producto__subreceta_vinculada__componentes__ingrediente',
+                'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
+                'detalles__adicionales__preparacion',
+            )
+        )
         found_ids = {pedido.id for pedido in pedidos}
         missing_ids = sorted(set(pedido_ids) - found_ids)
         if missing_ids:
@@ -2587,6 +2759,8 @@ def pedidos_cobro_view(request):
                 status=409,
             )
 
+        components_by_preparation, yields_by_preparation = _load_preparation_structure()
+
         total_cobrado = Decimal('0')
         for pedido in pedidos:
             VGPago.objects.create(
@@ -2601,6 +2775,27 @@ def pedidos_cobro_view(request):
             pedido.actualizado_por = request.user
             pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
             total_cobrado += pedido.total
+
+            needs = _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation)
+            if needs:
+                ingredients_by_id = {
+                    ingredient.id: ingredient
+                    for ingredient in VGIngrediente.objects.select_for_update().filter(id__in=needs.keys())
+                }
+                for ingrediente_id, cantidad in needs.items():
+                    ingredient = ingredients_by_id.get(ingrediente_id)
+                    if ingredient is None or cantidad <= 0:
+                        continue
+                    ingredient.stock_actual = ingredient.stock_actual - cantidad
+                    ingredient.save(update_fields=['stock_actual'])
+                    VGMovimientoInventario.objects.create(
+                        ingrediente=ingredient,
+                        tipo_movimiento='salida',
+                        cantidad=cantidad,
+                        motivo=f'Venta — Pedido #{pedido.id}',
+                        id_referencia=pedido.id,
+                        creado_por=request.user,
+                    )
 
     return _auth_response({
         'ok': True,

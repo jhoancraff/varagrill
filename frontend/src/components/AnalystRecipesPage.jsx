@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 50;
 
 function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEditRecipe }) {
   const [recipes, setRecipes] = useState([]);
@@ -6,6 +9,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -47,6 +51,10 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
     });
   }, [recipes, search]);
 
+  const pageCount = Math.max(1, Math.ceil(filteredRecipes.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pagedRecipes = filteredRecipes.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+
   const handleDelete = async (recipe) => {
     if (!window.confirm(`¿Deseas eliminar la receta ${recipe.nombre}?`)) {
       return;
@@ -80,7 +88,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al panel del analista
+          ← Volver al panel del analista
         </button>
       </section>
     );
@@ -88,6 +96,10 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
 
   return (
     <section style={containerStyle(isMobile)}>
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        ← Volver al panel del analista
+      </button>
+
       <div style={badgeStyle}>Recetas</div>
       <div style={headerRowStyle(isMobile)}>
         <div>
@@ -124,7 +136,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
               <div style={tableHeadStyle}>Costo</div>
               <div style={tableHeadStyle}>Acciones</div>
 
-              {filteredRecipes.map((recipe) => (
+              {pagedRecipes.map((recipe) => (
                 <>
                   <div key={`name-${recipe.id}`} style={tableCellPrimaryStyle}>
                     <div style={recipeNameStyle}>{recipe.nombre}</div>
@@ -155,11 +167,17 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
             </div>
           </div>
         ) : null}
-      </section>
 
-      <button type="button" onClick={onBack} style={backButtonStyle}>
-        Volver al panel del analista
-      </button>
+        <Pagination
+          page={currentPage}
+          pageCount={pageCount}
+          totalCount={filteredRecipes.length}
+          pageSize={PAGE_SIZE}
+          isMobile={isMobile}
+          onPrev={() => setPage((current) => Math.max(0, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+        />
+      </section>
     </section>
   );
 }
@@ -355,14 +373,19 @@ const dangerButtonStyle = {
 };
 
 const backButtonStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
   justifySelf: 'flex-start',
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  width: 'fit-content',
+  border: 'none',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
+  background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
+  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
 };
 
 export default AnalystRecipesPage;

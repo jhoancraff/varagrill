@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 50;
 
 function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, onEditProduct, onProductsChanged }) {
   const [products, setProducts] = useState([]);
@@ -6,6 +9,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(0);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -74,16 +78,23 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al panel del analista
+          ← Volver al panel del analista
         </button>
       </section>
     );
   }
 
   const availableCount = products.filter((product) => Boolean(product.disponible)).length;
+  const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pagedProducts = products.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
 
   return (
     <section style={containerStyle(isMobile)}>
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        ← Volver al panel del analista
+      </button>
+
       <div style={badgeStyle}>Productos</div>
       <div style={headerRowStyle(isMobile)}>
         <div>
@@ -134,7 +145,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
               <div style={tableHeadStyle}>Estado</div>
               <div style={tableHeadStyle}>Acciones</div>
 
-              {products.map((product) => (
+              {pagedProducts.map((product) => (
                 <>
                   <div key={`product-${product.id}`} style={tableCellPrimaryStyle}>
                     <div style={nameStyle}>{product.nombre || 'Sin nombre'}</div>
@@ -167,14 +178,21 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
             </div>
           </div>
         ) : null}
+
+        <Pagination
+          page={currentPage}
+          pageCount={pageCount}
+          totalCount={products.length}
+          pageSize={PAGE_SIZE}
+          isMobile={isMobile}
+          onPrev={() => setPage((current) => Math.max(0, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+        />
       </section>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button type="button" onClick={loadProducts} style={secondaryButtonStyle} disabled={loading || saving}>
           Recargar productos
-        </button>
-        <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al panel del analista
         </button>
       </div>
     </section>
@@ -425,8 +443,18 @@ const dangerButtonStyle = {
 };
 
 const backButtonStyle = {
-  ...secondaryButtonStyle,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
   width: 'fit-content',
+  border: 'none',
+  borderRadius: 12,
+  padding: '10px 14px',
+  background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
 };
 
 export default AnalystProductsPage;

@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 50;
 
 function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }) {
   const [items, setItems] = useState([]);
@@ -6,6 +9,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     const loadData = async () => {
@@ -41,6 +45,10 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
     });
   }, [items, search]);
 
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pagedItems = filtered.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+
   const handleDelete = async (item) => {
     if (!window.confirm(`Deseas eliminar la subreceta ${item.nombre}?`)) {
       return;
@@ -69,6 +77,10 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
 
   return (
     <section style={containerStyle(isMobile)}>
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        ← Volver al panel
+      </button>
+
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Reporte de subrecetas</h2>
@@ -102,7 +114,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
               <div style={headStyle}>Costo</div>
               <div style={headStyle}>Acciones</div>
 
-              {filtered.map((item) => (
+              {pagedItems.map((item) => (
                 <>
                   <div key={`name-${item.id}`} style={cellPrimaryStyle}>
                     <div style={{ fontWeight: 700 }}>{item.nombre}</div>
@@ -133,9 +145,17 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
             </div>
           </div>
         ) : null}
-      </section>
 
-      <button type="button" onClick={onBack} style={secondaryButtonStyle}>Volver al panel</button>
+        <Pagination
+          page={currentPage}
+          pageCount={pageCount}
+          totalCount={filtered.length}
+          pageSize={PAGE_SIZE}
+          isMobile={isMobile}
+          onPrev={() => setPage((current) => Math.max(0, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+        />
+      </section>
     </section>
   );
 }
@@ -160,5 +180,6 @@ const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 1
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '10px 16px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
 const addonBadgeStyle = { marginTop: 2, padding: '3px 8px', borderRadius: 999, border: '1px solid rgba(255,196,110,0.35)', background: 'rgba(255,166,0,0.12)', color: '#ffcf85', fontSize: 12, fontWeight: 700, width: 'fit-content' };
+const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default AnalystPreparationsReportPage;

@@ -24,11 +24,6 @@ function KitchenOrdersPage({
   onBack,
   isSocketConnected,
   alertPermission,
-  audioUnlocked,
-  alertDiagnostics,
-  alertMessage,
-  onUnlockAudio,
-  onRunDiagnostics,
   onRequestPermission,
   lastKitchenEvent,
   onEditOrder,
@@ -192,10 +187,6 @@ function KitchenOrdersPage({
 
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={onUnlockAudio} style={floatingAlertButtonStyle(isMobile)}>
-        {audioUnlocked ? 'Aviso listo' : 'Probar sonido'}
-      </button>
-
       <div style={headerWrapStyle}>
         <div>
           <div style={eyebrowStyle}>Panel de cocina</div>
@@ -225,23 +216,20 @@ function KitchenOrdersPage({
       <div style={alertPanelStyle(isMobile)}>
         <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
           <div style={{ color: '#fff', fontWeight: 700 }}>Alertas de cocina</div>
-          <div style={{ color: '#d6d6d6', fontSize: 12 }}>{alertMessage}</div>
+          <div style={{ color: '#d6d6d6', fontSize: 12 }}>
+            {alertPermission === 'granted'
+              ? 'Recibirás una notificación cuando llegue un pedido nuevo.'
+              : 'Activa las notificaciones para enterarte de pedidos nuevos aunque tengas otra pestaña abierta.'}
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" onClick={onUnlockAudio} style={primaryAlertButtonStyle(isMobile)}>
-            Probar sonido
-          </button>
-          <button type="button" onClick={onRunDiagnostics} style={secondaryAlertButtonStyle(isMobile)}>
-            Prueba completa
-          </button>
-          <button type="button" onClick={onRequestPermission} style={secondaryAlertButtonStyle(isMobile)}>
-            {alertPermission === 'granted' ? 'Alertas activas' : 'Activar notificaciones'}
-          </button>
+          {alertPermission !== 'granted' ? (
+            <button type="button" onClick={onRequestPermission} style={primaryAlertButtonStyle(isMobile)}>
+              Activar notificaciones
+            </button>
+          ) : null}
           <button type="button" onClick={() => fetchOrders()} style={secondaryAlertButtonStyle(isMobile)}>Actualizar</button>
-        </div>
-        <div style={{ color: '#a8a8a8', fontSize: 11, lineHeight: 1.4 }}>
-          {alertDiagnostics}
         </div>
       </div>
 
@@ -457,26 +445,6 @@ const backButtonStyle = (isMobile) => ({
   cursor: 'pointer',
   minHeight: isMobile ? 42 : 38,
   width: isMobile ? '100%' : 'auto',
-});
-
-const floatingAlertButtonStyle = (isMobile) => ({
-  position: 'fixed',
-  top: isMobile ? 12 : 16,
-  left: isMobile ? 12 : 16,
-  zIndex: 9999,
-  border: 'none',
-  borderRadius: 999,
-  padding: isMobile ? '12px 16px' : '10px 14px',
-  background: 'linear-gradient(90deg, #ff5d5d 0%, #ff8a00 100%)',
-  color: '#fff',
-  fontWeight: 800,
-  cursor: 'pointer',
-  boxShadow: '0 8px 24px rgba(255, 93, 93, 0.35)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  whiteSpace: 'nowrap',
-  pointerEvents: 'auto',
 });
 
 const alertPanelStyle = (isMobile) => ({

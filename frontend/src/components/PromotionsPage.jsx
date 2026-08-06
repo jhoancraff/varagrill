@@ -80,16 +80,23 @@ function PromotionsPage({ isMobile, onBack }) {
         <div style={gridStyle(isMobile)}>
           {filteredPromotions.map((promotion) => (
             <article key={promotion.id} style={cardStyle}>
-              <div style={cardTopRowStyle}>
-                <div style={productNameStyle}>{promotion.producto_nombre}</div>
+              <div style={cardImageWrapStyle}>
+                {promotion.imagen_url ? (
+                  <img src={promotion.imagen_url} alt={promotion.producto_nombre} style={cardImageStyle} loading="lazy" />
+                ) : (
+                  <div style={cardImagePlaceholderStyle}>{(promotion.producto_nombre || '?').charAt(0).toUpperCase()}</div>
+                )}
                 <span style={discountBadgeStyle}>-{promotion.porcentaje_descuento}%</span>
               </div>
-              <div style={categoryStyle}>{promotion.categoria || 'Sin categoría'}</div>
-              <div style={priceRowStyle}>
-                <span style={originalPriceStyle}>${promotion.precio_original}</span>
-                <span style={finalPriceStyle}>${promotion.precio_descuento}</span>
+              <div style={cardBodyStyle}>
+                <div style={productNameStyle}>{promotion.producto_nombre}</div>
+                <div style={categoryStyle}>{promotion.categoria || 'Sin categoría'}</div>
+                <div style={priceRowStyle}>
+                  <span style={originalPriceStyle}>${promotion.precio_original}</span>
+                  <span style={finalPriceStyle}>${promotion.precio_descuento}</span>
+                </div>
+                {promotion.descripcion ? <div style={descriptionStyle}>{promotion.descripcion}</div> : null}
               </div>
-              {promotion.descripcion ? <div style={descriptionStyle}>{promotion.descripcion}</div> : null}
             </article>
           ))}
         </div>
@@ -154,19 +161,43 @@ const gridStyle = (isMobile) => ({
 
 const cardStyle = {
   display: 'grid',
-  gap: 8,
-  padding: '16px 18px',
+  gap: 0,
+  overflow: 'hidden',
   borderRadius: 20,
   background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.94) 0%, rgba(10, 10, 10, 0.96) 100%)',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   boxShadow: '0 12px 28px rgba(0,0,0,0.24)',
 };
 
-const cardTopRowStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'flex-start',
+const cardImageWrapStyle = {
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '4 / 3',
+  background: 'rgba(255,255,255,0.04)',
+};
+
+const cardImageStyle = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  display: 'block',
+};
+
+const cardImagePlaceholderStyle = {
+  width: '100%',
+  height: '100%',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 30,
+  fontWeight: 800,
+  color: '#7a5f5f',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+};
+
+const cardBodyStyle = {
+  display: 'grid',
   gap: 8,
+  padding: '14px 18px 18px',
 };
 
 const productNameStyle = {
@@ -177,7 +208,9 @@ const productNameStyle = {
 };
 
 const discountBadgeStyle = {
-  flexShrink: 0,
+  position: 'absolute',
+  bottom: 8,
+  left: 8,
   padding: '4px 10px',
   borderRadius: 999,
   background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',

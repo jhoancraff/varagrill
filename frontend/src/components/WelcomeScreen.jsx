@@ -51,6 +51,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
   const [readyToBillCount, setReadyToBillCount] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
   const [lastKitchenEvent, setLastKitchenEvent] = useState(null);
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
 
   useEffect(() => {
     const handleEscapeClose = (event) => {
@@ -253,9 +254,6 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
     };
   }, []);
 
-  const normalizedRole = String(role || '').trim().toLowerCase();
-  const isKitchenRole = normalizedRole === 'cocinero';
-
   useEffect(() => {
     if (!isAdmin && activeView.startsWith('admin')) {
       setActiveView('home');
@@ -265,28 +263,58 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
   const {
     alertPermission,
     alertsEnabled,
-    audioUnlocked,
-    alertDiagnostics,
-    alertMessage,
-    triggerKitchenAlert,
-    runAlertDiagnostics,
-    unlockAudioAndTest,
+    triggerAlert,
     requestAlertPermission,
   } = useKitchenAlerts();
+
+  // Después de autenticar, si el navegador soporta notificaciones y el usuario
+  // no ha decidido nada todavía (ni a nivel de navegador ni en un intento
+  // previo dentro de la app), le preguntamos una sola vez si quiere activarlas.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      return;
+    }
+    if (Notification.permission !== 'default') {
+      return;
+    }
+    if (window.localStorage.getItem('varagrill.notificationPromptDismissed') === '1') {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setShowNotificationPrompt(true), 900);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const dismissNotificationPrompt = () => {
+    try {
+      window.localStorage.setItem('varagrill.notificationPromptDismissed', '1');
+    } catch (storageError) {
+      // Ignore storage failures (e.g. private browsing quota).
+    }
+    setShowNotificationPrompt(false);
+  };
+
+  const acceptNotificationPrompt = async () => {
+    await requestAlertPermission();
+    setShowNotificationPrompt(false);
+  };
 
   const handleKitchenSocketEvent = useCallback((message) => {
     if (!message?.event || !message.payload) {
       return;
     }
 
+    const payload = message.payload;
+    const mesaLabel = payload.mesa ? `Mesa ${payload.mesa}` : 'Sin mesa';
+
     if (message.event === 'NUEVA_COMANDAS' || message.event === 'PEDIDO_ACTUALIZADO') {
-      triggerKitchenAlert(message);
+      // Solo cocina se une al grupo que emite estos eventos (ver consumers.py),
+      // así que si este socket los recibe es porque este usuario es cocinero.
+      triggerAlert('Nueva orden en cocina', `Pedido #${payload.pedido_id || payload.order_id || 'N/A'} · ${mesaLabel}`);
       setLastKitchenEvent({ ...message, receivedAt: Date.now() });
     }
 
     if (message.event === 'NUEVA_COMANDAS') {
-      const payload = message.payload;
-      const mesaLabel = payload.mesa ? `Mesa ${payload.mesa}` : 'Sin mesa';
       setLiveNotice(`Alerta cocina: pedido #${payload.pedido_id} (${mesaLabel}) registrado por ${payload.actor}.`);
       setPendingOrdersCount((current) => current + 1);
 
@@ -294,15 +322,24 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
         setLiveNotice('');
       }, 8000);
     }
-  }, [triggerKitchenAlert]);
 
-  // Single, always-on socket connection for the whole dashboard, so alerts
-  // (sound/notification/vibration) fire no matter which view is on screen,
-  // instead of only inside the kitchen board.
+    if (message.event === 'PEDIDO_LISTO') {
+      // Aviso personal: solo llega al mesero dueño del pedido (grupo por-usuario en consumers.py).
+      triggerAlert('¡Tu pedido está listo!', `Pedido #${payload.pedido_id} · ${mesaLabel} ya puede salir a la mesa.`);
+      setLiveNotice(`Pedido #${payload.pedido_id} (${mesaLabel}) está listo para servir.`);
+      window.setTimeout(() => {
+        setLiveNotice('');
+      }, 8000);
+    }
+  }, [triggerAlert]);
+
+  // Socket único para todo el equipo autenticado: cocina recibe comandas
+  // nuevas/actualizadas y cada usuario recibe además sus propios avisos
+  // (ej. "tu pedido está listo"), sin importar en qué vista esté parado.
   const { isConnected: isKitchenSocketConnected } = useKitchenSocket({
     socketPath: '/ws/pedidos/',
     onEvent: handleKitchenSocketEvent,
-    enabled: isKitchenRole,
+    enabled: true,
   });
 
   const sidebarWidth = isSidebarOverlayMode ? 'min(84vw, 320px)' : '300px';
@@ -949,17 +986,39 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isSocketConnected={isKitchenSocketConnected}
             alertPermission={alertPermission}
             alertsEnabled={alertsEnabled}
-            audioUnlocked={audioUnlocked}
-            alertDiagnostics={alertDiagnostics}
-            alertMessage={alertMessage}
-            onUnlockAudio={unlockAudioAndTest}
-            onRunDiagnostics={runAlertDiagnostics}
             onRequestPermission={requestAlertPermission}
             lastKitchenEvent={lastKitchenEvent}
             onEditOrder={(orderId) => setActiveView(`orders-edit:${orderId}`)}
           />
         )}
       </div>
+
+      {showNotificationPrompt ? (
+        <div style={notificationPromptBackdropStyle}>
+          <div style={notificationPromptCardStyle(isMobile)}>
+            <div style={notificationPromptIconStyle} aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+              </svg>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>¿Activar notificaciones del equipo?</div>
+              <p style={{ margin: 0, color: '#d2c3c3', fontSize: 13.5, lineHeight: 1.5 }}>
+                Te avisaremos en este navegador cuando lleguen pedidos nuevos a cocina y cuando tus pedidos estén listos para servir, aunque tengas la app en segundo plano.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
+              <button type="button" onClick={acceptNotificationPrompt} style={notificationPromptAcceptStyle}>
+                Sí, activar
+              </button>
+              <button type="button" onClick={dismissNotificationPrompt} style={notificationPromptDismissStyle}>
+                Ahora no
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1083,6 +1142,60 @@ const liveNoticeStyle = {
   padding: '12px 14px',
   fontWeight: 700,
   boxShadow: '0 14px 30px rgba(0, 0, 0, 0.34)',
+};
+
+const notificationPromptBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 60,
+  background: 'rgba(0,0,0,0.6)',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 16,
+};
+
+const notificationPromptCardStyle = (isMobile) => ({
+  display: 'grid',
+  gap: 14,
+  width: '100%',
+  maxWidth: 420,
+  padding: isMobile ? 18 : 22,
+  borderRadius: 20,
+  border: '1px solid rgba(255, 106, 106, 0.4)',
+  background: 'linear-gradient(180deg, rgba(24, 10, 10, 0.98) 0%, rgba(8, 8, 8, 0.99) 100%)',
+  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+});
+
+const notificationPromptIconStyle = {
+  width: 46,
+  height: 46,
+  borderRadius: 14,
+  display: 'grid',
+  placeItems: 'center',
+  background: 'rgba(255, 88, 88, 0.14)',
+  color: '#ff8f8f',
+};
+
+const notificationPromptAcceptStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '11px 18px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  flex: '1 1 auto',
+};
+
+const notificationPromptDismissStyle = {
+  border: '1px solid rgba(255, 255, 255, 0.16)',
+  borderRadius: 999,
+  padding: '11px 18px',
+  background: 'rgba(255, 255, 255, 0.04)',
+  color: '#fff',
+  fontWeight: 600,
+  cursor: 'pointer',
+  flex: '1 1 auto',
 };
 
 export default WelcomeScreen;

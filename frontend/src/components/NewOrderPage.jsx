@@ -18,6 +18,8 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   const [isSyncingQueue, setIsSyncingQueue] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [promotionsByProductId, setPromotionsByProductId] = useState({});
+  const [detailProduct, setDetailProduct] = useState(null);
+  const [addonPickerFor, setAddonPickerFor] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -479,39 +481,48 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                   const quantityInCart = getCartQuantity(product.id);
 
                   return (
-                    <button
-                      key={product.id}
-                      type="button"
-                      onClick={() => addToCart(product)}
-                      style={productCardStyle(Boolean(promotion))}
-                    >
+                    <div key={product.id} style={productCardStyle(Boolean(promotion))}>
                       {quantityInCart > 0 ? <span style={cardQuantityBadgeStyle}>{quantityInCart}</span> : null}
-                      <div style={productImageWrapStyle}>
-                        {product.imagen_url ? (
-                          <img src={product.imagen_url} alt={product.nombre} style={productImageStyle} loading="lazy" />
-                        ) : (
-                          <div style={productImagePlaceholderStyle}>{product.nombre.charAt(0).toUpperCase()}</div>
-                        )}
-                        {promotion ? <span style={cardPromoBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
-                      </div>
-                      <div style={productCardBodyStyle}>
-                        <div style={productCardNameStyle}>{product.nombre}</div>
-                        {product.descripcion ? (
-                          <div style={productCardDescStyle}>{product.descripcion}</div>
-                        ) : null}
-                        <div style={productCardFooterStyle}>
-                          {promotion ? (
-                            <span style={productCardPriceGroupStyle}>
-                              <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
-                              <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}</span>
-                            </span>
+                      <button
+                        type="button"
+                        onClick={() => setDetailProduct(product)}
+                        style={productImageButtonStyle}
+                        aria-label={`Ver descripción de ${product.nombre}`}
+                      >
+                        <div style={productImageWrapStyle}>
+                          {product.imagen_url ? (
+                            <img src={product.imagen_url} alt={product.nombre} style={productImageStyle} loading="lazy" />
                           ) : (
-                            <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                            <div style={productImagePlaceholderStyle}>{product.nombre.charAt(0).toUpperCase()}</div>
                           )}
-                          <span style={addIconStyle} aria-hidden="true">+</span>
+                          {promotion ? <span style={cardPromoBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addToCart(product)}
+                        style={productBodyButtonStyle}
+                        aria-label={`Agregar ${product.nombre} al pedido`}
+                      >
+                        <div style={productCardBodyStyle}>
+                          <div style={productCardNameStyle}>{product.nombre}</div>
+                          {product.descripcion ? (
+                            <div style={productCardDescStyle}>{product.descripcion}</div>
+                          ) : null}
+                          <div style={productCardFooterStyle}>
+                            {promotion ? (
+                              <span style={productCardPriceGroupStyle}>
+                                <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                                <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+                              </span>
+                            ) : (
+                              <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                            )}
+                            <span style={addIconStyle} aria-hidden="true">+</span>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
                   );
                 })
               )}
@@ -579,18 +590,34 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                               </button>
                             </div>
                           ))}
-                          <select
-                            value=""
-                            onChange={(event) => addAddonToCartItem(item.productId, event.target.value)}
-                            style={addonSelectStyle}
+
+                          <button
+                            type="button"
+                            onClick={() => setAddonPickerFor((current) => (current === item.productId ? null : item.productId))}
+                            style={addAddonButtonStyle(addonPickerFor === item.productId)}
                           >
-                            <option value="">+ Agregar adicional (extra pagado)...</option>
-                            {adicionales.map((addon) => (
-                              <option key={addon.id} value={addon.id}>
-                                {addon.nombre} — ${Number(addon.precio || 0).toFixed(2)}
-                              </option>
-                            ))}
-                          </select>
+                            <span style={addAddonButtonIconStyle} aria-hidden="true">+</span>
+                            Agregar adicional (extra pagado)
+                          </button>
+
+                          {addonPickerFor === item.productId ? (
+                            <div style={addonPickerPanelStyle}>
+                              {adicionales.map((addon) => (
+                                <button
+                                  key={addon.id}
+                                  type="button"
+                                  onClick={() => {
+                                    addAddonToCartItem(item.productId, addon.id);
+                                    setAddonPickerFor(null);
+                                  }}
+                                  style={addonPickerOptionStyle}
+                                >
+                                  <span>{addon.nombre}</span>
+                                  <span style={addonPickerOptionPriceStyle}>${Number(addon.precio || 0).toFixed(2)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -636,7 +663,78 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
           </button>
         </div>
       ) : null}
+
+      {detailProduct ? (
+        <ProductDetailModal
+          product={detailProduct}
+          promotion={promotionsByProductId[detailProduct.id]}
+          onClose={() => setDetailProduct(null)}
+          onAdd={() => {
+            addToCart(detailProduct);
+            setDetailProduct(null);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function ProductDetailModal({ product, promotion, onClose, onAdd }) {
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
+          ×
+        </button>
+        <div style={modalImageWrapStyle}>
+          {product.imagen_url ? (
+            <img src={product.imagen_url} alt={product.nombre} style={productImageStyle} />
+          ) : (
+            <div style={productImagePlaceholderStyle}>{product.nombre.charAt(0).toUpperCase()}</div>
+          )}
+          {promotion ? <span style={cardPromoBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
+        </div>
+        <div style={modalBodyStyle}>
+          <div style={modalTitleStyle}>{product.nombre}</div>
+          {product.categoria_nombre ? <div style={modalCategoryStyle}>{product.categoria_nombre}</div> : null}
+
+          {product.descripcion ? (
+            <p style={modalDescStyle}>{product.descripcion}</p>
+          ) : (
+            <p style={modalDescEmptyStyle}>Este producto no tiene una descripción registrada.</p>
+          )}
+
+          {Array.isArray(product.composicion) && product.composicion.length > 0 ? (
+            <div>
+              <div style={modalSectionLabelStyle}>Lleva</div>
+              <div style={modalCompositionListStyle}>
+                {product.composicion.map((nombre, index) => (
+                  <span key={`${nombre}-${index}`} style={compositionChipStyle}>{nombre}</span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {product.tiempo_preparacion_min ? (
+            <div style={modalPrepTimeStyle}>Tiempo estimado de preparación: {product.tiempo_preparacion_min} min</div>
+          ) : null}
+
+          <div style={modalFooterStyle}>
+            {promotion ? (
+              <span style={productCardPriceGroupStyle}>
+                <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                <span style={{ ...pricePromoStyle, fontSize: 20 }}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+              </span>
+            ) : (
+              <span style={{ ...priceStyle, fontSize: 20 }}>${Number(product.precio_venta).toFixed(2)}</span>
+            )}
+            <button type="button" onClick={onAdd} style={modalAddButtonStyle}>
+              Agregar al pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -861,8 +959,25 @@ const productCardStyle = (hasPromotion) => ({
   borderRadius: 16,
   border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.12)',
   background: hasPromotion ? 'rgba(70, 200, 120, 0.06)' : 'rgba(255,255,255,0.03)',
-  cursor: 'pointer',
 });
+
+const resetButtonStyle = {
+  display: 'block',
+  width: '100%',
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  textAlign: 'left',
+  cursor: 'pointer',
+};
+
+const productImageButtonStyle = {
+  ...resetButtonStyle,
+};
+
+const productBodyButtonStyle = {
+  ...resetButtonStyle,
+};
 
 const cardQuantityBadgeStyle = {
   position: 'absolute',
@@ -1154,16 +1269,68 @@ const addonPriceStyle = {
   fontSize: 12,
 };
 
-const addonSelectStyle = {
+const addAddonButtonStyle = (active) => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 10,
+  border: active ? '1px solid rgba(255,196,110,0.55)' : '1px dashed rgba(255,196,110,0.4)',
+  background: active ? 'rgba(255,166,0,0.16)' : 'rgba(255,166,0,0.06)',
+  color: '#ffcf85',
+  padding: '9px 10px',
+  fontSize: 12.5,
+  fontWeight: 700,
+  cursor: 'pointer',
+  minHeight: 38,
+});
+
+const addAddonButtonIconStyle = {
+  display: 'inline-grid',
+  placeItems: 'center',
+  width: 18,
+  height: 18,
+  borderRadius: '50%',
+  background: 'rgba(255,196,110,0.22)',
+  fontSize: 13,
+  lineHeight: 1,
+};
+
+const addonPickerPanelStyle = {
+  display: 'grid',
+  gap: 4,
+  padding: 6,
+  borderRadius: 10,
   border: '1px solid rgba(255,255,255,0.1)',
-  background: 'rgba(255,255,255,0.03)',
+  background: 'rgba(0,0,0,0.25)',
+  maxHeight: 180,
+  overflowY: 'auto',
+};
+
+const addonPickerOptionStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  width: '100%',
+  boxSizing: 'border-box',
+  border: 'none',
+  borderRadius: 8,
+  background: 'rgba(255,255,255,0.04)',
   color: '#fff',
-  padding: '7px 9px',
-  fontSize: 12,
-  outline: 'none',
+  padding: '9px 10px',
+  fontSize: 13,
+  textAlign: 'left',
+  cursor: 'pointer',
+  minHeight: 38,
+};
+
+const addonPickerOptionPriceStyle = {
+  color: '#ffcf85',
+  fontWeight: 700,
+  fontSize: 12.5,
+  whiteSpace: 'nowrap',
 };
 
 const cartTotalRowStyle = {
@@ -1208,6 +1375,138 @@ const mobileCartButtonStyle = {
   fontWeight: 700,
   cursor: 'pointer',
   minHeight: 40,
+};
+
+// --- Modal de descripción del producto ---
+
+const modalBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 20,
+  background: 'rgba(0,0,0,0.7)',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 16,
+};
+
+const modalCardStyle = {
+  position: 'relative',
+  width: '100%',
+  maxWidth: 420,
+  maxHeight: '88vh',
+  overflowY: 'auto',
+  borderRadius: 20,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
+  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+};
+
+const modalCloseButtonStyle = {
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  zIndex: 2,
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  border: 'none',
+  background: 'rgba(0,0,0,0.55)',
+  color: '#fff',
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+};
+
+const modalImageWrapStyle = {
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '4 / 3',
+  background: 'rgba(255,255,255,0.04)',
+};
+
+const modalBodyStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: 16,
+};
+
+const modalTitleStyle = {
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 20,
+  lineHeight: 1.25,
+};
+
+const modalCategoryStyle = {
+  color: '#f1b8b8',
+  fontSize: 12,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const modalDescStyle = {
+  color: '#e6dcdc',
+  fontSize: 14,
+  lineHeight: 1.5,
+  margin: 0,
+};
+
+const modalDescEmptyStyle = {
+  color: '#9a8686',
+  fontSize: 13,
+  fontStyle: 'italic',
+  margin: 0,
+};
+
+const modalSectionLabelStyle = {
+  color: '#f1b8b8',
+  fontSize: 11,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  marginBottom: 6,
+};
+
+const modalCompositionListStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+};
+
+const compositionChipStyle = {
+  padding: '4px 10px',
+  borderRadius: 999,
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(255,255,255,0.14)',
+  color: '#e6dcdc',
+  fontSize: 12,
+};
+
+const modalPrepTimeStyle = {
+  color: '#c8bbbb',
+  fontSize: 12.5,
+};
+
+const modalFooterStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  marginTop: 6,
+  paddingTop: 12,
+  borderTop: '1px solid rgba(255,255,255,0.1)',
+};
+
+const modalAddButtonStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '11px 18px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  minHeight: 44,
 };
 
 export default NewOrderPage;

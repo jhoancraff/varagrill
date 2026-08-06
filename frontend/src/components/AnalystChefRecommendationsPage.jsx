@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import Pagination from './Pagination';
+
+const PAGE_SIZE = 50;
 
 function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew }) {
   const [recommendations, setRecommendations] = useState([]);
@@ -6,6 +9,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -46,6 +50,10 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
     });
   }, [recommendations, search]);
 
+  const pageCount = Math.max(1, Math.ceil(filteredRecommendations.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pagedRecommendations = filteredRecommendations.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+
   const handleDelete = async (recommendation) => {
     if (!window.confirm(`¿Deseas eliminar la recomendación de ${recommendation.producto_nombre}?`)) {
       return;
@@ -79,7 +87,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al panel del analista
+          ← Volver al panel del analista
         </button>
       </section>
     );
@@ -87,6 +95,10 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
 
   return (
     <section style={containerStyle(isMobile)}>
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        ← Volver al panel del analista
+      </button>
+
       <div style={badgeStyle}>Recomendaciones del chef</div>
       <div style={headerRowStyle(isMobile)}>
         <div>
@@ -130,11 +142,22 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
               <div style={tableHeadStyle}>Comentario</div>
               <div style={tableHeadStyle}>Acciones</div>
 
-              {filteredRecommendations.map((recommendation) => (
+              {pagedRecommendations.map((recommendation) => (
                 <>
                   <div key={`name-${recommendation.id}`} style={tableCellPrimaryStyle}>
-                    <div style={productNameStyle}>{recommendation.producto_nombre}</div>
-                    <div style={productMetaStyle}>ID #{recommendation.id}</div>
+                    <div style={productRowStyle}>
+                      <div style={productThumbWrapStyle}>
+                        {recommendation.imagen_url ? (
+                          <img src={recommendation.imagen_url} alt={recommendation.producto_nombre} style={productThumbImgStyle} loading="lazy" />
+                        ) : (
+                          <div style={productThumbPlaceholderStyle}>{(recommendation.producto_nombre || '?').charAt(0).toUpperCase()}</div>
+                        )}
+                      </div>
+                      <div>
+                        <div style={productNameStyle}>{recommendation.producto_nombre}</div>
+                        <div style={productMetaStyle}>ID #{recommendation.id}</div>
+                      </div>
+                    </div>
                   </div>
                   <div key={`category-${recommendation.id}`} style={tableCellStyle}>
                     {recommendation.categoria || 'Sin categoría'}
@@ -155,11 +178,17 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
             </div>
           </div>
         ) : null}
-      </section>
 
-      <button type="button" onClick={onBack} style={backButtonStyle}>
-        Volver al panel del analista
-      </button>
+        <Pagination
+          page={currentPage}
+          pageCount={pageCount}
+          totalCount={filteredRecommendations.length}
+          pageSize={PAGE_SIZE}
+          isMobile={isMobile}
+          onPrev={() => setPage((current) => Math.max(0, current - 1))}
+          onNext={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+        />
+      </section>
     </section>
   );
 }
@@ -294,6 +323,39 @@ const tableCellActionStyle = {
   flexWrap: 'wrap',
 };
 
+const productRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+};
+
+const productThumbWrapStyle = {
+  width: 44,
+  height: 44,
+  borderRadius: 10,
+  overflow: 'hidden',
+  flexShrink: 0,
+  background: 'rgba(255,255,255,0.04)',
+};
+
+const productThumbImgStyle = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  display: 'block',
+};
+
+const productThumbPlaceholderStyle = {
+  width: '100%',
+  height: '100%',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 16,
+  fontWeight: 800,
+  color: '#7a5f5f',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+};
+
 const productNameStyle = {
   color: '#fff',
   fontWeight: 700,
@@ -334,14 +396,19 @@ const dangerButtonStyle = {
 };
 
 const backButtonStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
   justifySelf: 'flex-start',
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  width: 'fit-content',
+  border: 'none',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
+  background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
+  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
 };
 
 export default AnalystChefRecommendationsPage;

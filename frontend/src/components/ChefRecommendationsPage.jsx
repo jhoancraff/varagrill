@@ -80,12 +80,21 @@ function ChefRecommendationsPage({ isMobile, onBack }) {
         <div style={gridStyle(isMobile)}>
           {filteredRecommendations.map((recommendation) => (
             <article key={recommendation.id} style={cardStyle}>
-              <div style={productNameStyle}>{recommendation.producto_nombre}</div>
-              <div style={categoryStyle}>{recommendation.categoria || 'Sin categoría'}</div>
-              <div style={priceStyle}>${recommendation.precio_venta}</div>
-              {recommendation.comentario_chef ? (
-                <div style={commentStyle}>&ldquo;{recommendation.comentario_chef}&rdquo;</div>
-              ) : null}
+              <div style={cardImageWrapStyle}>
+                {recommendation.imagen_url ? (
+                  <img src={recommendation.imagen_url} alt={recommendation.producto_nombre} style={cardImageStyle} loading="lazy" />
+                ) : (
+                  <div style={cardImagePlaceholderStyle}>{(recommendation.producto_nombre || '?').charAt(0).toUpperCase()}</div>
+                )}
+              </div>
+              <div style={cardBodyStyle}>
+                <div style={productNameStyle}>{recommendation.producto_nombre}</div>
+                <div style={categoryStyle}>{recommendation.categoria || 'Sin categoría'}</div>
+                <div style={priceStyle}>${recommendation.precio_venta}</div>
+                {recommendation.comentario_chef ? (
+                  <div style={commentStyle}>&ldquo;{recommendation.comentario_chef}&rdquo;</div>
+                ) : null}
+              </div>
             </article>
           ))}
         </div>
@@ -150,12 +159,43 @@ const gridStyle = (isMobile) => ({
 
 const cardStyle = {
   display: 'grid',
-  gap: 8,
-  padding: '16px 18px',
+  gap: 0,
+  overflow: 'hidden',
   borderRadius: 20,
   background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.94) 0%, rgba(10, 10, 10, 0.96) 100%)',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   boxShadow: '0 12px 28px rgba(0,0,0,0.24)',
+};
+
+const cardImageWrapStyle = {
+  position: 'relative',
+  width: '100%',
+  aspectRatio: '4 / 3',
+  background: 'rgba(255,255,255,0.04)',
+};
+
+const cardImageStyle = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  display: 'block',
+};
+
+const cardImagePlaceholderStyle = {
+  width: '100%',
+  height: '100%',
+  display: 'grid',
+  placeItems: 'center',
+  fontSize: 30,
+  fontWeight: 800,
+  color: '#7a5f5f',
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+};
+
+const cardBodyStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: '14px 18px 18px',
 };
 
 const productNameStyle = {

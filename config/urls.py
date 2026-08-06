@@ -42,6 +42,7 @@ from varagrill.api_views import (
     promociones_activas_view,
     product_image_view,
     recomendaciones_chef_activas_view,
+    tasa_cambio_view,
 )
 
 urlpatterns = [
@@ -57,6 +58,7 @@ urlpatterns = [
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
     path('api/promociones/', promociones_activas_view, name='promociones-activas'),
     path('api/recomendaciones-chef/', recomendaciones_chef_activas_view, name='recomendaciones-chef-activas'),
+    path('api/tasa-cambio/', tasa_cambio_view, name='tasa-cambio'),
     path('api/admin/usuarios/', admin_users_view, name='admin-users'),
     path('api/admin/mesas/', admin_mesas_view, name='admin-mesas'),
     path('api/admin/productos/', admin_products_view, name='admin-products'),

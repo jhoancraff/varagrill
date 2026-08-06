@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 function PromotionsPage({ isMobile, onBack }) {
+  const tasaCambio = useExchangeRate();
   const [promotions, setPromotions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -94,6 +97,7 @@ function PromotionsPage({ isMobile, onBack }) {
                 <div style={priceRowStyle}>
                   <span style={originalPriceStyle}>${promotion.precio_original}</span>
                   <span style={finalPriceStyle}>${promotion.precio_descuento}</span>
+                  <BsAmount amountUsd={promotion.precio_descuento} tasa={tasaCambio} />
                 </div>
                 {promotion.descripcion ? <div style={descriptionStyle}>{promotion.descripcion}</div> : null}
               </div>

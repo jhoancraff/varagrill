@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const PAGE_SIZE = 50;
 
 function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }) {
+  const tasaCambio = useExchangeRate();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -133,6 +136,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
                     {item.es_adicional ? (
                       <div style={addonBadgeStyle}>
                         Adicional · margen {item.margen_ganancia || '0'}% · vende ${item.precio_venta_calculado || '0.00'}
+                        <BsAmount amountUsd={item.precio_venta_calculado} tasa={tasaCambio} />
                       </div>
                     ) : null}
                   </div>

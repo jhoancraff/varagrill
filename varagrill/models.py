@@ -500,6 +500,31 @@ class VGRecomendacionChef(VGAuditoria):
         return f"{self.producto} — {self.fecha}"
 
 
+# ---------------------------------------------------------------------------
+# Tasa de cambio (BCV)
+# ---------------------------------------------------------------------------
+class VGTasaCambio(models.Model):
+    """
+    Cache de la tasa oficial BCV (Bs. por USD). Se guarda una fila por día;
+    tasa_cambio.obtener_tasa_actual() la refresca sola contra un proveedor
+    externo cuando la última fila queda vieja, así no hay que consultar la
+    fuente externa en cada request.
+    """
+    fecha = models.DateField(unique=True)
+    tasa = models.DecimalField(max_digits=10, decimal_places=4, validators=[MinValueValidator(0)])
+    fuente = models.CharField(max_length=50, default="BCV")
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vg_tasas_cambio"
+        verbose_name = "Tasa de cambio"
+        verbose_name_plural = "Tasas de cambio"
+        ordering = ["-fecha"]
+
+    def __str__(self):
+        return f"{self.fecha} — Bs. {self.tasa}/USD"
+
+
 class VGPago(models.Model):
     METODOS = [
         ("efectivo", "Efectivo"),

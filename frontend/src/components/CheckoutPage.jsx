@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const METODOS_PAGO = [
   { key: 'efectivo', label: 'Efectivo' },
@@ -8,6 +10,7 @@ const METODOS_PAGO = [
 ];
 
 function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
+  const tasaCambio = useExchangeRate();
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -200,7 +203,10 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                               {pedido.cliente || 'Sin cliente'} · {pedido.mesero} · {formatOrderTime(pedido.creado_en)}
                             </span>
                           </span>
-                          <span style={{ color: '#ffcf7d', fontWeight: 700 }}>${pedido.total}</span>
+                          <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
+                            ${pedido.total}
+                            <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
+                          </span>
                           <button type="button" onClick={() => toggleExpanded(pedido.id)} style={detailToggleStyle}>
                             {isExpanded ? 'Ocultar' : 'Detalle'}
                           </button>
@@ -225,6 +231,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                                   <span style={{ color: '#d2c4c4' }}>${item.precio_unitario} c/u</span>
                                   <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
                                     ${(Number(item.precio_unitario) * item.cantidad).toFixed(2)}
+                                    <BsAmount amountUsd={Number(item.precio_unitario) * item.cantidad} tasa={tasaCambio} />
                                   </span>
                                 </div>
                               ))}
@@ -241,11 +248,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                             ) : null}
 
                             <div style={detailTotalsStyle}>
-                              <span>Subtotal: ${pedido.subtotal}</span>
-                              {Number(pedido.impuesto) > 0 ? <span>Impuesto: ${pedido.impuesto}</span> : null}
-                              {Number(pedido.descuento) > 0 ? <span>Descuento: -${pedido.descuento}</span> : null}
-                              {Number(pedido.propina) > 0 ? <span>Propina: ${pedido.propina}</span> : null}
-                              <span style={{ fontWeight: 800, color: '#fff' }}>Total: ${pedido.total}</span>
+                              <span>Subtotal: ${pedido.subtotal}<BsAmount amountUsd={pedido.subtotal} tasa={tasaCambio} /></span>
+                              {Number(pedido.impuesto) > 0 ? <span>Impuesto: ${pedido.impuesto}<BsAmount amountUsd={pedido.impuesto} tasa={tasaCambio} /></span> : null}
+                              {Number(pedido.descuento) > 0 ? <span>Descuento: -${pedido.descuento}<BsAmount amountUsd={pedido.descuento} tasa={tasaCambio} /></span> : null}
+                              {Number(pedido.propina) > 0 ? <span>Propina: ${pedido.propina}<BsAmount amountUsd={pedido.propina} tasa={tasaCambio} /></span> : null}
+                              <span style={{ fontWeight: 800, color: '#fff' }}>
+                                Total: ${pedido.total}
+                                <BsAmount amountUsd={pedido.total} tasa={tasaCambio} style={{ color: '#e0c9a3' }} />
+                              </span>
                             </div>
                           </div>
                         ) : null}
@@ -257,6 +267,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                 <div style={groupFooterStyle(isMobile)}>
                   <div style={{ color: '#fff', fontWeight: 700 }}>
                     Total seleccionado: ${selectedTotal.toFixed(2)}
+                    <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <select

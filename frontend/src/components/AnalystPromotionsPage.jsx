@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const PAGE_SIZE = 50;
 
 function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onSelectBulk }) {
+  const tasaCambio = useExchangeRate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -226,6 +229,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
                   </div>
                   <div key={`price-${product.id}`} style={tableCellStyle}>
                     ${product.precio_venta}
+                    <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} />
                   </div>
                   <div key={`status-${product.id}`} style={tableCellStyle}>
                     <span style={statusBadgeStyle(product.promocion_activa)}>

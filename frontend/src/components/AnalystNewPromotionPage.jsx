@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const emptyForm = {
   titulo: '',
@@ -9,6 +11,7 @@ const emptyForm = {
 };
 
 function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
+  const tasaCambio = useExchangeRate();
   const [product, setProduct] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
@@ -200,7 +203,10 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
         <form onSubmit={handleSubmit} style={panelStyle}>
           <div style={productCardStyle}>
             <div style={productNameStyle}>{product.nombre}</div>
-            <div style={productMetaStyle}>{product.categoria || 'Sin categoría'} · Precio actual ${product.precio_venta}</div>
+            <div style={productMetaStyle}>
+              {product.categoria || 'Sin categoría'} · Precio actual ${product.precio_venta}
+              <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} />
+            </div>
           </div>
 
           <div style={formGridStyle(isMobile)}>
@@ -270,7 +276,10 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
           {previewPrice !== null ? (
             <div style={previewCardStyle}>
               <div style={previewLabelStyle}>Precio con descuento</div>
-              <div style={previewValueStyle}>${previewPrice.toFixed(2)}</div>
+              <div style={previewValueStyle}>
+                ${previewPrice.toFixed(2)}
+                <BsAmount amountUsd={previewPrice} tasa={tasaCambio} />
+              </div>
             </div>
           ) : null}
 

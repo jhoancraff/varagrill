@@ -40,6 +40,7 @@ from .models import (
 )
 from .notifications import send_whatsapp_new_order_alert
 from .serializers import MesaSerializer, ProductoSerializer
+from .tasa_cambio import obtener_tasa_actual
 
 
 def _auth_response(payload, status=200):
@@ -2357,6 +2358,26 @@ def promociones_activas_view(request):
         })
 
     return _auth_response({'ok': True, 'promotions': payload})
+
+
+def tasa_cambio_view(request):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    tasa_actual = obtener_tasa_actual()
+    if tasa_actual is None:
+        return _auth_response({'ok': False, 'message': 'La tasa de cambio no esta disponible por ahora.'}, status=503)
+
+    return _auth_response({
+        'ok': True,
+        'tasa': str(tasa_actual.tasa),
+        'fuente': tasa_actual.fuente,
+        'fecha': tasa_actual.fecha.isoformat(),
+        'fecha_actualizacion': tasa_actual.fecha_actualizacion.isoformat(),
+    })
 
 
 def recomendaciones_chef_activas_view(request):

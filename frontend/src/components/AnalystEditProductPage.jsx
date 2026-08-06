@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const emptyForm = {
   id: null,
@@ -14,6 +16,7 @@ const emptyForm = {
 };
 
 function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProductsChanged }) {
+  const tasaCambio = useExchangeRate();
   const [categories, setCategories] = useState([]);
   const [recetas, setRecetas] = useState([]);
   const [subrecetas, setSubrecetas] = useState([]);
@@ -191,7 +194,10 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                 </select>
               </label>
               <label style={fieldStyle}>
-                <span style={labelStyle}>Precio de venta</span>
+                <span style={labelStyle}>
+                  Precio de venta
+                  <BsAmount amountUsd={form.precio_venta} tasa={tasaCambio} />
+                </span>
                 <input type="number" min="0" step="0.01" value={form.precio_venta} onChange={(event) => handleChange('precio_venta', event.target.value)} style={inputStyle} />
               </label>
               <label style={fieldStyle}>

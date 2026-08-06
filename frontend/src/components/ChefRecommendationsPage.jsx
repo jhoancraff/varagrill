@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 function ChefRecommendationsPage({ isMobile, onBack }) {
+  const tasaCambio = useExchangeRate();
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -90,7 +93,10 @@ function ChefRecommendationsPage({ isMobile, onBack }) {
               <div style={cardBodyStyle}>
                 <div style={productNameStyle}>{recommendation.producto_nombre}</div>
                 <div style={categoryStyle}>{recommendation.categoria || 'Sin categoría'}</div>
-                <div style={priceStyle}>${recommendation.precio_venta}</div>
+                <div style={priceStyle}>
+                  ${recommendation.precio_venta}
+                  <BsAmount amountUsd={recommendation.precio_venta} tasa={tasaCambio} />
+                </div>
                 {recommendation.comentario_chef ? (
                   <div style={commentStyle}>&ldquo;{recommendation.comentario_chef}&rdquo;</div>
                 ) : null}

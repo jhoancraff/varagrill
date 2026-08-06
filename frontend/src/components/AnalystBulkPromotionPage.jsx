@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const emptyForm = {
   tipo_descuento: 'porcentaje',
@@ -8,6 +10,7 @@ const emptyForm = {
 };
 
 function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
+  const tasaCambio = useExchangeRate();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -183,9 +186,17 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
               {previewRows.map((product) => (
                 <>
                   <div key={`name-${product.id}`} style={tableCellPrimaryStyle}>{product.nombre}</div>
-                  <div key={`price-${product.id}`} style={tableCellStyle}>${product.precio_venta}</div>
+                  <div key={`price-${product.id}`} style={tableCellStyle}>
+                    ${product.precio_venta}
+                    <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} />
+                  </div>
                   <div key={`final-${product.id}`} style={tableCellStyle}>
-                    {product.finalPrice !== null ? `$${product.finalPrice.toFixed(2)}` : '—'}
+                    {product.finalPrice !== null ? (
+                      <>
+                        ${product.finalPrice.toFixed(2)}
+                        <BsAmount amountUsd={product.finalPrice} tasa={tasaCambio} />
+                      </>
+                    ) : '—'}
                   </div>
                   <div key={`status-${product.id}`} style={tableCellStyle}>
                     <span style={statusBadgeStyle(product.promocion_activa)}>

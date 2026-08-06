@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const todayIsoDate = () => new Date().toISOString().slice(0, 10);
 
 function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
+  const tasaCambio = useExchangeRate();
   const productPickerRef = useRef(null);
   const [products, setProducts] = useState([]);
   const [productSearch, setProductSearch] = useState('');
@@ -179,7 +182,10 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
                           style={pickerItemStyle}
                         >
                           <span style={pickerItemTitleStyle}>{item.nombre}</span>
-                          <span style={pickerItemMetaStyle}>${item.precio_venta}</span>
+                          <span style={pickerItemMetaStyle}>
+                            ${item.precio_venta}
+                            <BsAmount amountUsd={item.precio_venta} tasa={tasaCambio} />
+                          </span>
                         </button>
                       )) : (
                         <div style={pickerEmptyStyle}>No hay productos que coincidan.</div>

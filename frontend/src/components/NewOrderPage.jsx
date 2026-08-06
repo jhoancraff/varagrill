@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, waiterName, onBack }) {
+  const tasaCambio = useExchangeRate();
   const [orderHeader, setOrderHeader] = useState({
     mesaId: '',
     tipoPedido: 'local',
@@ -514,9 +517,13 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                               <span style={productCardPriceGroupStyle}>
                                 <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
                                 <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+                                <BsAmount amountUsd={promotion.precio_descuento} tasa={tasaCambio} style={{ marginLeft: 0 }} />
                               </span>
                             ) : (
-                              <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                              <span style={productCardPriceGroupStyle}>
+                                <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                                <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} style={{ marginLeft: 0 }} />
+                              </span>
                             )}
                             <span style={addIconStyle} aria-hidden="true">+</span>
                           </div>
@@ -564,7 +571,10 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                           <span style={qtyValueStyle}>{item.quantity}</span>
                           <button type="button" onClick={() => changeCartQuantity(item.productId, 1)} style={qtyButtonStyle}>+</button>
                         </div>
-                        <div style={cartLineSubtotalStyle}>${(unitPrice * item.quantity).toFixed(2)}</div>
+                        <div style={cartLineSubtotalStyle}>
+                          ${(unitPrice * item.quantity).toFixed(2)}
+                          <BsAmount amountUsd={unitPrice * item.quantity} tasa={tasaCambio} />
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -584,7 +594,10 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                                 <span style={qtyValueStyle}>{addon.cantidad}</span>
                                 <button type="button" onClick={() => changeAddonQuantity(item.productId, addon.preparacionId, 1)} style={qtyButtonStyle}>+</button>
                               </div>
-                              <span style={addonPriceStyle}>${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}</span>
+                              <span style={addonPriceStyle}>
+                                ${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}
+                                <BsAmount amountUsd={Number(addon.precioUnitario || 0) * addon.cantidad} tasa={tasaCambio} />
+                              </span>
                               <button type="button" onClick={() => removeAddonFromCartItem(item.productId, addon.preparacionId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${addon.nombre}`}>
                                 ×
                               </button>
@@ -613,7 +626,10 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                                   style={addonPickerOptionStyle}
                                 >
                                   <span>{addon.nombre}</span>
-                                  <span style={addonPickerOptionPriceStyle}>${Number(addon.precio || 0).toFixed(2)}</span>
+                                  <span style={addonPickerOptionPriceStyle}>
+                                    ${Number(addon.precio || 0).toFixed(2)}
+                                    <BsAmount amountUsd={addon.precio} tasa={tasaCambio} />
+                                  </span>
                                 </button>
                               ))}
                             </div>
@@ -639,7 +655,10 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
 
             <div style={cartTotalRowStyle}>
               <span>Total estimado</span>
-              <span style={cartTotalValueStyle}>${subtotal.toFixed(2)}</span>
+              <span style={cartTotalValueStyle}>
+                ${subtotal.toFixed(2)}
+                <BsAmount amountUsd={subtotal} tasa={tasaCambio} />
+              </span>
             </div>
 
             <button type="submit" style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
@@ -653,7 +672,10 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
 
       {isCompact && cartItems.length > 0 ? (
         <div style={mobileCartBarStyle}>
-          <div style={{ color: '#fff', fontWeight: 700 }}>{cartCount} {cartCount === 1 ? 'plato' : 'platos'} · ${subtotal.toFixed(2)}</div>
+          <div style={{ color: '#fff', fontWeight: 700 }}>
+            {cartCount} {cartCount === 1 ? 'plato' : 'platos'} · ${subtotal.toFixed(2)}
+            <BsAmount amountUsd={subtotal} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
+          </div>
           <button
             type="button"
             onClick={() => document.getElementById('cart-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
@@ -668,6 +690,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         <ProductDetailModal
           product={detailProduct}
           promotion={promotionsByProductId[detailProduct.id]}
+          tasaCambio={tasaCambio}
           onClose={() => setDetailProduct(null)}
           onAdd={() => {
             addToCart(detailProduct);
@@ -679,7 +702,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   );
 }
 
-function ProductDetailModal({ product, promotion, onClose, onAdd }) {
+function ProductDetailModal({ product, promotion, tasaCambio, onClose, onAdd }) {
   return (
     <div style={modalBackdropStyle} onClick={onClose}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
@@ -724,9 +747,13 @@ function ProductDetailModal({ product, promotion, onClose, onAdd }) {
               <span style={productCardPriceGroupStyle}>
                 <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
                 <span style={{ ...pricePromoStyle, fontSize: 20 }}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+                <BsAmount amountUsd={promotion.precio_descuento} tasa={tasaCambio} style={{ fontSize: 12, marginLeft: 0 }} />
               </span>
             ) : (
-              <span style={{ ...priceStyle, fontSize: 20 }}>${Number(product.precio_venta).toFixed(2)}</span>
+              <span style={productCardPriceGroupStyle}>
+                <span style={{ ...priceStyle, fontSize: 20 }}>${Number(product.precio_venta).toFixed(2)}</span>
+                <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} style={{ fontSize: 12, marginLeft: 0 }} />
+              </span>
             )}
             <button type="button" onClick={onAdd} style={modalAddButtonStyle}>
               Agregar al pedido

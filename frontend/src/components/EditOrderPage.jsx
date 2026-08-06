@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
+import { formatBs } from '../utils/currency';
 
 function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, orderId, onBack }) {
+  const tasaCambio = useExchangeRate();
   const [orderHeader, setOrderHeader] = useState({
     mesaId: '',
     tipoPedido: 'local',
@@ -464,9 +468,13 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                             <span style={productCardPriceGroupStyle}>
                               <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
                               <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+                              <BsAmount amountUsd={promotion.precio_descuento} tasa={tasaCambio} style={{ marginLeft: 0 }} />
                             </span>
                           ) : (
-                            <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                            <span style={productCardPriceGroupStyle}>
+                              <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                              <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} style={{ marginLeft: 0 }} />
+                            </span>
                           )}
                           <span style={addIconStyle} aria-hidden="true">+</span>
                         </div>
@@ -513,7 +521,10 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                           <span style={qtyValueStyle}>{item.quantity}</span>
                           <button type="button" onClick={() => changeCartQuantity(item.productId, 1)} style={qtyButtonStyle}>+</button>
                         </div>
-                        <div style={cartLineSubtotalStyle}>${(unitPrice * item.quantity).toFixed(2)}</div>
+                        <div style={cartLineSubtotalStyle}>
+                          ${(unitPrice * item.quantity).toFixed(2)}
+                          <BsAmount amountUsd={unitPrice * item.quantity} tasa={tasaCambio} />
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -533,7 +544,10 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                                 <span style={qtyValueStyle}>{addon.cantidad}</span>
                                 <button type="button" onClick={() => changeAddonQuantity(item.productId, addon.preparacionId, 1)} style={qtyButtonStyle}>+</button>
                               </div>
-                              <span style={addonPriceStyle}>${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}</span>
+                              <span style={addonPriceStyle}>
+                                ${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}
+                                <BsAmount amountUsd={Number(addon.precioUnitario || 0) * addon.cantidad} tasa={tasaCambio} />
+                              </span>
                               <button type="button" onClick={() => removeAddonFromCartItem(item.productId, addon.preparacionId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${addon.nombre}`}>
                                 ×
                               </button>
@@ -548,6 +562,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                             {adicionales.map((addon) => (
                               <option key={addon.id} value={addon.id}>
                                 {addon.nombre} — ${Number(addon.precio || 0).toFixed(2)}
+                                {formatBs(addon.precio, tasaCambio) ? ` (${formatBs(addon.precio, tasaCambio)})` : ''}
                               </option>
                             ))}
                           </select>
@@ -572,7 +587,10 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
             <div style={cartTotalRowStyle}>
               <span>Total estimado</span>
-              <span style={cartTotalValueStyle}>${subtotal.toFixed(2)}</span>
+              <span style={cartTotalValueStyle}>
+                ${subtotal.toFixed(2)}
+                <BsAmount amountUsd={subtotal} tasa={tasaCambio} />
+              </span>
             </div>
 
             <button type="submit" style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
@@ -586,7 +604,10 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
       {isCompact && cartItems.length > 0 ? (
         <div style={mobileCartBarStyle}>
-          <div style={{ color: '#fff', fontWeight: 700 }}>{cartCount} {cartCount === 1 ? 'plato' : 'platos'} · ${subtotal.toFixed(2)}</div>
+          <div style={{ color: '#fff', fontWeight: 700 }}>
+            {cartCount} {cartCount === 1 ? 'plato' : 'platos'} · ${subtotal.toFixed(2)}
+            <BsAmount amountUsd={subtotal} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
+          </div>
           <button
             type="button"
             onClick={() => document.getElementById('cart-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}

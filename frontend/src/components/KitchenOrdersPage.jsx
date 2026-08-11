@@ -290,18 +290,13 @@ function KitchenOrdersPage({
                       </div>
 
                       <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
-                        {order.items.map((item) => (
-                          <div key={item.id} style={itemRowStyle}>
-                            <span style={{ color: '#fff' }}>{item.cantidad}x {item.producto}</span>
-                            {!!item.notas && <span style={itemNoteStyle}>{item.notas}</span>}
-                            {(item.adicionales || []).map((addon) => (
-                              <span key={addon.id} style={itemAddonStyle}>+ {addon.cantidad}x {addon.nombre}</span>
-                            ))}
-                            {(item.composicion || []).length > 0 && (
-                              <span style={itemNoteStyle}>Lleva: {item.composicion.join(', ')}</span>
-                            )}
+                        {groupItemsByPlato(order.items).platos.map(({ grupoId, items }) => (
+                          <div key={`plato-${grupoId}`} style={platoGroupStyle}>
+                            <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
+                            {items.map((item) => renderKitchenItem(item))}
                           </div>
                         ))}
+                        {groupItemsByPlato(order.items).sueltos.map((item) => renderKitchenItem(item))}
                       </div>
 
                       {!!order.notas && <p style={orderNoteStyle}>Nota general: {order.notas}</p>}
@@ -358,6 +353,40 @@ function getCookie(name) {
     return parts.pop().split(';').shift();
   }
   return '';
+}
+
+function groupItemsByPlato(items) {
+  const grupos = new Map();
+  const sueltos = [];
+  (items || []).forEach((item) => {
+    if (item.grupo_armado) {
+      if (!grupos.has(item.grupo_armado)) {
+        grupos.set(item.grupo_armado, []);
+      }
+      grupos.get(item.grupo_armado).push(item);
+    } else {
+      sueltos.push(item);
+    }
+  });
+  const platos = Array.from(grupos.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([grupoId, groupedItems]) => ({ grupoId, items: groupedItems }));
+  return { platos, sueltos };
+}
+
+function renderKitchenItem(item) {
+  return (
+    <div key={item.id} style={itemRowStyle}>
+      <span style={{ color: '#fff' }}>{item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`} {item.producto}</span>
+      {!!item.notas && <span style={itemNoteStyle}>{item.notas}</span>}
+      {(item.adicionales || []).map((addon) => (
+        <span key={addon.id} style={itemAddonStyle}>+ {addon.cantidad}x {addon.nombre}</span>
+      ))}
+      {(item.composicion || []).length > 0 && (
+        <span style={itemNoteStyle}>Lleva: {item.composicion.join(', ')}</span>
+      )}
+    </div>
+  );
 }
 
 function formatElapsedTime(createdAt) {
@@ -609,6 +638,23 @@ const itemAddonStyle = {
   color: '#ffcf85',
   fontSize: 12,
   fontWeight: 700,
+};
+
+const platoGroupStyle = {
+  display: 'grid',
+  gap: 4,
+  padding: '6px 8px',
+  borderRadius: 10,
+  border: '1px solid rgba(125, 200, 255, 0.28)',
+  background: 'rgba(90, 170, 255, 0.05)',
+};
+
+const platoGroupTitleStyle = {
+  color: '#bfe0ff',
+  fontWeight: 800,
+  fontSize: 11,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
 };
 
 const orderNoteStyle = {

@@ -10,6 +10,7 @@ const emptyForm = {
   costo_estimado: '',
   tiempo_preparacion_min: '0',
   disponible: true,
+  venta_por_peso: false,
   vinculo_tipo: '',
   vinculo_id: '',
 };
@@ -90,6 +91,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       formData.append('costo_estimado', form.costo_estimado);
       formData.append('tiempo_preparacion_min', form.tiempo_preparacion_min || '0');
       formData.append('disponible', form.disponible ? 'true' : 'false');
+      formData.append('venta_por_peso', form.venta_por_peso ? 'true' : 'false');
       formData.append('vinculo_tipo', form.vinculo_tipo);
       formData.append('vinculo_id', form.vinculo_id);
       if (imageFile) {
@@ -168,10 +170,13 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
               </label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>
-                  Precio de venta
+                  {form.venta_por_peso ? 'Precio por kilogramo' : 'Precio de venta'}
                   <BsAmount amountUsd={form.precio_venta} tasa={tasaCambio} />
                 </span>
                 <input type="number" min="0" step="0.01" value={form.precio_venta} onChange={(event) => handleChange('precio_venta', event.target.value)} style={inputStyle} />
+                {form.venta_por_peso ? (
+                  <span style={ventaPorPesoHintStyle}>El mesero indicará los gramos al pedir; el sistema calcula el subtotal y descuenta el inventario en base a ese peso.</span>
+                ) : null}
               </label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>Costo estimado</span>
@@ -184,6 +189,10 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
               <label style={toggleRowStyle}>
                 <input type="checkbox" checked={form.disponible} onChange={(event) => handleChange('disponible', event.target.checked)} />
                 <span>Producto disponible</span>
+              </label>
+              <label style={toggleRowStyle}>
+                <input type="checkbox" checked={form.venta_por_peso} onChange={(event) => handleChange('venta_por_peso', event.target.checked)} />
+                <span>Se vende por peso (precio por kilogramo)</span>
               </label>
             </div>
 
@@ -362,6 +371,12 @@ const toggleRowStyle = {
   color: '#fff',
   fontWeight: 600,
   minHeight: 42,
+};
+
+const ventaPorPesoHintStyle = {
+  color: '#c2adad',
+  fontSize: 11.5,
+  lineHeight: 1.4,
 };
 
 const linkCardStyle = {

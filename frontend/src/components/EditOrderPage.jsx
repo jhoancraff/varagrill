@@ -22,6 +22,10 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const [isTablet, setIsTablet] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [promotionsByProductId, setPromotionsByProductId] = useState({});
+  const [pesoPickerFor, setPesoPickerFor] = useState(null);
+  const [armarPlatoActivo, setArmarPlatoActivo] = useState(false);
+  const [grupoActual, setGrupoActual] = useState(null);
+  const [nextGrupoId, setNextGrupoId] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,17 +83,23 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           cliente: pedido.cliente_nombre || '',
           notas: pedido.notas || '',
         });
-        setCartItems(pedido.items.map((item) => ({
+        const loadedItems = pedido.items.map((item) => ({
+          id: cryptoRandomId(),
           productId: String(item.product_id),
           quantity: item.cantidad,
           notes: item.notas || '',
+          pesoGramos: item.peso_gramos ? Number(item.peso_gramos) : null,
+          grupoArmado: item.grupo_armado || null,
           adicionales: (item.adicionales || []).map((addon) => ({
             preparacionId: addon.preparacion_id,
             nombre: addon.nombre,
             cantidad: addon.cantidad,
             precioUnitario: addon.precio_unitario,
           })),
-        })));
+        }));
+        setCartItems(loadedItems);
+        const maxGrupo = loadedItems.reduce((max, item) => Math.max(max, item.grupoArmado || 0), 0);
+        setNextGrupoId(maxGrupo + 1);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error.message || 'No se pudo cargar el pedido.');
@@ -149,24 +159,77 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
         return total;
       }
       const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
-      return total + getUnitPrice(product, promotionsByProductId) * item.quantity + addonsTotal;
+      const pesoFactor = item.pesoGramos ? Number(item.pesoGramos) / 1000 : 1;
+      return total + getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal;
     }, 0),
     [cartItems, products, promotionsByProductId],
   );
 
-  const addToCart = (product) => {
+  const groupedCartItems = useMemo(() => {
+    const groups = new Map();
+    const ungrouped = [];
+    cartItems.forEach((item) => {
+      if (item.grupoArmado) {
+        if (!groups.has(item.grupoArmado)) {
+          groups.set(item.grupoArmado, []);
+        }
+        groups.get(item.grupoArmado).push(item);
+      } else {
+        ungrouped.push(item);
+      }
+    });
+    const platos = Array.from(groups.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([grupoId, items]) => ({ grupoId, items }));
+    return { platos, ungrouped };
+  }, [cartItems]);
+
+  const handleStartArmarPlato = () => {
+    setGrupoActual(nextGrupoId);
+    setNextGrupoId((current) => current + 1);
+    setArmarPlatoActivo(true);
+  };
+
+  const handleNuevoPlato = () => {
+    setGrupoActual(nextGrupoId);
+    setNextGrupoId((current) => current + 1);
+  };
+
+  const handleTerminarArmado = () => {
+    setArmarPlatoActivo(false);
+    setGrupoActual(null);
+  };
+
+  const addToCart = (product, options = {}) => {
+    const grupoArmado = armarPlatoActivo ? grupoActual : null;
+
+    if (product.venta_por_peso) {
+      const pesoGramos = Number(options.pesoGramos);
+      if (!pesoGramos || pesoGramos <= 0) {
+        return;
+      }
+      setCartItems((current) => [
+        ...current,
+        { id: cryptoRandomId(), productId: String(product.id), quantity: 1, notes: '', adicionales: [], pesoGramos, grupoArmado },
+      ]);
+      return;
+    }
+
     setCartItems((current) => {
-      const existing = current.find((item) => item.productId === String(product.id));
+      const existing = current.find((item) => item.productId === String(product.id) && item.grupoArmado === grupoArmado && !item.pesoGramos);
       if (existing) {
         return current.map((item) => (
-          item.productId === String(product.id) ? { ...item, quantity: item.quantity + 1 } : item
+          item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item
         ));
       }
-      return [...current, { productId: String(product.id), quantity: 1, notes: '', adicionales: [] }];
+      return [
+        ...current,
+        { id: cryptoRandomId(), productId: String(product.id), quantity: 1, notes: '', adicionales: [], pesoGramos: null, grupoArmado },
+      ];
     });
   };
 
-  const addAddonToCartItem = (productId, addonId) => {
+  const addAddonToCartItem = (itemId, addonId) => {
     if (!addonId) {
       return;
     }
@@ -175,7 +238,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       return;
     }
     setCartItems((current) => current.map((item) => {
-      if (item.productId !== productId) {
+      if (item.id !== itemId) {
         return item;
       }
       const existingAddon = (item.adicionales || []).find((entry) => String(entry.preparacionId) === String(addonId));
@@ -197,9 +260,9 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
     }));
   };
 
-  const changeAddonQuantity = (productId, addonId, delta) => {
+  const changeAddonQuantity = (itemId, addonId, delta) => {
     setCartItems((current) => current.map((item) => {
-      if (item.productId !== productId) {
+      if (item.id !== itemId) {
         return item;
       }
       return {
@@ -211,34 +274,39 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
     }));
   };
 
-  const removeAddonFromCartItem = (productId, addonId) => {
+  const removeAddonFromCartItem = (itemId, addonId) => {
     setCartItems((current) => current.map((item) => (
-      item.productId === productId
+      item.id === itemId
         ? { ...item, adicionales: item.adicionales.filter((entry) => String(entry.preparacionId) !== String(addonId)) }
         : item
     )));
   };
 
-  const changeCartQuantity = (productId, delta) => {
+  const changeCartQuantity = (itemId, delta) => {
     setCartItems((current) => current
-      .map((item) => (item.productId === productId ? { ...item, quantity: item.quantity + delta } : item))
+      .map((item) => (item.id === itemId ? { ...item, quantity: item.quantity + delta } : item))
       .filter((item) => item.quantity > 0));
   };
 
-  const updateCartNotes = (productId, notes) => {
+  const changeCartPeso = (itemId, delta) => {
+    setCartItems((current) => current
+      .map((item) => (item.id === itemId ? { ...item, pesoGramos: Number(item.pesoGramos || 0) + delta } : item))
+      .filter((item) => item.pesoGramos === null || item.pesoGramos >= 10));
+  };
+
+  const updateCartNotes = (itemId, notes) => {
     setCartItems((current) => current.map((item) => (
-      item.productId === productId ? { ...item, notes } : item
+      item.id === itemId ? { ...item, notes } : item
     )));
   };
 
-  const removeCartItem = (productId) => {
-    setCartItems((current) => current.filter((item) => item.productId !== productId));
+  const removeCartItem = (itemId) => {
+    setCartItems((current) => current.filter((item) => item.id !== itemId));
   };
 
-  const getCartQuantity = (productId) => {
-    const item = cartItems.find((entry) => entry.productId === String(productId));
-    return item ? item.quantity : 0;
-  };
+  const getCartQuantity = (productId) => cartItems
+    .filter((item) => item.productId === String(productId))
+    .reduce((total, item) => total + (item.pesoGramos ? 1 : item.quantity), 0);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -271,6 +339,8 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
         items: cartItems.map((item) => ({
           product_id: Number(item.productId),
           cantidad: Number(item.quantity || 1),
+          peso_gramos: item.pesoGramos ? Number(item.pesoGramos) : null,
+          grupo_armado: item.grupoArmado ? Number(item.grupoArmado) : null,
           notas: item.notes,
           adicionales: (item.adicionales || []).map((addon) => ({
             preparacion_id: Number(addon.preparacionId),
@@ -307,6 +377,94 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const renderCartLine = (item) => {
+    const product = products.find((entry) => String(entry.id) === String(item.productId));
+    if (!product) {
+      return null;
+    }
+    const promotion = promotionsByProductId[product.id];
+    const unitPrice = getUnitPrice(product, promotionsByProductId);
+    const lineTotal = computeItemTotal(item, products, promotionsByProductId);
+
+    return (
+      <div key={item.id} style={cartLineStyle}>
+        <div style={cartLineTopStyle}>
+          <div style={cartLineNameStyle}>
+            {product.nombre}
+            {promotion ? <span style={promoInlineBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
+          </div>
+          <button type="button" onClick={() => removeCartItem(item.id)} style={cartRemoveButtonStyle} aria-label={`Quitar ${product.nombre}`}>
+            ×
+          </button>
+        </div>
+        <div style={cartLineControlsStyle}>
+          {item.pesoGramos !== null ? (
+            <div style={qtyStepperStyle}>
+              <button type="button" onClick={() => changeCartPeso(item.id, -50)} style={qtyButtonStyle}>−</button>
+              <span style={qtyValueStyle}>{item.pesoGramos} g</span>
+              <button type="button" onClick={() => changeCartPeso(item.id, 50)} style={qtyButtonStyle}>+</button>
+            </div>
+          ) : (
+            <div style={qtyStepperStyle}>
+              <button type="button" onClick={() => changeCartQuantity(item.id, -1)} style={qtyButtonStyle}>−</button>
+              <span style={qtyValueStyle}>{item.quantity}</span>
+              <button type="button" onClick={() => changeCartQuantity(item.id, 1)} style={qtyButtonStyle}>+</button>
+            </div>
+          )}
+          <div style={cartLineSubtotalStyle}>
+            ${lineTotal.toFixed(2)}
+            <BsAmount amountUsd={lineTotal} tasa={tasaCambio} />
+          </div>
+        </div>
+        {item.pesoGramos !== null ? (
+          <div style={pesoUnitPriceHintStyle}>${unitPrice.toFixed(2)}/kg</div>
+        ) : null}
+        <input
+          type="text"
+          value={item.notes}
+          onChange={(event) => updateCartNotes(item.id, event.target.value)}
+          placeholder="Indicaciones (sin cebolla, término medio...)"
+          style={cartNotesInputStyle}
+        />
+
+        {adicionales.length > 0 ? (
+          <div style={addonSectionStyle}>
+            {(item.adicionales || []).map((addon) => (
+              <div key={addon.preparacionId} style={addonChipStyle}>
+                <span>{addon.nombre}</span>
+                <div style={qtyStepperStyle}>
+                  <button type="button" onClick={() => changeAddonQuantity(item.id, addon.preparacionId, -1)} style={qtyButtonStyle}>−</button>
+                  <span style={qtyValueStyle}>{addon.cantidad}</span>
+                  <button type="button" onClick={() => changeAddonQuantity(item.id, addon.preparacionId, 1)} style={qtyButtonStyle}>+</button>
+                </div>
+                <span style={addonPriceStyle}>
+                  ${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}
+                  <BsAmount amountUsd={Number(addon.precioUnitario || 0) * addon.cantidad} tasa={tasaCambio} />
+                </span>
+                <button type="button" onClick={() => removeAddonFromCartItem(item.id, addon.preparacionId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${addon.nombre}`}>
+                  ×
+                </button>
+              </div>
+            ))}
+            <select
+              value=""
+              onChange={(event) => addAddonToCartItem(item.id, event.target.value)}
+              style={addonSelectStyle}
+            >
+              <option value="">+ Agregar adicional (extra pagado)...</option>
+              {adicionales.map((addon) => (
+                <option key={addon.id} value={addon.id}>
+                  {addon.nombre} — ${Number(addon.precio || 0).toFixed(2)}
+                  {formatBs(addon.precio, tasaCambio) ? ` (${formatBs(addon.precio, tasaCambio)})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   if (loadingOrder) {
@@ -446,7 +604,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                     <button
                       key={product.id}
                       type="button"
-                      onClick={() => addToCart(product)}
+                      onClick={() => (product.venta_por_peso ? setPesoPickerFor(product) : addToCart(product))}
                       style={productCardStyle(Boolean(promotion))}
                     >
                       {quantityInCart > 0 ? <span style={cardQuantityBadgeStyle}>{quantityInCart}</span> : null}
@@ -467,12 +625,12 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                           {promotion ? (
                             <span style={productCardPriceGroupStyle}>
                               <span style={priceStrikeStyle}>${Number(product.precio_venta).toFixed(2)}</span>
-                              <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}</span>
+                              <span style={pricePromoStyle}>${Number(promotion.precio_descuento).toFixed(2)}{product.venta_por_peso ? '/kg' : ''}</span>
                               <BsAmount amountUsd={promotion.precio_descuento} tasa={tasaCambio} style={{ marginLeft: 0 }} />
                             </span>
                           ) : (
                             <span style={productCardPriceGroupStyle}>
-                              <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}</span>
+                              <span style={priceStyle}>${Number(product.precio_venta).toFixed(2)}{product.venta_por_peso ? '/kg' : ''}</span>
                               <BsAmount amountUsd={product.precio_venta} tasa={tasaCambio} style={{ marginLeft: 0 }} />
                             </span>
                           )}
@@ -492,85 +650,40 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
               <span style={cartCountBadgeStyle}>{cartCount} {cartCount === 1 ? 'plato' : 'platos'}</span>
             </div>
 
+            <div style={armarPlatoBarStyle}>
+              {!armarPlatoActivo ? (
+                <button type="button" onClick={handleStartArmarPlato} style={armarPlatoButtonStyle}>
+                  <span aria-hidden="true">🍽</span> Armar plato
+                </button>
+              ) : (
+                <>
+                  <span style={armarPlatoLabelStyle}>Armando Plato {grupoActual}</span>
+                  <button type="button" onClick={handleNuevoPlato} style={nuevoPlatoButtonStyle}>+ Nuevo plato</button>
+                  <button type="button" onClick={handleTerminarArmado} style={terminarArmadoButtonStyle}>Terminar</button>
+                </>
+              )}
+            </div>
+
             <div style={cartListStyle(isCompact)}>
               {cartItems.length === 0 ? (
                 <div style={cartEmptyStyle}>Toca un plato del menú para agregarlo aquí.</div>
               ) : (
-                cartItems.map((item) => {
-                  const product = products.find((entry) => String(entry.id) === String(item.productId));
-                  if (!product) {
-                    return null;
-                  }
-                  const promotion = promotionsByProductId[product.id];
-                  const unitPrice = getUnitPrice(product, promotionsByProductId);
-
-                  return (
-                    <div key={item.productId} style={cartLineStyle}>
-                      <div style={cartLineTopStyle}>
-                        <div style={cartLineNameStyle}>
-                          {product.nombre}
-                          {promotion ? <span style={promoInlineBadgeStyle}>-{promotion.porcentaje_descuento}%</span> : null}
-                        </div>
-                        <button type="button" onClick={() => removeCartItem(item.productId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${product.nombre}`}>
-                          ×
-                        </button>
+                <>
+                  {groupedCartItems.platos.map(({ grupoId, items }) => (
+                    <div key={`plato-${grupoId}`} style={platoGroupStyle}>
+                      <div style={platoGroupHeaderStyle}>
+                        <span>Plato {grupoId}</span>
+                        <span style={platoGroupSubtotalStyle}>
+                          ${items.reduce((sum, item) => sum + computeItemTotal(item, products, promotionsByProductId), 0).toFixed(2)}
+                        </span>
                       </div>
-                      <div style={cartLineControlsStyle}>
-                        <div style={qtyStepperStyle}>
-                          <button type="button" onClick={() => changeCartQuantity(item.productId, -1)} style={qtyButtonStyle}>−</button>
-                          <span style={qtyValueStyle}>{item.quantity}</span>
-                          <button type="button" onClick={() => changeCartQuantity(item.productId, 1)} style={qtyButtonStyle}>+</button>
-                        </div>
-                        <div style={cartLineSubtotalStyle}>
-                          ${(unitPrice * item.quantity).toFixed(2)}
-                          <BsAmount amountUsd={unitPrice * item.quantity} tasa={tasaCambio} />
-                        </div>
+                      <div style={platoGroupItemsStyle}>
+                        {items.map((item) => renderCartLine(item))}
                       </div>
-                      <input
-                        type="text"
-                        value={item.notes}
-                        onChange={(event) => updateCartNotes(item.productId, event.target.value)}
-                        placeholder="Indicaciones (sin cebolla, término medio...)"
-                        style={cartNotesInputStyle}
-                      />
-
-                      {adicionales.length > 0 ? (
-                        <div style={addonSectionStyle}>
-                          {(item.adicionales || []).map((addon) => (
-                            <div key={addon.preparacionId} style={addonChipStyle}>
-                              <span>{addon.nombre}</span>
-                              <div style={qtyStepperStyle}>
-                                <button type="button" onClick={() => changeAddonQuantity(item.productId, addon.preparacionId, -1)} style={qtyButtonStyle}>−</button>
-                                <span style={qtyValueStyle}>{addon.cantidad}</span>
-                                <button type="button" onClick={() => changeAddonQuantity(item.productId, addon.preparacionId, 1)} style={qtyButtonStyle}>+</button>
-                              </div>
-                              <span style={addonPriceStyle}>
-                                ${(Number(addon.precioUnitario || 0) * addon.cantidad).toFixed(2)}
-                                <BsAmount amountUsd={Number(addon.precioUnitario || 0) * addon.cantidad} tasa={tasaCambio} />
-                              </span>
-                              <button type="button" onClick={() => removeAddonFromCartItem(item.productId, addon.preparacionId)} style={cartRemoveButtonStyle} aria-label={`Quitar ${addon.nombre}`}>
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                          <select
-                            value=""
-                            onChange={(event) => addAddonToCartItem(item.productId, event.target.value)}
-                            style={addonSelectStyle}
-                          >
-                            <option value="">+ Agregar adicional (extra pagado)...</option>
-                            {adicionales.map((addon) => (
-                              <option key={addon.id} value={addon.id}>
-                                {addon.nombre} — ${Number(addon.precio || 0).toFixed(2)}
-                                {formatBs(addon.precio, tasaCambio) ? ` (${formatBs(addon.precio, tasaCambio)})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : null}
                     </div>
-                  );
-                })
+                  ))}
+                  {groupedCartItems.ungrouped.map((item) => renderCartLine(item))}
+                </>
               )}
             </div>
 
@@ -617,13 +730,81 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           </button>
         </div>
       ) : null}
+
+      {pesoPickerFor ? (
+        <PesoPickerModal
+          product={pesoPickerFor}
+          tasaCambio={tasaCambio}
+          onClose={() => setPesoPickerFor(null)}
+          onConfirm={(gramos) => {
+            addToCart(pesoPickerFor, { pesoGramos: gramos });
+            setPesoPickerFor(null);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
+  const [gramos, setGramos] = useState(250);
+  const precioPorKg = Number(product.precio_venta) || 0;
+  const precioEstimado = precioPorKg * (gramos / 1000);
+
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
+          ×
+        </button>
+        <div style={modalBodyStyle}>
+          <div style={modalTitleStyle}>{product.nombre}</div>
+          <div style={modalCategoryStyle}>Precio por kilogramo: ${precioPorKg.toFixed(2)}</div>
+
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Gramos a pedir</span>
+            <div style={pesoStepperRowStyle}>
+              <button type="button" onClick={() => setGramos((current) => Math.max(10, current - 50))} style={qtyButtonStyle}>−</button>
+              <input
+                type="number"
+                min="10"
+                step="10"
+                value={gramos}
+                onChange={(event) => setGramos(Math.max(0, Number(event.target.value) || 0))}
+                style={pesoInputStyle}
+              />
+              <button type="button" onClick={() => setGramos((current) => current + 50)} style={qtyButtonStyle}>+</button>
+            </div>
+          </label>
+
+          <div style={modalFooterStyle}>
+            <span style={productCardPriceGroupStyle}>
+              <span style={{ ...priceStyle, fontSize: 20 }}>${precioEstimado.toFixed(2)}</span>
+              <BsAmount amountUsd={precioEstimado} tasa={tasaCambio} style={{ fontSize: 12, marginLeft: 0 }} />
+            </span>
+            <button type="button" onClick={() => onConfirm(gramos)} disabled={!gramos || gramos <= 0} style={modalAddButtonStyle}>
+              Agregar al pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function getUnitPrice(product, promotionsByProductId = {}) {
   const promotion = promotionsByProductId[product.id];
   return promotion ? Number(promotion.precio_descuento) : Number(product.precio_venta);
+}
+
+function computeItemTotal(item, productsList, promotionsByProductId = {}) {
+  const product = productsList.find((entry) => String(entry.id) === String(item.productId));
+  if (!product) {
+    return 0;
+  }
+  const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
+  const pesoFactor = item.pesoGramos ? Number(item.pesoGramos) / 1000 : 1;
+  return getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal;
 }
 
 function getCookie(name) {
@@ -633,6 +814,13 @@ function getCookie(name) {
     return parts.pop().split(';').shift();
   }
   return '';
+}
+
+function cryptoRandomId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 const orderContainerStyle = (isCompact) => ({
@@ -966,6 +1154,202 @@ const cartListStyle = (isCompact) => ({
   maxHeight: isCompact ? 'none' : 320,
   overflowY: isCompact ? 'visible' : 'auto',
 });
+
+// --- Armar plato (agrupar varias líneas del carrito en un mismo plato) ---
+
+const armarPlatoBarStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 8,
+};
+
+const armarPlatoButtonStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  border: '1px dashed rgba(125, 200, 255, 0.45)',
+  borderRadius: 999,
+  padding: '8px 14px',
+  background: 'rgba(90, 170, 255, 0.08)',
+  color: '#bfe0ff',
+  fontWeight: 700,
+  fontSize: 13,
+  cursor: 'pointer',
+  minHeight: 38,
+};
+
+const armarPlatoLabelStyle = {
+  padding: '6px 12px',
+  borderRadius: 999,
+  background: 'rgba(90, 170, 255, 0.16)',
+  border: '1px solid rgba(125, 200, 255, 0.4)',
+  color: '#bfe0ff',
+  fontSize: 12.5,
+  fontWeight: 700,
+};
+
+const nuevoPlatoButtonStyle = {
+  border: '1px solid rgba(125, 200, 255, 0.4)',
+  borderRadius: 999,
+  padding: '7px 12px',
+  background: 'rgba(90, 170, 255, 0.1)',
+  color: '#bfe0ff',
+  fontWeight: 700,
+  fontSize: 12.5,
+  cursor: 'pointer',
+  minHeight: 34,
+};
+
+const terminarArmadoButtonStyle = {
+  border: '1px solid rgba(255,255,255,0.18)',
+  borderRadius: 999,
+  padding: '7px 12px',
+  background: 'rgba(255,255,255,0.04)',
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 12.5,
+  cursor: 'pointer',
+  minHeight: 34,
+};
+
+const platoGroupStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: 8,
+  borderRadius: 14,
+  border: '1px solid rgba(125, 200, 255, 0.28)',
+  background: 'rgba(90, 170, 255, 0.05)',
+};
+
+const platoGroupHeaderStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  color: '#bfe0ff',
+  fontWeight: 800,
+  fontSize: 12.5,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  padding: '0 2px',
+};
+
+const platoGroupSubtotalStyle = {
+  color: '#fff',
+  fontWeight: 700,
+};
+
+const platoGroupItemsStyle = {
+  display: 'grid',
+  gap: 8,
+};
+
+const pesoUnitPriceHintStyle = {
+  color: '#9a8686',
+  fontSize: 11,
+  marginTop: -4,
+};
+
+const pesoStepperRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+};
+
+const pesoInputStyle = {
+  width: 90,
+  textAlign: 'center',
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'rgba(12, 12, 12, 0.95)',
+  color: '#fff',
+  padding: '10px 8px',
+  fontSize: 16,
+  colorScheme: 'dark',
+};
+
+// --- Modal de selección de peso ---
+
+const modalBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 20,
+  background: 'rgba(0,0,0,0.7)',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 16,
+};
+
+const modalCardStyle = {
+  position: 'relative',
+  width: '100%',
+  maxWidth: 420,
+  maxHeight: '88vh',
+  overflowY: 'auto',
+  borderRadius: 20,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
+  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+};
+
+const modalCloseButtonStyle = {
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  zIndex: 2,
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  border: 'none',
+  background: 'rgba(0,0,0,0.55)',
+  color: '#fff',
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+};
+
+const modalBodyStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: 16,
+};
+
+const modalTitleStyle = {
+  color: '#fff',
+  fontWeight: 700,
+  fontSize: 20,
+  lineHeight: 1.25,
+};
+
+const modalCategoryStyle = {
+  color: '#f1b8b8',
+  fontSize: 12,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+};
+
+const modalFooterStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  marginTop: 6,
+  paddingTop: 12,
+  borderTop: '1px solid rgba(255,255,255,0.1)',
+};
+
+const modalAddButtonStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '11px 18px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  minHeight: 44,
+};
 
 const cartEmptyStyle = {
   padding: '18px 10px',

@@ -18,6 +18,9 @@ const TICKET_STYLES = `
   .item { margin: 0 0 2.5mm; }
   .item-line { font-size: 15px; font-weight: 700; }
   .item-note { font-size: 12px; padding-left: 3mm; }
+  .plato-group { margin: 0 0 3mm; padding: 1.5mm 0 0 0; border-top: 1px dashed #000; }
+  .plato-group-title { font-size: 12px; font-weight: 700; text-transform: uppercase; margin: 0 0 1.5mm; }
+  .plato-group .item { padding-left: 2mm; }
   .notes { font-size: 12px; margin-top: 3mm; padding-top: 2mm; border-top: 1px dashed #000; }
   .footer { font-size: 10px; text-align: center; margin-top: 4mm; }
   .cut-space { height: 22mm; }
@@ -62,6 +65,8 @@ function normalizeTicket(ticket = {}) {
       cantidad: item.cantidad ?? item.qty ?? 1,
       producto: item.producto ?? item.producto_nombre ?? item.nombre ?? '',
       notas: item.notas ?? item.notes ?? '',
+      pesoGramos: item.pesoGramos ?? item.peso_gramos ?? null,
+      grupoArmado: item.grupoArmado ?? item.grupo_armado ?? null,
       adicionales: Array.isArray(item.adicionales) ? item.adicionales.map((addon) => ({
         cantidad: addon.cantidad ?? 1,
         nombre: addon.nombre ?? '',
@@ -71,18 +76,45 @@ function normalizeTicket(ticket = {}) {
   };
 }
 
-export function buildKitchenTicketHtml(ticket) {
-  const normalizedTicket = normalizeTicket(ticket);
-  const items = normalizedTicket.items;
-
-  const itemsHtml = items.map((item) => `
+function renderTicketItem(item) {
+  const cantidadLabel = item.pesoGramos ? `${escapeHtml(item.pesoGramos)} g` : `${escapeHtml(item.cantidad)}x`;
+  return `
     <div class="item">
-      <div class="item-line">${escapeHtml(item.cantidad)}x ${escapeHtml(item.producto)}</div>
+      <div class="item-line">${cantidadLabel} ${escapeHtml(item.producto)}</div>
       ${item.notas ? `<div class="item-note">- ${escapeHtml(item.notas)}</div>` : ''}
       ${item.adicionales.map((addon) => `<div class="item-note">+ ${escapeHtml(addon.cantidad)}x ${escapeHtml(addon.nombre)}</div>`).join('')}
       ${item.composicion.length > 0 ? `<div class="item-note">Lleva: ${escapeHtml(item.composicion.join(', '))}</div>` : ''}
     </div>
-  `).join('');
+  `;
+}
+
+export function buildKitchenTicketHtml(ticket) {
+  const normalizedTicket = normalizeTicket(ticket);
+  const items = normalizedTicket.items;
+
+  const grupos = new Map();
+  const sueltos = [];
+  items.forEach((item) => {
+    if (item.grupoArmado) {
+      if (!grupos.has(item.grupoArmado)) {
+        grupos.set(item.grupoArmado, []);
+      }
+      grupos.get(item.grupoArmado).push(item);
+    } else {
+      sueltos.push(item);
+    }
+  });
+
+  const gruposHtml = Array.from(grupos.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([grupoId, grupoItems]) => `
+      <div class="plato-group">
+        <div class="plato-group-title">Plato ${escapeHtml(grupoId)}</div>
+        ${grupoItems.map(renderTicketItem).join('')}
+      </div>
+    `).join('');
+
+  const itemsHtml = gruposHtml + sueltos.map(renderTicketItem).join('');
 
   return `<!doctype html>
 <html>

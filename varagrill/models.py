@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
@@ -123,6 +125,10 @@ class VGProducto(VGAuditoria):
     imagen_url = models.URLField(blank=True)
     disponible = models.BooleanField(default=True)
     tiempo_preparacion_min = models.PositiveSmallIntegerField(default=0)
+    venta_por_peso = models.BooleanField(
+        default=False,
+        help_text="Si está activo, precio_venta es el precio por KILOGRAMO y el pedido registra los gramos vendidos en vez de unidades (ej: cortes de carne).",
+    )
     receta_vinculada = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="productos_vinculados",
         help_text="Receta del catálogo (VGProducto de categoría 'Recetas') que compone este producto vendible.",
@@ -401,7 +407,18 @@ class VGDetallePedido(models.Model):
     pedido = models.ForeignKey(VGPedido, on_delete=models.CASCADE, related_name="detalles")
     producto = models.ForeignKey(VGProducto, on_delete=models.PROTECT, related_name="detalles_pedido")
     cantidad = models.PositiveSmallIntegerField(default=1)
-    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    precio_unitario = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        help_text="Precio por unidad, o precio por kilogramo si producto.venta_por_peso.",
+    )
+    peso_gramos = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Gramos vendidos cuando producto.venta_por_peso está activo (ej: 250.00). Vacío para productos por unidad.",
+    )
+    grupo_armado = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Agrupa varias líneas de este mismo pedido en un 'plato armado' (ej: carne + guarniciones). Sin agrupar si está vacío.",
+    )
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     notas = models.CharField(max_length=255, blank=True)
 
@@ -410,7 +427,8 @@ class VGDetallePedido(models.Model):
 
     @property
     def subtotal(self):
-        return self.cantidad * self.precio_unitario
+        peso_factor = (self.peso_gramos / Decimal("1000")) if self.peso_gramos else Decimal("1")
+        return self.cantidad * self.precio_unitario * peso_factor
 
     def __str__(self):
         return f"{self.producto} x {self.cantidad}"

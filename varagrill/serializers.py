@@ -23,4 +23,4 @@ class ProductoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VGProducto
-        fields = ['id', 'nombre', 'descripcion', 'precio_venta', 'tiempo_preparacion_min', 'categoria_nombre', 'imagen_url', 'composicion']
+        fields = ['id', 'nombre', 'descripcion', 'precio_venta', 'venta_por_peso', 'tiempo_preparacion_min', 'categoria_nombre', 'imagen_url', 'composicion']

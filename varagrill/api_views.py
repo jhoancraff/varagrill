@@ -365,7 +365,8 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
     """
     needs = {}
     for detalle in pedido.detalles.all():
-        cantidad_platos = Decimal(detalle.cantidad)
+        peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
+        cantidad_platos = Decimal(detalle.cantidad) * peso_factor
         for component in _product_recipe_components(detalle.producto):
             amount = component['cantidad'] * cantidad_platos
             if component['tipo'] == 'ingrediente':
@@ -484,6 +485,26 @@ def _parse_order_payload(data):
         if quantity <= 0:
             return None, f'La cantidad del item #{index} debe ser mayor a cero.'
 
+        peso_gramos = None
+        raw_peso_gramos = item.get('peso_gramos')
+        if raw_peso_gramos not in [None, '']:
+            try:
+                peso_gramos = Decimal(str(raw_peso_gramos))
+            except InvalidOperation:
+                return None, f'El peso del item #{index} es invalido.'
+            if peso_gramos <= 0:
+                return None, f'El peso del item #{index} debe ser mayor a cero.'
+
+        grupo_armado = None
+        raw_grupo_armado = item.get('grupo_armado')
+        if raw_grupo_armado not in [None, '']:
+            try:
+                grupo_armado = int(raw_grupo_armado)
+            except (TypeError, ValueError):
+                return None, f'El grupo del item #{index} es invalido.'
+            if grupo_armado <= 0:
+                return None, f'El grupo del item #{index} debe ser mayor a cero.'
+
         notes = str(item.get('notas', '') or '').strip()
 
         raw_addons = item.get('adicionales') or []
@@ -507,7 +528,14 @@ def _parse_order_payload(data):
             parsed_addons.append({'preparacion_id': addon_preparacion_id, 'cantidad': addon_quantity})
             preparacion_ids.append(addon_preparacion_id)
 
-        parsed_lines.append({'product_id': product_id, 'cantidad': quantity, 'notas': notes, 'adicionales': parsed_addons})
+        parsed_lines.append({
+            'product_id': product_id,
+            'cantidad': quantity,
+            'peso_gramos': peso_gramos,
+            'grupo_armado': grupo_armado,
+            'notas': notes,
+            'adicionales': parsed_addons,
+        })
         product_ids.append(product_id)
 
     products_map = {
@@ -522,6 +550,11 @@ def _parse_order_payload(data):
     for index, line in enumerate(parsed_lines, start=1):
         if line['product_id'] not in products_map:
             return None, f'El producto del item #{index} no existe o no esta disponible.'
+        product = products_map[line['product_id']]
+        if product.venta_por_peso and not line['peso_gramos']:
+            return None, f'Debes indicar el peso (gramos) del item #{index}, "{product.nombre}" se vende por peso.'
+        if not product.venta_por_peso:
+            line['peso_gramos'] = None
         for addon in line['adicionales']:
             if addon['preparacion_id'] not in preparaciones_map:
                 return None, f'Un adicional del item #{index} no existe o ya no esta disponible como adicional.'
@@ -552,7 +585,8 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
         product = products_map[line['product_id']]
         promotion = active_promotions.get(product.id)
         unit_price = _compute_discounted_price(product.precio_venta, promotion) if promotion else product.precio_venta
-        line_subtotal = unit_price * line['cantidad']
+        peso_factor = (line['peso_gramos'] / Decimal('1000')) if product.venta_por_peso and line['peso_gramos'] else Decimal('1')
+        line_subtotal = unit_price * peso_factor * line['cantidad']
 
         built_addons = []
         for addon in line['adicionales']:
@@ -571,6 +605,8 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
             'producto': product,
             'cantidad': line['cantidad'],
             'precio_unitario': unit_price,
+            'peso_gramos': line['peso_gramos'],
+            'grupo_armado': line['grupo_armado'],
             'notas': line['notas'],
             'adicionales': built_addons,
         })
@@ -612,6 +648,10 @@ def _serialize_order_detail(pedido):
                 'producto_nombre': detalle.producto.nombre,
                 'cantidad': detalle.cantidad,
                 'precio_unitario': str(detalle.precio_unitario),
+                'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
+                'grupo_armado': detalle.grupo_armado,
+                'venta_por_peso': detalle.producto.venta_por_peso,
+                'subtotal': str(detalle.subtotal),
                 'notas': detalle.notas,
                 'adicionales': _serialize_detalle_adicionales(detalle),
             }
@@ -666,6 +706,8 @@ def pedido_create_view(request):
                 producto=line['producto'],
                 cantidad=line['cantidad'],
                 precio_unitario=line['precio_unitario'],
+                peso_gramos=line['peso_gramos'],
+                grupo_armado=line['grupo_armado'],
                 estado='pendiente',
                 notas=line['notas'],
             )
@@ -776,6 +818,8 @@ def pedido_update_view(request, pedido_id):
                 producto=line['producto'],
                 cantidad=line['cantidad'],
                 precio_unitario=line['precio_unitario'],
+                peso_gramos=line['peso_gramos'],
+                grupo_armado=line['grupo_armado'],
                 estado='pendiente',
                 notas=line['notas'],
             )
@@ -1656,6 +1700,7 @@ def _serialize_product(product):
         'precio_venta': str(product.precio_venta),
         'costo_estimado': str(product.costo_estimado) if product.costo_estimado is not None else '',
         'disponible': product.disponible,
+        'venta_por_peso': product.venta_por_peso,
         'tiempo_preparacion_min': product.tiempo_preparacion_min,
         'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
         'receta_vinculada_id': product.receta_vinculada_id,
@@ -1784,6 +1829,7 @@ def admin_products_view(request):
     precio_venta_raw = data.get('precio_venta')
     costo_estimado_raw = data.get('costo_estimado')
     disponible = str(data.get('disponible', 'true')).strip().lower() not in {'false', '0', ''}
+    venta_por_peso = str(data.get('venta_por_peso', 'false')).strip().lower() not in {'false', '0', ''}
     tiempo_preparacion_raw = data.get('tiempo_preparacion_min') or 0
 
     if not nombre:
@@ -1861,6 +1907,7 @@ def admin_products_view(request):
             costo_estimado=costo_estimado,
             imagen_url=imagen_url,
             disponible=disponible,
+            venta_por_peso=venta_por_peso,
             tiempo_preparacion_min=tiempo_preparacion,
             receta_vinculada=receta_vinculada,
             subreceta_vinculada=subreceta_vinculada,
@@ -1876,6 +1923,7 @@ def admin_products_view(request):
         product.costo_estimado = costo_estimado
         product.imagen_url = imagen_url
         product.disponible = disponible
+        product.venta_por_peso = venta_por_peso
         product.tiempo_preparacion_min = tiempo_preparacion
         product.receta_vinculada = receta_vinculada
         product.subreceta_vinculada = subreceta_vinculada
@@ -2593,6 +2641,9 @@ def kitchen_orders_view(request):
                     'id': detalle.id,
                     'producto': detalle.producto.nombre,
                     'cantidad': detalle.cantidad,
+                    'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
+                    'grupo_armado': detalle.grupo_armado,
+                    'venta_por_peso': detalle.producto.venta_por_peso,
                     'estado': detalle.estado,
                     'notas': detalle.notas,
                     'adicionales': _serialize_detalle_adicionales(detalle),
@@ -2717,6 +2768,10 @@ def pedidos_cobro_view(request):
                             'producto': detalle.producto.nombre,
                             'cantidad': detalle.cantidad,
                             'precio_unitario': str(detalle.precio_unitario),
+                            'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
+                            'grupo_armado': detalle.grupo_armado,
+                            'venta_por_peso': detalle.producto.venta_por_peso,
+                            'subtotal': str(detalle.subtotal),
                             'notas': detalle.notas,
                             'adicionales': _serialize_detalle_adicionales(detalle),
                         }

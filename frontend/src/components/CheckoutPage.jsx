@@ -224,17 +224,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                               <div style={detailNoteStyle}>Nota general: {pedido.notas}</div>
                             ) : null}
 
-                            <div style={{ display: 'grid', gap: 4 }}>
-                              {items.map((item) => (
-                                <div key={item.id} style={detailItemRowStyle}>
-                                  <span style={{ color: '#fff' }}>{item.cantidad}x {item.producto}</span>
-                                  <span style={{ color: '#d2c4c4' }}>${item.precio_unitario} c/u</span>
-                                  <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
-                                    ${(Number(item.precio_unitario) * item.cantidad).toFixed(2)}
-                                    <BsAmount amountUsd={Number(item.precio_unitario) * item.cantidad} tasa={tasaCambio} />
-                                  </span>
+                            <div style={{ display: 'grid', gap: 6 }}>
+                              {groupItemsByPlato(items).platos.map(({ grupoId, items: grupoItems }) => (
+                                <div key={`plato-${grupoId}`} style={platoGroupStyle}>
+                                  <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
+                                  {grupoItems.map((item) => renderDetailItemRow(item, tasaCambio))}
                                 </div>
                               ))}
+                              {groupItemsByPlato(items).sueltos.map((item) => renderDetailItemRow(item, tasaCambio))}
                             </div>
 
                             {itemsWithNotes.length > 0 ? (
@@ -313,6 +310,40 @@ function formatOrderTime(createdAt) {
     return '';
   }
   return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+function groupItemsByPlato(items) {
+  const grupos = new Map();
+  const sueltos = [];
+  (items || []).forEach((item) => {
+    if (item.grupo_armado) {
+      if (!grupos.has(item.grupo_armado)) {
+        grupos.set(item.grupo_armado, []);
+      }
+      grupos.get(item.grupo_armado).push(item);
+    } else {
+      sueltos.push(item);
+    }
+  });
+  const platos = Array.from(grupos.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([grupoId, groupedItems]) => ({ grupoId, items: groupedItems }));
+  return { platos, sueltos };
+}
+
+function renderDetailItemRow(item, tasaCambio) {
+  const cantidadLabel = item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`;
+  const lineTotal = item.subtotal !== undefined ? Number(item.subtotal) : Number(item.precio_unitario) * item.cantidad;
+  return (
+    <div key={item.id} style={detailItemRowStyle}>
+      <span style={{ color: '#fff' }}>{cantidadLabel} {item.producto}</span>
+      <span style={{ color: '#d2c4c4' }}>${item.precio_unitario}{item.venta_por_peso ? '/kg' : ' c/u'}</span>
+      <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
+        ${lineTotal.toFixed(2)}
+        <BsAmount amountUsd={lineTotal} tasa={tasaCambio} />
+      </span>
+    </div>
+  );
 }
 
 function tipoPedidoLabel(tipoPedido) {
@@ -491,6 +522,23 @@ const detailItemRowStyle = {
   gap: 10,
   fontSize: 13,
   padding: '4px 0',
+};
+
+const platoGroupStyle = {
+  display: 'grid',
+  gap: 2,
+  padding: '6px 8px',
+  borderRadius: 10,
+  border: '1px solid rgba(125, 200, 255, 0.28)',
+  background: 'rgba(90, 170, 255, 0.05)',
+};
+
+const platoGroupTitleStyle = {
+  color: '#bfe0ff',
+  fontWeight: 800,
+  fontSize: 11,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
 };
 
 const itemNoteDetailStyle = {

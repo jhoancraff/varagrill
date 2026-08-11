@@ -106,6 +106,14 @@ class VGCliente(models.Model):
 class VGCategoriaProducto(VGAuditoria):
     nombre = models.CharField(max_length=100, unique=True)
     descripcion = models.CharField(max_length=255, blank=True)
+    ip_impresora = models.CharField(
+        max_length=45, blank=True,
+        help_text="IP en la red local de la impresora térmica que imprime las comandas de esta categoría. Vacío = no imprime.",
+    )
+    puerto_impresora = models.PositiveIntegerField(
+        default=9100,
+        help_text="Puerto TCP de impresión cruda de la impresora (ESC/POS estándar: 9100).",
+    )
 
     class Meta:
         db_table = "vg_categorias_productos"

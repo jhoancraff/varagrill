@@ -19,6 +19,7 @@ import AnalystNewPromotionPage from './AnalystNewPromotionPage';
 import AnalystNewUserPage from './AnalystNewUserPage';
 import AnalystNewRecipePage from './AnalystNewRecipePage';
 import AnalystPreparationsReportPage from './AnalystPreparationsReportPage';
+import AnalystPrintersPage from './AnalysPrintersPage';
 import AnalystProductsPage from './AnalystProductsPage';
 import AnalystPromotionsPage from './AnalystPromotionsPage';
 import AnalystRecipesPage from './AnalystRecipesPage';
@@ -978,6 +979,12 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             isAdmin={isAdmin}
             onBack={() => setActiveView('admin-chef-recommendations')}
+          />
+        ) : activeView === 'admin-printers' ? (
+          <AnalystPrintersPage
+            isMobile={isMobile}
+            isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
           />
         ) : (
           <KitchenOrdersPage

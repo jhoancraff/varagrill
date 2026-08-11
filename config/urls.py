@@ -14,10 +14,14 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from pathlib import Path
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path
+from django.http import Http404
+from django.urls import path, re_path
+from django.views.static import serve
 
 from varagrill.api_views import (
     LoginView,
@@ -27,6 +31,7 @@ from varagrill.api_views import (
     SessionStatusView,
     adicionales_disponibles_view,
     admin_catalog_view,
+    admin_categorias_view,
     admin_chef_recommendations_view,
     admin_mesas_view,
     admin_products_view,
@@ -45,6 +50,21 @@ from varagrill.api_views import (
     tasa_cambio_view,
 )
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIST_DIR = BASE_DIR / 'frontend' / 'dist'
+
+
+def serve_frontend(request, path='index.html'):
+    if not FRONTEND_DIST_DIR.exists():
+        raise Http404('Frontend dist not built yet.')
+
+    final_path = path or 'index.html'
+    if final_path == '':
+        final_path = 'index.html'
+
+    return serve(request, final_path, str(FRONTEND_DIST_DIR))
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/mesas/', MesaListView.as_view(), name='mesa-list'),
@@ -53,6 +73,7 @@ urlpatterns = [
     path('api/adicionales/', adicionales_disponibles_view, name='adicionales-list'),
     path('api/pedidos/', pedido_create_view, name='pedido-create'),
     path('api/admin/catalogo/', admin_catalog_view, name='admin-catalog'),
+    path('api/admin/categorias/', admin_categorias_view, name='admin-categorias'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),
     path('api/admin/promociones/', admin_promotions_view, name='admin-promotions'),
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
@@ -71,6 +92,9 @@ urlpatterns = [
     path('api/auth/status/', SessionStatusView.as_view(), name='session-status'),
     path('api/auth/logout/', LogoutView.as_view(), name='logout'),
 ]
+
+if FRONTEND_DIST_DIR.exists():
+    urlpatterns.append(re_path(r'^(?P<path>.*)$', serve_frontend))
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

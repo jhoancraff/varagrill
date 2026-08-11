@@ -1,5 +1,7 @@
+import ipaddress
 import json
 import mimetypes
+import logging
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -38,9 +40,12 @@ from .models import (
     VGRol,
     VGUsuario,
 )
+from .impresion_termica import imprimir_comandas_pedido
 from .notifications import send_whatsapp_new_order_alert
 from .serializers import MesaSerializer, ProductoSerializer
 from .tasa_cambio import obtener_tasa_actual
+
+logger = logging.getLogger(__name__)
 
 
 def _auth_response(payload, status=200):
@@ -160,7 +165,13 @@ def _notify_cocina_event(event_name, pedido, actor_user):
         try:
             send_whatsapp_new_order_alert(pedido, actor_user)
         except Exception:
-            pass
+            logger.exception('Fallo al enviar alerta WhatsApp para pedido %s', pedido.id)
+
+        # Comandas físicas en las impresoras térmicas de cada categoría.
+        try:
+            imprimir_comandas_pedido(pedido)
+        except Exception:
+            logger.exception('Fallo al imprimir comandas para pedido %s', pedido.id)
 
 
 def _notify_usuario_event(event_name, pedido, actor_user):
@@ -725,8 +736,7 @@ def pedido_create_view(request):
         pedido.actualizado_por = request.user
         pedido.save(update_fields=['subtotal', 'total', 'actualizado_por'])
 
-    if _is_mesero_user(request.user):
-        _notify_cocina_event('NUEVA_COMANDAS', pedido, request.user)
+    _notify_cocina_event('NUEVA_COMANDAS', pedido, request.user)
 
     return _auth_response(
         {
@@ -1647,6 +1657,72 @@ def admin_mesas_view(request):
         'mesa': _serialize_mesa(mesa),
     }, status=201 if action == 'create' else 200)
 
+
+def _serialize_categoria_impresora(categoria):
+    return {
+        'id': categoria.id,
+        'nombre': categoria.nombre,
+        'ip_impresora': categoria.ip_impresora,
+        'puerto_impresora': categoria.puerto_impresora,
+    }
+
+
+@csrf_exempt
+def admin_categorias_view(request):
+    """Asigna qué impresora térmica (IP:puerto en la LAN) imprime las comandas de cada categoría."""
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        categorias = VGCategoriaProducto.objects.order_by('nombre')
+        return _auth_response({
+            'ok': True,
+            'categorias': [_serialize_categoria_impresora(categoria) for categoria in categorias],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+    if action != 'update':
+        return _auth_response({'ok': False, 'message': 'Accion de categorias invalida.'}, status=400)
+
+    categoria_id = data.get('id')
+    try:
+        categoria = VGCategoriaProducto.objects.get(pk=int(categoria_id))
+    except (ValueError, TypeError, VGCategoriaProducto.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'La categoría no existe.'}, status=400)
+
+    ip_impresora = str(data.get('ip_impresora', '') or '').strip()
+    if ip_impresora:
+        try:
+            ipaddress.ip_address(ip_impresora)
+        except ValueError:
+            return _auth_response({'ok': False, 'message': 'La IP de la impresora no es válida.'}, status=400)
+
+    puerto_raw = data.get('puerto_impresora', categoria.puerto_impresora)
+    try:
+        puerto_impresora = int(puerto_raw)
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'El puerto de la impresora no es válido.'}, status=400)
+    if not (1 <= puerto_impresora <= 65535):
+        return _auth_response({'ok': False, 'message': 'El puerto debe estar entre 1 y 65535.'}, status=400)
+
+    categoria.ip_impresora = ip_impresora
+    categoria.puerto_impresora = puerto_impresora
+    categoria.actualizado_por = request.user
+    categoria.save(update_fields=['ip_impresora', 'puerto_impresora', 'actualizado_por', 'fecha_actualizacion'])
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Impresora asignada correctamente.',
+        'categoria': _serialize_categoria_impresora(categoria),
+    })
 
 
 ALLOWED_PRODUCT_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif'}

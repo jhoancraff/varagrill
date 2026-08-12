@@ -7,6 +7,7 @@ en la misma LAN que el servidor, así que basta con abrir un socket a su IP fija
 mandarle los bytes ESC/POS — el mismo mecanismo que `printf ... | nc <ip> 9100`.
 """
 import socket
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ ALIGN_CENTER = ESC + b'a' + b'\x01'
 ALIGN_LEFT = ESC + b'a' + b'\x00'
 DOUBLE_SIZE = GS + b'!' + b'\x11'
 NORMAL_SIZE = GS + b'!' + b'\x00'
-CUT = b''
+CUT = GS + b'V' + b'\x00'
 FEED = b'\n'
 
 ENCODING = 'cp1252'
@@ -132,20 +133,28 @@ def imprimir_comandas_pedido(pedido):
     for categoria, items in por_categoria.values():
         if not categoria.ip_impresora:
             continue
+        destino = f'{categoria.ip_impresora}:{categoria.puerto_impresora}'
         try:
             ticket = _build_ticket_bytes(pedido, categoria, items)
+            logger.info(
+                'Enviando comanda pedido %s categoria %s a %s (%s bytes)',
+                pedido.id, categoria.nombre, destino, len(ticket),
+            )
             with socket.create_connection(
                 (categoria.ip_impresora, categoria.puerto_impresora),
                 timeout=CONNECT_TIMEOUT_SECONDS,
             ) as conexion:
                 conexion.sendall(ticket)
-        except OSError as error:
-            logger.warning(
-                'No se pudo imprimir pedido %s en categoria %s hacia %s:%s (%s)',
-                pedido.id,
-                categoria.nombre,
-                categoria.ip_impresora,
-                categoria.puerto_impresora,
-                error,
+                # Algunas impresoras térmicas de red (controladores clon) necesitan un
+                # respiro entre el sendall() y el cierre del socket para volcar su
+                # buffer de recepción al cabezal antes de que la conexión se corte;
+                # cerrar de inmediato puede producir un ticket en blanco.
+                conexion.shutdown(socket.SHUT_WR)
+                time.sleep(0.3)
+            logger.info('Comanda pedido %s categoria %s enviada a %s', pedido.id, categoria.nombre, destino)
+        except Exception:
+            logger.exception(
+                'No se pudo imprimir pedido %s en categoria %s hacia %s',
+                pedido.id, categoria.nombre, destino,
             )
             continue

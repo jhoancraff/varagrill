@@ -136,6 +136,16 @@ def _serialize_recipe_product(product):
 
 
 def _notify_cocina_event(event_name, pedido, actor_user):
+    # Se imprime la comanda física tanto al registrar el pedido como al pasarlo
+    # a "en preparación" (el mesero/cocina confirma que arrancan a cocinarlo).
+    # No debe depender de que el canal de WebSocket esté disponible: se intenta
+    # siempre, aunque channel_layer sea None.
+    if event_name == 'NUEVA_COMANDAS' or (event_name == 'PEDIDO_ACTUALIZADO' and pedido.estado == 'en_preparacion'):
+        try:
+            imprimir_comandas_pedido(pedido)
+        except Exception:
+            logger.exception('Fallo al imprimir comandas para pedido %s', pedido.id)
+
     channel_layer = get_channel_layer()
     if channel_layer is None:
         return
@@ -166,12 +176,6 @@ def _notify_cocina_event(event_name, pedido, actor_user):
             send_whatsapp_new_order_alert(pedido, actor_user)
         except Exception:
             logger.exception('Fallo al enviar alerta WhatsApp para pedido %s', pedido.id)
-
-        # Comandas físicas en las impresoras térmicas de cada categoría.
-        try:
-            imprimir_comandas_pedido(pedido)
-        except Exception:
-            logger.exception('Fallo al imprimir comandas para pedido %s', pedido.id)
 
 
 def _notify_usuario_event(event_name, pedido, actor_user):

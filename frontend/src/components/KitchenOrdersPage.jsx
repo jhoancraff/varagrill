@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { printKitchenTicket } from '../utils/kitchenTicket';
 
 const ACTIVE_FILTER = 'activos';
 const ALL_FILTER = 'todos';
@@ -105,18 +104,6 @@ function KitchenOrdersPage({
     [isMobile, mobileColumn],
   );
 
-  const handlePrintOrder = (order) => {
-    printKitchenTicket({
-      pedidoId: order.id,
-      mesa: order.mesa,
-      tipoPedido: order.tipo_pedido,
-      mesero: order.mesero,
-      creadoEn: order.creado_en,
-      notasGenerales: order.notas,
-      items: order.items,
-    });
-  };
-
   const handleUpdateOrderState = async (orderId, nextState) => {
     if (updatingMap[orderId]) {
       return;
@@ -140,11 +127,6 @@ function KitchenOrdersPage({
       if (!response.ok || !data.ok) {
         setError(data.message || 'No se pudo actualizar el estado del pedido.');
         return;
-      }
-
-      const orderBeingUpdated = orders.find((order) => order.id === orderId);
-      if (nextState === 'en_preparacion' && orderBeingUpdated?.estado === 'pendiente') {
-        handlePrintOrder(orderBeingUpdated);
       }
 
       setOrders((current) => {
@@ -310,15 +292,6 @@ function KitchenOrdersPage({
                               style={editButtonStyle(isMobile)}
                             >
                               Editar pedido
-                            </button>
-                          ) : null}
-                          {order.estado === 'en_preparacion' ? (
-                            <button
-                              type="button"
-                              onClick={() => handlePrintOrder(order)}
-                              style={printButtonStyle(isMobile)}
-                            >
-                              Imprimir comanda
                             </button>
                           ) : null}
                           {(nextActionsByState[order.estado] || []).map((action) => (
@@ -673,18 +646,6 @@ const actionButtonStyle = (nextState, isMobile) => ({
   background: nextState === 'entregado'
     ? 'linear-gradient(90deg, #065f46 0%, #10b981 100%)'
     : 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
-  color: '#fff',
-  fontWeight: 700,
-  cursor: 'pointer',
-  minHeight: isMobile ? 42 : 36,
-  width: isMobile ? '100%' : 'auto',
-});
-
-const printButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(56, 189, 248, 0.4)',
-  borderRadius: 999,
-  padding: isMobile ? '10px 14px' : '8px 12px',
-  background: 'rgba(56, 189, 248, 0.14)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

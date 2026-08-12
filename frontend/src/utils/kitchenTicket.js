@@ -2,8 +2,8 @@ const TICKET_STYLES = `
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
   html, body {
-    margin: 20px;
-    padding: 20px;
+    margin: 0;
+    padding: 0;
     width: 80mm;
     font-family: 'Courier New', Courier, monospace;
     color: #000;

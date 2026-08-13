@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import BsAmount from './BsAmount';
 import useExchangeRate from '../hooks/useExchangeRate';
+import { UNIT_OPTIONS, convertirCantidad } from '../utils/unitConversion';
 
 const emptyForm = {
   id: null,
@@ -16,12 +17,25 @@ const emptyForm = {
   vinculo_id: '',
 };
 
+const emptyIngredientDraft = {
+  search: '',
+  id: '',
+  unidadBase: '',
+  unidad: '',
+  cantidad: '',
+};
+
 function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProductsChanged }) {
   const tasaCambio = useExchangeRate();
+  const ingredientPickerRef = useRef(null);
   const [categories, setCategories] = useState([]);
   const [recetas, setRecetas] = useState([]);
   const [subrecetas, setSubrecetas] = useState([]);
+  const [ingredients, setIngredients] = useState([]);
   const [form, setForm] = useState(emptyForm);
+  const [ingredientDraft, setIngredientDraft] = useState(emptyIngredientDraft);
+  const [ingredientes, setIngredientes] = useState([]);
+  const [showIngredientResults, setShowIngredientResults] = useState(false);
   const [currentImageUrl, setCurrentImageUrl] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -29,6 +43,22 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      if (ingredientPickerRef.current && !ingredientPickerRef.current.contains(event.target)) {
+        setShowIngredientResults(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -56,6 +86,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
         setCategories(Array.isArray(data.categories) ? data.categories : []);
         setRecetas(Array.isArray(data.recetas) ? data.recetas : []);
         setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
+        setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
         const vinculoTipo = selectedProduct.receta_vinculada_id ? 'receta' : selectedProduct.subreceta_vinculada_id ? 'subreceta' : '';
         setForm({
           id: selectedProduct.id,
@@ -74,6 +105,18 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
               ? String(selectedProduct.subreceta_vinculada_id)
               : '',
         });
+        setIngredientes(
+          (Array.isArray(selectedProduct.ingredientes) ? selectedProduct.ingredientes : [])
+            .filter((item) => item.tipo === 'ingrediente')
+            .map((item) => ({
+              uid: `ingrediente-${item.referencia_id}`,
+              referencia_id: item.referencia_id,
+              nombre: item.nombre,
+              unidadBase: item.unidad || 'unidad',
+              cantidad: item.cantidad,
+              unidad: item.unidad || 'unidad',
+            })),
+        );
         setCurrentImageUrl(selectedProduct.imagen_url || '');
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar el producto.');
@@ -92,6 +135,69 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
   const selectedVinculo = form.vinculo_id
     ? (form.vinculo_tipo === 'receta' ? recetas : subrecetas).find((item) => String(item.id) === String(form.vinculo_id))
     : null;
+
+  const filteredIngredients = useMemo(() => {
+    const query = ingredientDraft.search.trim().toLowerCase();
+    if (!query) {
+      return ingredients;
+    }
+    return ingredients.filter((item) => String(item.nombre || '').toLowerCase().includes(query));
+  }, [ingredients, ingredientDraft.search]);
+
+  const handleSelectIngredient = (item) => {
+    const unidadBase = item.unidad_medida || 'unidad';
+    setIngredientDraft((current) => ({
+      ...current,
+      id: String(item.id),
+      search: item.nombre,
+      unidadBase,
+      unidad: unidadBase,
+    }));
+    setShowIngredientResults(false);
+  };
+
+  const handleAddIngrediente = () => {
+    if (!ingredientDraft.id) {
+      setMessage('Selecciona un ingrediente.');
+      return;
+    }
+    if (!ingredientDraft.cantidad && !form.venta_por_peso) {
+      setMessage('Define la cantidad que lleva el producto.');
+      return;
+    }
+
+    const ingredient = ingredients.find((item) => String(item.id) === String(ingredientDraft.id));
+    if (!ingredient) {
+      setMessage('El ingrediente seleccionado ya no existe.');
+      return;
+    }
+
+    if (ingredientes.some((item) => String(item.referencia_id) === String(ingredient.id))) {
+      setMessage('Ese ingrediente ya está agregado a este producto.');
+      return;
+    }
+
+    const usaProporcion1a1 = !ingredientDraft.cantidad && form.venta_por_peso;
+    const unidadBase = ingredient.unidad_medida || 'unidad';
+
+    setIngredientes((current) => ([
+      ...current,
+      {
+        uid: `ingrediente-${ingredient.id}`,
+        referencia_id: ingredient.id,
+        nombre: ingredient.nombre,
+        unidadBase,
+        cantidad: usaProporcion1a1 ? '1' : ingredientDraft.cantidad,
+        unidad: usaProporcion1a1 ? unidadBase : (ingredientDraft.unidad || unidadBase),
+      },
+    ]));
+    setIngredientDraft(emptyIngredientDraft);
+    setMessage('');
+  };
+
+  const handleRemoveIngrediente = (uid) => {
+    setIngredientes((current) => current.filter((item) => item.uid !== uid));
+  };
 
   const handleImageChange = (event) => {
     const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
@@ -122,6 +228,12 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
       formData.append('venta_por_peso', form.venta_por_peso ? 'true' : 'false');
       formData.append('vinculo_tipo', form.vinculo_tipo);
       formData.append('vinculo_id', form.vinculo_id);
+      formData.append('componentes', JSON.stringify(ingredientes.map((item) => ({
+        tipo: 'ingrediente',
+        referencia_id: item.referencia_id,
+        cantidad: item.cantidad,
+        unidad: item.unidad,
+      }))));
       if (imageFile) {
         formData.append('imagen', imageFile);
       }
@@ -227,52 +339,165 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
             <div style={linkCardStyle}>
               <div style={labelStyle}>Vincular con Receta o Subreceta (opcional)</div>
               <p style={linkHintStyle}>Así, cuando el mesero pida este producto, cocina verá también de qué está compuesto.</p>
-              <div style={formGridStyle(isMobile)}>
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Tipo de vínculo</span>
-                  <select
-                    value={form.vinculo_tipo}
-                    onChange={(event) => setForm((current) => ({ ...current, vinculo_tipo: event.target.value, vinculo_id: '' }))}
-                    style={inputStyle}
-                  >
-                    <option value="">Ninguno</option>
-                    <option value="receta">Receta</option>
-                    <option value="subreceta">Subreceta</option>
-                  </select>
-                </label>
-                {form.vinculo_tipo ? (
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>{form.vinculo_tipo === 'receta' ? 'Receta' : 'Subreceta'}</span>
-                    <select value={form.vinculo_id} onChange={(event) => handleChange('vinculo_id', event.target.value)} style={inputStyle}>
-                      <option value="">Selecciona...</option>
-                      {(form.vinculo_tipo === 'receta' ? recetas : subrecetas).map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.nombre} — costo unitario: ${Number(item.costo_unitario_calculado || 0).toFixed(2)}
-                        </option>
+              {ingredientes.length > 0 ? (
+                <div style={noticeStyle}>Quita los ingredientes propios de abajo para poder vincular una receta o subreceta.</div>
+              ) : (
+                <>
+                  <div style={formGridStyle(isMobile)}>
+                    <label style={fieldStyle}>
+                      <span style={labelStyle}>Tipo de vínculo</span>
+                      <select
+                        value={form.vinculo_tipo}
+                        onChange={(event) => setForm((current) => ({ ...current, vinculo_tipo: event.target.value, vinculo_id: '' }))}
+                        style={inputStyle}
+                      >
+                        <option value="">Ninguno</option>
+                        <option value="receta">Receta</option>
+                        <option value="subreceta">Subreceta</option>
+                      </select>
+                    </label>
+                    {form.vinculo_tipo ? (
+                      <label style={fieldStyle}>
+                        <span style={labelStyle}>{form.vinculo_tipo === 'receta' ? 'Receta' : 'Subreceta'}</span>
+                        <select value={form.vinculo_id} onChange={(event) => handleChange('vinculo_id', event.target.value)} style={inputStyle}>
+                          <option value="">Selecciona...</option>
+                          {(form.vinculo_tipo === 'receta' ? recetas : subrecetas).map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.nombre} — costo unitario: ${Number(item.costo_unitario_calculado || 0).toFixed(2)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                  </div>
+
+                  {selectedVinculo ? (
+                    <div style={costReferenceBoxStyle}>
+                      <div>
+                        <div style={costReferenceLabelStyle}>Costo unitario calculado de "{selectedVinculo.nombre}"</div>
+                        <div style={costReferenceValueStyle}>${Number(selectedVinculo.costo_unitario_calculado || 0).toFixed(2)}</div>
+                        <p style={costReferenceHintStyle}>
+                          Es la suma del costo de los ingredientes/subrecetas de esta receta. Úsalo como referencia para definir el costo real del producto (empaque, mano de obra, etc.).
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleChange('costo_estimado', selectedVinculo.costo_unitario_calculado)}
+                        style={useCostButtonStyle}
+                      >
+                        Usar este valor
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            <div style={linkCardStyle}>
+              <style>
+                {`.product-picker-option:hover { background: rgba(255, 90, 90, 0.16); }
+                  .product-picker-option:focus-visible { outline: 1px solid rgba(255, 132, 132, 0.8); }
+                `}
+              </style>
+              <div style={labelStyle}>Ingredientes que lleva este producto (opcional)</div>
+              <p style={linkHintStyle}>
+                Busca el ingrediente y define cuánto lleva el plato, en la unidad que te resulte más cómoda (ej. gramos).
+                El sistema la convierte a la unidad del inventario del ingrediente al descontar stock cuando se venda.
+                {form.venta_por_peso ? (
+                  <> Como este producto se vende por peso, puedes dejar la cantidad vacía: se asume 1&nbsp;kg vendido = 1&nbsp;kg
+                    descontado de ese ingrediente (ideal cuando el producto ES el ingrediente, ej. un corte de carne). El
+                    mesero define el peso real al tomar el pedido y el descuento se ajusta solo a eso.</>
+                ) : null}
+              </p>
+
+              {form.vinculo_tipo ? (
+                <div style={noticeStyle}>Quita el vínculo de receta/subreceta de arriba para poder agregar ingredientes propios.</div>
+              ) : (
+                <>
+                  <div style={composerRowStyle(isMobile)}>
+                    <div ref={ingredientPickerRef} style={pickerWrapStyle}>
+                      <input
+                        value={ingredientDraft.search}
+                        onChange={(event) => {
+                          setIngredientDraft((current) => ({ ...current, search: event.target.value, id: '' }));
+                          setShowIngredientResults(true);
+                        }}
+                        onFocus={() => setShowIngredientResults(true)}
+                        placeholder="Buscar ingrediente"
+                        style={inputStyle}
+                      />
+                      {showIngredientResults ? (
+                        <div style={pickerListStyle}>
+                          {filteredIngredients.length > 0 ? filteredIngredients.map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              className="product-picker-option"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => handleSelectIngredient(item)}
+                              style={pickerItemStyle}
+                            >
+                              <span style={pickerItemTitleStyle}>{item.nombre}</span>
+                              <span style={pickerItemMetaStyle}>{item.unidad_medida || 'unidad'} · stock {item.stock_actual || '0'}</span>
+                            </button>
+                          )) : (
+                            <div style={pickerEmptyStyle}>No hay ingredientes que coincidan.</div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <input
+                      type="number"
+                      min="0.001"
+                      step="0.001"
+                      value={ingredientDraft.cantidad}
+                      onChange={(event) => setIngredientDraft((current) => ({ ...current, cantidad: event.target.value }))}
+                      placeholder={form.venta_por_peso ? 'Cantidad (vacío = 1:1)' : 'Cantidad'}
+                      style={inputStyle}
+                    />
+
+                    <select
+                      value={ingredientDraft.unidad}
+                      onChange={(event) => setIngredientDraft((current) => ({ ...current, unidad: event.target.value }))}
+                      style={inputStyle}
+                      disabled={!ingredientDraft.unidadBase || (form.venta_por_peso && !ingredientDraft.cantidad)}
+                    >
+                      {(UNIT_OPTIONS[ingredientDraft.unidadBase] || ['unidad']).map((unit) => (
+                        <option key={unit} value={unit}>{unit}</option>
                       ))}
                     </select>
-                  </label>
-                ) : null}
-              </div>
 
-              {selectedVinculo ? (
-                <div style={costReferenceBoxStyle}>
-                  <div>
-                    <div style={costReferenceLabelStyle}>Costo unitario calculado de "{selectedVinculo.nombre}"</div>
-                    <div style={costReferenceValueStyle}>${Number(selectedVinculo.costo_unitario_calculado || 0).toFixed(2)}</div>
-                    <p style={costReferenceHintStyle}>
-                      Es la suma del costo de los ingredientes/subrecetas de esta receta. Úsalo como referencia para definir el costo real del producto (empaque, mano de obra, etc.).
-                    </p>
+                    <button type="button" onClick={handleAddIngrediente} style={secondaryButtonStyle}>
+                      Agregar ingrediente
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleChange('costo_estimado', selectedVinculo.costo_unitario_calculado)}
-                    style={useCostButtonStyle}
-                  >
-                    Usar este valor
-                  </button>
-                </div>
-              ) : null}
+
+                  {ingredientes.length > 0 ? (
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {ingredientes.map((item) => {
+                        const convertido = item.unidad !== item.unidadBase
+                          ? convertirCantidad(item.cantidad, item.unidad, item.unidadBase)
+                          : null;
+                        return (
+                          <article key={item.uid} style={componentCardStyle}>
+                            <div>
+                              <div style={componentTitleStyle}>{item.nombre}</div>
+                              <div style={componentMetaStyle}>
+                                {item.cantidad} {item.unidad}
+                                {convertido !== null ? ` (≈ ${convertido.toFixed(3)} ${item.unidadBase} de inventario)` : ''}
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => handleRemoveIngrediente(item.uid)} style={dangerButtonStyle}>
+                              Quitar
+                            </button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <label style={fieldStyle}>
@@ -322,6 +547,89 @@ const containerStyle = (isMobile) => ({
   gap: 18,
   padding: isMobile ? 6 : 10,
 });
+
+const composerRowStyle = (isMobile) => ({
+  display: 'grid',
+  gridTemplateColumns: isMobile ? '1fr' : 'minmax(220px, 2fr) minmax(100px, 0.6fr) minmax(80px, 0.5fr) auto',
+  gap: 10,
+  alignItems: 'center',
+});
+
+const pickerWrapStyle = {
+  position: 'relative',
+};
+
+const pickerListStyle = {
+  position: 'absolute',
+  zIndex: 8,
+  top: 'calc(100% + 6px)',
+  left: 0,
+  right: 0,
+  maxHeight: 230,
+  overflowY: 'auto',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 132, 132, 0.4)',
+  background: '#140d0d',
+  boxShadow: '0 12px 24px rgba(0, 0, 0, 0.3)',
+};
+
+const pickerItemStyle = {
+  width: '100%',
+  textAlign: 'left',
+  border: 'none',
+  background: 'transparent',
+  color: '#ffeaea',
+  padding: '10px 12px',
+  display: 'grid',
+  gap: 3,
+  cursor: 'pointer',
+};
+
+const pickerItemTitleStyle = {
+  fontWeight: 700,
+};
+
+const pickerItemMetaStyle = {
+  fontSize: 12,
+  color: '#d8bcbc',
+};
+
+const pickerEmptyStyle = {
+  padding: '10px 12px',
+  color: '#d8bcbc',
+  fontSize: 13,
+};
+
+const componentCardStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  background: 'rgba(255, 255, 255, 0.03)',
+};
+
+const componentTitleStyle = {
+  color: '#fff',
+  fontWeight: 700,
+};
+
+const componentMetaStyle = {
+  color: '#d2c3c3',
+  fontSize: 13,
+};
+
+const dangerButtonStyle = {
+  border: '1px solid rgba(255, 126, 126, 0.4)',
+  borderRadius: 999,
+  padding: '8px 14px',
+  background: 'rgba(145, 33, 33, 0.25)',
+  color: '#ffd3d3',
+  fontWeight: 700,
+  cursor: 'pointer',
+};
 
 const badgeStyle = {
   display: 'inline-flex',

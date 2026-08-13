@@ -218,14 +218,16 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   };
 
   const handleStartArmarPlato = () => {
+    // El número de plato solo se reserva (avanza nextGrupoId) cuando se agrega el primer
+    // producto a ese plato, dentro de addToCart — no aquí. Así, si el mesero abre "Armar
+    // Plato" y no llega a registrar nada, el siguiente plato reutiliza el mismo número
+    // en vez de saltárselo.
     setGrupoActual(nextGrupoId);
-    setNextGrupoId((current) => current + 1);
     setArmarPlatoActivo(true);
   };
 
   const handleNuevoPlato = () => {
     setGrupoActual(nextGrupoId);
-    setNextGrupoId((current) => current + 1);
   };
 
   const handleTerminarArmado = () => {
@@ -233,19 +235,35 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
     setGrupoActual(null);
   };
 
+  const resetArmarPlato = () => {
+    setArmarPlatoActivo(false);
+    setGrupoActual(null);
+    setNextGrupoId(1);
+  };
+
   const addToCart = (product, options = {}) => {
     const grupoArmado = armarPlatoActivo ? grupoActual : null;
+    // Primer producto que cae en este plato: recién ahora se "consume" su número, para
+    // que el próximo "+ Nuevo plato" avance de verdad en vez de saltar números vacíos.
+    const consumesGrupo = grupoArmado && grupoArmado === nextGrupoId;
 
     if (product.venta_por_peso) {
       const pesoGramos = Number(options.pesoGramos);
       if (!pesoGramos || pesoGramos <= 0) {
         return;
       }
+      if (consumesGrupo) {
+        setNextGrupoId((current) => current + 1);
+      }
       setCartItems((current) => [
         ...current,
         { id: cryptoRandomId(), productId: product.id, quantity: 1, notes: '', adicionales: [], pesoGramos, grupoArmado },
       ]);
       return;
+    }
+
+    if (consumesGrupo) {
+      setNextGrupoId((current) => current + 1);
     }
 
     setCartItems((current) => {
@@ -400,6 +418,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
           setFeedbackType('success');
           setFeedback(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
           setCartItems([]);
+          resetArmarPlato();
           setOrderHeader((current) => ({ ...current, notas: '' }));
           return;
         }
@@ -413,6 +432,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       setFeedback(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${data.pedido.total}.`);
 
       setCartItems([]);
+      resetArmarPlato();
       setOrderHeader((current) => ({ ...current, notas: '' }));
     } catch (error) {
       if (!navigator.onLine) {
@@ -421,6 +441,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         setFeedbackType('success');
         setFeedback(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
         setCartItems([]);
+        resetArmarPlato();
         setOrderHeader((current) => ({ ...current, notas: '' }));
       } else {
         setFeedbackType('error');
@@ -731,20 +752,35 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                 <div style={cartEmptyStyle}>Toca un plato del menú para agregarlo aquí.</div>
               ) : (
                 <>
-                  {groupedCartItems.platos.map(({ grupoId, items }) => (
-                    <div key={`plato-${grupoId}`} style={platoGroupStyle}>
-                      <div style={platoGroupHeaderStyle}>
-                        <span>Plato {grupoId}</span>
-                        <span style={platoGroupSubtotalStyle}>
-                          ${items.reduce((sum, item) => sum + computeItemTotal(item, products, promotionsByProductId), 0).toFixed(2)}
-                        </span>
+                  {groupedCartItems.platos.map(({ grupoId, items }) => {
+                    const isActivePlato = armarPlatoActivo && grupoId === grupoActual;
+                    return (
+                      <div key={`plato-${grupoId}`} style={platoGroupStyle(isActivePlato)}>
+                        <div style={platoGroupHeaderStyle}>
+                          <span style={platoGroupTitleRowStyle}>
+                            <span>Plato {grupoId}</span>
+                            <span style={platoStatusBadgeStyle(isActivePlato)}>
+                              {isActivePlato ? '● Armando' : '✓ Armado'}
+                            </span>
+                          </span>
+                          <span style={platoGroupSubtotalStyle}>
+                            ${items.reduce((sum, item) => sum + computeItemTotal(item, products, promotionsByProductId), 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <div style={platoGroupItemsStyle}>
+                          {items.map((item) => renderCartLine(item))}
+                        </div>
                       </div>
+                    );
+                  })}
+                  {groupedCartItems.ungrouped.length > 0 ? (
+                    <div style={ungroupedGroupStyle}>
+                      <div style={ungroupedHeaderStyle}>Otros ítems (sin plato armado)</div>
                       <div style={platoGroupItemsStyle}>
-                        {items.map((item) => renderCartLine(item))}
+                        {groupedCartItems.ungrouped.map((item) => renderCartLine(item))}
                       </div>
                     </div>
-                  ))}
-                  {groupedCartItems.ungrouped.map((item) => renderCartLine(item))}
+                  ) : null}
                 </>
               )}
             </div>
@@ -1412,26 +1448,47 @@ const terminarArmadoButtonStyle = {
   minHeight: 34,
 };
 
-const platoGroupStyle = {
+const platoGroupStyle = (isActive) => ({
   display: 'grid',
   gap: 8,
   padding: 8,
   borderRadius: 14,
-  border: '1px solid rgba(125, 200, 255, 0.28)',
-  background: 'rgba(90, 170, 255, 0.05)',
-};
+  border: isActive ? '1px solid rgba(255, 176, 59, 0.6)' : '1px solid rgba(110, 220, 150, 0.35)',
+  background: isActive ? 'rgba(255, 176, 59, 0.09)' : 'rgba(80, 200, 130, 0.07)',
+  boxShadow: isActive ? '0 0 0 2px rgba(255, 176, 59, 0.14)' : 'none',
+});
 
 const platoGroupHeaderStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  color: '#bfe0ff',
+  color: '#fff',
   fontWeight: 800,
   fontSize: 12.5,
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
   padding: '0 2px',
 };
+
+const platoGroupTitleRowStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const platoStatusBadgeStyle = (isActive) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: '0.03em',
+  textTransform: 'uppercase',
+  background: isActive ? 'rgba(255, 176, 59, 0.2)' : 'rgba(80, 200, 130, 0.2)',
+  color: isActive ? '#ffcf8a' : '#8ff0b8',
+});
 
 const platoGroupSubtotalStyle = {
   color: '#fff',
@@ -1441,6 +1498,24 @@ const platoGroupSubtotalStyle = {
 const platoGroupItemsStyle = {
   display: 'grid',
   gap: 8,
+};
+
+const ungroupedGroupStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: 8,
+  borderRadius: 14,
+  border: '1px dashed rgba(255, 255, 255, 0.18)',
+  background: 'rgba(255, 255, 255, 0.02)',
+};
+
+const ungroupedHeaderStyle = {
+  color: '#c8bbbb',
+  fontWeight: 800,
+  fontSize: 12.5,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  padding: '0 2px',
 };
 
 const pesoUnitPriceHintStyle = {

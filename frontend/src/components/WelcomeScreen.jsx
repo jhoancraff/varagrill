@@ -8,6 +8,7 @@ import AnalystEditMesaPage from './AnalystEditMesaPage';
 import AnalystEditProductPage from './AnalystEditProductPage';
 import AnalystEditRecipePage from './AnalystEditRecipePage';
 import AnalystEditPreparationPage from './AnalystEditPreparationPage';
+import AnalystIngredientsImportPage from './AnalystIngredientsImportPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
 import AnalystMesasPage from './AnalystMesasPage';
 import AnalystNewChefRecommendationPage from './AnalystNewChefRecommendationPage';
@@ -811,6 +812,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             onBack={() => setActiveView('home')}
             lastKitchenEvent={lastKitchenEvent}
+            waiterName={displayName}
           />
         ) : activeView === 'admin' ? (
           <AdminPanelPage
@@ -893,6 +895,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             onBack={() => setActiveView('admin')}
             onCreateNew={() => setActiveView('admin-ingredients-new')}
             onEdit={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
+            onImport={() => setActiveView('admin-ingredients-import')}
           />
         ) : activeView.startsWith('admin-ingredients-edit:') ? (
           <AnalystEditIngredientPage
@@ -905,6 +908,11 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             onBack={() => setActiveView('admin-ingredients')}
             onEditExisting={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
+          />
+        ) : activeView === 'admin-ingredients-import' ? (
+          <AnalystIngredientsImportPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-ingredients')}
           />
         ) : activeView === 'admin-preparations' ? (
           <AnalystPreparationsReportPage

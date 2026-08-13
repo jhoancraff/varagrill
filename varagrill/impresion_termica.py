@@ -1,6 +1,9 @@
 """
 Impresión de comandas en impresoras térmicas de red (ESC/POS crudo por TCP/9100),
-una por categoría de producto (ej: barra para Jugos/Licores, cocina para Carnes/Pollos).
+una por impresora física (ip:puerto). Las categorías de producto que comparten la
+misma impresora (ej: Carnes y Guarniciones apuntando a la impresora de cocina) se
+combinan en un solo ticket, para que un plato armado con líneas de varias categorías
+no salga partido en dos comandas.
 
 Sin dependencias externas: solo `socket` de la librería estándar. Cada impresora vive
 en la misma LAN que el servidor, así que basta con abrir un socket a su IP fija y
@@ -61,9 +64,11 @@ def _cantidad_label(detalle):
     return f'{detalle.cantidad}x'
 
 
-def _render_detalle(detalle):
+def _render_detalle(detalle, mostrar_categoria):
     out = bytearray()
-    out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
+    categoria = detalle.producto.categoria
+    prefijo = f'[{categoria.nombre}] ' if mostrar_categoria and categoria else ''
+    out += _text(f'{prefijo}{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
     if detalle.notas:
         out += _text(f'  - {detalle.notas}') + FEED
     for adicional in detalle.adicionales.all():
@@ -71,9 +76,14 @@ def _render_detalle(detalle):
     return bytes(out)
 
 
-def _build_ticket_bytes(pedido, categoria, detalles):
+def _build_ticket_bytes(pedido, categorias, detalles):
     mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
     hora = pedido.fecha_creacion.strftime('%d/%m %H:%M')
+    # Un mismo ticket puede combinar varias categorías cuando comparten impresora
+    # (ej: Carnes + Guarniciones + Entradas en la impresora de cocina). En ese caso
+    # se etiqueta cada línea con su categoría para que el cocinero no las confunda.
+    encabezado = ' / '.join(sorted(c.nombre.upper() for c in categorias))
+    mostrar_categoria = len(categorias) > 1
 
     out = bytearray()
     # Secuencia mínima robusta para este equipo: reset ESC/POS + salir de modo
@@ -82,7 +92,7 @@ def _build_ticket_bytes(pedido, categoria, detalles):
     out += KANJI_OFF
     out += ESC_POS_WCP1252
     out += _text('VARAGRILL') + FEED
-    out += _text(categoria.nombre.upper()) + FEED
+    out += _text(encabezado) + FEED
     out += _text('-' * LINE_WIDTH) + FEED
     out += _text(f'Pedido #{pedido.id}') + FEED
     out += _text(f'{mesa_label} - {_tipo_pedido_label(pedido.tipo_pedido)}') + FEED
@@ -94,9 +104,9 @@ def _build_ticket_bytes(pedido, categoria, detalles):
     for grupo_id, items in platos:
         out += _text(f'-- Plato {grupo_id} --') + FEED
         for detalle in items:
-            out += _render_detalle(detalle)
+            out += _render_detalle(detalle, mostrar_categoria)
     for detalle in sueltos:
-        out += _render_detalle(detalle)
+        out += _render_detalle(detalle, mostrar_categoria)
 
     if pedido.notas:
         out += _text('-' * LINE_WIDTH) + FEED
@@ -109,10 +119,13 @@ def _build_ticket_bytes(pedido, categoria, detalles):
 
 def imprimir_comandas_pedido(pedido):
     """
-    Imprime una comanda por cada categoría con impresora asignada, con solo las líneas
-    de esa categoría. Si una impresora está apagada o inalcanzable, esa comanda se
-    omite sin afectar a las demás ni al registro del pedido (llamar siempre envuelto
-    en try/except desde el caller, igual que send_whatsapp_new_order_alert).
+    Imprime una comanda por cada impresora física con categorías asignadas (ip:puerto),
+    combinando en un solo ticket todas las categorías que comparten esa impresora —
+    así un plato armado con líneas de varias categorías (ej: churrasco de Carnes +
+    yuca de Guarniciones) sale en un único ticket en vez de uno por categoría. Si una
+    impresora está apagada o inalcanzable, esa comanda se omite sin afectar a las
+    demás ni al registro del pedido (llamar siempre envuelto en try/except desde el
+    caller, igual que send_whatsapp_new_order_alert).
     """
     detalles = list(
         pedido.detalles
@@ -123,25 +136,29 @@ def imprimir_comandas_pedido(pedido):
     if not detalles:
         return
 
-    por_categoria = {}
+    por_destino = {}
     for detalle in detalles:
         categoria = detalle.producto.categoria
-        if categoria is None:
+        if categoria is None or not categoria.ip_impresora:
             continue
-        por_categoria.setdefault(categoria.id, (categoria, []))[1].append(detalle)
+        destino_key = (categoria.ip_impresora, categoria.puerto_impresora)
+        entry = por_destino.setdefault(destino_key, {'categorias': {}, 'detalles': []})
+        entry['categorias'][categoria.id] = categoria
+        entry['detalles'].append(detalle)
 
-    for categoria, items in por_categoria.values():
-        if not categoria.ip_impresora:
-            continue
-        destino = f'{categoria.ip_impresora}:{categoria.puerto_impresora}'
+    for (ip_impresora, puerto_impresora), datos in por_destino.items():
+        categorias = list(datos['categorias'].values())
+        items = datos['detalles']
+        destino = f'{ip_impresora}:{puerto_impresora}'
+        nombres_categorias = ', '.join(c.nombre for c in categorias)
         try:
-            ticket = _build_ticket_bytes(pedido, categoria, items)
+            ticket = _build_ticket_bytes(pedido, categorias, items)
             logger.info(
-                'Enviando comanda pedido %s categoria %s a %s (%s bytes)',
-                pedido.id, categoria.nombre, destino, len(ticket),
+                'Enviando comanda pedido %s categorias [%s] a %s (%s bytes)',
+                pedido.id, nombres_categorias, destino, len(ticket),
             )
             with socket.create_connection(
-                (categoria.ip_impresora, categoria.puerto_impresora),
+                (ip_impresora, puerto_impresora),
                 timeout=CONNECT_TIMEOUT_SECONDS,
             ) as conexion:
                 conexion.sendall(ticket)
@@ -151,10 +168,10 @@ def imprimir_comandas_pedido(pedido):
                 # cerrar de inmediato puede producir un ticket en blanco.
                 conexion.shutdown(socket.SHUT_WR)
                 time.sleep(0.3)
-            logger.info('Comanda pedido %s categoria %s enviada a %s', pedido.id, categoria.nombre, destino)
+            logger.info('Comanda pedido %s categorias [%s] enviada a %s', pedido.id, nombres_categorias, destino)
         except Exception:
             logger.exception(
-                'No se pudo imprimir pedido %s en categoria %s hacia %s',
-                pedido.id, categoria.nombre, destino,
+                'No se pudo imprimir pedido %s en categorias [%s] hacia %s',
+                pedido.id, nombres_categorias, destino,
             )
             continue

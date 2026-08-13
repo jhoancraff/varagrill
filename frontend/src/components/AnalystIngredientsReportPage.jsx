@@ -3,7 +3,7 @@ import Pagination from './Pagination';
 
 const PAGE_SIZE = 50;
 
-function AnalystIngredientsReportPage({ isMobile, onBack, onCreateNew, onEdit }) {
+function AnalystIngredientsReportPage({ isMobile, onBack, onCreateNew, onEdit, onImport }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -86,9 +86,16 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onCreateNew, onEdit })
           <h2 style={titleStyle(isMobile)}>Reporte de ingredientes</h2>
           <p style={subtitleStyle}>Busca, modifica o elimina ingredientes del inventario.</p>
         </div>
-        <button type="button" onClick={onCreateNew} style={primaryButtonStyle}>
-          Agregar ingrediente
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {onImport ? (
+            <button type="button" onClick={onImport} style={secondaryButtonStyle}>
+              Importar desde Excel
+            </button>
+          ) : null}
+          <button type="button" onClick={onCreateNew} style={primaryButtonStyle}>
+            Agregar ingrediente
+          </button>
+        </div>
       </div>
 
       {message ? <div style={noticeStyle}>{message}</div> : null}

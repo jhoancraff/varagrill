@@ -41,6 +41,7 @@ from .models import (
     VGUsuario,
 )
 from .impresion_termica import imprimir_comandas_pedido
+from .ingredientes_excel import InvalidExcelError, normalize_unidad, parse_cantidad, parse_ingredientes_workbook
 from .notifications import send_whatsapp_new_order_alert
 from .serializers import MesaSerializer, ProductoSerializer
 from .tasa_cambio import obtener_tasa_actual
@@ -133,6 +134,134 @@ def _serialize_recipe_product(product):
         'componentes': components,
         'componentes_total': len(components),
     }
+
+
+_UNIDAD_FAMILIA = {
+    'kg': ('masa', Decimal('1000')),
+    'g': ('masa', Decimal('1')),
+    'l': ('volumen', Decimal('1000')),
+    'ml': ('volumen', Decimal('1')),
+    'unidad': ('conteo', Decimal('1')),
+}
+
+
+def _convertir_cantidad_a_unidad_ingrediente(cantidad, unidad_ingresada, unidad_ingrediente):
+    """
+    Convierte `cantidad` desde `unidad_ingresada` (la unidad que tecleó el analista al
+    armar la receta, ej. 'g') a `unidad_ingrediente` (la unidad en la que vive el stock
+    del ingrediente, ej. 'kg'), para que `cantidad_requerida` siempre quede guardada en
+    la unidad del inventario y el descuento al cobrar (_compute_pedido_ingredient_needs)
+    no necesite saber nada de conversión. Sin unidad_ingresada (caso de /api/admin/recetas/,
+    que no la envía) se asume que la cantidad ya viene en la unidad del ingrediente.
+
+    Devuelve None si las unidades son de familias incompatibles (ej. kg vs unidad).
+    """
+    unidad_ingresada = unidad_ingresada or unidad_ingrediente
+    if unidad_ingresada == unidad_ingrediente:
+        return cantidad
+    origen = _UNIDAD_FAMILIA.get(unidad_ingresada)
+    destino = _UNIDAD_FAMILIA.get(unidad_ingrediente)
+    if not origen or not destino or origen[0] != destino[0]:
+        return None
+    return (cantidad * origen[1]) / destino[1]
+
+
+def _parse_recipe_components(componentes, *, require_at_least_one):
+    """
+    Valida y normaliza la lista `componentes` que manda el buscador de ingredientes/
+    subrecetas del frontend a [{tipo, referencia_id, cantidad, unidad}, ...]. Compartido
+    entre /api/admin/recetas/ (recetas del catálogo) y /api/admin/productos/ (ingredientes
+    propios de un producto vendible). `unidad` es opcional: la unidad en la que el analista
+    tecleó la cantidad (ver _convertir_cantidad_a_unidad_ingrediente).
+
+    Devuelve (lista_de_componentes, None) o (None, mensaje_error).
+    """
+    if not isinstance(componentes, list):
+        return None, 'Formato inválido de ingredientes/subrecetas.'
+    if require_at_least_one and len(componentes) == 0:
+        return None, 'Debes agregar al menos un ingrediente o subreceta.'
+
+    parsed_components = []
+    duplicate_guard = set()
+    for raw_component in componentes:
+        if not isinstance(raw_component, dict):
+            continue
+
+        component_type = str(raw_component.get('tipo', '')).strip().lower()
+        reference_id = raw_component.get('referencia_id')
+        try:
+            amount = Decimal(str(raw_component.get('cantidad', '0') or '0'))
+        except InvalidOperation:
+            return None, 'Hay una cantidad inválida en los componentes de la receta.'
+
+        if amount <= 0:
+            return None, 'Todas las cantidades de la receta deben ser mayores a cero.'
+
+        if component_type not in {'ingrediente', 'sub_preparacion'}:
+            return None, 'Tipo de componente inválido en la receta.'
+
+        if reference_id in [None, '']:
+            return None, 'Falta seleccionar un ingrediente o subreceta.'
+
+        try:
+            reference_id = int(reference_id)
+        except (TypeError, ValueError):
+            return None, 'Referencia inválida en los componentes de la receta.'
+
+        duplicate_key = f'{component_type}:{reference_id}'
+        if duplicate_key in duplicate_guard:
+            return None, 'No puedes repetir el mismo componente en la receta.'
+        duplicate_guard.add(duplicate_key)
+
+        parsed_components.append({
+            'tipo': component_type,
+            'referencia_id': reference_id,
+            'cantidad': amount,
+            'unidad': str(raw_component.get('unidad') or '').strip().lower() or None,
+        })
+
+    if require_at_least_one and len(parsed_components) == 0:
+        return None, 'No se encontraron componentes válidos para la receta.'
+
+    return parsed_components, None
+
+
+def _resolve_recipe_components_for_save(parsed_components):
+    """
+    Resuelve cada componente ya validado por _parse_recipe_components contra la base de
+    datos (VGIngrediente/VGPreparacion) y convierte la cantidad de ingredientes a la
+    unidad base del ingrediente. Se resuelve todo ANTES de que el caller borre/reescriba
+    las filas de VGRecetaProducto, para no dejar una receta a medio borrar si algún
+    componente ya no existe o su unidad es incompatible.
+
+    Devuelve (filas_listas, None) — cada fila es {'ingrediente', 'preparacion',
+    'cantidad_requerida'} lista para instanciar VGRecetaProducto — o (None, mensaje_error).
+    """
+    resolved = []
+    for component in parsed_components:
+        if component['tipo'] == 'ingrediente':
+            try:
+                ingredient = VGIngrediente.objects.get(pk=component['referencia_id'])
+            except VGIngrediente.DoesNotExist:
+                return None, 'Uno de los ingredientes seleccionados no existe.'
+            cantidad = _convertir_cantidad_a_unidad_ingrediente(
+                component['cantidad'], component['unidad'], ingredient.unidad_medida,
+            )
+            if cantidad is None:
+                return None, (
+                    f'La unidad seleccionada para "{ingredient.nombre}" no es compatible con su '
+                    f'unidad de inventario ({ingredient.unidad_medida}).'
+                )
+            resolved.append({'ingrediente': ingredient, 'preparacion': None, 'cantidad_requerida': cantidad})
+        else:
+            try:
+                preparation = VGPreparacion.objects.get(pk=component['referencia_id'])
+            except VGPreparacion.DoesNotExist:
+                return None, 'Una de las subrecetas seleccionadas no existe.'
+            resolved.append({
+                'ingrediente': None, 'preparacion': preparation, 'cantidad_requerida': component['cantidad'],
+            })
+    return resolved, None
 
 
 def _notify_cocina_event(event_name, pedido, actor_user):
@@ -1433,6 +1562,168 @@ def admin_catalog_view(request):
     return _auth_response({'ok': False, 'message': 'Tipo de catálogo inválido.'}, status=400)
 
 
+MAX_INGREDIENTES_IMPORT_SIZE_BYTES = 5 * 1024 * 1024
+
+
+def _preview_ingrediente_row(row):
+    """
+    Clasifica una fila ya parseada del Excel (ver ingredientes_excel.parse_ingredientes_workbook)
+    contra el inventario actual, sin tocar la base de datos — es lo que ve el analista en la
+    pantalla de "mapeo"/revisión antes de confirmar la importación.
+    """
+    nombre = row['nombre']
+    unidad_normalizada = normalize_unidad(row['unidad'])
+    cantidad, error_cantidad = parse_cantidad(row['cantidad'])
+    ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+
+    resultado = {
+        'fila': row['fila'],
+        'nombre': nombre,
+        'unidad': unidad_normalizada or row['unidad'],
+        'cantidad': str(cantidad) if cantidad is not None else row['cantidad'],
+        'ingrediente_id': ingrediente.id if ingrediente else None,
+        'stock_actual': str(ingrediente.stock_actual) if ingrediente else None,
+        'unidad_actual': ingrediente.unidad_medida if ingrediente else None,
+    }
+
+    if error_cantidad:
+        resultado['accion'] = 'error'
+        resultado['mensaje'] = error_cantidad
+    elif cantidad == 0:
+        resultado['accion'] = 'ignorado'
+        resultado['mensaje'] = 'Cantidad vacía o en 0: no se toca este ingrediente.'
+    elif ingrediente is not None:
+        if cantidad == ingrediente.stock_actual:
+            resultado['accion'] = 'sin_cambios'
+            resultado['mensaje'] = 'El stock ya coincide, no hay nada que actualizar.'
+        else:
+            resultado['accion'] = 'actualizar'
+            resultado['mensaje'] = ''
+    elif not unidad_normalizada:
+        resultado['accion'] = 'error'
+        resultado['mensaje'] = 'Ingrediente nuevo: falta una unidad válida (kg, g, l, ml o unidad).'
+    else:
+        resultado['accion'] = 'nuevo'
+        resultado['mensaje'] = ''
+
+    return resultado
+
+
+def _importar_ingredientes(items, operator):
+    """
+    Aplica la carga de ingredientes ya revisada/editada por el analista (ver
+    _preview_ingrediente_row): por cada fila, si el ingrediente existe se actualiza su
+    stock_actual y se registra un movimiento de 'ajuste' con el delta; si no existe se
+    crea con ese stock inicial y se registra un movimiento de 'entrada'. Cantidad vacía o
+    en 0 se ignora — mismo criterio que sync_inventario_pesaje (management command).
+    """
+    creados, actualizados, ignorados = 0, 0, 0
+    errores = []
+
+    with transaction.atomic():
+        for item in items:
+            nombre = str(item.get('nombre', '') or '').strip()
+            if not nombre:
+                continue
+
+            cantidad, error_cantidad = parse_cantidad(item.get('cantidad'))
+            if error_cantidad:
+                errores.append(f'{nombre}: {error_cantidad}')
+                continue
+            if cantidad == 0:
+                ignorados += 1
+                continue
+
+            ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+            if ingrediente is not None:
+                if cantidad == ingrediente.stock_actual:
+                    continue
+                stock_anterior = ingrediente.stock_actual
+                delta = cantidad - stock_anterior
+                ingrediente.stock_actual = cantidad
+                ingrediente.actualizado_por = operator
+                ingrediente.save(update_fields=['stock_actual', 'actualizado_por', 'fecha_actualizacion'])
+                VGMovimientoInventario.objects.create(
+                    ingrediente=ingrediente,
+                    tipo_movimiento='ajuste',
+                    cantidad=delta,
+                    motivo=f'Carga por Excel: {stock_anterior} -> {cantidad} {ingrediente.unidad_medida}',
+                    creado_por=operator,
+                )
+                actualizados += 1
+            else:
+                unidad_normalizada = normalize_unidad(item.get('unidad'))
+                if not unidad_normalizada:
+                    errores.append(f'{nombre}: falta una unidad válida (kg, g, l, ml o unidad) para crearlo.')
+                    continue
+                nuevo = VGIngrediente.objects.create(
+                    nombre=nombre,
+                    unidad_medida=unidad_normalizada,
+                    stock_actual=cantidad,
+                    stock_minimo=Decimal('0'),
+                    costo_unitario=Decimal('0'),
+                    creado_por=operator,
+                    actualizado_por=operator,
+                )
+                VGMovimientoInventario.objects.create(
+                    ingrediente=nuevo,
+                    tipo_movimiento='entrada',
+                    cantidad=cantidad,
+                    motivo='Carga inicial por Excel (importación de ingredientes)',
+                    creado_por=operator,
+                )
+                creados += 1
+
+    return {'creados': creados, 'actualizados': actualizados, 'ignorados': ignorados, 'errores': errores}
+
+
+@csrf_exempt
+def admin_ingredientes_import_view(request):
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    is_multipart = bool(request.content_type) and request.content_type.startswith('multipart/form-data')
+    if is_multipart:
+        action = str(request.POST.get('action', '')).strip().lower()
+        data = {}
+    else:
+        try:
+            data = json.loads(request.body.decode('utf-8')) if request.body else {}
+        except json.JSONDecodeError:
+            return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+        action = str(data.get('action', '')).strip().lower()
+
+    if action == 'preview':
+        uploaded_file = request.FILES.get('archivo')
+        if uploaded_file is None:
+            return _auth_response({'ok': False, 'message': 'Debes adjuntar un archivo .xlsx.'}, status=400)
+        if uploaded_file.size > MAX_INGREDIENTES_IMPORT_SIZE_BYTES:
+            return _auth_response({'ok': False, 'message': 'El archivo no debe superar los 5MB.'}, status=400)
+
+        try:
+            filas = parse_ingredientes_workbook(uploaded_file)
+        except InvalidExcelError as error:
+            return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
+        if not filas:
+            return _auth_response({'ok': False, 'message': 'El archivo no tiene filas de ingredientes para importar.'}, status=400)
+
+        return _auth_response({'ok': True, 'filas': [_preview_ingrediente_row(row) for row in filas]})
+
+    if action == 'confirm':
+        items = data.get('items')
+        if not isinstance(items, list) or not items:
+            return _auth_response({'ok': False, 'message': 'No hay filas para importar.'}, status=400)
+
+        resumen = _importar_ingredientes(items, request.user)
+        return _auth_response({'ok': True, **resumen})
+
+    return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+
+
 @csrf_exempt
 def admin_users_view(request):
     if request.method not in ['GET', 'POST']:
@@ -1787,6 +2078,7 @@ def _serialize_product(product):
         'receta_vinculada_nombre': product.receta_vinculada.nombre if product.receta_vinculada_id else '',
         'subreceta_vinculada_id': product.subreceta_vinculada_id,
         'subreceta_vinculada_nombre': product.subreceta_vinculada.nombre if product.subreceta_vinculada_id else '',
+        'ingredientes': [_serialize_recipe_component(component) for component in product.receta.all()],
     }
 
 
@@ -1840,9 +2132,13 @@ def admin_products_view(request):
         products = (
             VGProducto.objects.exclude(categoria__nombre__iexact='Recetas')
             .select_related('categoria', 'receta_vinculada', 'subreceta_vinculada')
+            .prefetch_related('receta__ingrediente', 'receta__preparacion')
             .order_by('nombre')
         )
         preparation_cost_map = _load_preparation_cost_map()
+        ingredients = list(
+            VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
+        )
         recetas = [
             {
                 'id': receta.id,
@@ -1874,6 +2170,7 @@ def admin_products_view(request):
             'categories': [_serialize_product_category(category) for category in categories],
             'recetas': recetas,
             'subrecetas': subrecetas,
+            'ingredients': ingredients,
         })
 
     is_multipart = bool(request.content_type) and request.content_type.startswith('multipart/form-data')
@@ -1960,6 +2257,40 @@ def admin_products_view(request):
         except (ValueError, TypeError, VGPreparacion.DoesNotExist):
             return _auth_response({'ok': False, 'message': 'La subreceta seleccionada no existe.'}, status=400)
 
+    componentes_raw = data.get('componentes')
+    if is_multipart:
+        try:
+            componentes = json.loads(componentes_raw) if componentes_raw else []
+        except json.JSONDecodeError:
+            return _auth_response({'ok': False, 'message': 'Formato inválido de ingredientes del producto.'}, status=400)
+    else:
+        componentes = componentes_raw or []
+
+    if venta_por_peso:
+        # En un producto que se vende por peso, la cantidad real la define el mesero al
+        # tomar el pedido (peso_gramos), no el analista de antemano — el descuento ya
+        # escala solo con ese peso (ver peso_factor en _compute_pedido_ingredient_needs).
+        # Si el analista no especifica cantidad, se asume 1:1 con el peso vendido: el
+        # caso típico de un producto que ES el ingrediente crudo (ej. un corte de carne).
+        for raw_component in componentes:
+            if isinstance(raw_component, dict) and not raw_component.get('cantidad'):
+                raw_component['cantidad'] = '1'
+                raw_component['unidad'] = None
+
+    parsed_components, error = _parse_recipe_components(componentes, require_at_least_one=False)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
+    if parsed_components and (receta_vinculada is not None or subreceta_vinculada is not None):
+        return _auth_response({
+            'ok': False,
+            'message': 'No puedes vincular una receta/subreceta y agregar ingredientes propios al mismo tiempo. Elige una sola opción.',
+        }, status=400)
+
+    resolved_components, error = _resolve_recipe_components_for_save(parsed_components)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
     product = None
     if action == 'update':
         product_id = data.get('id')
@@ -1978,38 +2309,50 @@ def admin_products_view(request):
             _delete_product_image(product.imagen_url)
         imagen_url = new_imagen_url
 
-    if action == 'create':
-        product = VGProducto.objects.create(
-            nombre=nombre,
-            descripcion=descripcion,
-            categoria=categoria,
-            precio_venta=precio_venta,
-            costo_estimado=costo_estimado,
-            imagen_url=imagen_url,
-            disponible=disponible,
-            venta_por_peso=venta_por_peso,
-            tiempo_preparacion_min=tiempo_preparacion,
-            receta_vinculada=receta_vinculada,
-            subreceta_vinculada=subreceta_vinculada,
-            creado_por=request.user,
-            actualizado_por=request.user,
-        )
-        message = 'Producto creado correctamente.'
-    else:
-        product.nombre = nombre
-        product.descripcion = descripcion
-        product.categoria = categoria
-        product.precio_venta = precio_venta
-        product.costo_estimado = costo_estimado
-        product.imagen_url = imagen_url
-        product.disponible = disponible
-        product.venta_por_peso = venta_por_peso
-        product.tiempo_preparacion_min = tiempo_preparacion
-        product.receta_vinculada = receta_vinculada
-        product.subreceta_vinculada = subreceta_vinculada
-        product.actualizado_por = request.user
-        product.save()
-        message = 'Producto actualizado correctamente.'
+    with transaction.atomic():
+        if action == 'create':
+            product = VGProducto.objects.create(
+                nombre=nombre,
+                descripcion=descripcion,
+                categoria=categoria,
+                precio_venta=precio_venta,
+                costo_estimado=costo_estimado,
+                imagen_url=imagen_url,
+                disponible=disponible,
+                venta_por_peso=venta_por_peso,
+                tiempo_preparacion_min=tiempo_preparacion,
+                receta_vinculada=receta_vinculada,
+                subreceta_vinculada=subreceta_vinculada,
+                creado_por=request.user,
+                actualizado_por=request.user,
+            )
+            message = 'Producto creado correctamente.'
+        else:
+            product.nombre = nombre
+            product.descripcion = descripcion
+            product.categoria = categoria
+            product.precio_venta = precio_venta
+            product.costo_estimado = costo_estimado
+            product.imagen_url = imagen_url
+            product.disponible = disponible
+            product.venta_por_peso = venta_por_peso
+            product.tiempo_preparacion_min = tiempo_preparacion
+            product.receta_vinculada = receta_vinculada
+            product.subreceta_vinculada = subreceta_vinculada
+            product.actualizado_por = request.user
+            product.save()
+            message = 'Producto actualizado correctamente.'
+
+        product.receta.all().delete()
+        VGRecetaProducto.objects.bulk_create([
+            VGRecetaProducto(
+                producto=product,
+                ingrediente=row['ingrediente'],
+                preparacion=row['preparacion'],
+                cantidad_requerida=row['cantidad_requerida'],
+            )
+            for row in resolved_components
+        ])
 
     return _auth_response({
         'ok': True,
@@ -2076,8 +2419,14 @@ def admin_recipes_view(request):
 
     if not nombre:
         return _auth_response({'ok': False, 'message': 'El nombre de la receta es obligatorio.'}, status=400)
-    if not isinstance(componentes, list) or len(componentes) == 0:
-        return _auth_response({'ok': False, 'message': 'Debes agregar al menos un ingrediente o subreceta.'}, status=400)
+
+    parsed_components, error = _parse_recipe_components(componentes, require_at_least_one=True)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
+    resolved_components, error = _resolve_recipe_components_for_save(parsed_components)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
 
     recipe = None
     if action == 'update':
@@ -2092,47 +2441,6 @@ def admin_recipes_view(request):
         existing_name_query = existing_name_query.exclude(pk=recipe.pk)
     if existing_name_query.exists():
         return _auth_response({'ok': False, 'message': 'Ya existe una receta con ese nombre.'}, status=400)
-
-    parsed_components = []
-    duplicate_guard = set()
-    for raw_component in componentes:
-        if not isinstance(raw_component, dict):
-            continue
-
-        component_type = str(raw_component.get('tipo', '')).strip().lower()
-        reference_id = raw_component.get('referencia_id')
-        try:
-            amount = Decimal(str(raw_component.get('cantidad', '0') or '0'))
-        except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'Hay una cantidad inválida en los componentes de la receta.'}, status=400)
-
-        if amount <= 0:
-            return _auth_response({'ok': False, 'message': 'Todas las cantidades de la receta deben ser mayores a cero.'}, status=400)
-
-        if component_type not in {'ingrediente', 'sub_preparacion'}:
-            return _auth_response({'ok': False, 'message': 'Tipo de componente inválido en la receta.'}, status=400)
-
-        if reference_id in [None, '']:
-            return _auth_response({'ok': False, 'message': 'Falta seleccionar un ingrediente o subreceta.'}, status=400)
-
-        try:
-            reference_id = int(reference_id)
-        except (TypeError, ValueError):
-            return _auth_response({'ok': False, 'message': 'Referencia inválida en los componentes de la receta.'}, status=400)
-
-        duplicate_key = f'{component_type}:{reference_id}'
-        if duplicate_key in duplicate_guard:
-            return _auth_response({'ok': False, 'message': 'No puedes repetir el mismo componente en la receta.'}, status=400)
-        duplicate_guard.add(duplicate_key)
-
-        parsed_components.append({
-            'tipo': component_type,
-            'referencia_id': reference_id,
-            'cantidad': amount,
-        })
-
-    if len(parsed_components) == 0:
-        return _auth_response({'ok': False, 'message': 'No se encontraron componentes válidos para la receta.'}, status=400)
 
     category, _ = VGCategoriaProducto.objects.get_or_create(
         nombre='Recetas',
@@ -2165,28 +2473,15 @@ def admin_recipes_view(request):
             status_code = 200
 
         recipe.receta.all().delete()
-
-        for component in parsed_components:
-            if component['tipo'] == 'ingrediente':
-                try:
-                    ingredient = VGIngrediente.objects.get(pk=component['referencia_id'])
-                except VGIngrediente.DoesNotExist:
-                    return _auth_response({'ok': False, 'message': 'Uno de los ingredientes seleccionados no existe.'}, status=400)
-                VGRecetaProducto.objects.create(
-                    producto=recipe,
-                    ingrediente=ingredient,
-                    cantidad_requerida=component['cantidad'],
-                )
-            else:
-                try:
-                    preparation = VGPreparacion.objects.get(pk=component['referencia_id'])
-                except VGPreparacion.DoesNotExist:
-                    return _auth_response({'ok': False, 'message': 'Una de las subrecetas seleccionadas no existe.'}, status=400)
-                VGRecetaProducto.objects.create(
-                    producto=recipe,
-                    preparacion=preparation,
-                    cantidad_requerida=component['cantidad'],
-                )
+        VGRecetaProducto.objects.bulk_create([
+            VGRecetaProducto(
+                producto=recipe,
+                ingrediente=row['ingrediente'],
+                preparacion=row['preparacion'],
+                cantidad_requerida=row['cantidad_requerida'],
+            )
+            for row in resolved_components
+        ])
 
     recipe = VGProducto.objects.filter(pk=recipe.pk).select_related('categoria').prefetch_related('receta__ingrediente', 'receta__preparacion').first()
     return _auth_response({

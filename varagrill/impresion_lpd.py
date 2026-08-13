@@ -31,10 +31,11 @@ from .impresion_termica import (
     KANJI_OFF,
     LINE_WIDTH,
     _cantidad_label,
+    _group_detalles_por_plato,
     _text,
     _tipo_pedido_label,
 )
-from .models import VGImpresoraCaja
+from .models import VGImpresoraCaja, VGTasaCambio
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,12 @@ def enviar_trabajo_lpd(host, puerto, cola, datos, job_id=1, usuario='varagrill',
         _recv_ack(sock)
 
 
+def _formatear_bs(monto):
+    """Formatea un monto con separador de miles '.' y decimal ',' (estilo es-VE)."""
+    entero, _, decimales = f'{monto:,.2f}'.partition('.')
+    return f"{entero.replace(',', '.')},{decimales}"
+
+
 def _render_recibo_item(detalle):
     out = bytearray()
     out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
@@ -108,7 +115,7 @@ def _render_recibo_item(detalle):
     return bytes(out)
 
 
-def _build_recibo_bytes(pedidos, metodo_pago, referencia, total):
+def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
     metodo_label = METODO_PAGO_LABELS.get(metodo_pago, metodo_pago)
 
@@ -133,7 +140,18 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total):
         mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
         out += _text('-' * LINE_WIDTH) + FEED
         out += _text(f'Pedido #{pedido.id} - {mesa_label} - {_tipo_pedido_label(pedido.tipo_pedido)}') + FEED
-        for detalle in pedido.detalles.all():
+        # Mismo criterio que la comanda de cocina: los ítems de un plato armado se
+        # agrupan bajo "PLATO N" (para no confundir, por ejemplo, dos yucas de
+        # gramajes distintos que vinieron en platos diferentes); lo que no se armó
+        # como plato se lista igual que antes, sin ese título.
+        platos, sueltos = _group_detalles_por_plato(pedido.detalles.all())
+        for numero_plato, (_grupo_id, items) in enumerate(platos, start=1):
+            out += BOLD_ON
+            out += _text(f'PLATO {numero_plato}') + FEED
+            out += BOLD_OFF
+            for detalle in items:
+                out += _render_recibo_item(detalle)
+        for detalle in sueltos:
             out += _render_recibo_item(detalle)
         subtotal_total += pedido.subtotal
         impuesto_total += pedido.impuesto
@@ -150,6 +168,8 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total):
         out += _text(f'Propina: ${propina_total:.2f}') + FEED
     out += BOLD_ON
     out += _text(f'TOTAL: ${total:.2f}') + FEED
+    if tasa:
+        out += _text(f'Total Bs: {_formatear_bs(total * tasa)}') + FEED
     out += BOLD_OFF
     out += _text(f'Metodo de pago: {metodo_label}') + FEED
     out += ALIGN_CENTER
@@ -176,9 +196,15 @@ def imprimir_recibo_caja(pedidos, metodo_pago, referencia, total):
         logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite el recibo.')
         return
 
+    # Se usa la tasa ya cacheada (sin forzar una consulta a la fuente externa) para
+    # no demorar la impresión del recibo durante el cobro; si nunca se cacheó
+    # ninguna, el recibo sale sin la línea de bolívares en vez de fallar.
+    tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
+    tasa = tasa_actual.tasa if tasa_actual else None
+
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
-        ticket = _build_recibo_bytes(pedidos, metodo_pago, referencia, total)
+        ticket = _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa)
         logger.info('Enviando recibo de caja %s a %s (%s bytes)', referencia, destino, len(ticket))
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,

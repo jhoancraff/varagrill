@@ -67,7 +67,7 @@ ALLOWED_HOSTS = [
 DEFAULT_ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    '192.168.68.65',
+    '192.168.1.100',
     'varagrilladmin.com',
     '.varagrilladmin.com',
 ]
@@ -213,7 +213,7 @@ CORS_ALLOWED_ORIGINS = _get_list_env('DJANGO_CORS_ALLOWED_ORIGINS')
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     'http://localhost',
     'http://127.0.0.1',
-    'http://192.168.68.65',
+    'http://192.168.1.100',
     'https://varagrilladmin.com',
     'https://www.varagrilladmin.com',
 ]

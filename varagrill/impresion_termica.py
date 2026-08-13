@@ -24,6 +24,7 @@ BOLD_OFF = ESC + b'E' + b'\x00'
 ALIGN_CENTER = ESC + b'a' + b'\x01'
 ALIGN_LEFT = ESC + b'a' + b'\x00'
 DOUBLE_SIZE = GS + b'!' + b'\x11'
+DOUBLE_HEIGHT = GS + b'!' + b'\x01'
 NORMAL_SIZE = GS + b'!' + b'\x00'
 CUT = GS + b'V' + b'\x00'
 FEED = b'\n'
@@ -64,13 +65,11 @@ def _cantidad_label(detalle):
     return f'{detalle.cantidad}x'
 
 
-def _render_detalle(detalle, mostrar_categoria):
+def _render_detalle(detalle):
     out = bytearray()
-    categoria = detalle.producto.categoria
-    prefijo = f'[{categoria.nombre}] ' if mostrar_categoria and categoria else ''
-    out += _text(f'{prefijo}{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
+    out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
     if detalle.notas:
-        out += _text(f'  - {detalle.notas}') + FEED
+        out += _text(f'  * {detalle.notas}') + FEED
     for adicional in detalle.adicionales.all():
         out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}') + FEED
     return bytes(out)
@@ -80,10 +79,10 @@ def _build_ticket_bytes(pedido, categorias, detalles):
     mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
     hora = pedido.fecha_creacion.strftime('%d/%m %H:%M')
     # Un mismo ticket puede combinar varias categorías cuando comparten impresora
-    # (ej: Carnes + Guarniciones + Entradas en la impresora de cocina). En ese caso
-    # se etiqueta cada línea con su categoría para que el cocinero no las confunda.
+    # (ej: Carnes + Guarniciones + Entradas en la impresora de cocina). Ya no se
+    # etiqueta cada línea con su categoría (el título "PLATO N" en negrita ya separa
+    # cada plato); este encabezado solo indica qué estación imprimió el ticket.
     encabezado = ' / '.join(sorted(c.nombre.upper() for c in categorias))
-    mostrar_categoria = len(categorias) > 1
 
     out = bytearray()
     # Secuencia mínima robusta para este equipo: reset ESC/POS + salir de modo
@@ -91,25 +90,47 @@ def _build_ticket_bytes(pedido, categorias, detalles):
     out += INIT
     out += KANJI_OFF
     out += ESC_POS_WCP1252
+    out += ALIGN_CENTER
+    out += BOLD_ON
     out += _text('VARAGRILL') + FEED
+    out += BOLD_OFF
     out += _text(encabezado) + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
+    out += ALIGN_LEFT
+    out += _text('=' * LINE_WIDTH) + FEED
+    # Pedido y mesa en negrita y doble alto: son el primer dato que ubica el cocinero
+    # al recibir la comanda.
+    out += BOLD_ON + DOUBLE_HEIGHT
     out += _text(f'Pedido #{pedido.id}') + FEED
-    out += _text(f'{mesa_label} - {_tipo_pedido_label(pedido.tipo_pedido)}') + FEED
+    out += _text(mesa_label) + FEED
+    out += NORMAL_SIZE + BOLD_OFF
+    out += _text(_tipo_pedido_label(pedido.tipo_pedido)) + FEED
     out += _text(f'Mesero: {pedido.usuario.username}') + FEED
     out += _text(hora) + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text('=' * LINE_WIDTH) + FEED
 
+    # Solo los platos armados (grupo_armado) llevan título "PLATO N" grande y en
+    # negrita; los ítems sueltos que no se armaron como plato se listan tal cual, sin
+    # ese título, para no confundirlos con un plato armado. Cada bloque se separa del
+    # siguiente por una línea punteada.
     platos, sueltos = _group_detalles_por_plato(detalles)
-    for grupo_id, items in platos:
-        out += _text(f'-- Plato {grupo_id} --') + FEED
+    primer_bloque = True
+    for numero_plato, (_grupo_id, items) in enumerate(platos, start=1):
+        if not primer_bloque:
+            out += _text('-' * LINE_WIDTH) + FEED
+        primer_bloque = False
+        out += BOLD_ON + DOUBLE_HEIGHT
+        out += _text(f'PLATO {numero_plato}') + FEED
+        out += NORMAL_SIZE + BOLD_OFF
         for detalle in items:
-            out += _render_detalle(detalle, mostrar_categoria)
+            out += _render_detalle(detalle)
     for detalle in sueltos:
-        out += _render_detalle(detalle, mostrar_categoria)
+        if not primer_bloque:
+            out += _text('-' * LINE_WIDTH) + FEED
+        primer_bloque = False
+        out += _render_detalle(detalle)
 
     if pedido.notas:
-        out += _text('-' * LINE_WIDTH) + FEED
+        out += _text('=' * LINE_WIDTH) + FEED
         out += _text(f'Nota: {pedido.notas}') + FEED
 
     out += FEED + FEED + FEED + FEED

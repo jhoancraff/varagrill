@@ -26,6 +26,7 @@ from .models import (
     VGDetalleCompra,
     VGDetallePedido,
     VGDetallePedidoAdicional,
+    VGImpresoraCaja,
     VGIngrediente,
     VGMesa,
     VGMovimientoInventario,
@@ -40,6 +41,7 @@ from .models import (
     VGRol,
     VGUsuario,
 )
+from .impresion_lpd import imprimir_recibo_caja
 from .impresion_termica import imprimir_comandas_pedido
 from .ingredientes_excel import InvalidExcelError, normalize_unidad, parse_cantidad, parse_ingredientes_workbook
 from .notifications import send_whatsapp_new_order_alert
@@ -2020,6 +2022,76 @@ def admin_categorias_view(request):
     })
 
 
+def _serialize_impresora_caja(config):
+    return {
+        'ip': config.ip if config else '',
+        'puerto': config.puerto if config else 515,
+        'cola': config.cola if config else '',
+        'activo': config.activo if config else False,
+    }
+
+
+@csrf_exempt
+def admin_impresora_caja_view(request):
+    """
+    Configura la impresora de caja (recibo del cliente al cobrar) — no es por categoría
+    como las de cocina, es una sola impresora USB compartida vía LPD desde la PC de caja
+    (ver impresion_lpd.py). Fila única (singleton): siempre se lee/edita la primera.
+    """
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        return _auth_response({'ok': True, 'impresora_caja': _serialize_impresora_caja(VGImpresoraCaja.obtener_config())})
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    ip = str(data.get('ip', '') or '').strip()
+    if ip:
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return _auth_response({'ok': False, 'message': 'La IP de la impresora no es válida.'}, status=400)
+
+    try:
+        puerto = int(data.get('puerto', 515))
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'El puerto no es válido.'}, status=400)
+    if not (1 <= puerto <= 65535):
+        return _auth_response({'ok': False, 'message': 'El puerto debe estar entre 1 y 65535.'}, status=400)
+
+    cola = str(data.get('cola', '') or '').strip()
+    activo = bool(data.get('activo'))
+
+    if activo and (not ip or not cola):
+        return _auth_response(
+            {'ok': False, 'message': 'Para activar la impresora de caja necesitas indicar IP y nombre de cola.'},
+            status=400,
+        )
+
+    config = VGImpresoraCaja.obtener_config()
+    if config is None:
+        config = VGImpresoraCaja(creado_por=request.user)
+    config.ip = ip
+    config.puerto = puerto
+    config.cola = cola
+    config.activo = activo
+    config.actualizado_por = request.user
+    config.save()
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Impresora de caja guardada correctamente.',
+        'impresora_caja': _serialize_impresora_caja(config),
+    })
+
+
 ALLOWED_PRODUCT_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif'}
 MAX_PRODUCT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 
@@ -3247,6 +3319,11 @@ def pedidos_cobro_view(request):
                         id_referencia=pedido.id,
                         creado_por=request.user,
                     )
+
+    try:
+        imprimir_recibo_caja(pedidos, metodo_pago, referencia, total_cobrado)
+    except Exception:
+        logger.exception('Fallo al imprimir el recibo de caja para el cobro %s', referencia)
 
     return _auth_response({
         'ok': True,

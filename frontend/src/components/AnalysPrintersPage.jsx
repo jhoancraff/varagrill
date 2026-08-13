@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
 
+const emptyImpresoraCajaDraft = { ip: '', puerto: '515', cola: '', activo: false };
+
 function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
   const [categorias, setCategorias] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [message, setMessage] = useState('');
+
+  const [impresoraCajaDraft, setImpresoraCajaDraft] = useState(emptyImpresoraCajaDraft);
+  const [loadingCaja, setLoadingCaja] = useState(true);
+  const [savingCaja, setSavingCaja] = useState(false);
+  const [cajaMessage, setCajaMessage] = useState('');
 
   useEffect(() => {
     if (!isAdmin) {
@@ -43,6 +50,75 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
 
     loadCategorias();
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setLoadingCaja(false);
+      return;
+    }
+
+    const loadImpresoraCaja = async () => {
+      setLoadingCaja(true);
+      try {
+        const response = await fetch('/api/admin/impresora-caja/', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || 'No se pudo cargar la impresora de caja.');
+        }
+        const impresora = data.impresora_caja || {};
+        setImpresoraCajaDraft({
+          ip: impresora.ip || '',
+          puerto: String(impresora.puerto || 515),
+          cola: impresora.cola || '',
+          activo: Boolean(impresora.activo),
+        });
+      } catch (error) {
+        setCajaMessage(error.message || 'No se pudo cargar la impresora de caja.');
+      } finally {
+        setLoadingCaja(false);
+      }
+    };
+
+    loadImpresoraCaja();
+  }, [isAdmin]);
+
+  const handleSaveImpresoraCaja = async (event) => {
+    event.preventDefault();
+    setSavingCaja(true);
+    setCajaMessage('');
+    try {
+      const response = await fetch('/api/admin/impresora-caja/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ip: impresoraCajaDraft.ip.trim(),
+          puerto: impresoraCajaDraft.puerto,
+          cola: impresoraCajaDraft.cola.trim(),
+          activo: impresoraCajaDraft.activo,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo guardar la impresora de caja.');
+      }
+      const impresora = data.impresora_caja || {};
+      setImpresoraCajaDraft({
+        ip: impresora.ip || '',
+        puerto: String(impresora.puerto || 515),
+        cola: impresora.cola || '',
+        activo: Boolean(impresora.activo),
+      });
+      setCajaMessage(data.message || 'Impresora de caja guardada correctamente.');
+    } catch (error) {
+      setCajaMessage(error.message || 'No se pudo guardar la impresora de caja.');
+    } finally {
+      setSavingCaja(false);
+    }
+  };
 
   const updateDraft = (categoriaId, field, value) => {
     setDrafts((current) => ({
@@ -173,6 +249,70 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
               })}
             </div>
           </div>
+        ) : null}
+      </section>
+
+      <div style={headerRowStyle(isMobile)}>
+        <div>
+          <h2 style={titleStyle(isMobile)}>Impresora de caja</h2>
+          <p style={subtitleStyle}>
+            El recibo con el detalle y el total del pedido para el cliente sale por esta impresora, distinta a las
+            de cocina: es una impresora USB conectada a la PC de caja y compartida en red vía el "LPD Print Service"
+            de Windows (puerto estándar 515), no ESC/POS directo por socket. Indica la IP de esa PC y el nombre
+            exacto de la cola tal como quedó compartida.
+          </p>
+        </div>
+      </div>
+
+      {cajaMessage ? <div style={noticeStyle}>{cajaMessage}</div> : null}
+
+      <section style={panelStyle}>
+        {loadingCaja ? <div style={emptyStateStyle}>Cargando configuración...</div> : null}
+        {!loadingCaja ? (
+          <form onSubmit={handleSaveImpresoraCaja} style={cajaFormStyle(isMobile)}>
+            <label style={cajaFieldStyle}>
+              <span style={cajaLabelStyle}>IP de la PC de caja</span>
+              <input
+                type="text"
+                placeholder="192.168.1.236"
+                value={impresoraCajaDraft.ip}
+                onChange={(event) => setImpresoraCajaDraft((current) => ({ ...current, ip: event.target.value }))}
+                style={inputStyle}
+              />
+            </label>
+            <label style={cajaFieldStyle}>
+              <span style={cajaLabelStyle}>Puerto LPD</span>
+              <input
+                type="number"
+                min="1"
+                max="65535"
+                value={impresoraCajaDraft.puerto}
+                onChange={(event) => setImpresoraCajaDraft((current) => ({ ...current, puerto: event.target.value }))}
+                style={inputStyle}
+              />
+            </label>
+            <label style={cajaFieldStyle}>
+              <span style={cajaLabelStyle}>Nombre de la cola compartida</span>
+              <input
+                type="text"
+                placeholder="Impresora_Caja"
+                value={impresoraCajaDraft.cola}
+                onChange={(event) => setImpresoraCajaDraft((current) => ({ ...current, cola: event.target.value }))}
+                style={inputStyle}
+              />
+            </label>
+            <label style={cajaToggleRowStyle}>
+              <input
+                type="checkbox"
+                checked={impresoraCajaDraft.activo}
+                onChange={(event) => setImpresoraCajaDraft((current) => ({ ...current, activo: event.target.checked }))}
+              />
+              <span>Impresora activa (si está apagado, cobrar no intenta imprimir el recibo)</span>
+            </label>
+            <button type="submit" style={primaryButtonStyle} disabled={savingCaja}>
+              {savingCaja ? 'Guardando...' : 'Guardar impresora de caja'}
+            </button>
+          </form>
         ) : null}
       </section>
     </section>
@@ -319,6 +459,33 @@ const unassignedPillStyle = {
   color: '#e0e0e0',
   fontSize: 11.5,
   fontWeight: 700,
+};
+
+const cajaFormStyle = (isMobile) => ({
+  display: 'grid',
+  gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+  gap: 14,
+  alignItems: 'end',
+});
+
+const cajaFieldStyle = {
+  display: 'grid',
+  gap: 6,
+};
+
+const cajaLabelStyle = {
+  color: '#f0b4b4',
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const cajaToggleRowStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 10,
+  color: '#fff',
+  fontWeight: 600,
+  gridColumn: '1 / -1',
 };
 
 const noticeStyle = {

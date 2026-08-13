@@ -577,3 +577,47 @@ class VGPago(models.Model):
 
     def __str__(self):
         return f"Pago {self.monto} — Pedido #{self.pedido_id}"
+
+
+class VGImpresoraCaja(VGAuditoria):
+    """
+    Configuración de la impresora térmica de caja (recibo con detalle y montos que se le
+    entrega al cliente al cobrar). A diferencia de las impresoras de cocina —una por
+    categoría, ESC/POS crudo por socket directo al puerto 9100, ver
+    VGCategoriaProducto.ip_impresora/impresion_termica.py—, esta es una impresora USB
+    conectada a la PC de caja y compartida en red vía el "LPD Print Service" de Windows,
+    que habla el protocolo LPD/RFC 1179 (ver impresion_lpd.py) en vez de aceptar bytes
+    crudos en el socket.
+
+    Se modela como fila única (singleton): la vista de administración siempre lee/edita
+    la primera fila (ver obtener_config()), no hace falta elegir "cuál" impresora de caja
+    porque solo puede haber una.
+    """
+    ip = models.CharField(
+        max_length=45, blank=True,
+        help_text="IP de la PC de caja donde está compartida la impresora.",
+    )
+    puerto = models.PositiveIntegerField(
+        default=515,
+        help_text="Puerto del LPD Print Service de Windows (estándar LPD: 515).",
+    )
+    cola = models.CharField(
+        max_length=100, blank=True,
+        help_text="Nombre exacto de la cola/impresora tal como quedó compartida en Windows.",
+    )
+    activo = models.BooleanField(
+        default=False,
+        help_text="Si está apagado, cobrar un pedido no intenta imprimir el recibo de caja.",
+    )
+
+    class Meta:
+        db_table = "vg_impresora_caja"
+        verbose_name = "Impresora de caja"
+        verbose_name_plural = "Impresora de caja"
+
+    def __str__(self):
+        return f"Impresora de caja ({self.ip}:{self.puerto})" if self.ip else "Impresora de caja (sin configurar)"
+
+    @classmethod
+    def obtener_config(cls):
+        return cls.objects.first()

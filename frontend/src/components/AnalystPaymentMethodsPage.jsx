@@ -6,6 +6,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [nombre, setNombre] = useState('');
+  const [moneda, setMoneda] = useState('USD');
   const [esEfectivo, setEsEfectivo] = useState(false);
 
   const loadMetodos = async () => {
@@ -42,13 +43,14 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', nombre: nombre.trim(), es_efectivo: esEfectivo }),
+        body: JSON.stringify({ action: 'create', nombre: nombre.trim(), moneda, es_efectivo: esEfectivo }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo crear el metodo de pago.');
       }
       setNombre('');
+      setMoneda('USD');
       setEsEfectivo(false);
       setMessage(data.message || 'Metodo de pago creado.');
       loadMetodos();
@@ -104,6 +106,10 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
             onChange={(event) => setNombre(event.target.value)}
             style={{ ...inputStyle, flex: 1 }}
           />
+          <select value={moneda} onChange={(event) => setMoneda(event.target.value)} style={inputStyle}>
+            <option value="USD">Dólares (USD)</option>
+            <option value="VES">Bolívares (VES)</option>
+          </select>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f2e6e6' }}>
             <input type="checkbox" checked={esEfectivo} onChange={(event) => setEsEfectivo(event.target.checked)} />
             Cuenta como efectivo fisico
@@ -122,12 +128,14 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
           <div style={tableWrapStyle}>
             <div style={tableStyle}>
               <div style={headStyle}>Nombre</div>
+              <div style={headStyle}>Moneda</div>
               <div style={headStyle}>Efectivo</div>
               <div style={headStyle}>Estado</div>
               <div style={headStyle}>Acciones</div>
               {metodos.map((metodo) => (
                 <Fragment key={metodo.id}>
                   <div style={cellStyle}>{metodo.nombre}</div>
+                  <div style={cellStyle}>{metodo.moneda === 'VES' ? 'Bolívares' : 'Dólares'}</div>
                   <div style={cellStyle}>{metodo.es_efectivo ? 'Si' : 'No'}</div>
                   <div style={cellStyle}>{metodo.activo ? 'Activo' : 'Inactivo'}</div>
                   <div style={cellActionsStyle}>
@@ -157,7 +165,7 @@ const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, bo
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) minmax(100px,0.6fr) minmax(100px,0.6fr) minmax(160px,1fr)', minWidth: 600, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) minmax(110px,0.6fr) minmax(100px,0.6fr) minmax(100px,0.6fr) minmax(160px,1fr)', minWidth: 700, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const cellActionsStyle = { ...cellStyle, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' };

@@ -31,10 +31,12 @@ function KitchenOrdersPage({
   const [counts, setCounts] = useState({ pendiente: 0, en_preparacion: 0, listo: 0 });
   const [loading, setLoading] = useState(true);
   const [updatingMap, setUpdatingMap] = useState({});
+  const [printingMap, setPrintingMap] = useState({});
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState(ACTIVE_FILTER);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [mobileColumn, setMobileColumn] = useState('pendiente');
+  const [detailOrder, setDetailOrder] = useState(null);
 
   const fetchOrders = useCallback(async (controller) => {
     try {
@@ -167,6 +169,36 @@ function KitchenOrdersPage({
     }
   };
 
+  const handleReprintComanda = async (orderId) => {
+    if (printingMap[orderId]) {
+      return;
+    }
+
+    setPrintingMap((current) => ({ ...current, [orderId]: true }));
+    setError('');
+
+    try {
+      const response = await fetch(`/api/pedidos/${orderId}/reimprimir-comanda/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setError(data.message || 'No se pudo reimprimir la comanda.');
+      }
+    } catch (requestError) {
+      setError('No se pudo contactar al servidor para reimprimir la comanda.');
+    } finally {
+      setPrintingMap((current) => {
+        const copy = { ...current };
+        delete copy[orderId];
+        return copy;
+      });
+    }
+  };
+
   return (
     <section style={containerStyle(isMobile)}>
       <div style={headerWrapStyle}>
@@ -261,27 +293,24 @@ function KitchenOrdersPage({
                 <div style={{ display: 'grid', gap: 10 }}>
                   {groupedOrders[column.key].map((order) => (
                     <article key={order.id} style={cardStyle}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                        <div>
-                          <div style={{ color: '#fff', fontWeight: 700 }}>Pedido #{order.id}</div>
-                          <div style={{ color: '#f3cfcf', fontSize: 12, marginTop: 4 }}>
-                            {order.mesa ? `Mesa ${order.mesa}` : 'Sin mesa'} · {order.tipo_pedido}
+                      <button
+                        type="button"
+                        onClick={() => setDetailOrder(order)}
+                        style={cardHeaderButtonStyle}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: '#fff', fontWeight: 700 }}>Pedido #{order.id}</div>
+                            <div style={{ color: '#f3cfcf', fontSize: 12, marginTop: 4 }}>
+                              {order.mesa ? `Mesa ${order.mesa}` : 'Sin mesa'} · {order.tipo_pedido}
+                            </div>
+                            {order.cliente ? (
+                              <div style={clienteTextStyle}>{order.cliente}</div>
+                            ) : null}
                           </div>
+                          <div style={timeBadgeStyle(order.creado_en)}>{formatElapsedTime(order.creado_en)}</div>
                         </div>
-                        <div style={timeBadgeStyle(order.creado_en)}>{formatElapsedTime(order.creado_en)}</div>
-                      </div>
-
-                      <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
-                        {groupItemsByPlato(order.items).platos.map(({ grupoId, items }) => (
-                          <div key={`plato-${grupoId}`} style={platoGroupStyle}>
-                            <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
-                            {items.map((item) => renderKitchenItem(item))}
-                          </div>
-                        ))}
-                        {groupItemsByPlato(order.items).sueltos.map((item) => renderKitchenItem(item))}
-                      </div>
-
-                      {!!order.notas && <p style={orderNoteStyle}>Nota general: {order.notas}</p>}
+                      </button>
 
                       {(order.estado === 'pendiente' || (nextActionsByState[order.estado] || []).length > 0) && (
                         <div style={actionsWrapStyle(isMobile)}>
@@ -292,6 +321,16 @@ function KitchenOrdersPage({
                               style={editButtonStyle(isMobile)}
                             >
                               Editar pedido
+                            </button>
+                          ) : null}
+                          {order.estado === 'en_preparacion' || order.estado === 'listo' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleReprintComanda(order.id)}
+                              style={editButtonStyle(isMobile)}
+                              disabled={Boolean(printingMap[order.id])}
+                            >
+                              {printingMap[order.id] ? 'Imprimiendo...' : 'Imprimir comanda'}
                             </button>
                           ) : null}
                           {(nextActionsByState[order.estado] || []).map((action) => (
@@ -315,7 +354,46 @@ function KitchenOrdersPage({
           ))}
         </div>
       )}
+
+      {detailOrder ? (
+        <OrderDetailModal order={detailOrder} onClose={() => setDetailOrder(null)} />
+      ) : null}
     </section>
+  );
+}
+
+function OrderDetailModal({ order, onClose }) {
+  const { platos, sueltos } = groupItemsByPlato(order.items);
+
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
+          ×
+        </button>
+        <div style={modalBodyStyle}>
+          <div style={modalTitleStyle}>Pedido #{order.id}</div>
+          <div style={modalSubtitleStyle}>
+            {order.mesa ? `Mesa ${order.mesa}` : 'Sin mesa'} · {order.tipo_pedido} · Mesero: {order.mesero}
+          </div>
+          {order.cliente ? <div style={modalSubtitleStyle}>Cliente: {order.cliente}</div> : null}
+
+          <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+            {platos.map(({ grupoId, items }) => (
+              <div key={`plato-${grupoId}`} style={platoGroupStyle}>
+                <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
+                {items.map((item) => renderKitchenItem(item))}
+              </div>
+            ))}
+            {sueltos.map((item) => renderKitchenItem(item))}
+          </div>
+
+          {!!order.notas && <p style={orderNoteStyle}>Nota general: {order.notas}</p>}
+
+          <div style={modalTotalStyle}>Total: ${Number(order.total || 0).toFixed(2)}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -582,6 +660,95 @@ const cardStyle = {
   border: '1px solid rgba(255,255,255,0.12)',
   background: 'rgba(255,255,255,0.03)',
   padding: 11,
+};
+
+const cardHeaderButtonStyle = {
+  display: 'block',
+  width: '100%',
+  border: 'none',
+  background: 'transparent',
+  padding: 0,
+  margin: 0,
+  cursor: 'pointer',
+  textAlign: 'left',
+  font: 'inherit',
+  color: 'inherit',
+};
+
+const clienteTextStyle = {
+  color: '#d2c3c3',
+  fontSize: 12,
+  marginTop: 2,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const modalBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 40,
+  background: 'rgba(0,0,0,0.7)',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 16,
+};
+
+const modalCardStyle = {
+  position: 'relative',
+  width: '100%',
+  maxWidth: 420,
+  maxHeight: '88vh',
+  overflowY: 'auto',
+  borderRadius: 20,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
+  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+};
+
+const modalCloseButtonStyle = {
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  zIndex: 2,
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  border: 'none',
+  background: 'rgba(0,0,0,0.55)',
+  color: '#fff',
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+};
+
+const modalBodyStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: 20,
+};
+
+const modalTitleStyle = {
+  color: '#fff',
+  fontSize: 22,
+  fontWeight: 800,
+  paddingRight: 30,
+};
+
+const modalSubtitleStyle = {
+  color: '#e8bcbc',
+  fontSize: 13,
+};
+
+const modalTotalStyle = {
+  marginTop: 6,
+  paddingTop: 10,
+  borderTop: '1px solid rgba(255,255,255,0.1)',
+  color: '#fff',
+  fontWeight: 800,
+  fontSize: 16,
 };
 
 const actionsWrapStyle = (isMobile) => ({

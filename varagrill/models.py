@@ -538,8 +538,20 @@ class VGMetodoPago(VGAuditoria):
     es_efectivo marca cuales cuentan como dinero fisico en caja para el
     cuadre diario (ver varagrill/reportes.py); los demas solo se muestran
     como referencia informativa en ese reporte.
+
+    moneda indica en que moneda se recibe el dinero fisicamente (VES para
+    metodos como transferencia/pago movil, USD para zelle/binance/efectivo).
+    Los montos siempre se guardan en USD en VGPago (asi funciona el precio de
+    los productos); para un metodo en VES, el reporte de cuadre de caja
+    convierte ese monto a bolivares con la tasa BCV del dia, para mostrarlo
+    en la moneda real que recibio el cajero.
     """
+    MONEDAS = [
+        ("USD", "Dólares"),
+        ("VES", "Bolívares"),
+    ]
     nombre = models.CharField(max_length=50, unique=True)
+    moneda = models.CharField(max_length=3, choices=MONEDAS, default="USD")
     es_efectivo = models.BooleanField(
         default=False,
         help_text="Si esta activo, este metodo cuenta como efectivo fisico en el cuadre de caja.",

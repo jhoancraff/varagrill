@@ -48,7 +48,7 @@ from .impresion_lpd import imprimir_recibo_caja
 from .impresion_termica import imprimir_comandas_pedido
 from .ingredientes_excel import InvalidExcelError, normalize_unidad, parse_cantidad, parse_ingredientes_workbook
 from .notifications import send_whatsapp_new_order_alert
-from .reportes import efectivo_esperado_dia, total_consignado, totales_pagos_por_metodo
+from .reportes import efectivo_esperado_dia, tasa_para_fecha, total_consignado, totales_pagos_por_metodo
 from .serializers import MesaSerializer, ProductoSerializer
 from .tasa_cambio import obtener_tasa_actual
 
@@ -277,11 +277,11 @@ def _resolve_recipe_components_for_save(parsed_components):
 
 
 def _notify_cocina_event(event_name, pedido, actor_user):
-    # Se imprime la comanda física tanto al registrar el pedido como al pasarlo
-    # a "en preparación" (el mesero/cocina confirma que arrancan a cocinarlo).
-    # No debe depender de que el canal de WebSocket esté disponible: se intenta
+    # Se imprime la comanda física solo al pasar el pedido a "en preparación"
+    # (cocina confirma que arranca a cocinarlo), no al registrarlo. No debe
+    # depender de que el canal de WebSocket esté disponible: se intenta
     # siempre, aunque channel_layer sea None.
-    if event_name == 'NUEVA_COMANDAS' or (event_name == 'PEDIDO_ACTUALIZADO' and pedido.estado == 'en_preparacion'):
+    if event_name == 'PEDIDO_ACTUALIZADO' and pedido.estado == 'en_preparacion':
         try:
             imprimir_comandas_pedido(pedido)
         except Exception:
@@ -2106,6 +2106,7 @@ def _serialize_metodo_pago(metodo):
     return {
         'id': metodo.id,
         'nombre': metodo.nombre,
+        'moneda': metodo.moneda,
         'es_efectivo': metodo.es_efectivo,
         'activo': metodo.activo,
     }
@@ -2150,8 +2151,13 @@ def admin_metodos_pago_view(request):
         if VGMetodoPago.objects.filter(nombre__iexact=nombre).exists():
             return _auth_response({'ok': False, 'message': 'Ya existe un metodo de pago con ese nombre.'}, status=400)
 
+        moneda = str(data.get('moneda', 'USD')).strip().upper()
+        if moneda not in {clave for clave, _ in VGMetodoPago.MONEDAS}:
+            return _auth_response({'ok': False, 'message': 'La moneda debe ser USD o VES.'}, status=400)
+
         metodo = VGMetodoPago.objects.create(
             nombre=nombre,
+            moneda=moneda,
             es_efectivo=bool(data.get('es_efectivo')),
             creado_por=request.user,
         )
@@ -2233,12 +2239,18 @@ def reporte_cuadre_caja_view(request):
         totales = totales_pagos_por_metodo(fecha)
         consignaciones = VGConsignacionCaja.objects.filter(fecha=fecha).select_related('creado_por')
         cierre = VGCierreCaja.objects.filter(fecha=fecha).select_related('creado_por').first()
+        tasa = tasa_para_fecha(fecha)
 
         return _auth_response({
             'ok': True,
             'fecha': fecha.isoformat(),
+            'tasa_bcv': str(tasa) if tasa is not None else None,
             'totales_por_metodo': [
-                {**item, 'total': str(item['total'])}
+                {
+                    **item,
+                    'total': str(item['total']),
+                    'total_bs': str(item['total_bs']) if item['total_bs'] is not None else None,
+                }
                 for item in totales
             ],
             'total_general': str(sum(item['total'] for item in totales)),
@@ -3392,6 +3404,29 @@ def kitchen_order_status_update_view(request, pedido_id):
             'estado': pedido.estado,
         },
     })
+
+
+@csrf_exempt
+def pedido_reimprimir_comanda_view(request, pedido_id):
+    """Reimprime la comanda de cocina de un pedido a pedido del mesero/cocina, por ejemplo tras un fallo de impresora."""
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para reimprimir comandas.'}, status=401)
+
+    try:
+        pedido = VGPedido.objects.prefetch_related('detalles').get(pk=pedido_id)
+    except VGPedido.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+    try:
+        imprimir_comandas_pedido(pedido)
+    except Exception:
+        logger.exception('Fallo al reimprimir comandas para pedido %s', pedido.id)
+        return _auth_response({'ok': False, 'message': 'No se pudo reimprimir la comanda. Revisa la impresora.'}, status=502)
+
+    return _auth_response({'ok': True, 'message': 'Comanda reimpresa correctamente.'})
 
 
 BILLABLE_ORDER_STATES = ['listo', 'entregado']

@@ -161,6 +161,11 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
         <>
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Totales por metodo de pago — {fecha}</div>
+            {data.tasa_bcv ? (
+              <div style={{ fontSize: 12, color: '#c8bbbb' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
+            ) : (
+              <div style={{ fontSize: 12, color: '#ffcf85' }}>No hay tasa BCV registrada para esta fecha; los metodos en bolivares no muestran conversion.</div>
+            )}
             <div style={tableWrapStyle}>
               <div style={tableStyle}>
                 <div style={headStyle}>Metodo</div>
@@ -170,11 +175,20 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                     <div style={cellStyle}>
                       {metodo.nombre}{metodo.es_efectivo ? ' (efectivo)' : ''}
                     </div>
-                    <div style={cellStyle}>Bs. {formatMonto(metodo.total)}</div>
+                    <div style={cellStyle}>
+                      {metodo.moneda === 'VES' ? (
+                        <>
+                          Bs. {metodo.total_bs !== null ? formatMonto(metodo.total_bs) : '—'}
+                          <span style={secondaryAmountStyle}> (${formatMonto(metodo.total)})</span>
+                        </>
+                      ) : (
+                        <>${formatMonto(metodo.total)}</>
+                      )}
+                    </div>
                   </Fragment>
                 ))}
                 <div style={{ ...cellStyle, fontWeight: 800 }}>Total general</div>
-                <div style={{ ...cellStyle, fontWeight: 800 }}>Bs. {formatMonto(data.total_general)}</div>
+                <div style={{ ...cellStyle, fontWeight: 800 }}>${formatMonto(data.total_general)}</div>
               </div>
             </div>
           </section>
@@ -192,7 +206,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                   <div style={headStyle}>Notas</div>
                   {data.consignaciones.map((item) => (
                     <Fragment key={item.id}>
-                      <div style={cellStyle}>Bs. {formatMonto(item.monto)}</div>
+                      <div style={cellStyle}>${formatMonto(item.monto)}</div>
                       <div style={cellStyle}>{item.creado_por || '—'}</div>
                       <div style={cellStyle}>{new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}</div>
                       <div style={cellStyle}>{item.notas || '—'}</div>
@@ -202,7 +216,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
               </div>
             )}
             <div style={{ fontWeight: 700, color: '#fff' }}>
-              Total consignado: Bs. {formatMonto(data.total_consignado)}
+              Total consignado: ${formatMonto(data.total_consignado)}
             </div>
 
             {!cierre ? (
@@ -234,11 +248,11 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
             <div style={sectionTitleStyle}>Cierre del dia</div>
             {cierre ? (
               <div style={{ display: 'grid', gap: 8, color: '#f2e6e6' }}>
-                <div>Efectivo esperado (VGPago): <strong>Bs. {formatMonto(cierre.efectivo_esperado)}</strong></div>
-                <div>Total consignado: <strong>Bs. {formatMonto(cierre.total_consignado)}</strong></div>
-                <div>Efectivo contado al cerrar: <strong>Bs. {formatMonto(cierre.efectivo_contado_final)}</strong></div>
+                <div>Efectivo esperado (VGPago): <strong>${formatMonto(cierre.efectivo_esperado)}</strong></div>
+                <div>Total consignado: <strong>${formatMonto(cierre.total_consignado)}</strong></div>
+                <div>Efectivo contado al cerrar: <strong>${formatMonto(cierre.efectivo_contado_final)}</strong></div>
                 <div style={{ color: Number(cierre.diferencia) === 0 ? '#8fffb0' : '#ff9d9d', fontWeight: 800 }}>
-                  Diferencia: Bs. {formatMonto(cierre.diferencia)}
+                  Diferencia: ${formatMonto(cierre.diferencia)}
                 </div>
                 {cierre.notas ? <div>Notas: {cierre.notas}</div> : null}
                 <div style={{ fontSize: 13, color: '#c8bbbb' }}>
@@ -294,6 +308,7 @@ const consignacionTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(1
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
 const formRowStyle = (isMobile) => ({ display: 'flex', gap: 10, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' });
 const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

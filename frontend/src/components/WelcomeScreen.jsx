@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AdminPanelPage from './AdminPanelPage';
+import ContabilidadPanelPage from './ContabilidadPanelPage';
+import ReporteCuadreCajaPage from './ReporteCuadreCajaPage';
 import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
 import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
 import AnalystEditUserPage from './AnalystEditUserPage';
@@ -19,6 +21,7 @@ import AnalystNewProductPage from './AnalystNewProductPage';
 import AnalystNewPromotionPage from './AnalystNewPromotionPage';
 import AnalystNewUserPage from './AnalystNewUserPage';
 import AnalystNewRecipePage from './AnalystNewRecipePage';
+import AnalystPaymentMethodsPage from './AnalystPaymentMethodsPage';
 import AnalystPreparationsReportPage from './AnalystPreparationsReportPage';
 import AnalystPrintersPage from './AnalysPrintersPage';
 import AnalystProductsPage from './AnalystProductsPage';
@@ -34,7 +37,11 @@ import PromotionsPage from './PromotionsPage';
 import useKitchenSocket from '../hooks/useKitchenSocket';
 import useKitchenAlerts from './useKitchenAlerts';
 
+const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad-cuadre-caja'];
+
 function WelcomeScreen({ name, role, isAdmin, onBack }) {
+  const isCajera = (role || '').trim().toLowerCase() === 'cajera';
+
   const isCompactNavigationViewport = () => (
     window.matchMedia('(max-width: 1024px)').matches
     || window.matchMedia('(pointer: coarse)').matches
@@ -257,10 +264,17 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
   }, []);
 
   useEffect(() => {
-    if (!isAdmin && activeView.startsWith('admin')) {
+    if (isCajera) {
+      if (!CAJERA_ALLOWED_VIEWS.includes(activeView)) {
+        setActiveView('checkout');
+      }
+      return;
+    }
+
+    if (!isAdmin && (activeView.startsWith('admin') || activeView.startsWith('contabilidad'))) {
       setActiveView('home');
     }
-  }, [activeView, isAdmin]);
+  }, [activeView, isAdmin, isCajera]);
 
   const {
     alertPermission,
@@ -369,6 +383,10 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 122, 122, 0.45); }
             70% { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(255, 122, 122, 0); }
             100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 122, 122, 0); }
+          }
+          @media print {
+            .no-print { display: none !important; }
+            body { background: #fff !important; }
           }`}
       </style>
       {liveNotice && (
@@ -427,6 +445,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
 
       <aside
         aria-label="Barra lateral"
+        className="no-print"
         style={{
           position: 'fixed',
           top: 0,
@@ -482,66 +501,72 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleHomeClick}
-          style={sidebarButtonStyle(activeView === 'home')}
-        >
-          <span aria-hidden="true" style={sidebarIconWrapStyle}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 10.5L12 3l9 7.5" />
-              <path d="M5 9.5V21h14V9.5" />
-              <path d="M9.5 21v-6.5h5V21" />
-            </svg>
-          </span>
-          <span>Inicio</span>
-        </button>
+        {!isCajera ? (
+          <button
+            type="button"
+            onClick={handleHomeClick}
+            style={sidebarButtonStyle(activeView === 'home')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 10.5L12 3l9 7.5" />
+                <path d="M5 9.5V21h14V9.5" />
+                <path d="M9.5 21v-6.5h5V21" />
+              </svg>
+            </span>
+            <span>Inicio</span>
+          </button>
+        ) : null}
 
-        <button
-          type="button"
-          onClick={() => {
-            setActiveView('orders');
-            if (isSidebarOverlayMode) {
-              setIsSidebarOpen(false);
-            }
-          }}
-          style={sidebarButtonStyle(activeView === 'orders')}
-        >
-          <span aria-hidden="true" style={sidebarIconWrapStyle}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 11h6" />
-              <path d="M9 15h6" />
-              <path d="M5 3h14a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2-3-2V5a2 2 0 0 1 2-2Z" />
-            </svg>
-          </span>
-          <span>Nuevo pedido</span>
-        </button>
+        {!isCajera ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('orders');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView === 'orders')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 11h6" />
+                <path d="M9 15h6" />
+                <path d="M5 3h14a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2-3-2V5a2 2 0 0 1 2-2Z" />
+              </svg>
+            </span>
+            <span>Nuevo pedido</span>
+          </button>
+        ) : null}
 
-        <button
-          type="button"
-          onClick={() => {
-            setActiveView('kitchen');
-            if (isSidebarOverlayMode) {
-              setIsSidebarOpen(false);
-            }
-          }}
-          style={sidebarButtonStyle(activeView === 'kitchen')}
-        >
-          <span aria-hidden="true" style={sidebarIconWrapStyle}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 2h8" />
-              <path d="M9 2v3" />
-              <path d="M15 2v3" />
-              <path d="M5 5h14" />
-              <rect x="4" y="5" width="16" height="17" rx="2" />
-              <path d="M8 10h8" />
-              <path d="M8 14h8" />
-              <path d="M8 18h5" />
-            </svg>
-          </span>
-          <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
-          <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
-        </button>
+        {!isCajera ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('kitchen');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView === 'kitchen')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2h8" />
+                <path d="M9 2v3" />
+                <path d="M15 2v3" />
+                <path d="M5 5h14" />
+                <rect x="4" y="5" width="16" height="17" rx="2" />
+                <path d="M8 10h8" />
+                <path d="M8 14h8" />
+                <path d="M8 18h5" />
+              </svg>
+            </span>
+            <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
+            <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
+          </button>
+        ) : null}
 
         <button
           type="button"
@@ -564,6 +589,29 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           <span style={pendingBadgeStyle(readyToBillCount > 0)}>{readyToBillCount}</span>
         </button>
 
+        {isCajera ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('contabilidad-cuadre-caja');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView === 'contabilidad-cuadre-caja')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M8 14h.01" />
+                <path d="M12 14h4" />
+              </svg>
+            </span>
+            <span>Cuadre de caja</span>
+          </button>
+        ) : null}
+
         {isAdmin ? (
           <button
             type="button"
@@ -582,6 +630,31 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
               </svg>
             </span>
             <span>Panel analista</span>
+          </button>
+        ) : null}
+
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('contabilidad');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView.startsWith('contabilidad'))}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M8 14h.01" />
+                <path d="M12 14h4" />
+                <path d="M8 17h.01" />
+                <path d="M12 17h4" />
+              </svg>
+            </span>
+            <span>Contabilidad</span>
           </button>
         ) : null}
 
@@ -820,6 +893,18 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             onBack={() => setActiveView('home')}
             onNavigate={handleAnalystNavigation}
           />
+        ) : activeView === 'contabilidad' ? (
+          <ContabilidadPanelPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('home')}
+            onNavigate={handleAnalystNavigation}
+          />
+        ) : activeView === 'contabilidad-cuadre-caja' ? (
+          <ReporteCuadreCajaPage
+            isMobile={isMobile}
+            onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+            backLabel={isCajera ? '← Volver a Cobro' : '← Volver a Contabilidad'}
+          />
         ) : activeView === 'admin-users' ? (
           <AnalystUsersPage
             isMobile={isMobile}
@@ -892,7 +977,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
         ) : activeView === 'admin-ingredients' ? (
           <AnalystIngredientsReportPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin')}
+            onBack={() => setActiveView('contabilidad')}
             onCreateNew={() => setActiveView('admin-ingredients-new')}
             onEdit={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
             onImport={() => setActiveView('admin-ingredients-import')}
@@ -992,6 +1077,11 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           <AnalystPrintersPage
             isMobile={isMobile}
             isAdmin={isAdmin}
+            onBack={() => setActiveView('admin')}
+          />
+        ) : activeView === 'admin-payment-methods' ? (
+          <AnalystPaymentMethodsPage
+            isMobile={isMobile}
             onBack={() => setActiveView('admin')}
           />
         ) : (

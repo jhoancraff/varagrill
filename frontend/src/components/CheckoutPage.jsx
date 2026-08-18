@@ -2,13 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import useExchangeRate from '../hooks/useExchangeRate';
 
-const METODOS_PAGO = [
-  { key: 'efectivo', label: 'Efectivo' },
-  { key: 'tarjeta', label: 'Tarjeta' },
-  { key: 'transferencia', label: 'Transferencia' },
-  { key: 'pago_movil', label: 'Pago móvil' },
-];
-
 function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const tasaCambio = useExchangeRate();
   const [pedidos, setPedidos] = useState([]);
@@ -16,6 +9,23 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const [error, setError] = useState('');
   const [selectedByGroup, setSelectedByGroup] = useState({});
   const [metodoByGroup, setMetodoByGroup] = useState({});
+  const [metodosPago, setMetodosPago] = useState([]);
+
+  useEffect(() => {
+    const loadMetodosPago = async () => {
+      try {
+        const response = await fetch('/api/metodos-pago/', { credentials: 'include', cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.ok) {
+          setMetodosPago(Array.isArray(data.metodos_pago) ? data.metodos_pago : []);
+        }
+      } catch (requestError) {
+        // El selector simplemente queda vacio si falla; se reintenta en el siguiente montaje.
+      }
+    };
+
+    loadMetodosPago();
+  }, []);
   const [checkingOutGroup, setCheckingOutGroup] = useState('');
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
@@ -104,7 +114,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     if (selectedIds.length === 0) {
       return;
     }
-    const metodoPago = metodoByGroup[group.key] || 'efectivo';
+    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
+    if (!metodoPagoId) {
+      setFeedbackType('error');
+      setFeedback('No hay metodos de pago activos configurados.');
+      return;
+    }
 
     setCheckingOutGroup(group.key);
     setFeedback('');
@@ -116,7 +131,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
           'X-CSRFToken': getCookie('csrftoken') || '',
         },
         credentials: 'include',
-        body: JSON.stringify({ pedido_ids: selectedIds, metodo_pago: metodoPago }),
+        body: JSON.stringify({ pedido_ids: selectedIds, metodo_pago_id: metodoPagoId }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
@@ -268,12 +283,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <select
-                      value={metodoByGroup[group.key] || 'efectivo'}
-                      onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: event.target.value }))}
+                      value={metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id) || ''}
+                      onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: Number(event.target.value) }))}
                       style={selectStyle}
                     >
-                      {METODOS_PAGO.map((metodo) => (
-                        <option key={metodo.key} value={metodo.key}>{metodo.label}</option>
+                      {metodosPago.map((metodo) => (
+                        <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
                       ))}
                     </select>
                     <button

@@ -36,13 +36,6 @@ const ProductsIcon = () => (
   </svg>
 );
 
-const IngredientsIcon = () => (
-  <svg {...iconProps}>
-    <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
-    <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
-  </svg>
-);
-
 const PreparationsIcon = () => (
   <svg {...iconProps}>
     <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />
@@ -80,6 +73,14 @@ const PrinterIcon = () => (
   </svg>
 );
 
+const PaymentMethodsIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <path d="M2 10h20" />
+    <path d="M6 15h4" />
+  </svg>
+);
+
 const analystSections = [
   {
     id: 'admin-users',
@@ -98,12 +99,6 @@ const analystSections = [
     title: 'Catálogo de Productos',
     description: 'Crea platos y bebidas con imagen y categoría, y edítalos desde el reporte del menú.',
     icon: ProductsIcon,
-  },
-  {
-    id: 'admin-ingredients',
-    title: 'Inventario de Ingredientes',
-    description: 'Abre el reporte con buscador para modificar, eliminar o agregar ingredientes.',
-    icon: IngredientsIcon,
   },
   {
     id: 'admin-preparations',
@@ -134,6 +129,12 @@ const analystSections = [
     title: 'Impresoras de cocina',
     description: 'Asigna la IP de la impresora térmica que imprime la comanda de cada categoría de producto.',
     icon: PrinterIcon,
+  },
+  {
+    id: 'admin-payment-methods',
+    title: 'Métodos de pago',
+    description: 'Crea los tipos de pago que se pueden usar al cobrar (efectivo, tarjeta, Binance, Zelle, etc.).',
+    icon: PaymentMethodsIcon,
   },
 ];
 

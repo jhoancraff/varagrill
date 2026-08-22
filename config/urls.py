@@ -36,14 +36,12 @@ from varagrill.api_views import (
     admin_impresora_caja_view,
     admin_ingredientes_import_view,
     admin_mesas_view,
-    admin_metodos_pago_view,
     admin_products_view,
     admin_promotions_view,
     admin_recipes_view,
     admin_users_view,
     kitchen_order_status_update_view,
     kitchen_orders_view,
-    metodos_pago_activos_view,
     pedido_create_view,
     pedido_detail_view,
     pedido_reimprimir_comanda_view,
@@ -52,8 +50,12 @@ from varagrill.api_views import (
     promociones_activas_view,
     product_image_view,
     recomendaciones_chef_activas_view,
-    reporte_cuadre_caja_view,
     tasa_cambio_view,
+)
+from varagrill.contabilidad_views import (
+    admin_metodos_pago_view,
+    metodos_pago_activos_view,
+    reporte_cuadre_caja_view,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent

@@ -11,6 +11,7 @@ from varagrill.models import (
     VGDetallePedido,
     VGDetallePedidoAdicional,
     VGIngrediente,
+    VGMetodoPago,
     VGMovimientoInventario,
     VGPedido,
     VGPreparacion,
@@ -590,11 +591,14 @@ class PedidoCobroInventoryDeductionTests(TestCase):
         )
         self.client.force_login(self.user)
         self.category = VGCategoriaProducto.objects.create(nombre='Platos')
+        self.metodo_pago, _ = VGMetodoPago.objects.get_or_create(
+            nombre='Efectivo', defaults={'es_efectivo': True},
+        )
 
     def _cobrar(self, pedido_ids):
         return self.client.post(
             '/api/pedidos/cobro/',
-            data=json.dumps({'pedido_ids': pedido_ids, 'metodo_pago': 'efectivo'}),
+            data=json.dumps({'pedido_ids': pedido_ids, 'metodo_pago_id': self.metodo_pago.id}),
             content_type='application/json',
         )
 

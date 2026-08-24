@@ -27,12 +27,39 @@ const IngredientsIcon = () => (
   </svg>
 );
 
+const ReceivablesIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 3" />
+  </svg>
+);
+
+const HistoryIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 3v5h5" />
+    <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+    <path d="M12 7v5l4 2" />
+  </svg>
+);
+
 const reportSections = [
   {
     id: 'contabilidad-cuadre-caja',
     title: 'Cuadre de caja diario',
     description: 'Compara el efectivo esperado contra lo contado en físico, con consignaciones del turno y el cierre del día.',
     icon: CashRegisterIcon,
+  },
+  {
+    id: 'cuentas-cobrar',
+    title: 'Cuentas por cobrar',
+    description: 'Facturas emitidas con saldo pendiente: registra los abonos de cada cliente hasta saldarlas.',
+    icon: ReceivablesIcon,
+  },
+  {
+    id: 'facturas-historial',
+    title: 'Historial de facturas',
+    description: 'Todas las facturas emitidas, incluidas las ya saldadas y anuladas, con el detalle completo de sus abonos.',
+    icon: HistoryIcon,
   },
   {
     id: 'admin-ingredients',

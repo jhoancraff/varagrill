@@ -30,6 +30,9 @@ import AnalystRecipesPage from './AnalystRecipesPage';
 import AnalystUsersPage from './AnalystUsersPage';
 import ChefRecommendationsPage from './ChefRecommendationsPage';
 import CheckoutPage from './CheckoutPage';
+import CuentasPorCobrarPage from './CuentasPorCobrarPage';
+import HistorialFacturasPage from './HistorialFacturasPage';
+import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
 import EditOrderPage from './EditOrderPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import NewOrderPage from './NewOrderPage';
@@ -886,6 +889,21 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             onBack={() => setActiveView('home')}
             lastKitchenEvent={lastKitchenEvent}
             waiterName={displayName}
+          />
+        ) : activeView === 'cuentas-cobrar' ? (
+          <CuentasPorCobrarPage
+            isMobile={isMobile}
+            onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+          />
+        ) : activeView === 'facturas-historial' ? (
+          <HistorialFacturasPage
+            isMobile={isMobile}
+            onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+          />
+        ) : activeView === 'admin-datos-fiscales' ? (
+          <AnalystDatosFiscalesPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin')}
           />
         ) : activeView === 'admin' ? (
           <AdminPanelPage

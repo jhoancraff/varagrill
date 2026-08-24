@@ -57,6 +57,18 @@ from varagrill.contabilidad_views import (
     metodos_pago_activos_view,
     reporte_cuadre_caja_view,
 )
+from varagrill.facturacion_views import (
+    clientes_buscar_view,
+    cuentas_por_cobrar_view,
+    datos_fiscales_view,
+    factura_abono_view,
+    factura_anular_view,
+    factura_detail_view,
+    facturas_view,
+    prefactura_anular_view,
+    prefactura_convertir_view,
+    prefacturas_view,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST_DIR = BASE_DIR / 'frontend' / 'dist'
@@ -102,6 +114,16 @@ urlpatterns = [
     path('api/pedidos/<int:pedido_id>/actualizar/', pedido_update_view, name='pedido-update'),
     path('api/pedidos/<int:pedido_id>/estado/', kitchen_order_status_update_view, name='kitchen-order-status-update'),
     path('api/pedidos/<int:pedido_id>/reimprimir-comanda/', pedido_reimprimir_comanda_view, name='pedido-reimprimir-comanda'),
+    path('api/clientes/buscar/', clientes_buscar_view, name='clientes-buscar'),
+    path('api/admin/datos-fiscales/', datos_fiscales_view, name='admin-datos-fiscales'),
+    path('api/prefacturas/', prefacturas_view, name='prefacturas'),
+    path('api/prefacturas/<int:prefactura_id>/convertir/', prefactura_convertir_view, name='prefactura-convertir'),
+    path('api/prefacturas/<int:prefactura_id>/anular/', prefactura_anular_view, name='prefactura-anular'),
+    path('api/facturas/', facturas_view, name='facturas'),
+    path('api/facturas/<int:factura_id>/', factura_detail_view, name='factura-detail'),
+    path('api/facturas/<int:factura_id>/abonos/', factura_abono_view, name='factura-abono'),
+    path('api/facturas/<int:factura_id>/anular/', factura_anular_view, name='factura-anular'),
+    path('api/cuentas-por-cobrar/', cuentas_por_cobrar_view, name='cuentas-por-cobrar'),
     path('api/auth/login/', LoginView.as_view(), name='login'),
     path('api/auth/status/', SessionStatusView.as_view(), name='session-status'),
     path('api/auth/logout/', LogoutView.as_view(), name='logout'),

@@ -35,7 +35,7 @@ from .impresion_termica import (
     _text,
     _tipo_pedido_label,
 )
-from .models import VGImpresoraCaja, VGTasaCambio
+from .models import VGDatosFiscalesEmisor, VGImpresoraCaja, VGTasaCambio
 
 logger = logging.getLogger(__name__)
 
@@ -214,3 +214,146 @@ def imprimir_recibo_caja(pedidos, metodo_pago, referencia, total):
         logger.info('Recibo de caja %s enviado a %s', referencia, destino)
     except Exception:
         logger.exception('No se pudo imprimir el recibo de caja %s hacia %s', referencia, destino)
+
+
+# ---------------------------------------------------------------------------
+# Pre-factura / factura (modulo de facturacion)
+# ---------------------------------------------------------------------------
+def _render_documento_linea(linea):
+    out = bytearray()
+    out += _text(f'{linea.cantidad}x {linea.descripcion}') + FEED
+    out += _text(f'  ${linea.precio_unitario:.2f} c/u  ${linea.subtotal:.2f}') + FEED
+    return bytes(out)
+
+
+def _build_documento_venta_bytes(titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, tasa, datos_fiscales, extra_lineas=None):
+    hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
+
+    out = bytearray()
+    out += INIT
+    out += KANJI_OFF
+    out += ESC_POS_WCP1252
+    out += ALIGN_CENTER
+    out += BOLD_ON
+    out += _text((datos_fiscales.nombre_comercial if datos_fiscales and datos_fiscales.nombre_comercial else None) or 'VARAGRILL') + FEED
+    out += BOLD_OFF
+    if datos_fiscales:
+        if datos_fiscales.razon_social:
+            out += _text(datos_fiscales.razon_social) + FEED
+        if datos_fiscales.rif:
+            out += _text(f'RIF: {datos_fiscales.rif}') + FEED
+        if datos_fiscales.domicilio_fiscal:
+            out += _text(datos_fiscales.domicilio_fiscal) + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += BOLD_ON
+    out += _text(titulo) + FEED
+    out += BOLD_OFF
+    if subtitulo:
+        out += _text(subtitulo) + FEED
+    out += ALIGN_LEFT
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text(hora) + FEED
+    if cliente is not None:
+        out += _text(f'Cliente: {cliente.nombre}') + FEED
+        if cliente.numero_documento:
+            out += _text(f'{cliente.tipo_documento}-{cliente.numero_documento}') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+
+    for linea in lineas:
+        out += _render_documento_linea(linea)
+
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text(f'Subtotal: ${subtotal:.2f}') + FEED
+    out += _text(f'IVA: ${total_iva:.2f}') + FEED
+    out += BOLD_ON
+    out += _text(f'TOTAL: ${total:.2f}') + FEED
+    if tasa:
+        out += _text(f'Total Bs: {_formatear_bs(total * tasa)}') + FEED
+    out += BOLD_OFF
+
+    for texto in (extra_lineas or []):
+        out += _text(texto) + FEED
+
+    out += ALIGN_CENTER
+    out += _text('¡Gracias por su visita!') + FEED
+    out += ALIGN_LEFT
+
+    out += FEED + FEED + FEED + FEED
+    out += CUT
+    return bytes(out)
+
+
+def imprimir_prefactura_caja(prefactura):
+    """
+    Imprime la vista previa de cuenta (pre-factura) en la impresora de caja
+    — es solo la cuenta que el cliente pide ver antes de pagar, sin
+    numeracion fiscal ni validez legal. Silencioso ante fallos: llamar
+    siempre envuelto en try/except desde el caller, igual que
+    imprimir_recibo_caja, para que un fallo de impresion no eche para atras
+    la pre-factura ya generada.
+    """
+    config = VGImpresoraCaja.obtener_config()
+    if config is None or not config.activo:
+        return
+    if not config.ip or not config.cola:
+        logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la pre-factura.')
+        return
+
+    tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
+    tasa = tasa_actual.tasa if tasa_actual else None
+    datos_fiscales = VGDatosFiscalesEmisor.objects.first()
+    codigo = f'PF-{prefactura.numero:06d}'
+
+    destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
+    try:
+        ticket = _build_documento_venta_bytes(
+            'CUENTA (no es factura fiscal)', codigo, prefactura.cliente,
+            list(prefactura.lineas.all()), prefactura.subtotal, prefactura.total_iva, prefactura.total,
+            tasa, datos_fiscales,
+        )
+        logger.info('Enviando pre-factura %s a %s (%s bytes)', codigo, destino, len(ticket))
+        enviar_trabajo_lpd(
+            config.ip, config.puerto, config.cola, ticket,
+            job_id=prefactura.id, nombre_trabajo=f'PreFactura {codigo}',
+        )
+        logger.info('Pre-factura %s enviada a %s', codigo, destino)
+    except Exception:
+        logger.exception('No se pudo imprimir la pre-factura %s hacia %s', codigo, destino)
+
+
+def imprimir_factura_caja(factura):
+    """
+    Imprime la factura fiscal (con su numero de control) en la impresora de
+    caja. Usa la tasa de cambio guardada como referencia al momento de
+    emitir la factura (no la tasa actual), para que el monto en bolivares
+    impreso coincida con el que quedo registrado. Silencioso ante fallos,
+    igual que imprimir_recibo_caja.
+    """
+    config = VGImpresoraCaja.obtener_config()
+    if config is None or not config.activo:
+        return
+    if not config.ip or not config.cola:
+        logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la factura.')
+        return
+
+    datos_fiscales = VGDatosFiscalesEmisor.objects.first()
+    codigo = f'{factura.numero_factura:08d}'
+    extra_lineas = []
+    if factura.saldo_pendiente > 0:
+        extra_lineas.append(f'Saldo pendiente: ${factura.saldo_pendiente:.2f}')
+
+    destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
+    try:
+        ticket = _build_documento_venta_bytes(
+            f'FACTURA {codigo}', f'Control: {factura.numero_control:08d}', factura.cliente,
+            list(factura.lineas.all()), factura.subtotal, factura.total_iva, factura.total,
+            factura.tasa_cambio_referencia, datos_fiscales, extra_lineas=extra_lineas,
+        )
+        logger.info('Enviando factura %s a %s (%s bytes)', codigo, destino, len(ticket))
+        enviar_trabajo_lpd(
+            config.ip, config.puerto, config.cola, ticket,
+            job_id=factura.id, nombre_trabajo=f'Factura {codigo}',
+        )
+        logger.info('Factura %s enviada a %s', codigo, destino)
+    except Exception:
+        logger.exception('No se pudo imprimir la factura %s hacia %s', codigo, destino)

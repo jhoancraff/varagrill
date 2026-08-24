@@ -81,6 +81,15 @@ const PaymentMethodsIcon = () => (
   </svg>
 );
 
+const FiscalDataIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M7 8h10" />
+    <path d="M7 12h10" />
+    <path d="M7 16h6" />
+  </svg>
+);
+
 const analystSections = [
   {
     id: 'admin-users',
@@ -135,6 +144,12 @@ const analystSections = [
     title: 'Métodos de pago',
     description: 'Crea los tipos de pago que se pueden usar al cobrar (efectivo, tarjeta, Binance, Zelle, etc.).',
     icon: PaymentMethodsIcon,
+  },
+  {
+    id: 'admin-datos-fiscales',
+    title: 'Datos fiscales',
+    description: 'RIF, razón social y domicilio fiscal que aparecen en el encabezado de cada factura, y el IVA por defecto.',
+    icon: FiscalDataIcon,
   },
 ];
 

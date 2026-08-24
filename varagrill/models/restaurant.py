@@ -72,13 +72,33 @@ class VGMesa(VGAuditoria):
 
 
 class VGCliente(models.Model):
+    TIPOS_DOCUMENTO = [
+        ("V", "Cédula (V)"),
+        ("E", "Cédula de extranjero (E)"),
+        ("J", "RIF jurídico (J)"),
+        ("G", "RIF gubernamental (G)"),
+        ("P", "Pasaporte (P)"),
+    ]
     nombre = models.CharField(max_length=150)
     telefono = models.CharField(max_length=20, blank=True)
     correo = models.EmailField(blank=True)
+    tipo_documento = models.CharField(max_length=1, choices=TIPOS_DOCUMENTO, blank=True)
+    numero_documento = models.CharField(
+        max_length=20, blank=True,
+        help_text="Cédula o RIF sin el prefijo (ej: 12345678). Vacío para consumidor final sin datos fiscales.",
+    )
+    direccion_fiscal = models.CharField(max_length=255, blank=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "vg_clientes"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tipo_documento", "numero_documento"],
+                condition=~models.Q(numero_documento=""),
+                name="uniq_cliente_documento",
+            ),
+        ]
 
     def __str__(self):
         return self.nombre
@@ -536,11 +556,24 @@ class VGTasaCambio(models.Model):
 
 
 class VGPago(models.Model):
+    """
+    Un pago siempre está ligado a un VGPedido (cobro directo del mesero,
+    flujo de hoy) O a una VGFactura (abono de cuentas por cobrar, flujo de
+    caja/contabilidad) — nunca a ninguno de los dos, nunca a ambos. Así el
+    mismo modelo sirve de abono para el módulo de facturación sin duplicar
+    lógica, y el cuadre de caja diario (varagrill/reportes.py) sigue
+    sumando por fecha/método sin importar el origen del pago.
+    """
     ESTADOS = [
         ("completado", "Completado"),
         ("anulado", "Anulado"),
     ]
-    pedido = models.ForeignKey(VGPedido, on_delete=models.PROTECT, related_name="pagos")
+    pedido = models.ForeignKey(
+        VGPedido, on_delete=models.PROTECT, null=True, blank=True, related_name="pagos",
+    )
+    factura = models.ForeignKey(
+        "varagrill.VGFactura", on_delete=models.PROTECT, null=True, blank=True, related_name="pagos",
+    )
     monto = models.DecimalField(max_digits=10, decimal_places=2)
     metodo_pago = models.ForeignKey(
         VGMetodoPago, on_delete=models.PROTECT, related_name="pagos",
@@ -554,9 +587,17 @@ class VGPago(models.Model):
 
     class Meta:
         db_table = "vg_pagos"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(pedido__isnull=False) | models.Q(factura__isnull=False),
+                name="pago_tiene_pedido_o_factura",
+            ),
+        ]
 
     def __str__(self):
-        return f"Pago {self.monto} — Pedido #{self.pedido_id}"
+        if self.pedido_id:
+            return f"Pago {self.monto} — Pedido #{self.pedido_id}"
+        return f"Pago {self.monto} — Factura #{self.factura_id}"
 
 
 class VGImpresoraCaja(VGAuditoria):

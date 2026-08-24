@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import useExchangeRate from '../hooks/useExchangeRate';
+
+const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
 
 function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const tasaCambio = useExchangeRate();
@@ -9,6 +12,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const [error, setError] = useState('');
   const [selectedByGroup, setSelectedByGroup] = useState({});
   const [metodoByGroup, setMetodoByGroup] = useState({});
+  const [clienteByGroup, setClienteByGroup] = useState({});
+  const [prefacturaByGroup, setPrefacturaByGroup] = useState({});
   const [metodosPago, setMetodosPago] = useState([]);
 
   useEffect(() => {
@@ -26,10 +31,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
 
     loadMetodosPago();
   }, []);
-  const [checkingOutGroup, setCheckingOutGroup] = useState('');
+  const [busyGroup, setBusyGroup] = useState('');
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
   const [expandedOrderIds, setExpandedOrderIds] = useState(() => new Set());
+  const [cuentasRefreshToken, setCuentasRefreshToken] = useState(0);
 
   const toggleExpanded = (pedidoId) => {
     setExpandedOrderIds((current) => {
@@ -109,7 +115,28 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     });
   };
 
-  const handleCheckout = async (group) => {
+  const updateCliente = (groupKey, field, value) => {
+    setClienteByGroup((current) => ({
+      ...current,
+      [groupKey]: { ...(current[groupKey] || emptyCliente), [field]: value },
+    }));
+  };
+
+  const clearGroupState = (groupKey) => {
+    setSelectedByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
+    setPrefacturaByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
+  };
+
+  // --- Documento 1: Nota de entrega (cobro directo e inmediato, sin IVA ni numeracion fiscal) ---
+  const handleNotaEntrega = async (group) => {
     const selectedIds = Array.from(selectedByGroup[group.key] || []);
     if (selectedIds.length === 0) {
       return;
@@ -121,7 +148,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       return;
     }
 
-    setCheckingOutGroup(group.key);
+    setBusyGroup(group.key);
     setFeedback('');
     try {
       const response = await fetch('/api/pedidos/cobro/', {
@@ -136,26 +163,148 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo procesar el cobro.');
+        setFeedback(data.message || 'No se pudo procesar la nota de entrega.');
         await fetchPedidos();
         return;
       }
 
       setFeedbackType('success');
       setFeedback(
-        `Cobro registrado: $${data.factura.total} (${data.factura.pedidos.length} pedido(s)). Referencia ${data.factura.referencia}.`,
+        `Nota de entrega registrada: $${data.factura.total} (${data.factura.pedidos.length} pedido(s)). Referencia ${data.factura.referencia}.`,
       );
-      setSelectedByGroup((current) => {
-        const copy = { ...current };
-        delete copy[group.key];
-        return copy;
-      });
+      clearGroupState(group.key);
       await fetchPedidos();
     } catch (requestError) {
       setFeedbackType('error');
-      setFeedback('Error de red al procesar el cobro.');
+      setFeedback('Error de red al procesar la nota de entrega.');
     } finally {
-      setCheckingOutGroup('');
+      setBusyGroup('');
+    }
+  };
+
+  // --- Documento 2: Pre-factura (vista previa, sin cobrar todavia) ---
+  const handleGenerarPrefactura = async (group) => {
+    const selectedIds = Array.from(selectedByGroup[group.key] || []);
+    if (selectedIds.length === 0) {
+      return;
+    }
+    const cliente = clienteByGroup[group.key] || emptyCliente;
+
+    setBusyGroup(group.key);
+    setFeedback('');
+    try {
+      const response = await fetch('/api/prefacturas/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({
+          pedido_ids: selectedIds,
+          cliente_nombre: cliente.nombre,
+          cliente_tipo_documento: cliente.tipo_documento,
+          cliente_numero_documento: cliente.numero_documento,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setFeedbackType('error');
+        setFeedback(data.message || 'No se pudo generar la pre-factura.');
+        return;
+      }
+      setFeedbackType('success');
+      setFeedback(`Pre-factura ${data.prefactura.codigo} generada. Revisa la cuenta con el cliente antes de confirmar.`);
+      setPrefacturaByGroup((current) => ({ ...current, [group.key]: data.prefactura }));
+    } catch (requestError) {
+      setFeedbackType('error');
+      setFeedback('Error de red al generar la pre-factura.');
+    } finally {
+      setBusyGroup('');
+    }
+  };
+
+  const handleDescartarPrefactura = (groupKey) => {
+    setPrefacturaByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
+  };
+
+  const handleConfirmarFacturaDesdePrefactura = async (group) => {
+    const prefactura = prefacturaByGroup[group.key];
+    if (!prefactura) {
+      return;
+    }
+    setBusyGroup(group.key);
+    setFeedback('');
+    try {
+      const response = await fetch(`/api/prefacturas/${prefactura.id}/convertir/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setFeedbackType('error');
+        setFeedback(data.message || 'No se pudo emitir la factura.');
+        return;
+      }
+      setFeedbackType('success');
+      setFeedback(
+        `Factura Nº ${data.factura.numero_factura} emitida (Control ${data.factura.numero_control}). `
+        + `Total $${data.factura.total} — saldo pendiente $${data.factura.saldo_pendiente}. Cóbrala desde Cuentas por cobrar, abajo.`,
+      );
+      clearGroupState(group.key);
+      setCuentasRefreshToken((current) => current + 1);
+      await fetchPedidos();
+    } catch (requestError) {
+      setFeedbackType('error');
+      setFeedback('Error de red al emitir la factura.');
+    } finally {
+      setBusyGroup('');
+    }
+  };
+
+  // --- Documento 3: Factura directa (sin pasar por pre-factura) ---
+  const handleFacturaDirecta = async (group) => {
+    const selectedIds = Array.from(selectedByGroup[group.key] || []);
+    if (selectedIds.length === 0) {
+      return;
+    }
+    const cliente = clienteByGroup[group.key] || emptyCliente;
+
+    setBusyGroup(group.key);
+    setFeedback('');
+    try {
+      const response = await fetch('/api/facturas/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({
+          pedido_ids: selectedIds,
+          cliente_nombre: cliente.nombre,
+          cliente_tipo_documento: cliente.tipo_documento,
+          cliente_numero_documento: cliente.numero_documento,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setFeedbackType('error');
+        setFeedback(data.message || 'No se pudo emitir la factura.');
+        return;
+      }
+      setFeedbackType('success');
+      setFeedback(
+        `Factura Nº ${data.factura.numero_factura} emitida (Control ${data.factura.numero_control}). `
+        + `Total $${data.factura.total} — saldo pendiente $${data.factura.saldo_pendiente}. Cóbrala desde Cuentas por cobrar, abajo.`,
+      );
+      clearGroupState(group.key);
+      setCuentasRefreshToken((current) => current + 1);
+      await fetchPedidos();
+    } catch (requestError) {
+      setFeedbackType('error');
+      setFeedback('Error de red al emitir la factura.');
+    } finally {
+      setBusyGroup('');
     }
   };
 
@@ -166,7 +315,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
           <div style={eyebrowStyle}>Cobro</div>
           <h2 style={titleStyle(isMobile)}>Pedidos listos para cobrar</h2>
           <p style={subtitleStyle}>
-            Agrupados por mesa. Marca uno o varios pedidos de la misma mesa para unificarlos en un solo cobro.
+            Agrupados por mesa. Por cada grupo elige el documento que convenga: una nota de entrega rápida,
+            una pre-factura para que el cliente revise la cuenta, o la factura fiscal directa.
           </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
@@ -190,6 +340,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
             const selectedTotal = group.pedidos
               .filter((pedido) => selectedSet.has(pedido.id))
               .reduce((sum, pedido) => sum + Number(pedido.total), 0);
+            const cliente = clienteByGroup[group.key] || emptyCliente;
+            const prefactura = prefacturaByGroup[group.key];
+            const isBusy = busyGroup === group.key;
 
             return (
               <article key={group.key} style={groupCardStyle}>
@@ -276,36 +429,132 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                   })}
                 </div>
 
-                <div style={groupFooterStyle(isMobile)}>
-                  <div style={{ color: '#fff', fontWeight: 700 }}>
-                    Total seleccionado: ${selectedTotal.toFixed(2)}
-                    <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <select
-                      value={metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id) || ''}
-                      onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: Number(event.target.value) }))}
-                      style={selectStyle}
-                    >
-                      {metodosPago.map((metodo) => (
-                        <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+                {!prefactura ? (
+                  <>
+                    <div style={clienteFormStyle(isMobile)}>
+                      <input
+                        placeholder="Cliente (opcional, solo para pre-factura/factura)"
+                        value={cliente.nombre}
+                        onChange={(event) => updateCliente(group.key, 'nombre', event.target.value)}
+                        style={inputStyle}
+                      />
+                      <select
+                        value={cliente.tipo_documento}
+                        onChange={(event) => updateCliente(group.key, 'tipo_documento', event.target.value)}
+                        style={selectStyle}
+                        className="admin-dark-select"
+                      >
+                        <option value="">Sin documento</option>
+                        <option value="V">V - Cédula</option>
+                        <option value="E">E - Cédula extranjero</option>
+                        <option value="J">J - RIF jurídico</option>
+                        <option value="G">G - RIF gubernamental</option>
+                        <option value="P">P - Pasaporte</option>
+                      </select>
+                      <input
+                        placeholder="Número de documento"
+                        value={cliente.numero_documento}
+                        onChange={(event) => updateCliente(group.key, 'numero_documento', event.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+
+                    <div style={groupFooterStyle(isMobile)}>
+                      <div style={{ color: '#fff', fontWeight: 700 }}>
+                        Total seleccionado: ${selectedTotal.toFixed(2)}
+                        <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <select
+                          value={metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id) || ''}
+                          onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: Number(event.target.value) }))}
+                          style={selectStyle}
+                          className="admin-dark-select"
+                        >
+                          {metodosPago.map((metodo) => (
+                            <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleNotaEntrega(group)}
+                          style={checkoutButtonStyle}
+                          disabled={selectedSet.size === 0 || isBusy}
+                        >
+                          {isBusy ? 'Procesando...' : 'Nota de entrega'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={docButtonsRowStyle(isMobile)}>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerarPrefactura(group)}
+                        style={secondaryButtonStyle}
+                        disabled={selectedSet.size === 0 || isBusy}
+                      >
+                        {isBusy ? 'Generando...' : 'Pre-factura (vista previa)'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleFacturaDirecta(group)}
+                        style={primaryButtonStyle}
+                        disabled={selectedSet.size === 0 || isBusy}
+                      >
+                        {isBusy ? 'Emitiendo...' : 'Factura directa'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={prefacturaPanelStyle}>
+                    <div style={{ color: '#ffb0b0', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Pre-factura {prefactura.codigo}
+                    </div>
+                    <div style={{ color: '#d2c4c4', fontSize: 13 }}>
+                      Cliente: {prefactura.cliente ? prefactura.cliente.nombre : 'Consumidor Final'}
+                    </div>
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      {prefactura.lineas.map((linea) => (
+                        <div key={linea.id} style={lineaRowStyle}>
+                          <span>{linea.cantidad}x {linea.descripcion}</span>
+                          <span>${linea.subtotal}</span>
+                        </div>
                       ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => handleCheckout(group)}
-                      style={checkoutButtonStyle}
-                      disabled={selectedSet.size === 0 || checkingOutGroup === group.key}
-                    >
-                      {checkingOutGroup === group.key ? 'Procesando...' : 'Cobrar seleccionados'}
-                    </button>
+                    </div>
+                    <div style={detailTotalsStyle}>
+                      <span>Subtotal: ${prefactura.subtotal}</span>
+                      <span>IVA: ${prefactura.total_iva}</span>
+                      <span style={{ fontWeight: 800, color: '#fff' }}>Total: ${prefactura.total}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleDescartarPrefactura(group.key)}
+                        style={secondaryButtonStyle}
+                        disabled={isBusy}
+                      >
+                        Descartar (usar otra opción)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmarFacturaDesdePrefactura(group)}
+                        style={primaryButtonStyle}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? 'Emitiendo...' : 'Confirmar y emitir factura'}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
               </article>
             );
           })}
         </div>
       ) : null}
+
+      <div style={cuentasPorCobrarWrapStyle}>
+        <CuentasPorCobrarPage isMobile={isMobile} embedded refreshToken={cuentasRefreshToken} />
+      </div>
     </section>
   );
 }
@@ -449,7 +698,7 @@ const feedbackStyle = (feedbackType) => ({
 
 const groupsGridStyle = (isMobile) => ({
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(320px, 1fr))',
+  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))',
   gap: 14,
 });
 
@@ -599,6 +848,72 @@ const checkoutButtonStyle = {
   color: '#04140a',
   fontWeight: 800,
   cursor: 'pointer',
+};
+
+const clienteFormStyle = (isMobile) => ({
+  display: 'grid',
+  gridTemplateColumns: isMobile ? '1fr' : '2fr 1.4fr 1fr',
+  gap: 8,
+});
+
+const inputStyle = {
+  width: '100%',
+  boxSizing: 'border-box',
+  borderRadius: 12,
+  border: '1px solid rgba(255, 255, 255, 0.14)',
+  background: '#161010',
+  padding: '9px 10px',
+  color: '#fff4f4',
+  fontSize: 13,
+};
+
+const docButtonsRowStyle = (isMobile) => ({
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
+  flexDirection: isMobile ? 'column' : 'row',
+});
+
+const secondaryButtonStyle = {
+  border: '1px solid rgba(255, 255, 255, 0.16)',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'rgba(255, 255, 255, 0.05)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+const primaryButtonStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+const prefacturaPanelStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 190, 120, 0.3)',
+  background: 'rgba(255, 190, 120, 0.06)',
+};
+
+const lineaRowStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  fontSize: 13,
+  color: '#e8dede',
+};
+
+const cuentasPorCobrarWrapStyle = {
+  marginTop: 8,
+  paddingTop: 20,
+  borderTop: '1px solid rgba(255, 255, 255, 0.1)',
 };
 
 export default CheckoutPage;

@@ -10,7 +10,18 @@ haciendo `from .models import X` / `from varagrill.models import X`
 exactamente igual que cuando todo vivia en un solo models.py.
 """
 from .base import VGAuditoria
-from .contabilidad import VGCierreCaja, VGConsignacionCaja, VGMetodoPago
+from .contabilidad import (
+    VGCierreCaja,
+    VGConsignacionCaja,
+    VGCorrelativoFiscal,
+    VGDatosFiscalesEmisor,
+    VGFactura,
+    VGFacturaLinea,
+    VGMetodoPago,
+    VGOrdenCobro,
+    VGPreFactura,
+    VGPreFacturaLinea,
+)
 from .restaurant import (
     VGCategoriaProducto,
     VGCliente,
@@ -42,16 +53,23 @@ __all__ = [
     "VGCliente",
     "VGCompra",
     "VGConsignacionCaja",
+    "VGCorrelativoFiscal",
+    "VGDatosFiscalesEmisor",
     "VGDetalleCompra",
     "VGDetallePedido",
     "VGDetallePedidoAdicional",
+    "VGFactura",
+    "VGFacturaLinea",
     "VGImpresoraCaja",
     "VGIngrediente",
     "VGMesa",
     "VGMetodoPago",
     "VGMovimientoInventario",
+    "VGOrdenCobro",
     "VGPago",
     "VGPedido",
+    "VGPreFactura",
+    "VGPreFacturaLinea",
     "VGPreparacion",
     "VGProducto",
     "VGPromocion",

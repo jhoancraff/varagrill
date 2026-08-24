@@ -218,6 +218,11 @@ class VGPreFactura(VGAuditoria):
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_iva = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    moneda = models.CharField(
+        max_length=3, choices=VGMetodoPago.MONEDAS, default="USD",
+        help_text="Moneda en la que se muestra esta cuenta (tomada del método de pago elegido al generarla). Los montos siempre se calculan en USD por dentro; esto solo controla en qué moneda se despliega/imprime.",
+    )
+    tasa_cambio_referencia = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="vigente")
     notas = models.TextField(blank=True)
 
@@ -279,6 +284,10 @@ class VGFactura(VGAuditoria):
     descuento = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     saldo_pendiente = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    moneda = models.CharField(
+        max_length=3, choices=VGMetodoPago.MONEDAS, default="USD",
+        help_text="Moneda en la que se muestra esta factura (tomada del método de pago elegido al emitirla). Los montos siempre se calculan en USD por dentro; esto solo controla en qué moneda se despliega/imprime.",
+    )
     tasa_cambio_referencia = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente_pago")
     motivo_anulacion = models.CharField(max_length=255, blank=True)

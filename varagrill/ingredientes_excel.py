@@ -36,6 +36,11 @@ HEADER_ALIASES = {
     'total': 'cantidad',
     'stock': 'cantidad',
     'stock actual': 'cantidad',
+    'precio total': 'precio_total',
+    'precio total pagado': 'precio_total',
+    'precio': 'precio_total',
+    'costo total': 'precio_total',
+    'costo': 'precio_total',
 }
 
 
@@ -174,11 +179,13 @@ def parse_ingredientes_workbook(file_obj):
                 continue
             unidad = str(row_cells.get(columns.get('unidad', -1), '') or '').strip()
             cantidad_raw = row_cells.get(columns.get('cantidad', -1), '')
+            precio_total_raw = row_cells.get(columns.get('precio_total', -1), '')
             parsed_rows.append({
                 'fila': idx + 1,
                 'nombre': nombre,
                 'unidad': unidad,
                 'cantidad': str(cantidad_raw or '').strip(),
+                'precio_total': str(precio_total_raw or '').strip(),
             })
 
         return parsed_rows
@@ -202,3 +209,18 @@ def parse_cantidad(raw_cantidad):
         return Decimal(text), None
     except InvalidOperation:
         return None, f'"{raw_cantidad}" no es una cantidad numérica válida.'
+
+
+def parse_precio_total(raw_precio):
+    """
+    Devuelve (Decimal, None) o (None, mensaje_error). A diferencia de parse_cantidad,
+    una celda vacía se distingue de un 0 explícito: vacía significa "no se sabe el
+    costo de esta fila" (no se toca costo_unitario), 0 significa "se sabe y es gratis".
+    """
+    text = str(raw_precio or '').strip().replace(',', '.')
+    if not text:
+        return None, None
+    try:
+        return Decimal(text), None
+    except InvalidOperation:
+        return None, f'"{raw_precio}" no es un precio numérico válido.'

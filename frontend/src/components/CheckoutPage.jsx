@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import useExchangeRate from '../hooks/useExchangeRate';
+import { formatMontoDocumento } from '../utils/currency';
 
 const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
 
@@ -189,6 +190,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       return;
     }
     const cliente = clienteByGroup[group.key] || emptyCliente;
+    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
 
     setBusyGroup(group.key);
     setFeedback('');
@@ -202,6 +204,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
           cliente_nombre: cliente.nombre,
           cliente_tipo_documento: cliente.tipo_documento,
           cliente_numero_documento: cliente.numero_documento,
+          metodo_pago_id: metodoPagoId,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -271,6 +274,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       return;
     }
     const cliente = clienteByGroup[group.key] || emptyCliente;
+    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
 
     setBusyGroup(group.key);
     setFeedback('');
@@ -284,6 +288,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
           cliente_nombre: cliente.nombre,
           cliente_tipo_documento: cliente.tipo_documento,
           cliente_numero_documento: cliente.numero_documento,
+          metodo_pago_id: metodoPagoId,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -517,14 +522,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       {prefactura.lineas.map((linea) => (
                         <div key={linea.id} style={lineaRowStyle}>
                           <span>{linea.cantidad}x {linea.descripcion}</span>
-                          <span>${linea.subtotal}</span>
+                          <span>{formatMontoDocumento(linea.subtotal, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
                         </div>
                       ))}
                     </div>
                     <div style={detailTotalsStyle}>
-                      <span>Subtotal: ${prefactura.subtotal}</span>
-                      <span>IVA: ${prefactura.total_iva}</span>
-                      <span style={{ fontWeight: 800, color: '#fff' }}>Total: ${prefactura.total}</span>
+                      <span>Subtotal: {formatMontoDocumento(prefactura.subtotal, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
+                      <span>IVA: {formatMontoDocumento(prefactura.total_iva, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
+                      <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(prefactura.total, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button

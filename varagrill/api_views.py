@@ -45,7 +45,13 @@ from .models import (
 from .auth_helpers import _auth_response, _get_role_name, _is_admin_user, _is_cajera_user, _is_mesero_user
 from .impresion_lpd import imprimir_recibo_caja
 from .impresion_termica import imprimir_comandas_pedido
-from .ingredientes_excel import InvalidExcelError, normalize_unidad, parse_cantidad, parse_ingredientes_workbook
+from .ingredientes_excel import (
+    InvalidExcelError,
+    normalize_unidad,
+    parse_cantidad,
+    parse_ingredientes_workbook,
+    parse_precio_total,
+)
 from .notifications import send_whatsapp_new_order_alert
 from .serializers import MesaSerializer, ProductoSerializer
 from .tasa_cambio import obtener_tasa_actual
@@ -1306,6 +1312,14 @@ def admin_catalog_view(request):
 
         unidad = str(data.get('unidad', '')).strip() or 'unidad'
         proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
+        numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
+        fecha_factura_raw = str(data.get('fecha_factura', '') or '').strip()
+        fecha_factura = None
+        if fecha_factura_raw:
+            try:
+                fecha_factura = date.fromisoformat(fecha_factura_raw)
+            except ValueError:
+                return _auth_response({'ok': False, 'message': 'La fecha de la factura no es valida.'}, status=400)
         cantidad = data.get('cantidad', 0)
         stock_minimo = data.get('stock_minimo', 0)
         precio_total = data.get('precio_total', 0)
@@ -1370,6 +1384,8 @@ def admin_catalog_view(request):
             total_compra = precio_total_value
             compra = VGCompra.objects.create(
                 proveedor_nombre=proveedor,
+                numero_factura_proveedor=numero_factura_proveedor,
+                fecha_factura=fecha_factura,
                 total=total_compra,
                 estado='recibido',
                 creado_por=request.user,
@@ -1387,6 +1403,7 @@ def admin_catalog_view(request):
                 cantidad=cantidad_value,
                 motivo=f'Compra registrada #{compra.id}',
                 id_referencia=compra.id,
+                compra=compra,
                 creado_por=request.user,
             )
 
@@ -1559,6 +1576,7 @@ def _preview_ingrediente_row(row):
     nombre = row['nombre']
     unidad_normalizada = normalize_unidad(row['unidad'])
     cantidad, error_cantidad = parse_cantidad(row['cantidad'])
+    precio_total, error_precio = parse_precio_total(row.get('precio_total'))
     ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
 
     resultado = {
@@ -1566,12 +1584,16 @@ def _preview_ingrediente_row(row):
         'nombre': nombre,
         'unidad': unidad_normalizada or row['unidad'],
         'cantidad': str(cantidad) if cantidad is not None else row['cantidad'],
+        'precio_total': str(precio_total) if precio_total is not None else (row.get('precio_total') or ''),
         'ingrediente_id': ingrediente.id if ingrediente else None,
         'stock_actual': str(ingrediente.stock_actual) if ingrediente else None,
         'unidad_actual': ingrediente.unidad_medida if ingrediente else None,
     }
 
-    if error_cantidad:
+    if error_precio:
+        resultado['accion'] = 'error'
+        resultado['mensaje'] = error_precio
+    elif error_cantidad:
         resultado['accion'] = 'error'
         resultado['mensaje'] = error_cantidad
     elif cantidad == 0:
@@ -1594,16 +1616,39 @@ def _preview_ingrediente_row(row):
     return resultado
 
 
-def _importar_ingredientes(items, operator):
+def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_proveedor='', fecha_factura=None):
     """
     Aplica la carga de ingredientes ya revisada/editada por el analista (ver
     _preview_ingrediente_row): por cada fila, si el ingrediente existe se actualiza su
     stock_actual y se registra un movimiento de 'ajuste' con el delta; si no existe se
     crea con ese stock inicial y se registra un movimiento de 'entrada'. Cantidad vacía o
     en 0 se ignora — mismo criterio que sync_inventario_pesaje (management command).
+
+    La parte de "cantidad" (sincronizar el stock al valor de la planilla) se comporta
+    exactamente igual que antes — no se toca ese comportamiento para no romper el uso de
+    esta pantalla como reconteo físico. Lo nuevo: cuando una fila resulta en un aumento de
+    stock (ingrediente nuevo, o existente cuyo delta es positivo), esa porción SÍ se
+    registra como una compra real — un único VGCompra (el "lote") para todo el archivo,
+    con un VGDetalleCompra por cada fila que aumentó stock, costeado con precio_total/
+    cantidad_agregada si se dio un precio (mismo criterio que el alta manual de un
+    ingrediente). Si ninguna fila aumenta stock, no se crea ningún VGCompra.
     """
     creados, actualizados, ignorados = 0, 0, 0
     errores = []
+    compra = None
+
+    def _obtener_compra():
+        nonlocal compra
+        if compra is None:
+            compra = VGCompra.objects.create(
+                proveedor_nombre=proveedor_nombre or 'Sin proveedor',
+                numero_factura_proveedor=numero_factura_proveedor,
+                fecha_factura=fecha_factura,
+                estado='recibido',
+                creado_por=operator,
+                actualizado_por=operator,
+            )
+        return compra
 
     with transaction.atomic():
         for item in items:
@@ -1619,6 +1664,11 @@ def _importar_ingredientes(items, operator):
                 ignorados += 1
                 continue
 
+            precio_total, error_precio = parse_precio_total(item.get('precio_total'))
+            if error_precio:
+                errores.append(f'{nombre}: {error_precio}')
+                continue
+
             ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
             if ingrediente is not None:
                 if cantidad == ingrediente.stock_actual:
@@ -1626,13 +1676,30 @@ def _importar_ingredientes(items, operator):
                 stock_anterior = ingrediente.stock_actual
                 delta = cantidad - stock_anterior
                 ingrediente.stock_actual = cantidad
+                update_fields = ['stock_actual', 'actualizado_por', 'fecha_actualizacion']
+                if delta > 0 and precio_total is not None:
+                    ingrediente.costo_unitario = (precio_total / delta).quantize(Decimal('0.0001'))
+                    update_fields.append('costo_unitario')
                 ingrediente.actualizado_por = operator
-                ingrediente.save(update_fields=['stock_actual', 'actualizado_por', 'fecha_actualizacion'])
+                ingrediente.save(update_fields=update_fields)
+
+                movimiento_compra = None
+                if delta > 0:
+                    lote = _obtener_compra()
+                    costo_linea = (precio_total / delta).quantize(Decimal('0.0001')) if precio_total is not None else Decimal('0')
+                    VGDetalleCompra.objects.create(
+                        compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
+                    )
+                    lote.total = lote.total + (delta * costo_linea)
+                    lote.save(update_fields=['total'])
+                    movimiento_compra = lote
+
                 VGMovimientoInventario.objects.create(
                     ingrediente=ingrediente,
-                    tipo_movimiento='ajuste',
+                    tipo_movimiento='entrada' if movimiento_compra else 'ajuste',
                     cantidad=delta,
                     motivo=f'Carga por Excel: {stock_anterior} -> {cantidad} {ingrediente.unidad_medida}',
+                    compra=movimiento_compra,
                     creado_por=operator,
                 )
                 actualizados += 1
@@ -1641,25 +1708,36 @@ def _importar_ingredientes(items, operator):
                 if not unidad_normalizada:
                     errores.append(f'{nombre}: falta una unidad válida (kg, g, l, ml o unidad) para crearlo.')
                     continue
+                costo_inicial = (precio_total / cantidad).quantize(Decimal('0.0001')) if precio_total is not None else Decimal('0')
                 nuevo = VGIngrediente.objects.create(
                     nombre=nombre,
                     unidad_medida=unidad_normalizada,
                     stock_actual=cantidad,
                     stock_minimo=Decimal('0'),
-                    costo_unitario=Decimal('0'),
+                    costo_unitario=costo_inicial,
                     creado_por=operator,
                     actualizado_por=operator,
                 )
+                lote = _obtener_compra()
+                VGDetalleCompra.objects.create(
+                    compra=lote, ingrediente=nuevo, cantidad=cantidad, costo_unitario=costo_inicial,
+                )
+                lote.total = lote.total + (cantidad * costo_inicial)
+                lote.save(update_fields=['total'])
                 VGMovimientoInventario.objects.create(
                     ingrediente=nuevo,
                     tipo_movimiento='entrada',
                     cantidad=cantidad,
                     motivo='Carga inicial por Excel (importación de ingredientes)',
+                    compra=lote,
                     creado_por=operator,
                 )
                 creados += 1
 
-    return {'creados': creados, 'actualizados': actualizados, 'ignorados': ignorados, 'errores': errores}
+    return {
+        'creados': creados, 'actualizados': actualizados, 'ignorados': ignorados, 'errores': errores,
+        'compra_id': compra.id if compra else None,
+    }
 
 
 @csrf_exempt
@@ -1703,10 +1781,83 @@ def admin_ingredientes_import_view(request):
         if not isinstance(items, list) or not items:
             return _auth_response({'ok': False, 'message': 'No hay filas para importar.'}, status=400)
 
-        resumen = _importar_ingredientes(items, request.user)
+        proveedor_nombre = str(data.get('proveedor_nombre', '') or '').strip()
+        numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
+        fecha_factura_raw = str(data.get('fecha_factura', '') or '').strip()
+        fecha_factura = None
+        if fecha_factura_raw:
+            try:
+                fecha_factura = date.fromisoformat(fecha_factura_raw)
+            except ValueError:
+                return _auth_response({'ok': False, 'message': 'La fecha de la factura no es valida.'}, status=400)
+
+        resumen = _importar_ingredientes(
+            items, request.user,
+            proveedor_nombre=proveedor_nombre,
+            numero_factura_proveedor=numero_factura_proveedor,
+            fecha_factura=fecha_factura,
+        )
         return _auth_response({'ok': True, **resumen})
 
     return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+
+
+def _serialize_compra(compra, incluir_detalle=False):
+    data = {
+        'id': compra.id,
+        'proveedor_nombre': compra.proveedor_nombre,
+        'numero_factura_proveedor': compra.numero_factura_proveedor,
+        'fecha_factura': compra.fecha_factura.isoformat() if compra.fecha_factura else None,
+        'fecha_creacion': compra.fecha_creacion.isoformat(),
+        'total': str(compra.total),
+        'estado': compra.estado,
+        'creado_por': (compra.creado_por.get_full_name() or compra.creado_por.username) if compra.creado_por else '',
+        'cantidad_items': compra.detalles.count() if incluir_detalle else None,
+    }
+    if incluir_detalle:
+        data['detalles'] = [
+            {
+                'id': detalle.id,
+                'ingrediente_id': detalle.ingrediente_id,
+                'ingrediente_nombre': detalle.ingrediente.nombre,
+                'unidad_medida': detalle.ingrediente.unidad_medida,
+                'cantidad': str(detalle.cantidad),
+                'costo_unitario': str(detalle.costo_unitario),
+                'subtotal': str(detalle.subtotal),
+            }
+            for detalle in compra.detalles.select_related('ingrediente').all()
+        ]
+    return data
+
+
+def admin_compras_view(request):
+    """Historial de lotes de compra (VGCompra): de qué proveedor/factura vino cada carga de inventario."""
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    compras = VGCompra.objects.select_related('creado_por').prefetch_related('detalles').order_by('-fecha_creacion')
+    return _auth_response({
+        'ok': True,
+        'compras': [_serialize_compra(compra, incluir_detalle=True) for compra in compras[:200]],
+    })
+
+
+def compra_detail_view(request, compra_id):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    try:
+        compra = VGCompra.objects.select_related('creado_por').prefetch_related('detalles__ingrediente').get(pk=compra_id)
+    except VGCompra.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El lote de compra no existe.'}, status=404)
+
+    return _auth_response({'ok': True, 'compra': _serialize_compra(compra, incluir_detalle=True)})
 
 
 @csrf_exempt
@@ -3327,7 +3478,7 @@ def pedidos_cobro_view(request):
                     )
 
     try:
-        imprimir_recibo_caja(pedidos, metodo_pago.nombre, referencia, total_cobrado)
+        imprimir_recibo_caja(pedidos, metodo_pago, referencia, total_cobrado)
     except Exception:
         logger.exception('Fallo al imprimir el recibo de caja para el cobro %s', referencia)
 

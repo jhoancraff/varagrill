@@ -10,6 +10,8 @@ const emptyForm = {
   stock_minimo: '',
   precio_total: '',
   proveedor: '',
+  numero_factura_proveedor: '',
+  fecha_factura: '',
 };
 
 const UNIDAD_LABELS = {
@@ -130,6 +132,8 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         stock_minimo: form.stock_minimo || '0',
         precio_total: form.precio_total || '0',
         proveedor: form.proveedor,
+        numero_factura_proveedor: form.numero_factura_proveedor,
+        fecha_factura: form.fecha_factura,
       };
 
       const response = await fetch('/api/admin/catalogo/', {
@@ -277,6 +281,16 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
               <label style={fieldStyle}>
                 <span style={labelStyle}>Proveedor</span>
                 <input value={form.proveedor} onChange={(event) => handleChange('proveedor', event.target.value)} style={inputStyle} placeholder="Nombre del proveedor" />
+              </label>
+
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Número de factura del proveedor</span>
+                <input value={form.numero_factura_proveedor} onChange={(event) => handleChange('numero_factura_proveedor', event.target.value)} style={inputStyle} placeholder="Opcional" />
+              </label>
+
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Fecha de la factura</span>
+                <input type="date" value={form.fecha_factura} onChange={(event) => handleChange('fecha_factura', event.target.value)} style={inputStyle} />
               </label>
             </div>
 

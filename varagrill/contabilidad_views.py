@@ -14,7 +14,13 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import VGCierreCaja, VGConsignacionCaja, VGMetodoPago
-from .reportes import efectivo_esperado_dia, tasa_para_fecha, total_consignado, totales_pagos_por_metodo
+from .reportes import (
+    desglose_caja_por_moneda,
+    efectivo_esperado_dia,
+    tasa_para_fecha,
+    total_consignado,
+    totales_pagos_por_metodo,
+)
 
 
 def _serialize_metodo_pago(metodo):
@@ -119,6 +125,16 @@ def _serialize_consignacion(consignacion):
     }
 
 
+def _serialize_desglose_caja(desglose):
+    def _serialize_balde(balde):
+        data = {'total_usd': str(balde['total_usd'])}
+        if 'total_bs' in balde:
+            data['total_bs'] = str(balde['total_bs']) if balde['total_bs'] is not None else None
+        return data
+
+    return {clave: _serialize_balde(balde) for clave, balde in desglose.items()}
+
+
 def _serialize_cierre_caja(cierre):
     if cierre is None:
         return None
@@ -169,6 +185,7 @@ def reporte_cuadre_caja_view(request):
                 for item in totales
             ],
             'total_general': str(sum(item['total'] for item in totales)),
+            'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
             'total_consignado': str(total_consignado(fecha)),
             'cierre': _serialize_cierre_caja(cierre),

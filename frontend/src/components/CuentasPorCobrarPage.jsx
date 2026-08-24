@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import BsAmount from './BsAmount';
 import useExchangeRate from '../hooks/useExchangeRate';
+import { formatMontoDocumento } from '../utils/currency';
 
 function getCookie(name) {
   const all = `; ${document.cookie}`;
@@ -177,8 +177,7 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
                   {orden.factura.cliente ? orden.factura.cliente.nombre : 'Consumidor Final'}
                 </div>
                 <div style={{ color: '#ffcf7d', fontWeight: 700 }}>
-                  Saldo: ${orden.saldo_pendiente}
-                  <BsAmount amountUsd={orden.saldo_pendiente} tasa={tasaCambio} />
+                  Saldo: {formatMontoDocumento(orden.saldo_pendiente, orden.factura.moneda, orden.factura.tasa_cambio_referencia || tasaCambio)}
                 </div>
               </button>
             ))}
@@ -205,16 +204,16 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
                   {facturaDetalle.lineas.map((linea) => (
                     <div key={linea.id} style={lineaRowStyle}>
                       <span>{linea.cantidad}x {linea.descripcion}</span>
-                      <span>${linea.subtotal}</span>
+                      <span>{formatMontoDocumento(linea.subtotal, facturaDetalle.moneda, facturaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
                     </div>
                   ))}
                 </div>
 
                 <div style={detailTotalsStyle}>
-                  <span>Subtotal: ${facturaDetalle.subtotal}</span>
-                  <span>IVA: ${facturaDetalle.total_iva}</span>
-                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: ${facturaDetalle.total}</span>
-                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: ${facturaDetalle.saldo_pendiente}</span>
+                  <span>Subtotal: {formatMontoDocumento(facturaDetalle.subtotal, facturaDetalle.moneda, facturaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
+                  <span>IVA: {formatMontoDocumento(facturaDetalle.total_iva, facturaDetalle.moneda, facturaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(facturaDetalle.total, facturaDetalle.moneda, facturaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatMontoDocumento(facturaDetalle.saldo_pendiente, facturaDetalle.moneda, facturaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
                 </div>
 
                 {facturaDetalle.pagos.length > 0 ? (
@@ -223,7 +222,7 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
                     {facturaDetalle.pagos.map((pago) => (
                       <div key={pago.id} style={lineaRowStyle}>
                         <span>{pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')}</span>
-                        <span>${pago.monto}</span>
+                        <span>{formatMontoDocumento(pago.monto, facturaDetalle.moneda, facturaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
                       </div>
                     ))}
                   </div>

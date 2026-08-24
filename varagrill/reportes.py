@@ -67,6 +67,47 @@ def totales_pagos_por_metodo(fecha):
     return sorted(metodos_por_id.values(), key=lambda item: item['nombre'])
 
 
+def desglose_caja_por_moneda(fecha):
+    """
+    Agrupa lo cobrado en `fecha` (mismo criterio que totales_pagos_por_metodo)
+    en las 4 combinaciones que le interesan a un cierre de caja: moneda
+    (USD/VES) x tipo (fisico/digital, segun VGMetodoPago.es_efectivo) — para
+    poder darle a alguien un desglose tipo "cuanto entro en bolivares en
+    digital, cuanto en bolivares en fisico, cuanto en dolares en fisico y
+    cuanto en dolares en digital", igual que se clasifica cada cuenta
+    (nota de entrega/pre-factura/factura) por su metodo de pago.
+
+    Los baldes en bolivares llevan total_usd (el monto tal cual se guarda en
+    VGPago) y total_bs (convertido con la tasa BCV de `fecha`, None si algun
+    metodo de ese balde no tiene tasa disponible ese dia). Los baldes en
+    dolares no necesitan conversion.
+    """
+    buckets = {
+        'bs_fisico': {'total_usd': Decimal('0'), 'total_bs': Decimal('0'), '_falta_tasa': False},
+        'bs_digital': {'total_usd': Decimal('0'), 'total_bs': Decimal('0'), '_falta_tasa': False},
+        'usd_fisico': {'total_usd': Decimal('0')},
+        'usd_digital': {'total_usd': Decimal('0')},
+    }
+
+    for metodo in totales_pagos_por_metodo(fecha):
+        if metodo['moneda'] == 'VES':
+            clave = 'bs_fisico' if metodo['es_efectivo'] else 'bs_digital'
+            buckets[clave]['total_usd'] += metodo['total']
+            if metodo['total_bs'] is not None:
+                buckets[clave]['total_bs'] += metodo['total_bs']
+            else:
+                buckets[clave]['_falta_tasa'] = True
+        else:
+            clave = 'usd_fisico' if metodo['es_efectivo'] else 'usd_digital'
+            buckets[clave]['total_usd'] += metodo['total']
+
+    for clave in ('bs_fisico', 'bs_digital'):
+        if buckets[clave].pop('_falta_tasa'):
+            buckets[clave]['total_bs'] = None
+
+    return buckets
+
+
 def efectivo_esperado_dia(fecha):
     """Suma de VGPago completados en `fecha` cuyo metodo cuenta como efectivo fisico."""
     total = (

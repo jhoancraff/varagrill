@@ -320,6 +320,14 @@ class VGCompra(VGAuditoria):
         ("cancelado", "Cancelado"),
     ]
     proveedor_nombre = models.CharField(max_length=150)
+    numero_factura_proveedor = models.CharField(
+        max_length=100, blank=True,
+        help_text="Número de la factura física del proveedor, para poder rastrear de dónde vino este lote.",
+    )
+    fecha_factura = models.DateField(
+        null=True, blank=True,
+        help_text="Fecha real de la factura del proveedor (puede ser distinta a cuándo se cargó al sistema).",
+    )
     fecha_compra = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
@@ -359,6 +367,10 @@ class VGMovimientoInventario(models.Model):
     cantidad = models.DecimalField(max_digits=10, decimal_places=2)
     motivo = models.CharField(max_length=255, blank=True)
     id_referencia = models.PositiveIntegerField(null=True, blank=True)
+    compra = models.ForeignKey(
+        VGCompra, on_delete=models.SET_NULL, null=True, blank=True, related_name="movimientos",
+        help_text="Lote de compra que originó este movimiento (solo entradas ligadas a una compra documentada).",
+    )
     fecha_movimiento = models.DateTimeField(auto_now_add=True)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,

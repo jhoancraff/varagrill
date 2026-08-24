@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import BsAmount from './BsAmount';
 import useExchangeRate from '../hooks/useExchangeRate';
+import { formatMontoDocumento } from '../utils/currency';
 
 const FILTROS = [
   { value: '', label: 'Todas' },
@@ -119,8 +119,7 @@ function HistorialFacturasPage({ isMobile, onBack }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={estadoBadgeStyle(factura.estado)}>{estadoLabel(factura.estado)}</span>
                     <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
-                      ${factura.total}
-                      <BsAmount amountUsd={factura.total} tasa={tasaCambio} />
+                      {formatMontoDocumento(factura.total, factura.moneda, factura.tasa_cambio_referencia || tasaCambio)}
                     </span>
                   </div>
                 </button>
@@ -135,16 +134,16 @@ function HistorialFacturasPage({ isMobile, onBack }) {
                           {detalle.lineas.map((linea) => (
                             <div key={linea.id} style={lineaRowStyle}>
                               <span>{linea.cantidad}x {linea.descripcion}</span>
-                              <span>${linea.subtotal}</span>
+                              <span>{formatMontoDocumento(linea.subtotal, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
                             </div>
                           ))}
                         </div>
 
                         <div style={detailTotalsStyle}>
-                          <span>Subtotal: ${detalle.subtotal}</span>
-                          <span>IVA: ${detalle.total_iva}</span>
-                          <span style={{ fontWeight: 800, color: '#fff' }}>Total: ${detalle.total}</span>
-                          <span>Saldo pendiente: ${detalle.saldo_pendiente}</span>
+                          <span>Subtotal: {formatMontoDocumento(detalle.subtotal, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
+                          <span>IVA: {formatMontoDocumento(detalle.total_iva, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
+                          <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(detalle.total, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
+                          <span>Saldo pendiente: {formatMontoDocumento(detalle.saldo_pendiente, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
                         </div>
 
                         {detalle.motivo_anulacion ? (
@@ -159,7 +158,7 @@ function HistorialFacturasPage({ isMobile, onBack }) {
                             {detalle.pagos.map((pago) => (
                               <div key={pago.id} style={lineaRowStyle}>
                                 <span>{pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')} — {pago.creado_por}</span>
-                                <span>${pago.monto}</span>
+                                <span>{formatMontoDocumento(pago.monto, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
                               </div>
                             ))}
                           </div>

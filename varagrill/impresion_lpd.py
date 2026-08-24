@@ -42,13 +42,6 @@ logger = logging.getLogger(__name__)
 LPD_ORIGIN_HOST = 'varagrill'
 LPD_CONNECT_TIMEOUT_SECONDS = 5
 
-METODO_PAGO_LABELS = {
-    'efectivo': 'Efectivo',
-    'tarjeta': 'Tarjeta',
-    'transferencia': 'Transferencia',
-    'pago_movil': 'Pago móvil',
-}
-
 
 class LpdError(Exception):
     """La impresora/servidor LPD rechazó o cortó la transferencia del trabajo."""
@@ -104,6 +97,19 @@ def _formatear_bs(monto):
     return f"{entero.replace(',', '.')},{decimales}"
 
 
+def _monto_texto(valor_usd, moneda, tasa):
+    """
+    La cuenta se muestra en UNA sola moneda, nunca en las dos a la vez: si la
+    cuenta es en bolívares se convierte con la tasa y solo se ve "Bs.";
+    si es en dólares se ve solo "$". Si la cuenta es en bolívares pero no hay
+    ninguna tasa cacheada (caso raro), se cae a dólares para no imprimir un
+    monto sin sentido.
+    """
+    if moneda == 'VES' and tasa:
+        return f'Bs. {_formatear_bs(valor_usd * tasa)}'
+    return f'${valor_usd:.2f}'
+
+
 def _render_recibo_item(detalle):
     out = bytearray()
     out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
@@ -117,7 +123,8 @@ def _render_recibo_item(detalle):
 
 def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
-    metodo_label = METODO_PAGO_LABELS.get(metodo_pago, metodo_pago)
+    metodo_label = metodo_pago.nombre
+    moneda = metodo_pago.moneda
 
     out = bytearray()
     out += INIT
@@ -159,17 +166,15 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
         propina_total += pedido.propina
 
     out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Subtotal: ${subtotal_total:.2f}') + FEED
+    out += _text(f'Subtotal: {_monto_texto(subtotal_total, moneda, tasa)}') + FEED
     if impuesto_total > 0:
-        out += _text(f'Impuesto: ${impuesto_total:.2f}') + FEED
+        out += _text(f'Impuesto: {_monto_texto(impuesto_total, moneda, tasa)}') + FEED
     if descuento_total > 0:
-        out += _text(f'Descuento: -${descuento_total:.2f}') + FEED
+        out += _text(f'Descuento: -{_monto_texto(descuento_total, moneda, tasa)}') + FEED
     if propina_total > 0:
-        out += _text(f'Propina: ${propina_total:.2f}') + FEED
+        out += _text(f'Propina: {_monto_texto(propina_total, moneda, tasa)}') + FEED
     out += BOLD_ON
-    out += _text(f'TOTAL: ${total:.2f}') + FEED
-    if tasa:
-        out += _text(f'Total Bs: {_formatear_bs(total * tasa)}') + FEED
+    out += _text(f'TOTAL: {_monto_texto(total, moneda, tasa)}') + FEED
     out += BOLD_OFF
     out += _text(f'Metodo de pago: {metodo_label}') + FEED
     out += ALIGN_CENTER
@@ -184,10 +189,13 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
 def imprimir_recibo_caja(pedidos, metodo_pago, referencia, total):
     """
     Imprime el recibo combinado de caja para los `pedidos` cobrados en una misma
-    operación. Si la impresora de caja no está configurada o está apagada, no hace
-    nada (silencioso) — llamar siempre envuelto en try/except desde el caller, igual
-    que imprimir_comandas_pedido, para que un fallo de impresión no eche para atrás el
-    cobro ya registrado.
+    operación. `metodo_pago` es el objeto VGMetodoPago (no el nombre): su
+    `.moneda` decide si el recibo se imprime solo en dólares o solo en
+    bolívares (nunca ambos), igual que las facturas/pre-facturas. Si la
+    impresora de caja no está configurada o está apagada, no hace nada
+    (silencioso) — llamar siempre envuelto en try/except desde el caller,
+    igual que imprimir_comandas_pedido, para que un fallo de impresión no
+    eche para atrás el cobro ya registrado.
     """
     config = VGImpresoraCaja.obtener_config()
     if config is None or not config.activo:
@@ -198,7 +206,8 @@ def imprimir_recibo_caja(pedidos, metodo_pago, referencia, total):
 
     # Se usa la tasa ya cacheada (sin forzar una consulta a la fuente externa) para
     # no demorar la impresión del recibo durante el cobro; si nunca se cacheó
-    # ninguna, el recibo sale sin la línea de bolívares en vez de fallar.
+    # ninguna y el método de pago es en bolívares, _monto_texto cae a dólares
+    # en vez de imprimir un monto sin sentido.
     tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
     tasa = tasa_actual.tasa if tasa_actual else None
 
@@ -219,14 +228,16 @@ def imprimir_recibo_caja(pedidos, metodo_pago, referencia, total):
 # ---------------------------------------------------------------------------
 # Pre-factura / factura (modulo de facturacion)
 # ---------------------------------------------------------------------------
-def _render_documento_linea(linea):
+def _render_documento_linea(linea, moneda, tasa):
     out = bytearray()
     out += _text(f'{linea.cantidad}x {linea.descripcion}') + FEED
-    out += _text(f'  ${linea.precio_unitario:.2f} c/u  ${linea.subtotal:.2f}') + FEED
+    precio_texto = _monto_texto(linea.precio_unitario, moneda, tasa)
+    subtotal_texto = _monto_texto(linea.subtotal, moneda, tasa)
+    out += _text(f'  {precio_texto} c/u  {subtotal_texto}') + FEED
     return bytes(out)
 
 
-def _build_documento_venta_bytes(titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, tasa, datos_fiscales, extra_lineas=None):
+def _build_documento_venta_bytes(titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, moneda, tasa, datos_fiscales, extra_lineas=None):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
 
     out = bytearray()
@@ -260,15 +271,13 @@ def _build_documento_venta_bytes(titulo, subtitulo, cliente, lineas, subtotal, t
     out += _text('-' * LINE_WIDTH) + FEED
 
     for linea in lineas:
-        out += _render_documento_linea(linea)
+        out += _render_documento_linea(linea, moneda, tasa)
 
     out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Subtotal: ${subtotal:.2f}') + FEED
-    out += _text(f'IVA: ${total_iva:.2f}') + FEED
+    out += _text(f'Subtotal: {_monto_texto(subtotal, moneda, tasa)}') + FEED
+    out += _text(f'IVA: {_monto_texto(total_iva, moneda, tasa)}') + FEED
     out += BOLD_ON
-    out += _text(f'TOTAL: ${total:.2f}') + FEED
-    if tasa:
-        out += _text(f'Total Bs: {_formatear_bs(total * tasa)}') + FEED
+    out += _text(f'TOTAL: {_monto_texto(total, moneda, tasa)}') + FEED
     out += BOLD_OFF
 
     for texto in (extra_lineas or []):
@@ -299,8 +308,10 @@ def imprimir_prefactura_caja(prefactura):
         logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la pre-factura.')
         return
 
-    tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
-    tasa = tasa_actual.tasa if tasa_actual else None
+    tasa = prefactura.tasa_cambio_referencia
+    if tasa is None:
+        tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
+        tasa = tasa_actual.tasa if tasa_actual else None
     datos_fiscales = VGDatosFiscalesEmisor.objects.first()
     codigo = f'PF-{prefactura.numero:06d}'
 
@@ -309,7 +320,7 @@ def imprimir_prefactura_caja(prefactura):
         ticket = _build_documento_venta_bytes(
             'CUENTA (no es factura fiscal)', codigo, prefactura.cliente,
             list(prefactura.lineas.all()), prefactura.subtotal, prefactura.total_iva, prefactura.total,
-            tasa, datos_fiscales,
+            prefactura.moneda, tasa, datos_fiscales,
         )
         logger.info('Enviando pre-factura %s a %s (%s bytes)', codigo, destino, len(ticket))
         enviar_trabajo_lpd(
@@ -340,14 +351,15 @@ def imprimir_factura_caja(factura):
     codigo = f'{factura.numero_factura:08d}'
     extra_lineas = []
     if factura.saldo_pendiente > 0:
-        extra_lineas.append(f'Saldo pendiente: ${factura.saldo_pendiente:.2f}')
+        saldo_texto = _monto_texto(factura.saldo_pendiente, factura.moneda, factura.tasa_cambio_referencia)
+        extra_lineas.append(f'Saldo pendiente: {saldo_texto}')
 
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
         ticket = _build_documento_venta_bytes(
             f'FACTURA {codigo}', f'Control: {factura.numero_control:08d}', factura.cliente,
             list(factura.lineas.all()), factura.subtotal, factura.total_iva, factura.total,
-            factura.tasa_cambio_referencia, datos_fiscales, extra_lineas=extra_lineas,
+            factura.moneda, factura.tasa_cambio_referencia, datos_fiscales, extra_lineas=extra_lineas,
         )
         logger.info('Enviando factura %s a %s (%s bytes)', codigo, destino, len(ticket))
         enviar_trabajo_lpd(

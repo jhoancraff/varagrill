@@ -10,10 +10,13 @@ const ACCION_LABELS = {
 
 const SELECTABLE_ACCIONES = new Set(['nuevo', 'actualizar']);
 
+const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '', fecha_factura: '' };
+
 function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const fileInputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [rows, setRows] = useState(null);
+  const [lote, setLote] = useState(emptyLote);
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState('');
@@ -69,6 +72,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
 
       setRows((data.filas || []).map((row) => ({
         ...row,
+        precio_total: row.precio_total || '',
         selected: SELECTABLE_ACCIONES.has(row.accion),
       })));
       setSummary(null);
@@ -87,7 +91,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const handleConfirm = async () => {
     const items = (rows || [])
       .filter((row) => row.selected)
-      .map((row) => ({ nombre: row.nombre, unidad: row.unidad, cantidad: row.cantidad }));
+      .map((row) => ({
+        nombre: row.nombre, unidad: row.unidad, cantidad: row.cantidad, precio_total: row.precio_total,
+      }));
 
     if (items.length === 0) {
       setMessageType('error');
@@ -102,7 +108,13 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'confirm', items }),
+        body: JSON.stringify({
+          action: 'confirm',
+          items,
+          proveedor_nombre: lote.proveedor_nombre,
+          numero_factura_proveedor: lote.numero_factura_proveedor,
+          fecha_factura: lote.fecha_factura,
+        }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
@@ -147,6 +159,32 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       {message ? <div style={noticeStyle(messageType)}>{message}</div> : null}
 
       <section style={panelStyle}>
+        <div style={sectionTitleStyle}>Datos del lote (de dónde viene esta carga)</div>
+        <div style={loteFormStyle(isMobile)}>
+          <input
+            value={lote.proveedor_nombre}
+            onChange={(event) => setLote((current) => ({ ...current, proveedor_nombre: event.target.value }))}
+            style={editInputStyle}
+            placeholder="Proveedor"
+          />
+          <input
+            value={lote.numero_factura_proveedor}
+            onChange={(event) => setLote((current) => ({ ...current, numero_factura_proveedor: event.target.value }))}
+            style={editInputStyle}
+            placeholder="Número de factura del proveedor"
+          />
+          <input
+            type="date"
+            value={lote.fecha_factura}
+            onChange={(event) => setLote((current) => ({ ...current, fecha_factura: event.target.value }))}
+            style={editInputStyle}
+          />
+        </div>
+        <p style={hintStyle}>
+          Estos datos quedan guardados en un único lote de compra para todo el archivo, así después se puede
+          rastrear de qué factura vino cada ingrediente cargado.
+        </p>
+
         <div style={uploadRowStyle(isMobile)}>
           <a href="/plantilla_ingredientes.xlsx" download style={templateLinkStyle}>
             ⬇ Descargar plantilla (.xlsx)
@@ -169,7 +207,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         </div>
         <p style={hintStyle}>
           La plantilla trae las columnas Ingrediente, Unidad (kg, g, l, ml o unidad) y Cantidad. Puedes usar tus
-          propios encabezados siempre que incluyan una columna "Ingrediente".
+          propios encabezados siempre que incluyan una columna "Ingrediente". Si además agregas una columna
+          "Precio total" (lo pagado por esa cantidad de ese ingrediente), el sistema calcula solo el costo por
+          unidad — igual que al registrar un ingreso individual.
         </p>
       </section>
 
@@ -192,6 +232,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
               <div style={headStyle}>Ingrediente</div>
               <div style={headStyle}>Unidad</div>
               <div style={headStyle}>Cantidad</div>
+              <div style={headStyle}>Precio total</div>
               <div style={headStyle}>Estado</div>
               <div style={headStyle}>Detalle</div>
 
@@ -225,6 +266,14 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                         value={row.cantidad || ''}
                         onChange={(event) => updateRow(row.fila, { cantidad: event.target.value })}
                         style={editInputStyle}
+                      />
+                    </div>
+                    <div key={`precio-${row.fila}`} style={cellStyle}>
+                      <input
+                        value={row.precio_total || ''}
+                        onChange={(event) => updateRow(row.fila, { precio_total: event.target.value })}
+                        style={editInputStyle}
+                        placeholder="Opcional"
                       />
                     </div>
                     <div key={`state-${row.fila}`} style={cellStyle}>
@@ -293,8 +342,10 @@ const countBadgeStyle = (badge) => ({
   color: badge ? badge.color : '#fff', background: badge ? badge.background : 'rgba(255,255,255,0.08)',
 });
 
+const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr 1fr', gap: 10 });
+
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 110px 100px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 720 };
+const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 110px 100px 110px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 820 };
 const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
 const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
 const cellPrimaryStyle = { ...cellStyle };

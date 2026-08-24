@@ -160,6 +160,43 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
       {!loading && data ? (
         <>
           <section style={panelStyle}>
+            <div style={sectionTitleStyle}>Desglose por moneda — {fecha}</div>
+            <div style={desgloseGridStyle(isMobile)}>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Bolívares · Físico</div>
+                <div style={desgloseValueStyle}>
+                  {data.desglose_caja?.bs_fisico?.total_bs !== null && data.desglose_caja?.bs_fisico?.total_bs !== undefined
+                    ? `Bs. ${formatMonto(data.desglose_caja.bs_fisico.total_bs)}`
+                    : '—'}
+                </div>
+                <div style={desgloseSecondaryStyle}>${formatMonto(data.desglose_caja?.bs_fisico?.total_usd)}</div>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Bolívares · Digital</div>
+                <div style={desgloseValueStyle}>
+                  {data.desglose_caja?.bs_digital?.total_bs !== null && data.desglose_caja?.bs_digital?.total_bs !== undefined
+                    ? `Bs. ${formatMonto(data.desglose_caja.bs_digital.total_bs)}`
+                    : '—'}
+                </div>
+                <div style={desgloseSecondaryStyle}>${formatMonto(data.desglose_caja?.bs_digital?.total_usd)}</div>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Dólares · Físico</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.desglose_caja?.usd_fisico?.total_usd)}</div>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Dólares · Digital</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.desglose_caja?.usd_digital?.total_usd)}</div>
+              </div>
+            </div>
+            {!data.tasa_bcv ? (
+              <div style={{ fontSize: 12, color: '#ffcf85' }}>
+                No hay tasa BCV registrada para esta fecha; los montos en bolívares no se pueden convertir.
+              </div>
+            ) : null}
+          </section>
+
+          <section style={panelStyle}>
             <div style={sectionTitleStyle}>Totales por metodo de pago — {fecha}</div>
             {data.tasa_bcv ? (
               <div style={{ fontSize: 12, color: '#c8bbbb' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
@@ -309,6 +346,11 @@ const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', 
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
+const desgloseGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
+const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
+const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const desgloseValueStyle = { color: '#fff', fontSize: 20, fontWeight: 800 };
+const desgloseSecondaryStyle = { color: '#c8bbbb', fontSize: 12.5 };
 const formRowStyle = (isMobile) => ({ display: 'flex', gap: 10, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' });
 const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

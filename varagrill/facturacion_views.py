@@ -78,6 +78,25 @@ def _resolve_cliente(data):
     return cliente, None
 
 
+def _resolve_moneda(data):
+    """
+    Devuelve (moneda, error_message). La moneda de la cuenta no se elige
+    aparte: se toma directo del método de pago seleccionado en Cobro
+    (VGMetodoPago.moneda) — así una cuenta que se va a pagar con un método
+    en bolívares se muestra/imprime solo en bolívares, y una en dólares solo
+    en dólares, sin mezclar las dos. Si no viene metodo_pago_id (ej. una
+    pre-factura generada sin tener aún el método decidido), queda en USD.
+    """
+    metodo_pago_id = data.get('metodo_pago_id')
+    if metodo_pago_id in [None, '']:
+        return 'USD', None
+    try:
+        metodo = VGMetodoPago.objects.get(pk=int(metodo_pago_id))
+    except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+        return None, 'El metodo de pago es invalido.'
+    return metodo.moneda, None
+
+
 def _pedidos_facturables_por_ids(pedido_ids):
     """
     Bloquea (select_for_update) y valida los pedidos: deben existir, estar
@@ -139,7 +158,7 @@ def _lineas_data_desde_pedidos(pedidos, porcentaje_iva):
     return lineas
 
 
-def _emitir_factura(pedidos, cliente, request_user, pre_factura=None, porcentaje_iva=None):
+def _emitir_factura(pedidos, cliente, request_user, pre_factura=None, porcentaje_iva=None, moneda='USD'):
     """
     Crea la VGFactura + lineas + VGOrdenCobro a partir de pedidos ya
     validados y bloqueados (ver _pedidos_facturables_por_ids). Descuenta
@@ -161,6 +180,7 @@ def _emitir_factura(pedidos, cliente, request_user, pre_factura=None, porcentaje
         numero_control=numero_control,
         cliente=cliente,
         pre_factura=pre_factura,
+        moneda=moneda,
         tasa_cambio_referencia=tasa_actual.tasa if tasa_actual else None,
         creado_por=request_user,
         actualizado_por=request_user,
@@ -263,6 +283,8 @@ def _serialize_prefactura(prefactura):
         'subtotal': str(prefactura.subtotal),
         'total_iva': str(prefactura.total_iva),
         'total': str(prefactura.total),
+        'moneda': prefactura.moneda,
+        'tasa_cambio_referencia': str(prefactura.tasa_cambio_referencia) if prefactura.tasa_cambio_referencia is not None else None,
         'estado': prefactura.estado,
         'notas': prefactura.notas,
         'lineas': [_serialize_linea(linea) for linea in prefactura.lineas.all()],
@@ -295,6 +317,7 @@ def _serialize_factura(factura, incluir_detalle=True):
         'descuento': str(factura.descuento),
         'total': str(factura.total),
         'saldo_pendiente': str(factura.saldo_pendiente),
+        'moneda': factura.moneda,
         'tasa_cambio_referencia': str(factura.tasa_cambio_referencia) if factura.tasa_cambio_referencia is not None else None,
         'estado': factura.estado,
         'motivo_anulacion': factura.motivo_anulacion,
@@ -444,6 +467,10 @@ def prefacturas_view(request):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
+    moneda, error = _resolve_moneda(data)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
     with transaction.atomic():
         pedidos, error = _pedidos_facturables_por_ids(pedido_ids)
         if error:
@@ -451,9 +478,12 @@ def prefacturas_view(request):
 
         porcentaje_iva = _porcentaje_iva_default()
         numero = VGCorrelativoFiscal.siguiente('PREFACTURA')
+        tasa_actual = obtener_tasa_actual()
         prefactura = VGPreFactura.objects.create(
             numero=numero,
             cliente=cliente,
+            moneda=moneda,
+            tasa_cambio_referencia=tasa_actual.tasa if tasa_actual else None,
             notas=str(data.get('notas', '') or '').strip(),
             creado_por=request.user,
             actualizado_por=request.user,
@@ -523,7 +553,10 @@ def prefactura_convertir_view(request, prefactura_id):
             if error:
                 return _auth_response({'ok': False, 'message': error}, status=400)
 
-        factura = _emitir_factura(pedidos, cliente, request.user, pre_factura=prefactura, porcentaje_iva=porcentaje_iva)
+        factura = _emitir_factura(
+            pedidos, cliente, request.user, pre_factura=prefactura, porcentaje_iva=porcentaje_iva,
+            moneda=prefactura.moneda,
+        )
 
         prefactura.estado = 'convertida'
         prefactura.actualizado_por = request.user
@@ -606,12 +639,16 @@ def facturas_view(request):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
+    moneda, error = _resolve_moneda(data)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
     with transaction.atomic():
         pedidos, error = _pedidos_facturables_por_ids(pedido_ids)
         if error:
             return _auth_response({'ok': False, 'message': error}, status=409)
 
-        factura = _emitir_factura(pedidos, cliente, request.user)
+        factura = _emitir_factura(pedidos, cliente, request.user, moneda=moneda)
 
     try:
         imprimir_factura_caja(factura)

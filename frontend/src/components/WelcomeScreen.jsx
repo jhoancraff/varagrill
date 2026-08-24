@@ -33,6 +33,7 @@ import CheckoutPage from './CheckoutPage';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import HistorialFacturasPage from './HistorialFacturasPage';
 import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
+import AnalystComprasPage from './AnalystComprasPage';
 import EditOrderPage from './EditOrderPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import NewOrderPage from './NewOrderPage';
@@ -902,6 +903,11 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           />
         ) : activeView === 'admin-datos-fiscales' ? (
           <AnalystDatosFiscalesPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin')}
+          />
+        ) : activeView === 'admin-compras' ? (
+          <AnalystComprasPage
             isMobile={isMobile}
             onBack={() => setActiveView('admin')}
           />

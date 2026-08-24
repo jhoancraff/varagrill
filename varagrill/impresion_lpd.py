@@ -116,6 +116,11 @@ def _render_recibo_item(detalle):
     if detalle.notas:
         out += _text(f'  - {detalle.notas}') + FEED
     out += _text(f'  ${detalle.subtotal:.2f}') + FEED
+    for opcion in detalle.opciones.all():
+        if opcion.precio_unitario:
+            out += _text(f'  » {opcion.grupo_nombre}: {opcion.preparacion.nombre}  ${opcion.subtotal:.2f}') + FEED
+        else:
+            out += _text(f'  » {opcion.grupo_nombre}: {opcion.preparacion.nombre}') + FEED
     for adicional in detalle.adicionales.all():
         out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}  ${adicional.subtotal:.2f}') + FEED
     return bytes(out)

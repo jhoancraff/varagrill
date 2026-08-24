@@ -17,7 +17,13 @@ from django.db import models, transaction
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from .api_views import BILLABLE_ORDER_STATES, _compute_pedido_ingredient_needs, _load_preparation_structure
+from .api_views import (
+    BILLABLE_ORDER_STATES,
+    _compute_pedido_ingredient_needs,
+    _compute_preparation_cost_map,
+    _load_preparation_structure,
+    _snapshot_costo_venta_detalles,
+)
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .impresion_lpd import imprimir_factura_caja, imprimir_prefactura_caja
 from .models import (
@@ -115,6 +121,7 @@ def _pedidos_facturables_por_ids(pedido_ids):
             'detalles__producto__subreceta_vinculada__componentes__ingrediente',
             'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
             'detalles__adicionales__preparacion',
+            'detalles__opciones__preparacion',
         )
     )
     found_ids = {pedido.id for pedido in pedidos}
@@ -153,6 +160,14 @@ def _lineas_data_desde_pedidos(pedidos, porcentaje_iva):
                     'producto_id': None,
                     'cantidad': Decimal(adicional.cantidad),
                     'precio_unitario': adicional.precio_unitario,
+                    'porcentaje_iva': porcentaje_iva,
+                })
+            for opcion in detalle.opciones.all():
+                lineas.append({
+                    'descripcion': f'{opcion.grupo_nombre}: {opcion.preparacion.nombre}',
+                    'producto_id': None,
+                    'cantidad': Decimal('1'),
+                    'precio_unitario': opcion.precio_unitario,
                     'porcentaje_iva': porcentaje_iva,
                 })
     return lineas
@@ -214,10 +229,16 @@ def _emitir_factura(pedidos, cliente, request_user, pre_factura=None, porcentaje
     )
 
     components_by_preparation, yields_by_preparation = _load_preparation_structure()
+    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+    preparation_cost_map = _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
+    unit_cost_cache = {}
+
     for pedido in pedidos:
         pedido.estado = 'pagado'
         pedido.actualizado_por = request_user
         pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+
+        _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_map, unit_cost_cache)
 
         needs = _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation)
         if needs:

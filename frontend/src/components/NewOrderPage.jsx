@@ -24,6 +24,8 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   const [detailProduct, setDetailProduct] = useState(null);
   const [addonPickerFor, setAddonPickerFor] = useState(null);
   const [pesoPickerFor, setPesoPickerFor] = useState(null);
+  const [opcionesPickerFor, setOpcionesPickerFor] = useState(null);
+  const [pendingOpciones, setPendingOpciones] = useState([]);
   const [armarPlatoActivo, setArmarPlatoActivo] = useState(false);
   const [grupoActual, setGrupoActual] = useState(null);
   const [nextGrupoId, setNextGrupoId] = useState(1);
@@ -82,15 +84,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   );
 
   const subtotal = useMemo(
-    () => cartItems.reduce((total, item) => {
-      const product = products.find((entry) => String(entry.id) === String(item.productId));
-      if (!product) {
-        return total;
-      }
-      const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
-      const pesoFactor = item.pesoGramos ? Number(item.pesoGramos) / 1000 : 1;
-      return total + getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal;
-    }, 0),
+    () => cartItems.reduce((total, item) => total + computeItemTotal(item, products, promotionsByProductId), 0),
     [cartItems, products, promotionsByProductId],
   );
 
@@ -243,6 +237,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
 
   const addToCart = (product, options = {}) => {
     const grupoArmado = armarPlatoActivo ? grupoActual : null;
+    const opciones = options.opcionesElegidas || [];
     // Primer producto que cae en este plato: recién ahora se "consume" su número, para
     // que el próximo "+ Nuevo plato" avance de verdad en vez de saltar números vacíos.
     const consumesGrupo = grupoArmado && grupoArmado === nextGrupoId;
@@ -257,7 +252,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       }
       setCartItems((current) => [
         ...current,
-        { id: cryptoRandomId(), productId: product.id, quantity: 1, notes: '', adicionales: [], pesoGramos, grupoArmado },
+        { id: cryptoRandomId(), productId: product.id, quantity: 1, notes: '', adicionales: [], opciones, pesoGramos, grupoArmado },
       ]);
       return;
     }
@@ -266,8 +261,15 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       setNextGrupoId((current) => current + 1);
     }
 
+    const opcionesKey = (list) => (list || []).map((o) => o.preparacionId).sort().join(',');
+
     setCartItems((current) => {
-      const existing = current.find((item) => item.productId === product.id && item.grupoArmado === grupoArmado && !item.pesoGramos);
+      const existing = current.find((item) => (
+        item.productId === product.id
+        && item.grupoArmado === grupoArmado
+        && !item.pesoGramos
+        && opcionesKey(item.opciones) === opcionesKey(opciones)
+      ));
       if (existing) {
         return current.map((item) => (
           item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item
@@ -275,9 +277,25 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       }
       return [
         ...current,
-        { id: cryptoRandomId(), productId: product.id, quantity: 1, notes: '', adicionales: [], pesoGramos: null, grupoArmado },
+        { id: cryptoRandomId(), productId: product.id, quantity: 1, notes: '', adicionales: [], opciones, pesoGramos: null, grupoArmado },
       ];
     });
+  };
+
+  const productoTieneOpciones = (product) => (
+    Array.isArray(product.grupos_opciones) && product.grupos_opciones.length > 0
+  );
+
+  const handleAgregarProducto = (product) => {
+    if (productoTieneOpciones(product)) {
+      setOpcionesPickerFor(product);
+      return;
+    }
+    if (product.venta_por_peso) {
+      setPesoPickerFor(product);
+      return;
+    }
+    addToCart(product);
   };
 
   const addAddonToCartItem = (itemId, addonId) => {
@@ -373,6 +391,10 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       adicionales: (item.adicionales || []).map((addon) => ({
         preparacion_id: Number(addon.preparacionId),
         cantidad: Number(addon.cantidad || 1),
+      })),
+      opciones: (item.opciones || []).map((opcion) => ({
+        grupo_id: Number(opcion.grupoId),
+        preparacion_id: Number(opcion.preparacionId),
       })),
     })),
   });
@@ -501,6 +523,17 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
           placeholder="Indicaciones (sin cebolla, término medio...)"
           style={cartNotesInputStyle}
         />
+
+        {(item.opciones || []).length > 0 ? (
+          <div style={opcionesElegidasWrapStyle}>
+            {item.opciones.map((opcion) => (
+              <span key={`${opcion.grupoId}-${opcion.preparacionId}`} style={opcionElegidaChipStyle}>
+                {opcion.nombre}
+                {opcion.precioAdicional > 0 ? ` (+$${Number(opcion.precioAdicional).toFixed(2)})` : ''}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         {adicionales.length > 0 ? (
           <div style={addonSectionStyle}>
@@ -694,7 +727,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
                       </button>
                       <button
                         type="button"
-                        onClick={() => (product.venta_por_peso ? setPesoPickerFor(product) : addToCart(product))}
+                        onClick={() => handleAgregarProducto(product)}
                         style={productBodyButtonStyle}
                         aria-label={`Agregar ${product.nombre} al pedido`}
                       >
@@ -836,13 +869,26 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
           tasaCambio={tasaCambio}
           onClose={() => setDetailProduct(null)}
           onAdd={() => {
-            if (detailProduct.venta_por_peso) {
-              setPesoPickerFor(detailProduct);
-              setDetailProduct(null);
+            const product = detailProduct;
+            setDetailProduct(null);
+            handleAgregarProducto(product);
+          }}
+        />
+      ) : null}
+
+      {opcionesPickerFor ? (
+        <OpcionesProductoModal
+          product={opcionesPickerFor}
+          onClose={() => setOpcionesPickerFor(null)}
+          onConfirm={(opcionesElegidas) => {
+            const product = opcionesPickerFor;
+            setOpcionesPickerFor(null);
+            if (product.venta_por_peso) {
+              setPendingOpciones(opcionesElegidas);
+              setPesoPickerFor(product);
               return;
             }
-            addToCart(detailProduct);
-            setDetailProduct(null);
+            addToCart(product, { opcionesElegidas });
           }}
         />
       ) : null}
@@ -851,10 +897,14 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         <PesoPickerModal
           product={pesoPickerFor}
           tasaCambio={tasaCambio}
-          onClose={() => setPesoPickerFor(null)}
-          onConfirm={(gramos) => {
-            addToCart(pesoPickerFor, { pesoGramos: gramos });
+          onClose={() => {
             setPesoPickerFor(null);
+            setPendingOpciones([]);
+          }}
+          onConfirm={(gramos) => {
+            addToCart(pesoPickerFor, { pesoGramos: gramos, opcionesElegidas: pendingOpciones });
+            setPesoPickerFor(null);
+            setPendingOpciones([]);
           }}
         />
       ) : null}
@@ -971,6 +1021,102 @@ function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
   );
 }
 
+function OpcionesProductoModal({ product, onClose, onConfirm }) {
+  const grupos = Array.isArray(product.grupos_opciones) ? product.grupos_opciones : [];
+  const [seleccion, setSeleccion] = useState({});
+  const [error, setError] = useState('');
+
+  const toggleOpcion = (grupo, preparacionId) => {
+    setError('');
+    setSeleccion((current) => {
+      const actuales = current[grupo.id] || [];
+      const yaElegida = actuales.includes(preparacionId);
+      let next;
+      if (grupo.seleccion_multiple) {
+        next = yaElegida ? actuales.filter((id) => id !== preparacionId) : [...actuales, preparacionId];
+      } else {
+        next = yaElegida ? [] : [preparacionId];
+      }
+      return { ...current, [grupo.id]: next };
+    });
+  };
+
+  const handleConfirmar = () => {
+    for (const grupo of grupos) {
+      const elegidas = seleccion[grupo.id] || [];
+      if (grupo.obligatorio && elegidas.length === 0) {
+        setError(`Elige una opción de "${grupo.nombre}".`);
+        return;
+      }
+    }
+    const opcionesElegidas = [];
+    grupos.forEach((grupo) => {
+      (seleccion[grupo.id] || []).forEach((preparacionId) => {
+        const opcionInfo = grupo.opciones.find((op) => String(op.preparacion_id) === String(preparacionId));
+        opcionesElegidas.push({
+          grupoId: grupo.id,
+          preparacionId,
+          nombre: opcionInfo ? opcionInfo.nombre : '',
+          precioAdicional: opcionInfo ? Number(opcionInfo.precio_adicional || 0) : 0,
+        });
+      });
+    });
+    onConfirm(opcionesElegidas);
+  };
+
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
+          ×
+        </button>
+        <div style={modalBodyStyle}>
+          <div style={modalTitleStyle}>{product.nombre}</div>
+          <div style={modalCategoryStyle}>Elige cómo va este plato</div>
+
+          {grupos.map((grupo) => {
+            const elegidas = seleccion[grupo.id] || [];
+            return (
+              <label key={grupo.id} style={fieldWrapStyle}>
+                <span style={labelStyle}>
+                  {grupo.nombre}{grupo.obligatorio ? ' *' : ' (opcional)'}
+                  {grupo.seleccion_multiple ? ' — puedes elegir varias' : ''}
+                </span>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {grupo.opciones.map((opcion) => {
+                    const isSelected = elegidas.includes(opcion.preparacion_id);
+                    return (
+                      <button
+                        key={opcion.id}
+                        type="button"
+                        onClick={() => toggleOpcion(grupo, opcion.preparacion_id)}
+                        style={opcionButtonStyle(isSelected)}
+                      >
+                        <span>{opcion.nombre}</span>
+                        {Number(opcion.precio_adicional) > 0 ? (
+                          <span style={{ color: '#ffcf7d', fontWeight: 700 }}>+${Number(opcion.precio_adicional).toFixed(2)}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </label>
+            );
+          })}
+
+          {error ? <div style={{ color: '#ff9d9d', fontSize: 13 }}>{error}</div> : null}
+
+          <div style={modalFooterStyle}>
+            <button type="button" onClick={handleConfirmar} style={modalAddButtonStyle}>
+              Agregar al pedido
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function getUnitPrice(product, promotionsByProductId = {}) {
   const promotion = promotionsByProductId[product.id];
   return promotion ? Number(promotion.precio_descuento) : Number(product.precio_venta);
@@ -983,7 +1129,8 @@ function computeItemTotal(item, productsList, promotionsByProductId = {}) {
   }
   const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
   const pesoFactor = item.pesoGramos ? Number(item.pesoGramos) / 1000 : 1;
-  return getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal;
+  const opcionesTotal = (item.opciones || []).reduce((sum, opcion) => sum + Number(opcion.precioAdicional || 0), 0) * pesoFactor * item.quantity;
+  return getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal + opcionesTotal;
 }
 
 function getCookie(name) {
@@ -1644,6 +1791,40 @@ const addonSectionStyle = {
   paddingTop: 4,
   borderTop: '1px dashed rgba(255,255,255,0.12)',
 };
+
+const opcionesElegidasWrapStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+};
+
+const opcionElegidaChipStyle = {
+  padding: '4px 9px',
+  borderRadius: 999,
+  border: '1px solid rgba(125, 200, 255, 0.35)',
+  background: 'rgba(90, 170, 255, 0.08)',
+  color: '#bfe0ff',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
+const opcionButtonStyle = (isSelected) => ({
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 10,
+  width: '100%',
+  boxSizing: 'border-box',
+  textAlign: 'left',
+  borderRadius: 12,
+  border: isSelected ? '1px solid rgba(255, 132, 132, 0.7)' : '1px solid rgba(255, 255, 255, 0.14)',
+  background: isSelected ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+  color: '#fff',
+  padding: '10px 12px',
+  fontSize: 14,
+  fontWeight: isSelected ? 700 : 500,
+  cursor: 'pointer',
+});
 
 const addonChipStyle = {
   display: 'flex',

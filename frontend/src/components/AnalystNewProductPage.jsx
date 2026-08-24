@@ -24,6 +24,22 @@ const emptyIngredientDraft = {
   cantidad: '',
 };
 
+let opcionesUidSeq = 0;
+function nextOpcionesUid(prefix) {
+  opcionesUidSeq += 1;
+  return `${prefix}-${opcionesUidSeq}`;
+}
+
+function crearGrupoOpcionVacio() {
+  return {
+    uid: nextOpcionesUid('grupo'),
+    nombre: '',
+    obligatorio: true,
+    seleccion_multiple: false,
+    opciones: [],
+  };
+}
+
 function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged }) {
   const tasaCambio = useExchangeRate();
   const ingredientPickerRef = useRef(null);
@@ -34,6 +50,8 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
   const [form, setForm] = useState(emptyForm);
   const [ingredientDraft, setIngredientDraft] = useState(emptyIngredientDraft);
   const [ingredientes, setIngredientes] = useState([]);
+  const [gruposOpciones, setGruposOpciones] = useState([]);
+  const [opcionDraftByGrupo, setOpcionDraftByGrupo] = useState({});
   const [showIngredientResults, setShowIngredientResults] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -160,6 +178,57 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
     setIngredientes((current) => current.filter((item) => item.uid !== uid));
   };
 
+  const handleAddGrupoOpcion = () => {
+    setGruposOpciones((current) => [...current, crearGrupoOpcionVacio()]);
+  };
+
+  const handleRemoveGrupoOpcion = (grupoUid) => {
+    setGruposOpciones((current) => current.filter((grupo) => grupo.uid !== grupoUid));
+  };
+
+  const handleUpdateGrupoOpcion = (grupoUid, field, value) => {
+    setGruposOpciones((current) => current.map((grupo) => (
+      grupo.uid === grupoUid ? { ...grupo, [field]: value } : grupo
+    )));
+  };
+
+  const handleAddOpcionAGrupo = (grupoUid) => {
+    const draft = opcionDraftByGrupo[grupoUid] || { preparacion_id: '', precio_adicional: '0' };
+    if (!draft.preparacion_id) {
+      setMessage('Selecciona una subreceta para la opción.');
+      return;
+    }
+    const preparacion = subrecetas.find((item) => String(item.id) === String(draft.preparacion_id));
+    if (!preparacion) {
+      setMessage('Esa subreceta ya no existe.');
+      return;
+    }
+    setGruposOpciones((current) => current.map((grupo) => {
+      if (grupo.uid !== grupoUid) {
+        return grupo;
+      }
+      if (grupo.opciones.some((opcion) => String(opcion.preparacion_id) === String(preparacion.id))) {
+        setMessage('Esa opción ya está agregada a este grupo.');
+        return grupo;
+      }
+      return {
+        ...grupo,
+        opciones: [
+          ...grupo.opciones,
+          { uid: nextOpcionesUid('opcion'), preparacion_id: preparacion.id, nombre: preparacion.nombre, precio_adicional: draft.precio_adicional || '0' },
+        ],
+      };
+    }));
+    setOpcionDraftByGrupo((current) => ({ ...current, [grupoUid]: { preparacion_id: '', precio_adicional: '0' } }));
+    setMessage('');
+  };
+
+  const handleRemoveOpcionDeGrupo = (grupoUid, opcionUid) => {
+    setGruposOpciones((current) => current.map((grupo) => (
+      grupo.uid === grupoUid ? { ...grupo, opciones: grupo.opciones.filter((opcion) => opcion.uid !== opcionUid) } : grupo
+    )));
+  };
+
   const handleImageChange = (event) => {
     const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
     setImageFile(file);
@@ -194,6 +263,15 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         cantidad: item.cantidad,
         unidad: item.unidad,
       }))));
+      formData.append('grupos_opciones', JSON.stringify(gruposOpciones.map((grupo) => ({
+        nombre: grupo.nombre,
+        obligatorio: grupo.obligatorio,
+        seleccion_multiple: grupo.seleccion_multiple,
+        opciones: grupo.opciones.map((opcion) => ({
+          preparacion_id: opcion.preparacion_id,
+          precio_adicional: opcion.precio_adicional || '0',
+        })),
+      }))));
       if (imageFile) {
         formData.append('imagen', imageFile);
       }
@@ -212,6 +290,8 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       setForm(emptyForm);
       setIngredientes([]);
       setIngredientDraft(emptyIngredientDraft);
+      setGruposOpciones([]);
+      setOpcionDraftByGrupo({});
       setImageFile(null);
       setImagePreview('');
       if (fileInputRef.current) {
@@ -462,6 +542,97 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
               )}
             </div>
 
+            <div style={linkCardStyle}>
+              <div style={labelStyle}>Opciones del pedido (opcional)</div>
+              <p style={linkHintStyle}>
+                Para platos con variantes que el mesero debe preguntar al pedir (ej. "Acompañante: Arepas o Casabe").
+                Cada grupo puede ser obligatorio (elegir al menos una) y permitir una o varias opciones a la vez. Cada
+                opción se apoya en una subreceta ya creada, para saber qué descontar de inventario.
+              </p>
+
+              {gruposOpciones.map((grupo) => {
+                const draft = opcionDraftByGrupo[grupo.uid] || { preparacion_id: '', precio_adicional: '0' };
+                return (
+                  <div key={grupo.uid} style={grupoOpcionCardStyle}>
+                    <div style={composerRowStyle(isMobile)}>
+                      <input
+                        placeholder='Nombre del grupo (ej. "Acompañante")'
+                        value={grupo.nombre}
+                        onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'nombre', event.target.value)}
+                        style={inputStyle}
+                      />
+                      <label style={toggleRowStyle}>
+                        <input
+                          type="checkbox"
+                          checked={grupo.obligatorio}
+                          onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'obligatorio', event.target.checked)}
+                        />
+                        <span>Obligatorio</span>
+                      </label>
+                      <label style={toggleRowStyle}>
+                        <input
+                          type="checkbox"
+                          checked={grupo.seleccion_multiple}
+                          onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'seleccion_multiple', event.target.checked)}
+                        />
+                        <span>Permite varias</span>
+                      </label>
+                      <button type="button" onClick={() => handleRemoveGrupoOpcion(grupo.uid)} style={dangerButtonStyle}>
+                        Quitar grupo
+                      </button>
+                    </div>
+
+                    {grupo.opciones.length > 0 ? (
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        {grupo.opciones.map((opcion) => (
+                          <div key={opcion.uid} style={componentCardStyle}>
+                            <div>
+                              <div style={componentTitleStyle}>{opcion.nombre}</div>
+                              <div style={componentMetaStyle}>
+                                {Number(opcion.precio_adicional || 0) > 0 ? `+ $${Number(opcion.precio_adicional).toFixed(2)}` : 'Sin costo adicional'}
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => handleRemoveOpcionDeGrupo(grupo.uid, opcion.uid)} style={dangerButtonStyle}>
+                              Quitar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div style={composerRowStyle(isMobile)}>
+                      <select
+                        value={draft.preparacion_id}
+                        onChange={(event) => setOpcionDraftByGrupo((current) => ({ ...current, [grupo.uid]: { ...draft, preparacion_id: event.target.value } }))}
+                        style={inputStyle}
+                      >
+                        <option value="">Selecciona una subreceta...</option>
+                        {subrecetas.map((item) => (
+                          <option key={item.id} value={item.id}>{item.nombre}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Precio adicional"
+                        value={draft.precio_adicional}
+                        onChange={(event) => setOpcionDraftByGrupo((current) => ({ ...current, [grupo.uid]: { ...draft, precio_adicional: event.target.value } }))}
+                        style={inputStyle}
+                      />
+                      <button type="button" onClick={() => handleAddOpcionAGrupo(grupo.uid)} style={secondaryButtonStyle}>
+                        Agregar opción
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <button type="button" onClick={handleAddGrupoOpcion} style={secondaryButtonStyle}>
+                Agregar grupo de opciones
+              </button>
+            </div>
+
             <label style={fieldStyle}>
               <span style={labelStyle}>Descripción</span>
               <textarea rows={3} value={form.descripcion} onChange={(event) => handleChange('descripcion', event.target.value)} style={{ ...inputStyle, resize: 'vertical' }} />
@@ -549,6 +720,15 @@ const pickerEmptyStyle = {
   padding: '10px 12px',
   color: '#d8bcbc',
   fontSize: 13,
+};
+
+const grupoOpcionCardStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: 12,
+  borderRadius: 14,
+  border: '1px solid rgba(255, 190, 120, 0.25)',
+  background: 'rgba(255, 190, 120, 0.04)',
 };
 
 const componentCardStyle = {

@@ -34,6 +34,7 @@ import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import HistorialFacturasPage from './HistorialFacturasPage';
 import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
 import AnalystComprasPage from './AnalystComprasPage';
+import AnalystMargenGananciaPage from './AnalystMargenGananciaPage';
 import EditOrderPage from './EditOrderPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import NewOrderPage from './NewOrderPage';
@@ -900,6 +901,11 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           <HistorialFacturasPage
             isMobile={isMobile}
             onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+          />
+        ) : activeView === 'margen-ganancia' ? (
+          <AnalystMargenGananciaPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('contabilidad')}
           />
         ) : activeView === 'admin-datos-fiscales' ? (
           <AnalystDatosFiscalesPage

@@ -70,6 +70,8 @@ def _render_detalle(detalle):
     out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
     if detalle.notas:
         out += _text(f'  * {detalle.notas}') + FEED
+    for opcion in detalle.opciones.all():
+        out += _text(f'  » {opcion.grupo_nombre}: {opcion.preparacion.nombre}') + FEED
     for adicional in detalle.adicionales.all():
         out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}') + FEED
     return bytes(out)
@@ -151,7 +153,7 @@ def imprimir_comandas_pedido(pedido):
     detalles = list(
         pedido.detalles
         .select_related('producto__categoria')
-        .prefetch_related('adicionales__preparacion')
+        .prefetch_related('adicionales__preparacion', 'opciones__preparacion')
         .all()
     )
     if not detalles:

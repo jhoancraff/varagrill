@@ -42,6 +42,13 @@ const HistoryIcon = () => (
   </svg>
 );
 
+const MarginIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 3v18h18" />
+    <path d="M7 15l4-4 3 3 5-6" />
+  </svg>
+);
+
 const reportSections = [
   {
     id: 'contabilidad-cuadre-caja',
@@ -60,6 +67,12 @@ const reportSections = [
     title: 'Historial de facturas',
     description: 'Todas las facturas emitidas, incluidas las ya saldadas y anuladas, con el detalle completo de sus abonos.',
     icon: HistoryIcon,
+  },
+  {
+    id: 'margen-ganancia',
+    title: 'Margen de ganancia por plato',
+    description: 'Cuánto entró, cuánto costó y cuánto se ganó por cada plato vendido, en el rango de fechas que elijas.',
+    icon: MarginIcon,
   },
   {
     id: 'admin-ingredients',

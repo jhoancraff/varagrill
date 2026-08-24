@@ -26,11 +26,14 @@ from .models import (
     VGDetalleCompra,
     VGDetallePedido,
     VGDetallePedidoAdicional,
+    VGDetallePedidoOpcion,
+    VGGrupoOpcionProducto,
     VGImpresoraCaja,
     VGIngrediente,
     VGMesa,
     VGMetodoPago,
     VGMovimientoInventario,
+    VGOpcionProducto,
     VGPedido,
     VGPago,
     VGPreparacion,
@@ -488,8 +491,9 @@ def _add_preparation_needs(prep_id, quantity_needed, components_by_preparation, 
 def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation):
     """
     Cuánto de cada VGIngrediente hay que descontar del inventario al cobrar `pedido`: recorre
-    cada línea (VGDetallePedido) y sus adicionales (VGDetallePedidoAdicional), expandiendo
-    recetas/subrecetas hasta llegar a ingredientes crudos.
+    cada línea (VGDetallePedido), sus adicionales (VGDetallePedidoAdicional) y sus opciones
+    elegidas (VGDetallePedidoOpcion, ej. "Acompañante: Arepas"), expandiendo recetas/subrecetas
+    hasta llegar a ingredientes crudos.
 
     Devuelve {ingrediente_id: Decimal cantidad}.
     """
@@ -512,6 +516,12 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
                 components_by_preparation, yields_by_preparation, needs, set(),
             )
 
+        for opcion in detalle.opciones.all():
+            _add_preparation_needs(
+                opcion.preparacion_id, cantidad_platos,
+                components_by_preparation, yields_by_preparation, needs, set(),
+            )
+
     return needs
 
 
@@ -528,6 +538,160 @@ def _compute_product_recipe_cost(product, preparation_cost_map):
     return total
 
 
+def _compute_product_unit_cost(product, ingredient_costs, preparation_cost_map):
+    """
+    Costea 1 unidad vendible de `product` (o 1 kg si es venta_por_peso, mismo
+    criterio que _compute_pedido_ingredient_needs) usando _product_recipe_components
+    — a diferencia de _compute_product_recipe_cost, sí resuelve productos vinculados
+    a una receta/subreceta (receta_vinculada/subreceta_vinculada), cuya tabla propia
+    `receta` está vacía.
+    """
+    total = Decimal('0')
+    for component in _product_recipe_components(product):
+        if component['tipo'] == 'ingrediente':
+            total += component['cantidad'] * ingredient_costs.get(component['referencia_id'], Decimal('0'))
+        else:
+            costs = preparation_cost_map.get(component['referencia_id'], {'costo_unitario': Decimal('0')})
+            total += component['cantidad'] * costs['costo_unitario']
+    return total
+
+
+def _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_map, unit_cost_cache=None):
+    """
+    Congela en cada VGDetallePedido de `pedido` el costo de receta por unidad
+    (VGDetallePedido.costo_unitario_venta) usando los costos de ingredientes
+    VIGENTES en este momento. Se llama justo en el momento del cobro —el mismo
+    punto donde ya se descuenta inventario en pedidos_cobro_view / _emitir_factura—
+    para que el margen de ganancia de una venta ya cobrada no cambie después si
+    sube o baja el costo de un ingrediente. `unit_cost_cache` es opcional, para
+    reusar costos ya calculados entre pedidos de un mismo cobro combinado.
+    """
+    if unit_cost_cache is None:
+        unit_cost_cache = {}
+    detalles = list(pedido.detalles.all())
+    for detalle in detalles:
+        if detalle.producto_id not in unit_cost_cache:
+            unit_cost_cache[detalle.producto_id] = _compute_product_unit_cost(
+                detalle.producto, ingredient_costs, preparation_cost_map,
+            )
+        detalle.costo_unitario_venta = unit_cost_cache[detalle.producto_id]
+    if detalles:
+        VGDetallePedido.objects.bulk_update(detalles, ['costo_unitario_venta'])
+
+
+def reporte_margen_ganancia_view(request):
+    """
+    Margen de ganancia por plato vendido en un rango de fechas: cuánto entró
+    (precio de venta x cantidad), cuánto costó y la ganancia resultante,
+    agrupado por producto. Usa el costo histórico congelado al momento del
+    cobro (VGDetallePedido.costo_unitario_venta, ver _snapshot_costo_venta_detalles)
+    cuando existe; para ventas de antes de que ese campo existiera (o cualquier
+    fila vieja sin snapshot), cae al costo_unitario ACTUAL de los ingredientes
+    como estimación — mismo criterio "último costo" que el reporte de
+    referencia (Profit Plus) — y esa fila queda marcada con 'costo_estimado':
+    true para que quede claro que no es un costo histórico real.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    try:
+        desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate()
+        hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+
+    detalles = (
+        VGDetallePedido.objects
+        .filter(
+            pedido__estado='pagado',
+            pedido__fecha_creacion__date__gte=desde,
+            pedido__fecha_creacion__date__lte=hasta,
+        )
+        .select_related('producto__categoria')
+    )
+
+    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+    preparation_cost_map = _load_preparation_cost_map()
+    unit_cost_cache = {}
+
+    filas_por_producto = {}
+    for detalle in detalles:
+        producto = detalle.producto
+        peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
+        cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor
+
+        if detalle.costo_unitario_venta is not None:
+            costo_unitario = detalle.costo_unitario_venta
+            es_estimado = False
+        else:
+            if producto.id not in unit_cost_cache:
+                unit_cost_cache[producto.id] = _compute_product_unit_cost(producto, ingredient_costs, preparation_cost_map)
+            costo_unitario = unit_cost_cache[producto.id]
+            es_estimado = True
+
+        fila = filas_por_producto.setdefault(producto.id, {
+            'producto_id': producto.id,
+            'nombre': producto.nombre,
+            'categoria': producto.categoria.nombre if producto.categoria_id else '',
+            'venta_por_peso': producto.venta_por_peso,
+            'cantidad_vendida': Decimal('0'),
+            'ingreso_total': Decimal('0'),
+            'costo_total': Decimal('0'),
+            'costo_estimado': False,
+        })
+        fila['cantidad_vendida'] += cantidad_equivalente
+        fila['ingreso_total'] += detalle.subtotal
+        fila['costo_total'] += costo_unitario * cantidad_equivalente
+        if es_estimado:
+            fila['costo_estimado'] = True
+
+    filas = []
+    total_ingreso = Decimal('0')
+    total_costo = Decimal('0')
+    for fila in filas_por_producto.values():
+        ganancia_monto = fila['ingreso_total'] - fila['costo_total']
+        ganancia_pct = (ganancia_monto / fila['ingreso_total'] * Decimal('100')) if fila['ingreso_total'] > 0 else Decimal('0')
+        total_ingreso += fila['ingreso_total']
+        total_costo += fila['costo_total']
+        filas.append({
+            'producto_id': fila['producto_id'],
+            'nombre': fila['nombre'],
+            'categoria': fila['categoria'],
+            'cantidad_vendida': str(fila['cantidad_vendida'].quantize(Decimal('0.01'))),
+            'unidad': 'kg' if fila['venta_por_peso'] else 'unidad',
+            'ingreso_total': str(fila['ingreso_total'].quantize(Decimal('0.01'))),
+            'costo_total': str(fila['costo_total'].quantize(Decimal('0.01'))),
+            'ganancia_monto': str(ganancia_monto.quantize(Decimal('0.01'))),
+            'ganancia_pct': str(ganancia_pct.quantize(Decimal('0.01'))),
+            'costo_estimado': fila['costo_estimado'],
+        })
+
+    filas.sort(key=lambda item: Decimal(item['ingreso_total']), reverse=True)
+
+    total_ganancia = total_ingreso - total_costo
+    total_ganancia_pct = (total_ganancia / total_ingreso * Decimal('100')) if total_ingreso > 0 else Decimal('0')
+
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        'platos': filas,
+        'totales': {
+            'ingreso_total': str(total_ingreso.quantize(Decimal('0.01'))),
+            'costo_total': str(total_costo.quantize(Decimal('0.01'))),
+            'ganancia_monto': str(total_ganancia.quantize(Decimal('0.01'))),
+            'ganancia_pct': str(total_ganancia_pct.quantize(Decimal('0.01'))),
+        },
+    })
+
+
 class MesaListView(generics.ListAPIView):
     queryset = VGMesa.objects.all().order_by('numero')
     serializer_class = MesaSerializer
@@ -542,6 +706,7 @@ class ProductoListView(generics.ListAPIView):
             'receta_vinculada__receta__preparacion',
             'subreceta_vinculada__componentes__ingrediente',
             'subreceta_vinculada__componentes__sub_preparacion',
+            'grupos_opciones__opciones__preparacion',
         )
         .order_by('nombre')
     )
@@ -565,6 +730,44 @@ def adicionales_disponibles_view(request):
         })
 
     return _auth_response({'ok': True, 'adicionales': adicionales})
+
+
+def _resolve_opciones_linea(product, grupos, opciones_seleccionadas):
+    """
+    Valida las opciones elegidas para una línea de pedido de `product` contra
+    sus VGGrupoOpcionProducto (grupos propios de ESE producto, ej. "Acompañante"
+    con Arepas/Casabe) — distinto de los adicionales globales (es_adicional=True).
+    Revisa que cada grupo obligatorio tenga al menos una opción elegida, que un
+    grupo sin selección múltiple no reciba más de una, y que cada opción elegida
+    pertenezca al grupo indicado. Devuelve (opciones_resueltas, error_message);
+    opciones_resueltas es [{'grupo_nombre': str, 'opcion': VGOpcionProducto}, ...].
+    """
+    opciones_validas_por_grupo = {
+        grupo.id: {opcion.preparacion_id: opcion for opcion in grupo.opciones.all()}
+        for grupo in grupos
+    }
+
+    seleccion_por_grupo = {}
+    for seleccion in opciones_seleccionadas:
+        grupo_id = seleccion['grupo_id']
+        if grupo_id not in opciones_validas_por_grupo:
+            return None, f'"{product.nombre}" no tiene ese grupo de opciones.'
+        opciones_del_grupo = opciones_validas_por_grupo[grupo_id]
+        if seleccion['preparacion_id'] not in opciones_del_grupo:
+            return None, f'Esa opción no pertenece al grupo indicado para "{product.nombre}".'
+        seleccion_por_grupo.setdefault(grupo_id, []).append(opciones_del_grupo[seleccion['preparacion_id']])
+
+    resueltas = []
+    for grupo in grupos:
+        elegidas = seleccion_por_grupo.get(grupo.id, [])
+        if grupo.obligatorio and not elegidas:
+            return None, f'Debes elegir una opción de "{grupo.nombre}" para "{product.nombre}".'
+        if not grupo.seleccion_multiple and len(elegidas) > 1:
+            return None, f'Solo puedes elegir una opción de "{grupo.nombre}" para "{product.nombre}".'
+        for opcion in elegidas:
+            resueltas.append({'grupo_nombre': grupo.nombre, 'opcion': opcion})
+
+    return resueltas, None
 
 
 def _parse_order_payload(data):
@@ -658,6 +861,20 @@ def _parse_order_payload(data):
             parsed_addons.append({'preparacion_id': addon_preparacion_id, 'cantidad': addon_quantity})
             preparacion_ids.append(addon_preparacion_id)
 
+        raw_opciones = item.get('opciones') or []
+        if not isinstance(raw_opciones, list):
+            return None, f'Las opciones del item #{index} tienen formato invalido.'
+        parsed_opciones = []
+        for opcion_index, opcion in enumerate(raw_opciones, start=1):
+            if not isinstance(opcion, dict):
+                return None, f'Una opción del item #{index} tiene formato invalido.'
+            try:
+                opcion_grupo_id = int(opcion.get('grupo_id'))
+                opcion_preparacion_id = int(opcion.get('preparacion_id'))
+            except (TypeError, ValueError):
+                return None, f'Una opción del item #{index} no es valida.'
+            parsed_opciones.append({'grupo_id': opcion_grupo_id, 'preparacion_id': opcion_preparacion_id})
+
         parsed_lines.append({
             'product_id': product_id,
             'cantidad': quantity,
@@ -665,6 +882,7 @@ def _parse_order_payload(data):
             'grupo_armado': grupo_armado,
             'notas': notes,
             'adicionales': parsed_addons,
+            'opciones': parsed_opciones,
         })
         product_ids.append(product_id)
 
@@ -677,6 +895,7 @@ def _parse_order_payload(data):
         for preparacion in VGPreparacion.objects.filter(id__in=preparacion_ids, es_adicional=True)
     }
 
+    grupos_opciones_by_producto = {}
     for index, line in enumerate(parsed_lines, start=1):
         if line['product_id'] not in products_map:
             return None, f'El producto del item #{index} no existe o no esta disponible.'
@@ -688,6 +907,16 @@ def _parse_order_payload(data):
         for addon in line['adicionales']:
             if addon['preparacion_id'] not in preparaciones_map:
                 return None, f'Un adicional del item #{index} no existe o ya no esta disponible como adicional.'
+
+        if product.id not in grupos_opciones_by_producto:
+            grupos_opciones_by_producto[product.id] = list(
+                VGGrupoOpcionProducto.objects.filter(producto=product).prefetch_related('opciones__preparacion')
+            )
+        grupos = grupos_opciones_by_producto[product.id]
+        opciones_resueltas, error = _resolve_opciones_linea(product, grupos, line['opciones'])
+        if error:
+            return None, f'Item #{index}: {error}'
+        line['opciones_resueltas'] = opciones_resueltas
 
     return {
         'parsed_lines': parsed_lines,
@@ -730,6 +959,17 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
                 'precio_unitario': addon_price,
             })
 
+        built_opciones = []
+        for resuelta in line.get('opciones_resueltas', []):
+            opcion = resuelta['opcion']
+            precio_opcion_total = (opcion.precio_adicional * peso_factor * line['cantidad']).quantize(Decimal('0.01'))
+            line_subtotal += precio_opcion_total
+            built_opciones.append({
+                'grupo_nombre': resuelta['grupo_nombre'],
+                'preparacion': opcion.preparacion,
+                'precio_unitario': precio_opcion_total,
+            })
+
         subtotal += line_subtotal
         built_lines.append({
             'producto': product,
@@ -739,6 +979,7 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
             'grupo_armado': line['grupo_armado'],
             'notas': line['notas'],
             'adicionales': built_addons,
+            'opciones': built_opciones,
         })
     return built_lines, subtotal
 
@@ -754,6 +995,20 @@ def _serialize_detalle_adicionales(detalle):
             'subtotal': str(adicional.subtotal),
         }
         for adicional in detalle.adicionales.all()
+    ]
+
+
+def _serialize_detalle_opciones(detalle):
+    return [
+        {
+            'id': opcion.id,
+            'grupo_nombre': opcion.grupo_nombre,
+            'preparacion_id': opcion.preparacion_id,
+            'nombre': opcion.preparacion.nombre,
+            'precio_unitario': str(opcion.precio_unitario),
+            'subtotal': str(opcion.subtotal),
+        }
+        for opcion in detalle.opciones.all()
     ]
 
 
@@ -784,6 +1039,7 @@ def _serialize_order_detail(pedido):
                 'subtotal': str(detalle.subtotal),
                 'notas': detalle.notas,
                 'adicionales': _serialize_detalle_adicionales(detalle),
+                'opciones': _serialize_detalle_opciones(detalle),
             }
             for detalle in pedido.detalles.all()
         ],
@@ -848,6 +1104,13 @@ def pedido_create_view(request):
                     cantidad=addon['cantidad'],
                     precio_unitario=addon['precio_unitario'],
                 )
+            for opcion in line['opciones']:
+                VGDetallePedidoOpcion.objects.create(
+                    detalle_pedido=detalle,
+                    grupo_nombre=opcion['grupo_nombre'],
+                    preparacion=opcion['preparacion'],
+                    precio_unitario=opcion['precio_unitario'],
+                )
 
         total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
         pedido.subtotal = subtotal
@@ -885,7 +1148,7 @@ def pedido_detail_view(request, pedido_id):
         pedido = (
             VGPedido.objects
             .select_related('mesa', 'cliente')
-            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion')
             .get(pk=pedido_id)
         )
     except VGPedido.DoesNotExist:
@@ -959,6 +1222,13 @@ def pedido_update_view(request, pedido_id):
                     cantidad=addon['cantidad'],
                     precio_unitario=addon['precio_unitario'],
                 )
+            for opcion in line['opciones']:
+                VGDetallePedidoOpcion.objects.create(
+                    detalle_pedido=detalle,
+                    grupo_nombre=opcion['grupo_nombre'],
+                    preparacion=opcion['preparacion'],
+                    precio_unitario=opcion['precio_unitario'],
+                )
 
         total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
         pedido.subtotal = subtotal
@@ -966,7 +1236,7 @@ def pedido_update_view(request, pedido_id):
         pedido.actualizado_por = request.user
         pedido.save()
 
-    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion').get(pk=pedido.id)
+    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion').get(pk=pedido.id)
     _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
 
     return _auth_response({
@@ -2285,6 +2555,24 @@ def _serialize_product(product):
         'subreceta_vinculada_id': product.subreceta_vinculada_id,
         'subreceta_vinculada_nombre': product.subreceta_vinculada.nombre if product.subreceta_vinculada_id else '',
         'ingredientes': [_serialize_recipe_component(component) for component in product.receta.all()],
+        'grupos_opciones': [
+            {
+                'id': grupo.id,
+                'nombre': grupo.nombre,
+                'obligatorio': grupo.obligatorio,
+                'seleccion_multiple': grupo.seleccion_multiple,
+                'opciones': [
+                    {
+                        'id': opcion.id,
+                        'preparacion_id': opcion.preparacion_id,
+                        'preparacion_nombre': opcion.preparacion.nombre,
+                        'precio_adicional': str(opcion.precio_adicional),
+                    }
+                    for opcion in grupo.opciones.all()
+                ],
+            }
+            for grupo in product.grupos_opciones.all()
+        ],
     }
 
 
@@ -2321,6 +2609,69 @@ def product_image_view(request, product_id):
     return response
 
 
+def _parse_grupos_opciones(raw_grupos):
+    """
+    Valida el payload de grupos de opciones de un producto (ver admin_products_view):
+    [{"nombre": str, "obligatorio": bool, "seleccion_multiple": bool,
+      "opciones": [{"preparacion_id": int, "precio_adicional": str}, ...]}, ...]
+    Cada opción se apoya en una VGPreparacion ya existente. Devuelve
+    (grupos_parseados, error_message); cada grupo trae sus opciones ya
+    resueltas a objetos VGPreparacion, listas para crear en bulk.
+    """
+    if not isinstance(raw_grupos, list):
+        return None, 'Formato inválido de grupos de opciones.'
+
+    preparacion_ids = set()
+    parsed_grupos = []
+    for grupo_index, grupo in enumerate(raw_grupos, start=1):
+        if not isinstance(grupo, dict):
+            return None, f'El grupo de opciones #{grupo_index} tiene formato inválido.'
+        nombre = str(grupo.get('nombre', '') or '').strip()
+        if not nombre:
+            return None, f'El grupo de opciones #{grupo_index} necesita un nombre.'
+        obligatorio = bool(grupo.get('obligatorio', True))
+        seleccion_multiple = bool(grupo.get('seleccion_multiple', False))
+        raw_opciones = grupo.get('opciones') or []
+        if not isinstance(raw_opciones, list) or not raw_opciones:
+            return None, f'El grupo "{nombre}" necesita al menos una opción.'
+
+        parsed_opciones = []
+        for opcion in raw_opciones:
+            if not isinstance(opcion, dict):
+                return None, f'Una opción del grupo "{nombre}" tiene formato inválido.'
+            try:
+                preparacion_id = int(opcion.get('preparacion_id'))
+            except (TypeError, ValueError):
+                return None, f'Una opción del grupo "{nombre}" no tiene una subreceta válida.'
+            try:
+                precio_adicional = Decimal(str(opcion.get('precio_adicional', '0') or '0'))
+            except InvalidOperation:
+                return None, f'El precio de una opción del grupo "{nombre}" no es válido.'
+            if precio_adicional < 0:
+                return None, f'El precio de una opción del grupo "{nombre}" no puede ser negativo.'
+            parsed_opciones.append({'preparacion_id': preparacion_id, 'precio_adicional': precio_adicional})
+            preparacion_ids.add(preparacion_id)
+
+        parsed_grupos.append({
+            'nombre': nombre,
+            'obligatorio': obligatorio,
+            'seleccion_multiple': seleccion_multiple,
+            'opciones': parsed_opciones,
+        })
+
+    preparaciones_map = {
+        preparacion.id: preparacion for preparacion in VGPreparacion.objects.filter(id__in=preparacion_ids)
+    }
+    for grupo in parsed_grupos:
+        for opcion in grupo['opciones']:
+            preparacion = preparaciones_map.get(opcion['preparacion_id'])
+            if preparacion is None:
+                return None, f'Una de las subrecetas elegidas para "{grupo["nombre"]}" no existe.'
+            opcion['preparacion'] = preparacion
+
+    return parsed_grupos, None
+
+
 @csrf_exempt
 def admin_products_view(request):
     if request.method not in ['GET', 'POST']:
@@ -2338,7 +2689,7 @@ def admin_products_view(request):
         products = (
             VGProducto.objects.exclude(categoria__nombre__iexact='Recetas')
             .select_related('categoria', 'receta_vinculada', 'subreceta_vinculada')
-            .prefetch_related('receta__ingrediente', 'receta__preparacion')
+            .prefetch_related('receta__ingrediente', 'receta__preparacion', 'grupos_opciones__opciones__preparacion')
             .order_by('nombre')
         )
         preparation_cost_map = _load_preparation_cost_map()
@@ -2497,6 +2848,19 @@ def admin_products_view(request):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
+    grupos_opciones_raw = data.get('grupos_opciones')
+    if is_multipart:
+        try:
+            grupos_opciones_data = json.loads(grupos_opciones_raw) if grupos_opciones_raw else []
+        except json.JSONDecodeError:
+            return _auth_response({'ok': False, 'message': 'Formato inválido de las opciones del producto.'}, status=400)
+    else:
+        grupos_opciones_data = grupos_opciones_raw or []
+
+    parsed_grupos_opciones, error = _parse_grupos_opciones(grupos_opciones_data)
+    if error:
+        return _auth_response({'ok': False, 'message': error}, status=400)
+
     product = None
     if action == 'update':
         product_id = data.get('id')
@@ -2559,6 +2923,25 @@ def admin_products_view(request):
             )
             for row in resolved_components
         ])
+
+        product.grupos_opciones.all().delete()
+        for orden, grupo_data in enumerate(parsed_grupos_opciones):
+            grupo = VGGrupoOpcionProducto.objects.create(
+                producto=product,
+                nombre=grupo_data['nombre'],
+                obligatorio=grupo_data['obligatorio'],
+                seleccion_multiple=grupo_data['seleccion_multiple'],
+                orden=orden,
+            )
+            VGOpcionProducto.objects.bulk_create([
+                VGOpcionProducto(
+                    grupo=grupo,
+                    preparacion=opcion['preparacion'],
+                    precio_adicional=opcion['precio_adicional'],
+                    orden=opcion_orden,
+                )
+                for opcion_orden, opcion in enumerate(grupo_data['opciones'])
+            ])
 
     return _auth_response({
         'ok': True,
@@ -3195,6 +3578,7 @@ def kitchen_orders_view(request):
         .prefetch_related(
             'detalles__producto',
             'detalles__adicionales__preparacion',
+            'detalles__opciones__preparacion',
             'detalles__producto__receta_vinculada__receta__ingrediente',
             'detalles__producto__receta_vinculada__receta__preparacion',
             'detalles__producto__subreceta_vinculada__componentes__ingrediente',
@@ -3228,6 +3612,7 @@ def kitchen_orders_view(request):
                     'estado': detalle.estado,
                     'notas': detalle.notas,
                     'adicionales': _serialize_detalle_adicionales(detalle),
+                    'opciones': _serialize_detalle_opciones(detalle),
                     'composicion': detalle.producto.nombres_composicion(),
                 }
                 for detalle in pedido.detalles.all()
@@ -3345,7 +3730,7 @@ def pedidos_cobro_view(request):
         pedidos = (
             VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
             .select_related('mesa', 'cliente', 'usuario')
-            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion')
             .order_by('mesa__numero', 'fecha_creacion')
         )
         return _auth_response({
@@ -3378,6 +3763,7 @@ def pedidos_cobro_view(request):
                             'subtotal': str(detalle.subtotal),
                             'notas': detalle.notas,
                             'adicionales': _serialize_detalle_adicionales(detalle),
+                            'opciones': _serialize_detalle_opciones(detalle),
                         }
                         for detalle in pedido.detalles.all()
                     ],
@@ -3419,6 +3805,7 @@ def pedidos_cobro_view(request):
                 'detalles__producto__subreceta_vinculada__componentes__ingrediente',
                 'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
                 'detalles__adicionales__preparacion',
+                'detalles__opciones__preparacion',
             )
         )
         found_ids = {pedido.id for pedido in pedidos}
@@ -3440,6 +3827,9 @@ def pedidos_cobro_view(request):
             )
 
         components_by_preparation, yields_by_preparation = _load_preparation_structure()
+        ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+        preparation_cost_map = _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
+        unit_cost_cache = {}
 
         total_cobrado = Decimal('0')
         for pedido in pedidos:
@@ -3455,6 +3845,8 @@ def pedidos_cobro_view(request):
             pedido.actualizado_por = request.user
             pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
             total_cobrado += pedido.total
+
+            _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_map, unit_cost_cache)
 
             needs = _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation)
             if needs:

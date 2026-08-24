@@ -236,6 +236,63 @@ class VGPreparacion(VGAuditoria):
         return self.nombre
 
 
+class VGGrupoOpcionProducto(models.Model):
+    """
+    Un grupo de opciones propio de un producto (ej: "Acompañante" en una sopa
+    de costilla, con Arepas/Casabe para elegir). A diferencia de VGPreparacion
+    con es_adicional=True (extras globales ofrecibles a cualquier plato), este
+    grupo está ligado a UN producto específico y aparece como un paso
+    obligatorio u opcional al tomar el pedido de ese plato.
+    """
+    producto = models.ForeignKey(VGProducto, on_delete=models.CASCADE, related_name="grupos_opciones")
+    nombre = models.CharField(max_length=100, help_text="Ej: Acompañante, Término de la carne, Extras.")
+    obligatorio = models.BooleanField(
+        default=True,
+        help_text="Si está activo, el mesero debe elegir al menos una opción de este grupo antes de agregar el plato al pedido.",
+    )
+    seleccion_multiple = models.BooleanField(
+        default=False,
+        help_text="Si está activo, se puede elegir más de una opción del grupo (ej: varios extras). Si no, es una sola (ej: arepas O casabe).",
+    )
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "vg_grupos_opcion_producto"
+        verbose_name = "Grupo de opciones de producto"
+        verbose_name_plural = "Grupos de opciones de producto"
+        ordering = ["orden", "id"]
+
+    def __str__(self):
+        return f"{self.producto} — {self.nombre}"
+
+
+class VGOpcionProducto(models.Model):
+    """
+    Una opción concreta dentro de un VGGrupoOpcionProducto (ej: "Arepas" dentro
+    del grupo "Acompañante"). Se apoya en una VGPreparacion ya existente (su
+    propia receta) para que elegir esta opción sepa qué descontar de
+    inventario y cuánto cuesta, igual que el resto del sistema de recetas.
+    """
+    grupo = models.ForeignKey(VGGrupoOpcionProducto, on_delete=models.CASCADE, related_name="opciones")
+    preparacion = models.ForeignKey(
+        VGPreparacion, on_delete=models.PROTECT, related_name="usado_en_opciones_producto",
+    )
+    precio_adicional = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Cuánto se le suma al precio del plato si se elige esta opción (0 si es una sustitución sin costo).",
+    )
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "vg_opciones_producto"
+        verbose_name = "Opción de producto"
+        verbose_name_plural = "Opciones de producto"
+        ordering = ["orden", "id"]
+
+    def __str__(self):
+        return f"{self.grupo} — {self.preparacion.nombre}"
+
+
 class VGRecetaPreparacion(models.Model):
     """
     Componentes de una VGPreparacion. Cada fila es un ingrediente crudo O
@@ -443,6 +500,10 @@ class VGDetallePedido(models.Model):
         null=True, blank=True,
         help_text="Agrupa varias líneas de este mismo pedido en un 'plato armado' (ej: carne + guarniciones). Sin agrupar si está vacío.",
     )
+    costo_unitario_venta = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="Costo de receta por unidad (o por kg si venta_por_peso), congelado en el momento del cobro con los costos de ingredientes vigentes ese día. Vacío para pedidos cobrados antes de que este campo existiera — el reporte de margen cae al costo actual para esos casos.",
+    )
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     notas = models.CharField(max_length=255, blank=True)
 
@@ -481,6 +542,33 @@ class VGDetallePedidoAdicional(models.Model):
 
     def __str__(self):
         return f"{self.preparacion} x {self.cantidad}"
+
+
+class VGDetallePedidoOpcion(models.Model):
+    """
+    La opción elegida (de un VGGrupoOpcionProducto) para una línea de pedido,
+    ej. "Acompañante: Arepas" sobre una sopa de costilla. grupo_nombre se
+    guarda como snapshot (por si el grupo se renombra/borra después) igual
+    que precio_unitario, que ya viene multiplicado por la cantidad/peso de la
+    línea (el total que corresponde a esta elección en este pedido, no un
+    precio unitario suelto que haya que volver a escalar al mostrarlo).
+    """
+    detalle_pedido = models.ForeignKey(VGDetallePedido, on_delete=models.CASCADE, related_name="opciones")
+    grupo_nombre = models.CharField(max_length=100)
+    preparacion = models.ForeignKey(VGPreparacion, on_delete=models.PROTECT, related_name="usado_en_pedidos_opcion")
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "vg_detalle_pedido_opcion"
+        verbose_name = "Opción elegida de pedido"
+        verbose_name_plural = "Opciones elegidas de pedido"
+
+    @property
+    def subtotal(self):
+        return self.precio_unitario
+
+    def __str__(self):
+        return f"{self.grupo_nombre}: {self.preparacion.nombre}"
 
 
 # ---------------------------------------------------------------------------

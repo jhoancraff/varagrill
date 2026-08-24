@@ -173,7 +173,7 @@ class VGIngrediente(VGAuditoria):
     unidad_medida = models.CharField(max_length=10, choices=UNIDADES)
     stock_actual = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     stock_minimo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    costo_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    costo_unitario = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     ultimo_proveedor = models.CharField(
         max_length=150, blank=True,
         help_text="Nombre del último proveedor que despachó este ingrediente (sin tabla propia: los proveedores cambian seguido).",
@@ -315,7 +315,7 @@ class VGDetalleCompra(models.Model):
     compra = models.ForeignKey(VGCompra, on_delete=models.CASCADE, related_name="detalles")
     ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.PROTECT, related_name="compras")
     cantidad = models.DecimalField(max_digits=10, decimal_places=2)
-    costo_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    costo_unitario = models.DecimalField(max_digits=12, decimal_places=4)
 
     class Meta:
         db_table = "vg_detalle_compras"

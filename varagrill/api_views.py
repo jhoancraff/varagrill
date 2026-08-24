@@ -1308,16 +1308,21 @@ def admin_catalog_view(request):
         proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
         cantidad = data.get('cantidad', 0)
         stock_minimo = data.get('stock_minimo', 0)
-        costo_unitario = data.get('costo_unitario', 0)
+        precio_total = data.get('precio_total', 0)
         try:
             cantidad_value = Decimal(str(cantidad))
             stock_minimo_value = Decimal(str(stock_minimo or 0))
-            costo_unitario_value = Decimal(str(costo_unitario or 0))
+            precio_total_value = Decimal(str(precio_total or 0))
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'Los datos numéricos del insumo son inválidos.'}, status=400)
 
         if cantidad_value <= 0:
             return _auth_response({'ok': False, 'message': 'La cantidad del ingreso debe ser mayor a cero.'}, status=400)
+
+        # El costo unitario nunca se recibe precalculado: se deriva siempre del precio
+        # total pagado dividido entre la cantidad realmente recibida, para que
+        # presentaciones no redondas (ej. potes de 910 g) queden bien costeadas.
+        costo_unitario_value = (precio_total_value / cantidad_value).quantize(Decimal('0.0001'))
 
         ingredient = None
         if ingredient_id not in [None, '']:
@@ -1362,7 +1367,7 @@ def admin_catalog_view(request):
             ingredient.actualizado_por = request.user
             ingredient.save(update_fields=['stock_actual', 'actualizado_por', 'fecha_actualizacion'])
 
-            total_compra = cantidad_value * costo_unitario_value
+            total_compra = precio_total_value
             compra = VGCompra.objects.create(
                 proveedor_nombre=proveedor,
                 total=total_compra,

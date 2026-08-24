@@ -8,8 +8,16 @@ const emptyForm = {
   unidad: 'kg',
   cantidad: '',
   stock_minimo: '',
-  costo_unitario: '',
+  precio_total: '',
   proveedor: '',
+};
+
+const UNIDAD_LABELS = {
+  kg: 'kg',
+  g: 'g',
+  l: 'L',
+  ml: 'ml',
+  unidad: 'unidad',
 };
 
 function AnalystIngredientsPage({ isMobile, onBack }) {
@@ -62,6 +70,11 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
   }, []);
 
   const isCreatingNew = form.ingrediente_id === NEW_INGREDIENT_VALUE;
+  const cantidadNumber = Number(form.cantidad);
+  const precioTotalNumber = Number(form.precio_total);
+  const computedUnitCost = cantidadNumber > 0 && precioTotalNumber > 0
+    ? (precioTotalNumber / cantidadNumber).toFixed(4)
+    : null;
   const filteredInventory = inventory.filter((item) => {
     const query = ingredientSearch.trim().toLowerCase();
     if (!query) {
@@ -78,7 +91,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         nombre: '',
         unidad: 'kg',
         stock_minimo: '',
-        costo_unitario: '',
+        precio_total: '',
         proveedor: '',
       }));
       setIngredientSearch('');
@@ -93,7 +106,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
       nombre: selectedIngredient?.nombre || '',
       unidad: selectedIngredient?.unidad_medida || 'kg',
       stock_minimo: selectedIngredient?.stock_minimo || '',
-      costo_unitario: selectedIngredient?.costo_unitario || '',
+      precio_total: '',
       proveedor: selectedIngredient?.ultimo_proveedor || '',
     }));
     setIngredientSearch(selectedIngredient?.nombre || '');
@@ -115,7 +128,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         unidad: form.unidad,
         cantidad: form.cantidad,
         stock_minimo: form.stock_minimo || '0',
-        costo_unitario: form.costo_unitario || '0',
+        precio_total: form.precio_total || '0',
         proveedor: form.proveedor,
       };
 
@@ -254,8 +267,11 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
               </label>
 
               <label style={fieldStyle}>
-                <span style={labelStyle}>Costo unitario</span>
-                <input type="number" min="0" step="0.01" value={form.costo_unitario} onChange={(event) => handleChange('costo_unitario', event.target.value)} style={inputStyle} />
+                <span style={labelStyle}>Precio total pagado</span>
+                <input type="number" min="0" step="0.01" value={form.precio_total} onChange={(event) => handleChange('precio_total', event.target.value)} style={inputStyle} placeholder="Lo que pagaste por toda la compra" />
+                {computedUnitCost ? (
+                  <span style={unitCostHintStyle}>≈ ${computedUnitCost} por {UNIDAD_LABELS[form.unidad] || form.unidad}</span>
+                ) : null}
               </label>
 
               <label style={fieldStyle}>
@@ -266,7 +282,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
 
             <div style={helperCardStyle}>
               <div style={helperTitleStyle}>Auditoría automática</div>
-              <div style={helperTextStyle}>Cada ingreso crea o actualiza el ingrediente y además registra una compra con su detalle y un movimiento de inventario de tipo entrada.</div>
+              <div style={helperTextStyle}>Cada ingreso crea o actualiza el ingrediente y además registra una compra con su detalle y un movimiento de inventario de tipo entrada. El costo por {UNIDAD_LABELS[form.unidad] || form.unidad} se calcula solo dividiendo el precio total pagado entre la cantidad recibida — no hace falta calcularlo a mano, incluso si el paquete trae una cantidad no redonda (ej. 910 g).</div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -406,6 +422,12 @@ const pickerItemTitleStyle = {
 const pickerItemMetaStyle = {
   color: '#cfb8b8',
   fontSize: 12,
+};
+
+const unitCostHintStyle = {
+  color: '#9fe3b0',
+  fontSize: 12,
+  fontWeight: 700,
 };
 
 const pickerEmptyStyle = {

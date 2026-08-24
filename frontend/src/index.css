@@ -1,0 +1,27 @@
+/*
+ * Arreglo global para el desplegable de cada <select> del sistema.
+ *
+ * El problema: cada página fija su propio estilo inline oscuro (fondo negro,
+ * letra blanca) sobre el <select> cerrado, pero la LISTA desplegada al hacer
+ * clic la dibuja el sistema operativo/navegador, no el CSS de la página. En
+ * escritorio (Chrome/Edge/Firefox), sin ninguna pista, esa lista sale con
+ * fondo blanco por defecto — y como el texto hereda el blanco que puso la
+ * página, queda letra blanca sobre fondo blanco (invisible). En el celular,
+ * el selector nativo del sistema no tiene ese problema porque usa su propio
+ * tema, por eso ahí se veía bien.
+ *
+ * La solución real es `color-scheme: dark` en el propio <select>: le avisa
+ * al navegador que dibuje SUS controles nativos (incluida esta lista) en
+ * tema oscuro. Se refuerza con colores explícitos en <option> por si algún
+ * navegador no lo respeta del todo. Al ser una regla global (no una clase
+ * que hay que acordarse de poner en cada página), cubre todos los <select>
+ * que ya existen y los que se agreguen después, sin tocar cada archivo.
+ */
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #17100f;
+  color: #fff4f4;
+}

@@ -27,7 +27,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   const [addonPickerFor, setAddonPickerFor] = useState(null);
   const [pesoPickerFor, setPesoPickerFor] = useState(null);
   const [opcionesPickerFor, setOpcionesPickerFor] = useState(null);
-  const [pendingOpciones, setPendingOpciones] = useState([]);
+  const [pendingPeso, setPendingPeso] = useState(null);
   const [armarPlatoActivo, setArmarPlatoActivo] = useState(false);
   const [grupoActual, setGrupoActual] = useState(null);
   const [nextGrupoId, setNextGrupoId] = useState(1);
@@ -264,7 +264,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       setNextGrupoId((current) => current + 1);
     }
 
-    const opcionesKey = (list) => (list || []).map((o) => o.preparacionId).sort().join(',');
+    const opcionesKey = (list) => (list || []).map((o) => `${o.preparacionId || ''}:${o.productoId || ''}`).sort().join(',');
 
     setCartItems((current) => {
       const existing = current.find((item) => (
@@ -290,12 +290,14 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   );
 
   const handleAgregarProducto = (product) => {
-    if (productoTieneOpciones(product)) {
-      setOpcionesPickerFor(product);
-      return;
-    }
+    // Primero el peso (si aplica) y después los acompañantes: así el mesero sabe
+    // cuánto va a pesar el corte antes de que le pregunten con qué lo acompaña.
     if (product.venta_por_peso) {
       setPesoPickerFor(product);
+      return;
+    }
+    if (productoTieneOpciones(product)) {
+      setOpcionesPickerFor(product);
       return;
     }
     addToCart(product);
@@ -395,10 +397,15 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         preparacion_id: Number(addon.preparacionId),
         cantidad: Number(addon.cantidad || 1),
       })),
-      opciones: (item.opciones || []).map((opcion) => ({
-        grupo_id: Number(opcion.grupoId),
-        preparacion_id: Number(opcion.preparacionId),
-      })),
+      opciones: (item.opciones || []).map((opcion) => (
+        opcion.productoId ? {
+          grupo_id: Number(opcion.grupoId),
+          producto_id: Number(opcion.productoId),
+        } : {
+          grupo_id: Number(opcion.grupoId),
+          preparacion_id: Number(opcion.preparacionId),
+        }
+      )),
     })),
   });
 
@@ -533,7 +540,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         {(item.opciones || []).length > 0 ? (
           <div style={opcionesElegidasWrapStyle}>
             {item.opciones.map((opcion) => (
-              <span key={`${opcion.grupoId}-${opcion.preparacionId}`} style={opcionElegidaChipStyle}>
+              <span key={`${opcion.grupoId}-${opcion.preparacionId || ''}-${opcion.productoId || ''}`} style={opcionElegidaChipStyle}>
                 {opcion.nombre}
                 {opcion.precioAdicional > 0 ? ` (+$${Number(opcion.precioAdicional).toFixed(2)})` : ''}
               </span>
@@ -882,35 +889,37 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         />
       ) : null}
 
-      {opcionesPickerFor ? (
-        <OpcionesProductoModal
-          product={opcionesPickerFor}
-          onClose={() => setOpcionesPickerFor(null)}
-          onConfirm={(opcionesElegidas) => {
-            const product = opcionesPickerFor;
-            setOpcionesPickerFor(null);
-            if (product.venta_por_peso) {
-              setPendingOpciones(opcionesElegidas);
-              setPesoPickerFor(product);
-              return;
-            }
-            addToCart(product, { opcionesElegidas });
-          }}
-        />
-      ) : null}
-
       {pesoPickerFor ? (
         <PesoPickerModal
           product={pesoPickerFor}
           tasaCambio={tasaCambio}
-          onClose={() => {
-            setPesoPickerFor(null);
-            setPendingOpciones([]);
-          }}
+          onClose={() => setPesoPickerFor(null)}
           onConfirm={(gramos) => {
-            addToCart(pesoPickerFor, { pesoGramos: gramos, opcionesElegidas: pendingOpciones });
+            const product = pesoPickerFor;
             setPesoPickerFor(null);
-            setPendingOpciones([]);
+            if (productoTieneOpciones(product)) {
+              setPendingPeso(gramos);
+              setOpcionesPickerFor(product);
+              return;
+            }
+            addToCart(product, { pesoGramos: gramos });
+          }}
+        />
+      ) : null}
+
+      {opcionesPickerFor ? (
+        <OpcionesProductoModal
+          product={opcionesPickerFor}
+          products={products}
+          onClose={() => {
+            setOpcionesPickerFor(null);
+            setPendingPeso(null);
+          }}
+          onConfirm={(opcionesElegidas) => {
+            const product = opcionesPickerFor;
+            setOpcionesPickerFor(null);
+            addToCart(product, { pesoGramos: pendingPeso, opcionesElegidas });
+            setPendingPeso(null);
           }}
         />
       ) : null}
@@ -1029,37 +1038,69 @@ function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
   );
 }
 
-function OpcionesProductoModal({ product, onClose, onConfirm }) {
+function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
   const grupos = Array.isArray(product.grupos_opciones) ? product.grupos_opciones : [];
   const [seleccion, setSeleccion] = useState({});
   const [error, setError] = useState('');
+  const [gruposSinElegir, setGruposSinElegir] = useState(null);
 
-  const toggleOpcion = (grupo, preparacionId) => {
+  // Pool de un grupo dinámico: los productos disponibles de su categoría en este
+  // momento (excluyendo el propio plato), no una lista curada de antemano — ver
+  // VGGrupoOpcionProducto.categoria_opciones.
+  const poolPorGrupo = useMemo(() => {
+    const pools = {};
+    grupos.forEach((grupo) => {
+      if (grupo.categoria_opciones_id) {
+        pools[grupo.id] = (products || []).filter((item) => (
+          String(item.categoria_id) === String(grupo.categoria_opciones_id) && item.id !== product.id
+        ));
+      }
+    });
+    return pools;
+  }, [grupos, products, product.id]);
+
+  const toggleOpcion = (grupo, id) => {
     setError('');
+    setGruposSinElegir(null);
     setSeleccion((current) => {
       const actuales = current[grupo.id] || [];
-      const yaElegida = actuales.includes(preparacionId);
+      const yaElegida = actuales.includes(id);
       let next;
-      if (grupo.seleccion_multiple) {
-        next = yaElegida ? actuales.filter((id) => id !== preparacionId) : [...actuales, preparacionId];
+      if (yaElegida) {
+        next = actuales.filter((v) => v !== id);
+      } else if (grupo.categoria_opciones_id) {
+        const max = grupo.maximo_selecciones;
+        if (max && actuales.length >= max) {
+          return current;
+        }
+        next = [...actuales, id];
+      } else if (grupo.seleccion_multiple) {
+        next = [...actuales, id];
       } else {
-        next = yaElegida ? [] : [preparacionId];
+        next = [id];
       }
       return { ...current, [grupo.id]: next };
     });
   };
 
-  const handleConfirmar = () => {
-    for (const grupo of grupos) {
-      const elegidas = seleccion[grupo.id] || [];
-      if (grupo.obligatorio && elegidas.length === 0) {
-        setError(`Elige una opción de "${grupo.nombre}".`);
-        return;
-      }
-    }
+  const buildOpcionesElegidas = () => {
     const opcionesElegidas = [];
     grupos.forEach((grupo) => {
-      (seleccion[grupo.id] || []).forEach((preparacionId) => {
+      const elegidas = seleccion[grupo.id] || [];
+      if (grupo.categoria_opciones_id) {
+        const pool = poolPorGrupo[grupo.id] || [];
+        elegidas.forEach((productoId) => {
+          const productoInfo = pool.find((item) => String(item.id) === String(productoId));
+          opcionesElegidas.push({
+            grupoId: grupo.id,
+            productoId,
+            nombre: productoInfo ? productoInfo.nombre : '',
+            precioAdicional: 0,
+          });
+        });
+        return;
+      }
+      elegidas.forEach((preparacionId) => {
         const opcionInfo = grupo.opciones.find((op) => String(op.preparacion_id) === String(preparacionId));
         opcionesElegidas.push({
           grupoId: grupo.id,
@@ -1069,7 +1110,36 @@ function OpcionesProductoModal({ product, onClose, onConfirm }) {
         });
       });
     });
-    onConfirm(opcionesElegidas);
+    return opcionesElegidas;
+  };
+
+  const handleConfirmar = () => {
+    for (const grupo of grupos) {
+      if (grupo.categoria_opciones_id) {
+        continue;
+      }
+      const elegidas = seleccion[grupo.id] || [];
+      if (grupo.obligatorio && elegidas.length === 0) {
+        setError(`Elige una opción de "${grupo.nombre}".`);
+        return;
+      }
+    }
+    setError('');
+
+    // Los grupos dinámicos (acompañantes) nunca bloquean, pero si el mesero no
+    // eligió ninguno se le avisa una vez antes de continuar sin acompañante.
+    const sinElegir = grupos.filter((grupo) => grupo.categoria_opciones_id && (seleccion[grupo.id] || []).length === 0);
+    if (sinElegir.length > 0) {
+      setGruposSinElegir(sinElegir.map((grupo) => grupo.nombre));
+      return;
+    }
+
+    onConfirm(buildOpcionesElegidas());
+  };
+
+  const handleContinuarSinAcompanante = () => {
+    setGruposSinElegir(null);
+    onConfirm(buildOpcionesElegidas());
   };
 
   return (
@@ -1084,24 +1154,36 @@ function OpcionesProductoModal({ product, onClose, onConfirm }) {
 
           {grupos.map((grupo) => {
             const elegidas = seleccion[grupo.id] || [];
+            const esDinamico = Boolean(grupo.categoria_opciones_id);
+            const pool = esDinamico ? (poolPorGrupo[grupo.id] || []) : [];
+            const max = grupo.maximo_selecciones;
+            const alcanzoMax = esDinamico && max && elegidas.length >= max;
             return (
               <label key={grupo.id} style={fieldWrapStyle}>
                 <span style={labelStyle}>
-                  {grupo.nombre}{grupo.obligatorio ? ' *' : ' (opcional)'}
-                  {grupo.seleccion_multiple ? ' — puedes elegir varias' : ''}
+                  {grupo.nombre}
+                  {esDinamico
+                    ? ` (opcional${max ? ` — hasta ${max}` : ''}, elegidas ${elegidas.length}${max ? `/${max}` : ''})`
+                    : (grupo.obligatorio ? ' *' : ' (opcional)') + (grupo.seleccion_multiple ? ' — puedes elegir varias' : '')}
                 </span>
+                {esDinamico && pool.length === 0 ? (
+                  <div style={{ color: '#c8bbbb', fontSize: 13 }}>No hay opciones disponibles en este momento.</div>
+                ) : null}
                 <div style={{ display: 'grid', gap: 8 }}>
-                  {grupo.opciones.map((opcion) => {
-                    const isSelected = elegidas.includes(opcion.preparacion_id);
+                  {(esDinamico ? pool : grupo.opciones).map((opcion) => {
+                    const optionId = esDinamico ? opcion.id : opcion.preparacion_id;
+                    const isSelected = elegidas.includes(optionId);
+                    const disabled = esDinamico && alcanzoMax && !isSelected;
                     return (
                       <button
-                        key={opcion.id}
+                        key={optionId}
                         type="button"
-                        onClick={() => toggleOpcion(grupo, opcion.preparacion_id)}
-                        style={opcionButtonStyle(isSelected)}
+                        onClick={() => toggleOpcion(grupo, optionId)}
+                        style={opcionButtonStyle(isSelected, disabled)}
+                        disabled={disabled}
                       >
                         <span>{opcion.nombre}</span>
-                        {Number(opcion.precio_adicional) > 0 ? (
+                        {!esDinamico && Number(opcion.precio_adicional) > 0 ? (
                           <span style={{ color: '#ffcf7d', fontWeight: 700 }}>+${Number(opcion.precio_adicional).toFixed(2)}</span>
                         ) : null}
                       </button>
@@ -1114,11 +1196,25 @@ function OpcionesProductoModal({ product, onClose, onConfirm }) {
 
           {error ? <div style={{ color: '#ff9d9d', fontSize: 13 }}>{error}</div> : null}
 
-          <div style={modalFooterStyle}>
-            <button type="button" onClick={handleConfirmar} style={modalAddButtonStyle}>
-              Agregar al pedido
-            </button>
-          </div>
+          {gruposSinElegir ? (
+            <div style={avisoAcompananteStyle}>
+              <span>No elegiste {gruposSinElegir.join(', ')}. ¿Seguro que quieres continuar sin acompañante?</span>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={handleContinuarSinAcompanante} style={modalAddButtonStyle}>
+                  Continuar sin acompañante
+                </button>
+                <button type="button" onClick={() => setGruposSinElegir(null)} style={opcionButtonStyle(false)}>
+                  Volver a elegir
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={modalFooterStyle}>
+              <button type="button" onClick={handleConfirmar} style={modalAddButtonStyle}>
+                Agregar al pedido
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1816,7 +1912,7 @@ const opcionElegidaChipStyle = {
   fontWeight: 600,
 };
 
-const opcionButtonStyle = (isSelected) => ({
+const opcionButtonStyle = (isSelected, disabled = false) => ({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
@@ -1827,11 +1923,12 @@ const opcionButtonStyle = (isSelected) => ({
   borderRadius: 12,
   border: isSelected ? '1px solid rgba(255, 132, 132, 0.7)' : '1px solid rgba(255, 255, 255, 0.14)',
   background: isSelected ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
-  color: '#fff',
+  color: disabled ? '#8a7a7a' : '#fff',
   padding: '10px 12px',
   fontSize: 14,
   fontWeight: isSelected ? 700 : 500,
-  cursor: 'pointer',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  opacity: disabled ? 0.5 : 1,
 });
 
 const addonChipStyle = {
@@ -2080,6 +2177,18 @@ const modalFooterStyle = {
   marginTop: 6,
   paddingTop: 12,
   borderTop: '1px solid rgba(255,255,255,0.1)',
+};
+
+const avisoAcompananteStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 190, 120, 0.35)',
+  background: 'rgba(255, 170, 60, 0.1)',
+  color: '#ffe1b8',
+  fontSize: 13,
+  marginTop: 6,
 };
 
 const modalAddButtonStyle = {

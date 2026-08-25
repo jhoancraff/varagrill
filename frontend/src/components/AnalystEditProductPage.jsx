@@ -36,9 +36,12 @@ function nextOpcionesUid(prefix) {
 function crearGrupoOpcionVacio() {
   return {
     uid: nextOpcionesUid('grupo'),
+    tipo: 'curado',
     nombre: '',
     obligatorio: true,
     seleccion_multiple: false,
+    categoriaOpcionesId: '',
+    maximoSelecciones: '',
     opciones: [],
   };
 }
@@ -142,9 +145,12 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
           }));
         const loadedGruposOpciones = (Array.isArray(selectedProduct.grupos_opciones) ? selectedProduct.grupos_opciones : []).map((grupo) => ({
           uid: nextOpcionesUid('grupo'),
+          tipo: grupo.categoria_opciones_id ? 'dinamico' : 'curado',
           nombre: grupo.nombre || '',
           obligatorio: Boolean(grupo.obligatorio),
           seleccion_multiple: Boolean(grupo.seleccion_multiple),
+          categoriaOpcionesId: grupo.categoria_opciones_id ? String(grupo.categoria_opciones_id) : '',
+          maximoSelecciones: grupo.maximo_selecciones != null ? String(grupo.maximo_selecciones) : '',
           opciones: (Array.isArray(grupo.opciones) ? grupo.opciones : []).map((opcion) => ({
             uid: nextOpcionesUid('opcion'),
             preparacion_id: opcion.preparacion_id,
@@ -255,6 +261,17 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
     )));
   };
 
+  const handleToggleTipoGrupo = (grupoUid, esDinamico) => {
+    setGruposOpciones((current) => current.map((grupo) => {
+      if (grupo.uid !== grupoUid) {
+        return grupo;
+      }
+      return esDinamico
+        ? { ...grupo, tipo: 'dinamico', opciones: [] }
+        : { ...grupo, tipo: 'curado', categoriaOpcionesId: '', maximoSelecciones: '', obligatorio: true, seleccion_multiple: false };
+    }));
+  };
+
   const handleAddOpcionAGrupo = (grupoUid) => {
     const draft = opcionDraftByGrupo[grupoUid] || { preparacion_id: '', precio_adicional: '0' };
     if (!draft.preparacion_id) {
@@ -353,15 +370,21 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
         cantidad: item.cantidad,
         unidad: item.unidad,
       }))));
-      formData.append('grupos_opciones', JSON.stringify(gruposOpciones.map((grupo) => ({
-        nombre: grupo.nombre,
-        obligatorio: grupo.obligatorio,
-        seleccion_multiple: grupo.seleccion_multiple,
-        opciones: grupo.opciones.map((opcion) => ({
-          preparacion_id: opcion.preparacion_id,
-          precio_adicional: opcion.precio_adicional || '0',
-        })),
-      }))));
+      formData.append('grupos_opciones', JSON.stringify(gruposOpciones.map((grupo) => (
+        grupo.tipo === 'dinamico' ? {
+          nombre: grupo.nombre,
+          categoria_opciones_id: grupo.categoriaOpcionesId,
+          maximo_selecciones: grupo.maximoSelecciones || null,
+        } : {
+          nombre: grupo.nombre,
+          obligatorio: grupo.obligatorio,
+          seleccion_multiple: grupo.seleccion_multiple,
+          opciones: grupo.opciones.map((opcion) => ({
+            preparacion_id: opcion.preparacion_id,
+            precio_adicional: opcion.precio_adicional || '0',
+          })),
+        }
+      ))));
       if (imageFile) {
         formData.append('imagen', imageFile);
       } else if (removeImageRequested) {
@@ -642,6 +665,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
 
               {gruposOpciones.map((grupo) => {
                 const draft = opcionDraftByGrupo[grupo.uid] || { preparacion_id: '', precio_adicional: '0' };
+                const esDinamico = grupo.tipo === 'dinamico';
                 return (
                   <div key={grupo.uid} style={grupoOpcionCardStyle}>
                     <div style={composerRowStyle(isMobile)}>
@@ -651,69 +675,113 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                         onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'nombre', event.target.value)}
                         style={inputStyle}
                       />
-                      <label style={toggleRowStyle}>
-                        <input
-                          type="checkbox"
-                          checked={grupo.obligatorio}
-                          onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'obligatorio', event.target.checked)}
-                        />
-                        <span>Obligatorio</span>
-                      </label>
-                      <label style={toggleRowStyle}>
-                        <input
-                          type="checkbox"
-                          checked={grupo.seleccion_multiple}
-                          onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'seleccion_multiple', event.target.checked)}
-                        />
-                        <span>Permite varias</span>
-                      </label>
+                      <select
+                        value={grupo.tipo}
+                        onChange={(event) => handleToggleTipoGrupo(grupo.uid, event.target.value === 'dinamico')}
+                        style={inputStyle}
+                      >
+                        <option value="curado">Curado (elijo las opciones)</option>
+                        <option value="dinamico">Dinámico (desde una categoría)</option>
+                      </select>
                       <button type="button" onClick={() => handleRemoveGrupoOpcion(grupo.uid)} style={dangerButtonStyle}>
                         Quitar grupo
                       </button>
                     </div>
 
-                    {grupo.opciones.length > 0 ? (
-                      <div style={{ display: 'grid', gap: 8 }}>
-                        {grupo.opciones.map((opcion) => (
-                          <div key={opcion.uid} style={componentCardStyle}>
-                            <div>
-                              <div style={componentTitleStyle}>{opcion.nombre}</div>
-                              <div style={componentMetaStyle}>
-                                {Number(opcion.precio_adicional || 0) > 0 ? `+ $${Number(opcion.precio_adicional).toFixed(2)}` : 'Sin costo adicional'}
-                              </div>
-                            </div>
-                            <button type="button" onClick={() => handleRemoveOpcionDeGrupo(grupo.uid, opcion.uid)} style={dangerButtonStyle}>
-                              Quitar
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
+                    {esDinamico ? (
+                      <>
+                        <p style={linkHintStyle}>
+                          El mesero elegirá entre los productos disponibles de la categoría elegida en el momento del
+                          pedido (si agregas o quitas productos de esa categoría después, el pool cambia solo). Nunca
+                          es obligatorio: si el mesero no elige nada, solo se le avisa antes de continuar.
+                        </p>
+                        <div style={composerRowStyle(isMobile)}>
+                          <select
+                            value={grupo.categoriaOpcionesId}
+                            onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'categoriaOpcionesId', event.target.value)}
+                            style={inputStyle}
+                          >
+                            <option value="">Selecciona una categoría...</option>
+                            {categories.map((category) => (
+                              <option key={category.id} value={category.id}>{category.nombre}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder="Máximo a elegir (ej. 2)"
+                            value={grupo.maximoSelecciones}
+                            onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'maximoSelecciones', event.target.value)}
+                            style={inputStyle}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={composerRowStyle(isMobile)}>
+                          <label style={toggleRowStyle}>
+                            <input
+                              type="checkbox"
+                              checked={grupo.obligatorio}
+                              onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'obligatorio', event.target.checked)}
+                            />
+                            <span>Obligatorio</span>
+                          </label>
+                          <label style={toggleRowStyle}>
+                            <input
+                              type="checkbox"
+                              checked={grupo.seleccion_multiple}
+                              onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'seleccion_multiple', event.target.checked)}
+                            />
+                            <span>Permite varias</span>
+                          </label>
+                        </div>
 
-                    <div style={composerRowStyle(isMobile)}>
-                      <select
-                        value={draft.preparacion_id}
-                        onChange={(event) => setOpcionDraftByGrupo((current) => ({ ...current, [grupo.uid]: { ...draft, preparacion_id: event.target.value } }))}
-                        style={inputStyle}
-                      >
-                        <option value="">Selecciona una subreceta...</option>
-                        {subrecetas.map((item) => (
-                          <option key={item.id} value={item.id}>{item.nombre}</option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Precio adicional"
-                        value={draft.precio_adicional}
-                        onChange={(event) => setOpcionDraftByGrupo((current) => ({ ...current, [grupo.uid]: { ...draft, precio_adicional: event.target.value } }))}
-                        style={inputStyle}
-                      />
-                      <button type="button" onClick={() => handleAddOpcionAGrupo(grupo.uid)} style={secondaryButtonStyle}>
-                        Agregar opción
-                      </button>
-                    </div>
+                        {grupo.opciones.length > 0 ? (
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {grupo.opciones.map((opcion) => (
+                              <div key={opcion.uid} style={componentCardStyle}>
+                                <div>
+                                  <div style={componentTitleStyle}>{opcion.nombre}</div>
+                                  <div style={componentMetaStyle}>
+                                    {Number(opcion.precio_adicional || 0) > 0 ? `+ $${Number(opcion.precio_adicional).toFixed(2)}` : 'Sin costo adicional'}
+                                  </div>
+                                </div>
+                                <button type="button" onClick={() => handleRemoveOpcionDeGrupo(grupo.uid, opcion.uid)} style={dangerButtonStyle}>
+                                  Quitar
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div style={composerRowStyle(isMobile)}>
+                          <select
+                            value={draft.preparacion_id}
+                            onChange={(event) => setOpcionDraftByGrupo((current) => ({ ...current, [grupo.uid]: { ...draft, preparacion_id: event.target.value } }))}
+                            style={inputStyle}
+                          >
+                            <option value="">Selecciona una subreceta...</option>
+                            {subrecetas.map((item) => (
+                              <option key={item.id} value={item.id}>{item.nombre}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Precio adicional"
+                            value={draft.precio_adicional}
+                            onChange={(event) => setOpcionDraftByGrupo((current) => ({ ...current, [grupo.uid]: { ...draft, precio_adicional: event.target.value } }))}
+                            style={inputStyle}
+                          />
+                          <button type="button" onClick={() => handleAddOpcionAGrupo(grupo.uid)} style={secondaryButtonStyle}>
+                            Agregar opción
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })}

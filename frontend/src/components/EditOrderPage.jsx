@@ -25,6 +25,8 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [promotionsByProductId, setPromotionsByProductId] = useState({});
   const [pesoPickerFor, setPesoPickerFor] = useState(null);
+  const [opcionesPickerFor, setOpcionesPickerFor] = useState(null);
+  const [pendingPeso, setPendingPeso] = useState(null);
   const [armarPlatoActivo, setArmarPlatoActivo] = useState(false);
   const [grupoActual, setGrupoActual] = useState(null);
   const [nextGrupoId, setNextGrupoId] = useState(1);
@@ -87,20 +89,44 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           notas: pedido.notas || '',
         };
         setOrderHeader(loadedHeader);
-        const loadedItems = pedido.items.map((item) => ({
-          id: cryptoRandomId(),
-          productId: String(item.product_id),
-          quantity: item.cantidad,
-          notes: item.notas || '',
-          pesoGramos: item.peso_gramos ? Number(item.peso_gramos) : null,
-          grupoArmado: item.grupo_armado || null,
-          adicionales: (item.adicionales || []).map((addon) => ({
-            preparacionId: addon.preparacion_id,
-            nombre: addon.nombre,
-            cantidad: addon.cantidad,
-            precioUnitario: addon.precio_unitario,
-          })),
-        }));
+        const loadedItems = pedido.items.map((item) => {
+          const product = products.find((entry) => String(entry.id) === String(item.product_id));
+          const gruposDelProducto = product && Array.isArray(product.grupos_opciones) ? product.grupos_opciones : [];
+          return {
+            id: cryptoRandomId(),
+            productId: String(item.product_id),
+            quantity: item.cantidad,
+            notes: item.notas || '',
+            pesoGramos: item.peso_gramos ? Number(item.peso_gramos) : null,
+            grupoArmado: item.grupo_armado || null,
+            adicionales: (item.adicionales || []).map((addon) => ({
+              preparacionId: addon.preparacion_id,
+              nombre: addon.nombre,
+              cantidad: addon.cantidad,
+              precioUnitario: addon.precio_unitario,
+            })),
+            // El detalle guardado solo trae grupo_nombre (snapshot histórico, ver
+            // VGDetallePedidoOpcion) — para poder re-guardar la edición hace falta el
+            // grupo_id VIVO del producto, así que se resuelve por nombre contra
+            // product.grupos_opciones. Si el grupo ya no existe o fue renombrado, esa
+            // opción se descarta del carrito editable (el mesero puede volver a elegirla).
+            opciones: (item.opciones || [])
+              .map((opcion) => {
+                const grupo = gruposDelProducto.find((entry) => entry.nombre === opcion.grupo_nombre);
+                if (!grupo) {
+                  return null;
+                }
+                return {
+                  grupoId: grupo.id,
+                  preparacionId: opcion.preparacion_id || null,
+                  productoId: opcion.producto_id || null,
+                  nombre: opcion.nombre,
+                  precioAdicional: Number(opcion.precio_unitario || 0),
+                };
+              })
+              .filter(Boolean),
+          };
+        });
         setCartItems(loadedItems);
         markClean({ cartItems: loadedItems, orderHeader: loadedHeader });
         const maxGrupo = loadedItems.reduce((max, item) => Math.max(max, item.grupoArmado || 0), 0);
@@ -120,7 +146,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
     return () => {
       cancelled = true;
     };
-  }, [orderId]);
+  }, [orderId, products]);
 
   useEffect(() => {
     const tabletQuery = window.matchMedia('(max-width: 1100px)');
@@ -158,15 +184,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   );
 
   const subtotal = useMemo(
-    () => cartItems.reduce((total, item) => {
-      const product = products.find((entry) => String(entry.id) === String(item.productId));
-      if (!product) {
-        return total;
-      }
-      const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
-      const pesoFactor = item.pesoGramos ? Number(item.pesoGramos) / 1000 : 1;
-      return total + getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal;
-    }, 0),
+    () => cartItems.reduce((total, item) => total + computeItemTotal(item, products, promotionsByProductId), 0),
     [cartItems, products, promotionsByProductId],
   );
 
@@ -215,6 +233,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
   const addToCart = (product, options = {}) => {
     const grupoArmado = armarPlatoActivo ? grupoActual : null;
+    const opciones = options.opcionesElegidas || [];
     // Primer producto que cae en este plato: recién ahora se "consume" su número, para
     // que el próximo "+ Nuevo plato" avance de verdad en vez de saltar números vacíos.
     const consumesGrupo = grupoArmado && grupoArmado === nextGrupoId;
@@ -229,7 +248,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       }
       setCartItems((current) => [
         ...current,
-        { id: cryptoRandomId(), productId: String(product.id), quantity: 1, notes: '', adicionales: [], pesoGramos, grupoArmado },
+        { id: cryptoRandomId(), productId: String(product.id), quantity: 1, notes: '', adicionales: [], opciones, pesoGramos, grupoArmado },
       ]);
       return;
     }
@@ -238,8 +257,15 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       setNextGrupoId((current) => current + 1);
     }
 
+    const opcionesKey = (list) => (list || []).map((o) => `${o.preparacionId || ''}:${o.productoId || ''}`).sort().join(',');
+
     setCartItems((current) => {
-      const existing = current.find((item) => item.productId === String(product.id) && item.grupoArmado === grupoArmado && !item.pesoGramos);
+      const existing = current.find((item) => (
+        item.productId === String(product.id)
+        && item.grupoArmado === grupoArmado
+        && !item.pesoGramos
+        && opcionesKey(item.opciones) === opcionesKey(opciones)
+      ));
       if (existing) {
         return current.map((item) => (
           item.id === existing.id ? { ...item, quantity: item.quantity + 1 } : item
@@ -247,9 +273,27 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       }
       return [
         ...current,
-        { id: cryptoRandomId(), productId: String(product.id), quantity: 1, notes: '', adicionales: [], pesoGramos: null, grupoArmado },
+        { id: cryptoRandomId(), productId: String(product.id), quantity: 1, notes: '', adicionales: [], opciones, pesoGramos: null, grupoArmado },
       ];
     });
+  };
+
+  const productoTieneOpciones = (product) => (
+    Array.isArray(product.grupos_opciones) && product.grupos_opciones.length > 0
+  );
+
+  const handleAgregarProducto = (product) => {
+    // Primero el peso (si aplica) y después los acompañantes: así el mesero sabe
+    // cuánto va a pesar el corte antes de que le pregunten con qué lo acompaña.
+    if (product.venta_por_peso) {
+      setPesoPickerFor(product);
+      return;
+    }
+    if (productoTieneOpciones(product)) {
+      setOpcionesPickerFor(product);
+      return;
+    }
+    addToCart(product);
   };
 
   const addAddonToCartItem = (itemId, addonId) => {
@@ -369,6 +413,15 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
             preparacion_id: Number(addon.preparacionId),
             cantidad: Number(addon.cantidad || 1),
           })),
+          opciones: (item.opciones || []).map((opcion) => (
+            opcion.productoId ? {
+              grupo_id: Number(opcion.grupoId),
+              producto_id: Number(opcion.productoId),
+            } : {
+              grupo_id: Number(opcion.grupoId),
+              preparacion_id: Number(opcion.preparacionId),
+            }
+          )),
         })),
       };
 
@@ -452,6 +505,17 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           placeholder="Indicaciones (sin cebolla, término medio...)"
           style={cartNotesInputStyle}
         />
+
+        {(item.opciones || []).length > 0 ? (
+          <div style={opcionesElegidasWrapStyle}>
+            {item.opciones.map((opcion) => (
+              <span key={`${opcion.grupoId}-${opcion.preparacionId || ''}-${opcion.productoId || ''}`} style={opcionElegidaChipStyle}>
+                {opcion.nombre}
+                {opcion.precioAdicional > 0 ? ` (+$${Number(opcion.precioAdicional).toFixed(2)})` : ''}
+              </span>
+            ))}
+          </div>
+        ) : null}
 
         {adicionales.length > 0 ? (
           <div style={addonSectionStyle}>
@@ -628,7 +692,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
                     <button
                       key={product.id}
                       type="button"
-                      onClick={() => (product.venta_por_peso ? setPesoPickerFor(product) : addToCart(product))}
+                      onClick={() => handleAgregarProducto(product)}
                       style={productCardStyle(Boolean(promotion))}
                     >
                       {quantityInCart > 0 ? <span style={cardQuantityBadgeStyle}>{quantityInCart}</span> : null}
@@ -776,8 +840,31 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           tasaCambio={tasaCambio}
           onClose={() => setPesoPickerFor(null)}
           onConfirm={(gramos) => {
-            addToCart(pesoPickerFor, { pesoGramos: gramos });
+            const product = pesoPickerFor;
             setPesoPickerFor(null);
+            if (productoTieneOpciones(product)) {
+              setPendingPeso(gramos);
+              setOpcionesPickerFor(product);
+              return;
+            }
+            addToCart(product, { pesoGramos: gramos });
+          }}
+        />
+      ) : null}
+
+      {opcionesPickerFor ? (
+        <OpcionesProductoModal
+          product={opcionesPickerFor}
+          products={products}
+          onClose={() => {
+            setOpcionesPickerFor(null);
+            setPendingPeso(null);
+          }}
+          onConfirm={(opcionesElegidas) => {
+            const product = opcionesPickerFor;
+            setOpcionesPickerFor(null);
+            addToCart(product, { pesoGramos: pendingPeso, opcionesElegidas });
+            setPendingPeso(null);
           }}
         />
       ) : null}
@@ -833,6 +920,189 @@ function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
   );
 }
 
+function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
+  const grupos = Array.isArray(product.grupos_opciones) ? product.grupos_opciones : [];
+  const [seleccion, setSeleccion] = useState({});
+  const [error, setError] = useState('');
+  const [gruposSinElegir, setGruposSinElegir] = useState(null);
+
+  // Pool de un grupo dinámico: los productos disponibles de su categoría en este
+  // momento (excluyendo el propio plato), no una lista curada de antemano — ver
+  // VGGrupoOpcionProducto.categoria_opciones.
+  const poolPorGrupo = useMemo(() => {
+    const pools = {};
+    grupos.forEach((grupo) => {
+      if (grupo.categoria_opciones_id) {
+        pools[grupo.id] = (products || []).filter((item) => (
+          String(item.categoria_id) === String(grupo.categoria_opciones_id) && item.id !== product.id
+        ));
+      }
+    });
+    return pools;
+  }, [grupos, products, product.id]);
+
+  const toggleOpcion = (grupo, id) => {
+    setError('');
+    setGruposSinElegir(null);
+    setSeleccion((current) => {
+      const actuales = current[grupo.id] || [];
+      const yaElegida = actuales.includes(id);
+      let next;
+      if (yaElegida) {
+        next = actuales.filter((v) => v !== id);
+      } else if (grupo.categoria_opciones_id) {
+        const max = grupo.maximo_selecciones;
+        if (max && actuales.length >= max) {
+          return current;
+        }
+        next = [...actuales, id];
+      } else if (grupo.seleccion_multiple) {
+        next = [...actuales, id];
+      } else {
+        next = [id];
+      }
+      return { ...current, [grupo.id]: next };
+    });
+  };
+
+  const buildOpcionesElegidas = () => {
+    const opcionesElegidas = [];
+    grupos.forEach((grupo) => {
+      const elegidas = seleccion[grupo.id] || [];
+      if (grupo.categoria_opciones_id) {
+        const pool = poolPorGrupo[grupo.id] || [];
+        elegidas.forEach((productoId) => {
+          const productoInfo = pool.find((item) => String(item.id) === String(productoId));
+          opcionesElegidas.push({
+            grupoId: grupo.id,
+            productoId,
+            nombre: productoInfo ? productoInfo.nombre : '',
+            precioAdicional: 0,
+          });
+        });
+        return;
+      }
+      elegidas.forEach((preparacionId) => {
+        const opcionInfo = grupo.opciones.find((op) => String(op.preparacion_id) === String(preparacionId));
+        opcionesElegidas.push({
+          grupoId: grupo.id,
+          preparacionId,
+          nombre: opcionInfo ? opcionInfo.nombre : '',
+          precioAdicional: opcionInfo ? Number(opcionInfo.precio_adicional || 0) : 0,
+        });
+      });
+    });
+    return opcionesElegidas;
+  };
+
+  const handleConfirmar = () => {
+    for (const grupo of grupos) {
+      if (grupo.categoria_opciones_id) {
+        continue;
+      }
+      const elegidas = seleccion[grupo.id] || [];
+      if (grupo.obligatorio && elegidas.length === 0) {
+        setError(`Elige una opción de "${grupo.nombre}".`);
+        return;
+      }
+    }
+    setError('');
+
+    // Los grupos dinámicos (acompañantes) nunca bloquean, pero si el mesero no
+    // eligió ninguno se le avisa una vez antes de continuar sin acompañante.
+    const sinElegir = grupos.filter((grupo) => grupo.categoria_opciones_id && (seleccion[grupo.id] || []).length === 0);
+    if (sinElegir.length > 0) {
+      setGruposSinElegir(sinElegir.map((grupo) => grupo.nombre));
+      return;
+    }
+
+    onConfirm(buildOpcionesElegidas());
+  };
+
+  const handleContinuarSinAcompanante = () => {
+    setGruposSinElegir(null);
+    onConfirm(buildOpcionesElegidas());
+  };
+
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
+          ×
+        </button>
+        <div style={modalBodyStyle}>
+          <div style={modalTitleStyle}>{product.nombre}</div>
+          <div style={modalCategoryStyle}>Elige cómo va este plato</div>
+
+          {grupos.map((grupo) => {
+            const elegidas = seleccion[grupo.id] || [];
+            const esDinamico = Boolean(grupo.categoria_opciones_id);
+            const pool = esDinamico ? (poolPorGrupo[grupo.id] || []) : [];
+            const max = grupo.maximo_selecciones;
+            const alcanzoMax = esDinamico && max && elegidas.length >= max;
+            return (
+              <label key={grupo.id} style={fieldWrapStyle}>
+                <span style={labelStyle}>
+                  {grupo.nombre}
+                  {esDinamico
+                    ? ` (opcional${max ? ` — hasta ${max}` : ''}, elegidas ${elegidas.length}${max ? `/${max}` : ''})`
+                    : (grupo.obligatorio ? ' *' : ' (opcional)') + (grupo.seleccion_multiple ? ' — puedes elegir varias' : '')}
+                </span>
+                {esDinamico && pool.length === 0 ? (
+                  <div style={{ color: '#c8bbbb', fontSize: 13 }}>No hay opciones disponibles en este momento.</div>
+                ) : null}
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {(esDinamico ? pool : grupo.opciones).map((opcion) => {
+                    const optionId = esDinamico ? opcion.id : opcion.preparacion_id;
+                    const isSelected = elegidas.includes(optionId);
+                    const disabled = esDinamico && alcanzoMax && !isSelected;
+                    return (
+                      <button
+                        key={optionId}
+                        type="button"
+                        onClick={() => toggleOpcion(grupo, optionId)}
+                        style={opcionButtonStyle(isSelected, disabled)}
+                        disabled={disabled}
+                      >
+                        <span>{opcion.nombre}</span>
+                        {!esDinamico && Number(opcion.precio_adicional) > 0 ? (
+                          <span style={{ color: '#ffcf7d', fontWeight: 700 }}>+${Number(opcion.precio_adicional).toFixed(2)}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </label>
+            );
+          })}
+
+          {error ? <div style={{ color: '#ff9d9d', fontSize: 13 }}>{error}</div> : null}
+
+          {gruposSinElegir ? (
+            <div style={avisoAcompananteStyle}>
+              <span>No elegiste {gruposSinElegir.join(', ')}. ¿Seguro que quieres continuar sin acompañante?</span>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={handleContinuarSinAcompanante} style={modalAddButtonStyle}>
+                  Continuar sin acompañante
+                </button>
+                <button type="button" onClick={() => setGruposSinElegir(null)} style={opcionButtonStyle(false)}>
+                  Volver a elegir
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={modalFooterStyle}>
+              <button type="button" onClick={handleConfirmar} style={modalAddButtonStyle}>
+                Agregar al pedido
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function getUnitPrice(product, promotionsByProductId = {}) {
   const promotion = promotionsByProductId[product.id];
   return promotion ? Number(promotion.precio_descuento) : Number(product.precio_venta);
@@ -845,7 +1115,8 @@ function computeItemTotal(item, productsList, promotionsByProductId = {}) {
   }
   const addonsTotal = (item.adicionales || []).reduce((sum, addon) => sum + Number(addon.precioUnitario || 0) * addon.cantidad, 0);
   const pesoFactor = item.pesoGramos ? Number(item.pesoGramos) / 1000 : 1;
-  return getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal;
+  const opcionesTotal = (item.opciones || []).reduce((sum, opcion) => sum + Number(opcion.precioAdicional || 0), 0) * pesoFactor * item.quantity;
+  return getUnitPrice(product, promotionsByProductId) * pesoFactor * item.quantity + addonsTotal + opcionesTotal;
 }
 
 function getCookie(name) {
@@ -1429,6 +1700,53 @@ const modalAddButtonStyle = {
   fontWeight: 700,
   cursor: 'pointer',
   minHeight: 44,
+};
+
+const opcionesElegidasWrapStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+};
+
+const opcionElegidaChipStyle = {
+  padding: '4px 9px',
+  borderRadius: 999,
+  border: '1px solid rgba(125, 200, 255, 0.35)',
+  background: 'rgba(90, 170, 255, 0.08)',
+  color: '#bfe0ff',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
+const opcionButtonStyle = (isSelected, disabled = false) => ({
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 10,
+  width: '100%',
+  boxSizing: 'border-box',
+  textAlign: 'left',
+  borderRadius: 12,
+  border: isSelected ? '1px solid rgba(255, 132, 132, 0.7)' : '1px solid rgba(255, 255, 255, 0.14)',
+  background: isSelected ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+  color: disabled ? '#8a7a7a' : '#fff',
+  padding: '10px 12px',
+  fontSize: 14,
+  fontWeight: isSelected ? 700 : 500,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  opacity: disabled ? 0.5 : 1,
+});
+
+const avisoAcompananteStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 190, 120, 0.35)',
+  background: 'rgba(255, 170, 60, 0.1)',
+  color: '#ffe1b8',
+  fontSize: 13,
+  marginTop: 6,
 };
 
 const cartEmptyStyle = {

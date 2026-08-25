@@ -122,6 +122,7 @@ def _pedidos_facturables_por_ids(pedido_ids):
             'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
             'detalles__adicionales__preparacion',
             'detalles__opciones__preparacion',
+            'detalles__opciones__producto',
         )
     )
     found_ids = {pedido.id for pedido in pedidos}
@@ -164,7 +165,7 @@ def _lineas_data_desde_pedidos(pedidos, porcentaje_iva):
                 })
             for opcion in detalle.opciones.all():
                 lineas.append({
-                    'descripcion': f'{opcion.grupo_nombre}: {opcion.preparacion.nombre}',
+                    'descripcion': f'{opcion.grupo_nombre}: {opcion.nombre}',
                     'producto_id': None,
                     'cantidad': Decimal('1'),
                     'precio_unitario': opcion.precio_unitario,

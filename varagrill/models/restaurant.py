@@ -248,11 +248,25 @@ class VGGrupoOpcionProducto(models.Model):
     nombre = models.CharField(max_length=100, help_text="Ej: Acompañante, Término de la carne, Extras.")
     obligatorio = models.BooleanField(
         default=True,
-        help_text="Si está activo, el mesero debe elegir al menos una opción de este grupo antes de agregar el plato al pedido.",
+        help_text="Si está activo, el mesero debe elegir al menos una opción de este grupo antes de agregar el plato al pedido. Sin efecto en grupos dinámicos (categoria_opciones): esos nunca bloquean, solo avisan.",
     )
     seleccion_multiple = models.BooleanField(
         default=False,
         help_text="Si está activo, se puede elegir más de una opción del grupo (ej: varios extras). Si no, es una sola (ej: arepas O casabe).",
+    )
+    categoria_opciones = models.ForeignKey(
+        VGCategoriaProducto, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="grupos_opciones_dinamicos",
+        help_text=(
+            "Si se define, este grupo es dinámico: el mesero elige entre los productos "
+            "disponibles de esta categoría en ese momento (ej. Guarniciones), en vez de una "
+            "lista fija de opciones curadas por el analista. Deja vacío para el modo curado "
+            "de siempre (usa las opciones de abajo, ligadas a una subreceta específica)."
+        ),
+    )
+    maximo_selecciones = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Solo aplica a grupos dinámicos: tope de cuántas opciones puede elegir el mesero, sin importar cuántas haya disponibles en la categoría. Vacío = sin tope.",
     )
     orden = models.PositiveSmallIntegerField(default=0)
 
@@ -552,23 +566,50 @@ class VGDetallePedidoOpcion(models.Model):
     que precio_unitario, que ya viene multiplicado por la cantidad/peso de la
     línea (el total que corresponde a esta elección en este pedido, no un
     precio unitario suelto que haya que volver a escalar al mostrarlo).
+
+    Exactamente uno de preparacion/producto está definido: preparacion para el
+    modo curado de siempre (grupo ligado a una subreceta específica, ej.
+    arepas/casabe); producto cuando la elección viene de un grupo dinámico
+    (categoria_opciones en VGGrupoOpcionProducto, ej. "elige 2 guarniciones de
+    lo que haya disponible"). Guardar el producto elegido, y no solo su
+    subreceta, deja que la impresión de comandas ruquee esa línea a la
+    impresora de SU categoría (ej. Cocina) en vez de la del plato principal
+    (ej. Parrilla) — ver impresion_termica.py.
     """
     detalle_pedido = models.ForeignKey(VGDetallePedido, on_delete=models.CASCADE, related_name="opciones")
     grupo_nombre = models.CharField(max_length=100)
-    preparacion = models.ForeignKey(VGPreparacion, on_delete=models.PROTECT, related_name="usado_en_pedidos_opcion")
+    preparacion = models.ForeignKey(
+        VGPreparacion, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en_pedidos_opcion",
+    )
+    producto = models.ForeignKey(
+        VGProducto, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en_pedidos_opcion",
+    )
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     class Meta:
         db_table = "vg_detalle_pedido_opcion"
         verbose_name = "Opción elegida de pedido"
         verbose_name_plural = "Opciones elegidas de pedido"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(preparacion__isnull=False, producto__isnull=True)
+                    | models.Q(preparacion__isnull=True, producto__isnull=False)
+                ),
+                name="detalle_pedido_opcion_un_solo_origen",
+            ),
+        ]
 
     @property
     def subtotal(self):
         return self.precio_unitario
 
+    @property
+    def nombre(self):
+        return self.producto.nombre if self.producto_id else self.preparacion.nombre
+
     def __str__(self):
-        return f"{self.grupo_nombre}: {self.preparacion.nombre}"
+        return f"{self.grupo_nombre}: {self.nombre}"
 
 
 # ---------------------------------------------------------------------------

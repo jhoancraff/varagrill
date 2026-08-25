@@ -17,7 +17,12 @@ class ProductoSerializer(serializers.ModelSerializer):
     def get_imagen_url(self, obj):
         if not obj.imagen_url:
             return ''
-        return f'/api/productos/{obj.id}/imagen/'
+        # El endpoint es siempre /api/productos/<id>/imagen/ sin importar el archivo
+        # real: sin este "cache-bust" por fecha_actualizacion, el navegador sigue
+        # sirviendo la imagen vieja despues de reemplazarla (mismo criterio que
+        # _product_image_url en api_views.py).
+        version = int(obj.fecha_actualizacion.timestamp()) if obj.fecha_actualizacion else 0
+        return f'/api/productos/{obj.id}/imagen/?v={version}'
 
     def get_composicion(self, obj):
         return obj.nombres_composicion()
@@ -29,6 +34,8 @@ class ProductoSerializer(serializers.ModelSerializer):
                 'nombre': grupo.nombre,
                 'obligatorio': grupo.obligatorio,
                 'seleccion_multiple': grupo.seleccion_multiple,
+                'categoria_opciones_id': grupo.categoria_opciones_id,
+                'maximo_selecciones': grupo.maximo_selecciones,
                 'opciones': [
                     {
                         'id': opcion.id,
@@ -44,4 +51,7 @@ class ProductoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VGProducto
-        fields = ['id', 'nombre', 'descripcion', 'precio_venta', 'venta_por_peso', 'tiempo_preparacion_min', 'categoria_nombre', 'imagen_url', 'composicion', 'grupos_opciones']
+        fields = [
+            'id', 'nombre', 'descripcion', 'precio_venta', 'venta_por_peso', 'tiempo_preparacion_min',
+            'categoria_id', 'categoria_nombre', 'imagen_url', 'composicion', 'grupos_opciones',
+        ]

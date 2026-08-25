@@ -46,8 +46,17 @@ def _tipo_pedido_label(tipo_pedido):
     return {'llevar': 'Para llevar', 'delivery': 'Delivery'}.get(tipo_pedido, 'Local')
 
 
+def _cantidad_label(detalle):
+    if detalle.peso_gramos:
+        return f'{int(detalle.peso_gramos)} g'
+    return f'{detalle.cantidad}x'
+
+
 def _group_detalles_por_plato(detalles):
-    """Agrupa por grupo_armado (ver 'armar plato'), igual que kitchenTicket.js en el frontend."""
+    """Agrupa VGDetallePedido por grupo_armado (ver 'armar plato'). Usado por el recibo de
+    caja (impresion_lpd.py), que es un solo ticket consolidado sin repartir por estación —
+    a diferencia de _group_items_por_plato, que agrupa los ítems YA separados por destino
+    de esta comanda de cocina."""
     grupos = {}
     sueltos = []
     for detalle in detalles:
@@ -59,25 +68,94 @@ def _group_detalles_por_plato(detalles):
     return platos, sueltos
 
 
-def _cantidad_label(detalle):
-    if detalle.peso_gramos:
-        return f'{int(detalle.peso_gramos)} g'
-    return f'{detalle.cantidad}x'
+def _destino_categoria(categoria):
+    """(ip, puerto) de la impresora de esta categoría, o None si no tiene una asignada
+    (una categoría sin IP simplemente no imprime nada — mismo criterio ya usado en toda
+    la app, ver AnalysPrintersPage)."""
+    if categoria is None or not categoria.ip_impresora:
+        return None
+    return (categoria.ip_impresora, categoria.puerto_impresora)
 
 
-def _render_detalle(detalle):
+def _render_detalle_principal(detalle):
+    """
+    Línea principal de un detalle (cantidad/peso + nombre + notas + adicionales +
+    opciones de grupos CURADOS). Las opciones de grupos DINÁMICOS (categoria_opciones,
+    ej. un acompañante elegido de Guarniciones) quedan afuera a propósito: esas se
+    imprimen aparte, en la comanda de la categoría de ESE acompañante, ver
+    _render_acompanante y _collect_print_items.
+    """
     out = bytearray()
     out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
     if detalle.notas:
         out += _text(f'  * {detalle.notas}') + FEED
     for opcion in detalle.opciones.all():
+        if opcion.producto_id:
+            continue
         out += _text(f'  » {opcion.grupo_nombre}: {opcion.preparacion.nombre}') + FEED
     for adicional in detalle.adicionales.all():
         out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}') + FEED
     return bytes(out)
 
 
-def _build_ticket_bytes(pedido, categorias, detalles):
+def _render_acompanante(opcion):
+    """Línea de un acompañante de grupo dinámico (VGDetallePedidoOpcion.producto), que
+    imprime en su propia comanda en vez de pegado a la línea principal del plato."""
+    out = bytearray()
+    out += _text(f'{opcion.grupo_nombre}: {opcion.producto.nombre}') + FEED
+    return bytes(out)
+
+
+def _collect_print_items(detalles):
+    """
+    Arma la lista de ítems a imprimir a partir de los detalles del pedido: uno por línea
+    principal (ruteado según la categoría de ESE producto) y uno aparte por cada
+    acompañante de un grupo dinámico (ej. "Yuca al vapor" elegida de Guarniciones para
+    acompañar una Punta trasera) — así la carne sale en la comanda de Parrilla y el
+    acompañante en la de Cocina, aunque vengan en la misma línea de pedido. Los
+    acompañantes de grupos curados (preparacion, sin producto — ej. Arepas/Casabe) NO
+    generan un ítem aparte: siguen impresos pegados a la línea principal, igual que
+    siempre, dentro de _render_detalle_principal.
+
+    Cada ítem: {'destino': (ip, puerto) | None, 'categoria': VGCategoriaProducto | None,
+                'grupo_armado': int | None, 'render': bytes}.
+    """
+    items = []
+    for detalle in detalles:
+        categoria = detalle.producto.categoria
+        items.append({
+            'destino': _destino_categoria(categoria),
+            'categoria': categoria,
+            'grupo_armado': detalle.grupo_armado,
+            'render': _render_detalle_principal(detalle),
+        })
+        for opcion in detalle.opciones.all():
+            if not opcion.producto_id:
+                continue
+            acomp_categoria = opcion.producto.categoria
+            items.append({
+                'destino': _destino_categoria(acomp_categoria),
+                'categoria': acomp_categoria,
+                'grupo_armado': detalle.grupo_armado,
+                'render': _render_acompanante(opcion),
+            })
+    return items
+
+
+def _group_items_por_plato(items):
+    """Agrupa por grupo_armado (ver 'armar plato'), igual que kitchenTicket.js en el frontend."""
+    grupos = {}
+    sueltos = []
+    for item in items:
+        if item['grupo_armado']:
+            grupos.setdefault(item['grupo_armado'], []).append(item)
+        else:
+            sueltos.append(item)
+    platos = [(grupo_id, grupos[grupo_id]) for grupo_id in sorted(grupos)]
+    return platos, sueltos
+
+
+def _build_ticket_bytes(pedido, categorias, items):
     mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
     hora = pedido.fecha_creacion.strftime('%d/%m %H:%M')
     # Un mismo ticket puede combinar varias categorías cuando comparten impresora
@@ -113,23 +191,26 @@ def _build_ticket_bytes(pedido, categorias, detalles):
     # Solo los platos armados (grupo_armado) llevan título "PLATO N" grande y en
     # negrita; los ítems sueltos que no se armaron como plato se listan tal cual, sin
     # ese título, para no confundirlos con un plato armado. Cada bloque se separa del
-    # siguiente por una línea punteada.
-    platos, sueltos = _group_detalles_por_plato(detalles)
+    # siguiente por una línea punteada. El número de plato usado en el título es el
+    # grupo_armado real (no una posición relativa a este ticket): un plato puede
+    # repartirse entre varias comandas (ej. carne en Parrilla, acompañante en Cocina) y
+    # así el cocinero y el parrillero ven el mismo "PLATO N" para el mismo plato.
+    platos, sueltos = _group_items_por_plato(items)
     primer_bloque = True
-    for numero_plato, (_grupo_id, items) in enumerate(platos, start=1):
+    for grupo_id, plato_items in platos:
         if not primer_bloque:
             out += _text('-' * LINE_WIDTH) + FEED
         primer_bloque = False
         out += BOLD_ON + DOUBLE_HEIGHT
-        out += _text(f'PLATO {numero_plato}') + FEED
+        out += _text(f'PLATO {grupo_id}') + FEED
         out += NORMAL_SIZE + BOLD_OFF
-        for detalle in items:
-            out += _render_detalle(detalle)
-    for detalle in sueltos:
+        for item in plato_items:
+            out += item['render']
+    for item in sueltos:
         if not primer_bloque:
             out += _text('-' * LINE_WIDTH) + FEED
         primer_bloque = False
-        out += _render_detalle(detalle)
+        out += item['render']
 
     if pedido.notas:
         out += _text('=' * LINE_WIDTH) + FEED
@@ -142,40 +223,45 @@ def _build_ticket_bytes(pedido, categorias, detalles):
 
 def imprimir_comandas_pedido(pedido):
     """
-    Imprime una comanda por cada impresora física con categorías asignadas (ip:puerto),
-    combinando en un solo ticket todas las categorías que comparten esa impresora —
-    así un plato armado con líneas de varias categorías (ej: churrasco de Carnes +
-    yuca de Guarniciones) sale en un único ticket en vez de uno por categoría. Si una
-    impresora está apagada o inalcanzable, esa comanda se omite sin afectar a las
-    demás ni al registro del pedido (llamar siempre envuelto en try/except desde el
-    caller, igual que send_whatsapp_new_order_alert).
+    Imprime una comanda por cada impresora física con ítems asignados (ip:puerto),
+    combinando en un solo ticket todo lo que comparte esa impresora — así un plato
+    armado con líneas de varias categorías (ej: churrasco de Carnes + yuca de
+    Guarniciones) sale en un único ticket cuando comparten impresora, o repartido en
+    varios cuando cada parte tiene su propia estación (ej: carne en Parrilla,
+    acompañante dinámico en Cocina — ver _collect_print_items). Si una impresora está
+    apagada o inalcanzable, esa comanda se omite sin afectar a las demás ni al registro
+    del pedido (llamar siempre envuelto en try/except desde el caller, igual que
+    send_whatsapp_new_order_alert).
     """
     detalles = list(
         pedido.detalles
         .select_related('producto__categoria')
-        .prefetch_related('adicionales__preparacion', 'opciones__preparacion')
+        .prefetch_related(
+            'adicionales__preparacion', 'opciones__preparacion', 'opciones__producto__categoria',
+        )
         .all()
     )
     if not detalles:
         return
 
+    items = _collect_print_items(detalles)
+
     por_destino = {}
-    for detalle in detalles:
-        categoria = detalle.producto.categoria
-        if categoria is None or not categoria.ip_impresora:
+    for item in items:
+        if item['destino'] is None:
             continue
-        destino_key = (categoria.ip_impresora, categoria.puerto_impresora)
-        entry = por_destino.setdefault(destino_key, {'categorias': {}, 'detalles': []})
-        entry['categorias'][categoria.id] = categoria
-        entry['detalles'].append(detalle)
+        entry = por_destino.setdefault(item['destino'], {'categorias': {}, 'items': []})
+        if item['categoria'] is not None:
+            entry['categorias'][item['categoria'].id] = item['categoria']
+        entry['items'].append(item)
 
     for (ip_impresora, puerto_impresora), datos in por_destino.items():
         categorias = list(datos['categorias'].values())
-        items = datos['detalles']
+        items_destino = datos['items']
         destino = f'{ip_impresora}:{puerto_impresora}'
         nombres_categorias = ', '.join(c.nombre for c in categorias)
         try:
-            ticket = _build_ticket_bytes(pedido, categorias, items)
+            ticket = _build_ticket_bytes(pedido, categorias, items_destino)
             logger.info(
                 'Enviando comanda pedido %s categorias [%s] a %s (%s bytes)',
                 pedido.id, nombres_categorias, destino, len(ticket),

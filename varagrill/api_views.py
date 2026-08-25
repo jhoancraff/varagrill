@@ -517,6 +517,20 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
             )
 
         for opcion in detalle.opciones.all():
+            if opcion.producto_id:
+                # Acompañante de un grupo dinámico (ej. "Yuca al vapor" elegida de
+                # Guarniciones): descuenta según SU PROPIA receta, escalado igual que la
+                # línea principal (cantidad x peso_factor del corte que acompaña).
+                for component in _product_recipe_components(opcion.producto):
+                    amount = component['cantidad'] * cantidad_platos
+                    if component['tipo'] == 'ingrediente':
+                        needs[component['referencia_id']] = needs.get(component['referencia_id'], Decimal('0')) + amount
+                    else:
+                        _add_preparation_needs(
+                            component['referencia_id'], amount,
+                            components_by_preparation, yields_by_preparation, needs, set(),
+                        )
+                continue
             _add_preparation_needs(
                 opcion.preparacion_id, cantidad_platos,
                 components_by_preparation, yields_by_preparation, needs, set(),
@@ -707,6 +721,7 @@ class ProductoListView(generics.ListAPIView):
             'subreceta_vinculada__componentes__ingrediente',
             'subreceta_vinculada__componentes__sub_preparacion',
             'grupos_opciones__opciones__preparacion',
+            'grupos_opciones__categoria_opciones',
         )
         .order_by('nombre')
     )
@@ -732,34 +747,66 @@ def adicionales_disponibles_view(request):
     return _auth_response({'ok': True, 'adicionales': adicionales})
 
 
-def _resolve_opciones_linea(product, grupos, opciones_seleccionadas):
+def _resolve_opciones_linea(product, grupos, opciones_seleccionadas, dynamic_products_map):
     """
     Valida las opciones elegidas para una línea de pedido de `product` contra
-    sus VGGrupoOpcionProducto (grupos propios de ESE producto, ej. "Acompañante"
-    con Arepas/Casabe) — distinto de los adicionales globales (es_adicional=True).
-    Revisa que cada grupo obligatorio tenga al menos una opción elegida, que un
-    grupo sin selección múltiple no reciba más de una, y que cada opción elegida
-    pertenezca al grupo indicado. Devuelve (opciones_resueltas, error_message);
-    opciones_resueltas es [{'grupo_nombre': str, 'opcion': VGOpcionProducto}, ...].
+    sus VGGrupoOpcionProducto (grupos propios de ESE producto) — distinto de los
+    adicionales globales (es_adicional=True). Cada grupo es de uno de dos tipos
+    (ver VGGrupoOpcionProducto.categoria_opciones):
+
+    - Curado: la selección trae preparacion_id, validado contra las VGOpcionProducto
+      del grupo (ej. "Acompañante" con Arepas/Casabe). Revisa obligatorio/seleccion_multiple
+      igual que siempre.
+    - Dinámico (categoria_opciones definida, ej. Guarniciones): la selección trae
+      producto_id, validado contra `dynamic_products_map` (VGProducto disponibles,
+      ya filtrados por _parse_order_payload) y contra que pertenezca a esa categoría.
+      Nunca bloquea por "obligatorio" (se fuerza a False al guardar el grupo) — solo
+      limita cuántas se pueden elegir vía maximo_selecciones.
+
+    Devuelve (opciones_resueltas, error_message); cada fila resuelta es
+    {'grupo_nombre': str, 'opcion': VGOpcionProducto} (curado) o
+    {'grupo_nombre': str, 'producto': VGProducto} (dinámico).
     """
+    grupos_by_id = {grupo.id: grupo for grupo in grupos}
     opciones_validas_por_grupo = {
         grupo.id: {opcion.preparacion_id: opcion for opcion in grupo.opciones.all()}
-        for grupo in grupos
+        for grupo in grupos if grupo.categoria_opciones_id is None
     }
 
     seleccion_por_grupo = {}
     for seleccion in opciones_seleccionadas:
         grupo_id = seleccion['grupo_id']
-        if grupo_id not in opciones_validas_por_grupo:
+        grupo = grupos_by_id.get(grupo_id)
+        if grupo is None:
             return None, f'"{product.nombre}" no tiene ese grupo de opciones.'
-        opciones_del_grupo = opciones_validas_por_grupo[grupo_id]
-        if seleccion['preparacion_id'] not in opciones_del_grupo:
-            return None, f'Esa opción no pertenece al grupo indicado para "{product.nombre}".'
-        seleccion_por_grupo.setdefault(grupo_id, []).append(opciones_del_grupo[seleccion['preparacion_id']])
+
+        if grupo.categoria_opciones_id is not None:
+            producto_id = seleccion.get('producto_id')
+            elegido = dynamic_products_map.get(producto_id) if producto_id else None
+            if elegido is None or elegido.categoria_id != grupo.categoria_opciones_id:
+                return None, f'Esa opción ya no está disponible en "{grupo.nombre}" para "{product.nombre}".'
+            seleccion_por_grupo.setdefault(grupo_id, []).append(elegido)
+        else:
+            opciones_del_grupo = opciones_validas_por_grupo.get(grupo_id, {})
+            preparacion_id = seleccion.get('preparacion_id')
+            if preparacion_id not in opciones_del_grupo:
+                return None, f'Esa opción no pertenece al grupo indicado para "{product.nombre}".'
+            seleccion_por_grupo.setdefault(grupo_id, []).append(opciones_del_grupo[preparacion_id])
 
     resueltas = []
     for grupo in grupos:
         elegidas = seleccion_por_grupo.get(grupo.id, [])
+
+        if grupo.categoria_opciones_id is not None:
+            if grupo.maximo_selecciones and len(elegidas) > grupo.maximo_selecciones:
+                return None, (
+                    f'Solo puedes elegir hasta {grupo.maximo_selecciones} opciones '
+                    f'de "{grupo.nombre}" para "{product.nombre}".'
+                )
+            for producto_elegido in elegidas:
+                resueltas.append({'grupo_nombre': grupo.nombre, 'producto': producto_elegido})
+            continue
+
         if grupo.obligatorio and not elegidas:
             return None, f'Debes elegir una opción de "{grupo.nombre}" para "{product.nombre}".'
         if not grupo.seleccion_multiple and len(elegidas) > 1:
@@ -870,10 +917,27 @@ def _parse_order_payload(data):
                 return None, f'Una opción del item #{index} tiene formato invalido.'
             try:
                 opcion_grupo_id = int(opcion.get('grupo_id'))
-                opcion_preparacion_id = int(opcion.get('preparacion_id'))
             except (TypeError, ValueError):
                 return None, f'Una opción del item #{index} no es valida.'
-            parsed_opciones.append({'grupo_id': opcion_grupo_id, 'preparacion_id': opcion_preparacion_id})
+            # Una opción curada trae preparacion_id (subreceta fija del grupo); una opción de
+            # un grupo dinámico (categoria_opciones) trae producto_id (elegido entre lo
+            # disponible de esa categoría en ese momento) — exactamente uno de los dos.
+            opcion_preparacion_id = opcion.get('preparacion_id')
+            opcion_producto_id = opcion.get('producto_id')
+            try:
+                opcion_preparacion_id = int(opcion_preparacion_id) if opcion_preparacion_id not in [None, ''] else None
+                opcion_producto_id = int(opcion_producto_id) if opcion_producto_id not in [None, ''] else None
+            except (TypeError, ValueError):
+                return None, f'Una opción del item #{index} no es valida.'
+            if (opcion_preparacion_id is None) == (opcion_producto_id is None):
+                return None, f'Una opción del item #{index} no es valida.'
+            parsed_opciones.append({
+                'grupo_id': opcion_grupo_id,
+                'preparacion_id': opcion_preparacion_id,
+                'producto_id': opcion_producto_id,
+            })
+            if opcion_producto_id is not None:
+                product_ids.append(opcion_producto_id)
 
         parsed_lines.append({
             'product_id': product_id,
@@ -913,7 +977,7 @@ def _parse_order_payload(data):
                 VGGrupoOpcionProducto.objects.filter(producto=product).prefetch_related('opciones__preparacion')
             )
         grupos = grupos_opciones_by_producto[product.id]
-        opciones_resueltas, error = _resolve_opciones_linea(product, grupos, line['opciones'])
+        opciones_resueltas, error = _resolve_opciones_linea(product, grupos, line['opciones'], products_map)
         if error:
             return None, f'Item #{index}: {error}'
         line['opciones_resueltas'] = opciones_resueltas
@@ -961,12 +1025,25 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
 
         built_opciones = []
         for resuelta in line.get('opciones_resueltas', []):
+            if 'producto' in resuelta:
+                # Acompañante de un grupo dinámico (categoria_opciones, ej. Guarniciones):
+                # viene incluido en el precio del corte, sin cargo adicional — ver acuerdo
+                # con el usuario ("puedes acompañar tus cortes con 2 de las siguientes
+                # opciones", sin mencionar recargo.
+                built_opciones.append({
+                    'grupo_nombre': resuelta['grupo_nombre'],
+                    'producto': resuelta['producto'],
+                    'preparacion': None,
+                    'precio_unitario': Decimal('0.00'),
+                })
+                continue
             opcion = resuelta['opcion']
             precio_opcion_total = (opcion.precio_adicional * peso_factor * line['cantidad']).quantize(Decimal('0.01'))
             line_subtotal += precio_opcion_total
             built_opciones.append({
                 'grupo_nombre': resuelta['grupo_nombre'],
                 'preparacion': opcion.preparacion,
+                'producto': None,
                 'precio_unitario': precio_opcion_total,
             })
 
@@ -1004,7 +1081,8 @@ def _serialize_detalle_opciones(detalle):
             'id': opcion.id,
             'grupo_nombre': opcion.grupo_nombre,
             'preparacion_id': opcion.preparacion_id,
-            'nombre': opcion.preparacion.nombre,
+            'producto_id': opcion.producto_id,
+            'nombre': opcion.nombre,
             'precio_unitario': str(opcion.precio_unitario),
             'subtotal': str(opcion.subtotal),
         }
@@ -1109,6 +1187,7 @@ def pedido_create_view(request):
                     detalle_pedido=detalle,
                     grupo_nombre=opcion['grupo_nombre'],
                     preparacion=opcion['preparacion'],
+                    producto=opcion['producto'],
                     precio_unitario=opcion['precio_unitario'],
                 )
 
@@ -1148,7 +1227,7 @@ def pedido_detail_view(request, pedido_id):
         pedido = (
             VGPedido.objects
             .select_related('mesa', 'cliente')
-            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto')
             .get(pk=pedido_id)
         )
     except VGPedido.DoesNotExist:
@@ -1227,6 +1306,7 @@ def pedido_update_view(request, pedido_id):
                     detalle_pedido=detalle,
                     grupo_nombre=opcion['grupo_nombre'],
                     preparacion=opcion['preparacion'],
+                    producto=opcion['producto'],
                     precio_unitario=opcion['precio_unitario'],
                 )
 
@@ -1236,7 +1316,7 @@ def pedido_update_view(request, pedido_id):
         pedido.actualizado_por = request.user
         pedido.save()
 
-    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion').get(pk=pedido.id)
+    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto').get(pk=pedido.id)
     _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
 
     return _auth_response({
@@ -2575,6 +2655,9 @@ def _serialize_product(product):
                 'nombre': grupo.nombre,
                 'obligatorio': grupo.obligatorio,
                 'seleccion_multiple': grupo.seleccion_multiple,
+                'categoria_opciones_id': grupo.categoria_opciones_id,
+                'categoria_opciones_nombre': grupo.categoria_opciones.nombre if grupo.categoria_opciones_id else '',
+                'maximo_selecciones': grupo.maximo_selecciones,
                 'opciones': [
                     {
                         'id': opcion.id,
@@ -2625,17 +2708,29 @@ def product_image_view(request, product_id):
 
 def _parse_grupos_opciones(raw_grupos):
     """
-    Valida el payload de grupos de opciones de un producto (ver admin_products_view):
-    [{"nombre": str, "obligatorio": bool, "seleccion_multiple": bool,
-      "opciones": [{"preparacion_id": int, "precio_adicional": str}, ...]}, ...]
-    Cada opción se apoya en una VGPreparacion ya existente. Devuelve
-    (grupos_parseados, error_message); cada grupo trae sus opciones ya
+    Valida el payload de grupos de opciones de un producto (ver admin_products_view). Cada
+    grupo es de uno de dos tipos:
+
+    - Curado (de siempre): {"nombre": str, "obligatorio": bool, "seleccion_multiple": bool,
+      "opciones": [{"preparacion_id": int, "precio_adicional": str}, ...]}. Cada opción se
+      apoya en una VGPreparacion ya existente, curada a mano por el analista (ej. Arepas o
+      Casabe).
+    - Dinámico: {"nombre": str, "categoria_opciones_id": int, "maximo_selecciones": int|null}.
+      El pool de opciones NO se guarda aquí: se arma en el momento del pedido con los
+      VGProducto disponibles de esa categoría (ej. Guarniciones), así que agregar/quitar
+      productos de esa categoría cambia el pool sin tocar este producto. Estos grupos nunca
+      bloquean el pedido (obligatorio se fuerza a False) y siempre permiten varias
+      selecciones hasta maximo_selecciones (seleccion_multiple se fuerza a True) — ver el
+      acuerdo con el usuario: "el cliente a veces no va a querer el acompañante".
+
+    Devuelve (grupos_parseados, error_message); cada grupo curado trae sus opciones ya
     resueltas a objetos VGPreparacion, listas para crear en bulk.
     """
     if not isinstance(raw_grupos, list):
         return None, 'Formato inválido de grupos de opciones.'
 
     preparacion_ids = set()
+    categoria_ids = set()
     parsed_grupos = []
     for grupo_index, grupo in enumerate(raw_grupos, start=1):
         if not isinstance(grupo, dict):
@@ -2643,6 +2738,35 @@ def _parse_grupos_opciones(raw_grupos):
         nombre = str(grupo.get('nombre', '') or '').strip()
         if not nombre:
             return None, f'El grupo de opciones #{grupo_index} necesita un nombre.'
+
+        categoria_opciones_id = grupo.get('categoria_opciones_id')
+        if categoria_opciones_id not in [None, '']:
+            try:
+                categoria_opciones_id = int(categoria_opciones_id)
+            except (TypeError, ValueError):
+                return None, f'La categoría de opciones del grupo "{nombre}" no es válida.'
+
+            maximo_selecciones = None
+            maximo_raw = grupo.get('maximo_selecciones')
+            if maximo_raw not in [None, '']:
+                try:
+                    maximo_selecciones = int(maximo_raw)
+                except (TypeError, ValueError):
+                    return None, f'El máximo de selecciones del grupo "{nombre}" no es válido.'
+                if maximo_selecciones <= 0:
+                    return None, f'El máximo de selecciones del grupo "{nombre}" debe ser mayor a cero.'
+
+            categoria_ids.add(categoria_opciones_id)
+            parsed_grupos.append({
+                'nombre': nombre,
+                'obligatorio': False,
+                'seleccion_multiple': True,
+                'categoria_opciones_id': categoria_opciones_id,
+                'maximo_selecciones': maximo_selecciones,
+                'opciones': [],
+            })
+            continue
+
         obligatorio = bool(grupo.get('obligatorio', True))
         seleccion_multiple = bool(grupo.get('seleccion_multiple', False))
         raw_opciones = grupo.get('opciones') or []
@@ -2670,6 +2794,8 @@ def _parse_grupos_opciones(raw_grupos):
             'nombre': nombre,
             'obligatorio': obligatorio,
             'seleccion_multiple': seleccion_multiple,
+            'categoria_opciones_id': None,
+            'maximo_selecciones': None,
             'opciones': parsed_opciones,
         })
 
@@ -2682,6 +2808,14 @@ def _parse_grupos_opciones(raw_grupos):
             if preparacion is None:
                 return None, f'Una de las subrecetas elegidas para "{grupo["nombre"]}" no existe.'
             opcion['preparacion'] = preparacion
+
+    if categoria_ids:
+        categorias_map = {
+            categoria.id: categoria for categoria in VGCategoriaProducto.objects.filter(id__in=categoria_ids)
+        }
+        for grupo in parsed_grupos:
+            if grupo['categoria_opciones_id'] is not None and grupo['categoria_opciones_id'] not in categorias_map:
+                return None, f'La categoría de opciones del grupo "{grupo["nombre"]}" no existe.'
 
     return parsed_grupos, None
 
@@ -2703,7 +2837,10 @@ def admin_products_view(request):
         products = (
             VGProducto.objects.exclude(categoria__nombre__iexact='Recetas')
             .select_related('categoria', 'receta_vinculada', 'subreceta_vinculada')
-            .prefetch_related('receta__ingrediente', 'receta__preparacion', 'grupos_opciones__opciones__preparacion')
+            .prefetch_related(
+                'receta__ingrediente', 'receta__preparacion',
+                'grupos_opciones__opciones__preparacion', 'grupos_opciones__categoria_opciones',
+            )
             .order_by('nombre')
         )
         preparation_cost_map = _load_preparation_cost_map()
@@ -2950,17 +3087,20 @@ def admin_products_view(request):
                 nombre=grupo_data['nombre'],
                 obligatorio=grupo_data['obligatorio'],
                 seleccion_multiple=grupo_data['seleccion_multiple'],
+                categoria_opciones_id=grupo_data['categoria_opciones_id'],
+                maximo_selecciones=grupo_data['maximo_selecciones'],
                 orden=orden,
             )
-            VGOpcionProducto.objects.bulk_create([
-                VGOpcionProducto(
-                    grupo=grupo,
-                    preparacion=opcion['preparacion'],
-                    precio_adicional=opcion['precio_adicional'],
-                    orden=opcion_orden,
-                )
-                for opcion_orden, opcion in enumerate(grupo_data['opciones'])
-            ])
+            if grupo_data['opciones']:
+                VGOpcionProducto.objects.bulk_create([
+                    VGOpcionProducto(
+                        grupo=grupo,
+                        preparacion=opcion['preparacion'],
+                        precio_adicional=opcion['precio_adicional'],
+                        orden=opcion_orden,
+                    )
+                    for opcion_orden, opcion in enumerate(grupo_data['opciones'])
+                ])
 
     return _auth_response({
         'ok': True,
@@ -3596,7 +3736,7 @@ def kitchen_orders_view(request):
         .prefetch_related(
             'detalles__producto',
             'detalles__adicionales__preparacion',
-            'detalles__opciones__preparacion',
+            'detalles__opciones__preparacion', 'detalles__opciones__producto',
             'detalles__producto__receta_vinculada__receta__ingrediente',
             'detalles__producto__receta_vinculada__receta__preparacion',
             'detalles__producto__subreceta_vinculada__componentes__ingrediente',
@@ -3748,7 +3888,7 @@ def pedidos_cobro_view(request):
         pedidos = (
             VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
             .select_related('mesa', 'cliente', 'usuario')
-            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto')
             .order_by('mesa__numero', 'fecha_creacion')
         )
         return _auth_response({
@@ -3823,7 +3963,7 @@ def pedidos_cobro_view(request):
                 'detalles__producto__subreceta_vinculada__componentes__ingrediente',
                 'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
                 'detalles__adicionales__preparacion',
-                'detalles__opciones__preparacion',
+                'detalles__opciones__preparacion', 'detalles__opciones__producto',
             )
         )
         found_ids = {pedido.id for pedido in pedidos}

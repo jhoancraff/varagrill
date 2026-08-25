@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import { UNIT_OPTIONS, convertirCantidad } from '../utils/unitConversion';
 
 const emptyForm = {
@@ -61,6 +63,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const fileInputRef = useRef(null);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, ingredientes, gruposOpciones });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -106,7 +109,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
         setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
         setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
         const vinculoTipo = selectedProduct.receta_vinculada_id ? 'receta' : selectedProduct.subreceta_vinculada_id ? 'subreceta' : '';
-        setForm({
+        const loadedForm = {
           id: selectedProduct.id,
           nombre: selectedProduct.nombre || '',
           descripcion: selectedProduct.descripcion || '',
@@ -122,33 +125,33 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
             : vinculoTipo === 'subreceta'
               ? String(selectedProduct.subreceta_vinculada_id)
               : '',
-        });
-        setIngredientes(
-          (Array.isArray(selectedProduct.ingredientes) ? selectedProduct.ingredientes : [])
-            .filter((item) => item.tipo === 'ingrediente')
-            .map((item) => ({
-              uid: `ingrediente-${item.referencia_id}`,
-              referencia_id: item.referencia_id,
-              nombre: item.nombre,
-              unidadBase: item.unidad || 'unidad',
-              cantidad: item.cantidad,
-              unidad: item.unidad || 'unidad',
-            })),
-        );
-        setGruposOpciones(
-          (Array.isArray(selectedProduct.grupos_opciones) ? selectedProduct.grupos_opciones : []).map((grupo) => ({
-            uid: nextOpcionesUid('grupo'),
-            nombre: grupo.nombre || '',
-            obligatorio: Boolean(grupo.obligatorio),
-            seleccion_multiple: Boolean(grupo.seleccion_multiple),
-            opciones: (Array.isArray(grupo.opciones) ? grupo.opciones : []).map((opcion) => ({
-              uid: nextOpcionesUid('opcion'),
-              preparacion_id: opcion.preparacion_id,
-              nombre: opcion.preparacion_nombre,
-              precio_adicional: opcion.precio_adicional || '0',
-            })),
+        };
+        const loadedIngredientes = (Array.isArray(selectedProduct.ingredientes) ? selectedProduct.ingredientes : [])
+          .filter((item) => item.tipo === 'ingrediente')
+          .map((item) => ({
+            uid: `ingrediente-${item.referencia_id}`,
+            referencia_id: item.referencia_id,
+            nombre: item.nombre,
+            unidadBase: item.unidad || 'unidad',
+            cantidad: item.cantidad,
+            unidad: item.unidad || 'unidad',
+          }));
+        const loadedGruposOpciones = (Array.isArray(selectedProduct.grupos_opciones) ? selectedProduct.grupos_opciones : []).map((grupo) => ({
+          uid: nextOpcionesUid('grupo'),
+          nombre: grupo.nombre || '',
+          obligatorio: Boolean(grupo.obligatorio),
+          seleccion_multiple: Boolean(grupo.seleccion_multiple),
+          opciones: (Array.isArray(grupo.opciones) ? grupo.opciones : []).map((opcion) => ({
+            uid: nextOpcionesUid('opcion'),
+            preparacion_id: opcion.preparacion_id,
+            nombre: opcion.preparacion_nombre,
+            precio_adicional: opcion.precio_adicional || '0',
           })),
-        );
+        }));
+        setForm(loadedForm);
+        setIngredientes(loadedIngredientes);
+        setGruposOpciones(loadedGruposOpciones);
+        markClean({ form: loadedForm, ingredientes: loadedIngredientes, gruposOpciones: loadedGruposOpciones });
         setCurrentImageUrl(selectedProduct.imagen_url || '');
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar el producto.');
@@ -344,6 +347,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
       setCurrentImageUrl(data.product?.imagen_url || currentImageUrl);
       setImageFile(null);
       setImagePreview('');
+      markClean({ form, ingredientes, gruposOpciones });
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -714,13 +718,15 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar cambios'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver al reporte
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

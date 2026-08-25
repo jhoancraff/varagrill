@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   nombre: '',
@@ -26,6 +28,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, components });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -233,6 +236,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
       setForm(emptyForm);
       setDraft(emptyDraft);
       setComponents([]);
+      markClean({ form: emptyForm, components: [] });
       setShowIngredientResults(false);
       setShowPreparationResults(false);
     } catch (error) {
@@ -459,13 +463,15 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar receta'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver al reporte
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

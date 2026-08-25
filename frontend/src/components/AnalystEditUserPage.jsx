@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   id: null,
@@ -20,6 +22,7 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -45,7 +48,7 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
         }
 
         setRoles(Array.isArray(data.roles) ? data.roles : []);
-        setForm({
+        const loadedForm = {
           id: selectedUser.id,
           username: selectedUser.username || '',
           password: '',
@@ -57,7 +60,9 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
           fecha_nacimiento: selectedUser.fecha_nacimiento || '',
           role_id: selectedUser.role?.id ? String(selectedUser.role.id) : '',
           is_active: Boolean(selectedUser.is_active),
-        });
+        };
+        setForm(loadedForm);
+        markClean(loadedForm);
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar el usuario.');
       } finally {
@@ -101,7 +106,9 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
       }
 
       setMessage(data.message || 'Usuario actualizado correctamente.');
-      setForm((current) => ({ ...current, password: '' }));
+      const nextForm = { ...form, password: '' };
+      setForm(nextForm);
+      markClean(nextForm);
     } catch (error) {
       setMessage(error.message || 'No se pudo actualizar el usuario.');
     } finally {
@@ -190,13 +197,15 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar cambios'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver al reporte
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

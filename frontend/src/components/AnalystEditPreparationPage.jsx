@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyDraft = { ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' };
 
@@ -32,6 +34,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, components });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -68,22 +71,25 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
 
         setInventory(Array.isArray(data.inventory) ? data.inventory : []);
         setPreparations(Array.isArray(data.recipes) ? data.recipes : []);
-        setForm({
+        const loadedForm = {
           id: selected.id,
           nombre: selected.nombre || '',
           rendimiento_cantidad: selected.rendimiento_cantidad || '1',
           rendimiento_unidad: selected.rendimiento_unidad || 'unidad',
           es_adicional: !!selected.es_adicional,
           margen_ganancia: selected.margen_ganancia != null ? String(selected.margen_ganancia) : '',
-        });
-        setComponents((selected.componentes || []).map((item) => ({
+        };
+        const loadedComponents = (selected.componentes || []).map((item) => ({
           uid: `${item.tipo}-${item.referencia_id}`,
           tipo: item.tipo,
           referencia_id: item.referencia_id,
           nombre: item.nombre,
           cantidad: item.cantidad,
           costoUnitario: resolveCostoUnitario(item.tipo, item.referencia_id, data.inventory || [], data.recipes || []),
-        })));
+        }));
+        setForm(loadedForm);
+        setComponents(loadedComponents);
+        markClean({ form: loadedForm, components: loadedComponents });
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar la data.');
       } finally {
@@ -195,6 +201,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
       }
 
       setMessage(data.message || 'Subreceta actualizada correctamente.');
+      markClean({ form, components });
     } catch (error) {
       setMessage(error.message || 'No se pudo actualizar la subreceta.');
     } finally {
@@ -301,11 +308,13 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button type="submit" style={primaryButtonStyle} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>Volver al reporte</button>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>Volver al reporte</button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

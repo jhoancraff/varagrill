@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = { nombre: '', rendimiento_cantidad: '1', rendimiento_unidad: 'unidad', es_adicional: false, margen_ganancia: '' };
 const emptyDraft = { ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' };
@@ -24,6 +26,7 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, components });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -165,6 +168,7 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
       setForm(emptyForm);
       setDraft(emptyDraft);
       setComponents([]);
+      markClean({ form: emptyForm, components: [] });
     } catch (error) {
       setMessage(error.message || 'No se pudo crear la subreceta.');
     } finally {
@@ -319,11 +323,13 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button type="submit" style={primaryButtonStyle} disabled={saving}>{saving ? 'Guardando...' : 'Crear subreceta'}</button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>Volver al reporte</button>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>Volver al reporte</button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

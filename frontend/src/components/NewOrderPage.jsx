@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, waiterName, onBack }) {
   const tasaCambio = useExchangeRate();
@@ -29,6 +31,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   const [armarPlatoActivo, setArmarPlatoActivo] = useState(false);
   const [grupoActual, setGrupoActual] = useState(null);
   const [nextGrupoId, setNextGrupoId] = useState(1);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ cartItems, orderHeader });
 
   useEffect(() => {
     let cancelled = false;
@@ -442,6 +445,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
           setCartItems([]);
           resetArmarPlato();
           setOrderHeader((current) => ({ ...current, notas: '' }));
+          markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
           return;
         }
         setFeedbackType('error');
@@ -456,6 +460,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
       setCartItems([]);
       resetArmarPlato();
       setOrderHeader((current) => ({ ...current, notas: '' }));
+      markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
     } catch (error) {
       if (!navigator.onLine) {
         const payload = buildPayload();
@@ -465,6 +470,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         setCartItems([]);
         resetArmarPlato();
         setOrderHeader((current) => ({ ...current, notas: '' }));
+        markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
       } else {
         setFeedbackType('error');
         setFeedback('Error de conexion al registrar el pedido. Verifica la red e intenta otra vez.');
@@ -605,7 +611,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
             Mesero: {waiterName || 'Usuario'}
           </div>
         </div>
-        <button type="button" onClick={onBack} style={ghostButtonStyle(isCompact)}>
+        <button type="button" onClick={() => guard(onBack)} style={ghostButtonStyle(isCompact)}>
           Volver a inicio
         </button>
       </div>
@@ -908,6 +914,8 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
           }}
         />
       ) : null}
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

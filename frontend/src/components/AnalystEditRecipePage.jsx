@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyDraft = {
   ingredientSearch: '',
@@ -30,6 +32,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, components });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -75,22 +78,23 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
 
         setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
         setPreparations(Array.isArray(data.preparations) ? data.preparations : []);
-        setForm({
+        const loadedForm = {
           id: selectedRecipe.id,
           nombre: selectedRecipe.nombre || '',
           descripcion: selectedRecipe.descripcion || '',
-        });
-        setComponents(
-          (selectedRecipe.componentes || []).map((item) => ({
-            uid: `${item.tipo}-${item.referencia_id}`,
-            tipo: item.tipo,
-            referencia_id: item.referencia_id,
-            nombre: item.nombre,
-            unidad: item.unidad || 'unidad',
-            cantidad: item.cantidad,
-            costoUnitario: resolveCostoUnitario(item.tipo, item.referencia_id, data.ingredients || [], data.preparations || []),
-          })),
-        );
+        };
+        const loadedComponents = (selectedRecipe.componentes || []).map((item) => ({
+          uid: `${item.tipo}-${item.referencia_id}`,
+          tipo: item.tipo,
+          referencia_id: item.referencia_id,
+          nombre: item.nombre,
+          unidad: item.unidad || 'unidad',
+          cantidad: item.cantidad,
+          costoUnitario: resolveCostoUnitario(item.tipo, item.referencia_id, data.ingredients || [], data.preparations || []),
+        }));
+        setForm(loadedForm);
+        setComponents(loadedComponents);
+        markClean({ form: loadedForm, components: loadedComponents });
       } catch (error) {
         setMessage(error.message || 'No se pudieron cargar los datos de recetas.');
       } finally {
@@ -257,6 +261,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
       }
 
       setMessage(data.message || 'Receta actualizada correctamente.');
+      markClean({ form, components });
     } catch (error) {
       setMessage(error.message || 'No se pudo actualizar la receta.');
     } finally {
@@ -479,13 +484,15 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar cambios'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver al reporte
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

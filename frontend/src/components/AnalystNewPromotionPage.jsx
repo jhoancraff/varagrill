@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   titulo: '',
@@ -17,6 +19,7 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const isEditMode = Boolean(product?.promocion);
 
@@ -35,15 +38,19 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
       const found = products.find((item) => String(item.id) === String(productId)) || null;
       setProduct(found);
       if (found?.promocion) {
-        setForm({
+        const loadedForm = {
           titulo: found.promocion.titulo || `Promoción ${found.nombre}`,
           descripcion: found.promocion.descripcion || '',
           tipo_descuento: found.promocion.tipo_descuento || 'porcentaje',
           valor_descuento: found.promocion.valor_descuento || '',
           duracion_dias: String(found.promocion.duracion_dias || ''),
-        });
+        };
+        setForm(loadedForm);
+        markClean(loadedForm);
       } else if (found) {
-        setForm((current) => ({ ...current, titulo: `Promoción ${found.nombre}` }));
+        const loadedForm = { ...emptyForm, titulo: `Promoción ${found.nombre}` };
+        setForm(loadedForm);
+        markClean(loadedForm);
       }
     } catch (error) {
       setMessage(error.message || 'No se pudo cargar el producto seleccionado.');
@@ -292,12 +299,14 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
                 Eliminar promoción
               </button>
             ) : null}
-            <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+            <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
               Volver al reporte
             </button>
           </div>
         </form>
       ) : null}
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

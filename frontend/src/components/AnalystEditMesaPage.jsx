@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   id: null,
@@ -20,6 +22,7 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -44,13 +47,15 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
           throw new Error('La mesa seleccionada no existe.');
         }
 
-        setForm({
+        const loadedForm = {
           id: selectedMesa.id,
           numero: String(selectedMesa.numero ?? ''),
           capacidad: String(selectedMesa.capacidad ?? '4'),
           ubicacion: selectedMesa.ubicacion || '',
           estado: selectedMesa.estado || 'libre',
-        });
+        };
+        setForm(loadedForm);
+        markClean(loadedForm);
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar la mesa.');
       } finally {
@@ -88,6 +93,7 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
       }
 
       setMessage(data.message || 'Mesa actualizada correctamente.');
+      markClean(form);
       if (onMesasChanged) {
         onMesasChanged();
       }
@@ -154,13 +160,15 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar cambios'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver al reporte
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import { formatBs } from '../utils/currency';
 
 function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, orderId, onBack }) {
@@ -26,6 +28,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const [armarPlatoActivo, setArmarPlatoActivo] = useState(false);
   const [grupoActual, setGrupoActual] = useState(null);
   const [nextGrupoId, setNextGrupoId] = useState(1);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ cartItems, orderHeader });
 
   useEffect(() => {
     let cancelled = false;
@@ -77,12 +80,13 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
         const pedido = data.pedido;
         setOriginalEstado(pedido.estado);
-        setOrderHeader({
+        const loadedHeader = {
           mesaId: pedido.mesa_id ? String(pedido.mesa_id) : '',
           tipoPedido: pedido.tipo_pedido,
           cliente: pedido.cliente_nombre || '',
           notas: pedido.notas || '',
-        });
+        };
+        setOrderHeader(loadedHeader);
         const loadedItems = pedido.items.map((item) => ({
           id: cryptoRandomId(),
           productId: String(item.product_id),
@@ -98,6 +102,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           })),
         }));
         setCartItems(loadedItems);
+        markClean({ cartItems: loadedItems, orderHeader: loadedHeader });
         const maxGrupo = loadedItems.reduce((max, item) => Math.max(max, item.grupoArmado || 0), 0);
         setNextGrupoId(maxGrupo + 1);
       } catch (error) {
@@ -389,6 +394,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
       setFeedbackType('success');
       setFeedback(`Pedido #${data.pedido.id} actualizado: total $${data.pedido.total}.`);
+      markClean({ cartItems, orderHeader });
     } catch (error) {
       setFeedbackType('error');
       setFeedback('Error de conexion al actualizar el pedido. Verifica la red e intenta otra vez.');
@@ -531,7 +537,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
             Solo se puede editar mientras el pedido esté pendiente.
           </div>
         </div>
-        <button type="button" onClick={onBack} style={ghostButtonStyle(isCompact)}>
+        <button type="button" onClick={() => guard(onBack)} style={ghostButtonStyle(isCompact)}>
           Volver a pedidos
         </button>
       </div>
@@ -775,6 +781,8 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           }}
         />
       ) : null}
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

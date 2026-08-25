@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   id: '',
@@ -23,6 +25,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
     const loadData = async () => {
@@ -42,7 +45,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           throw new Error('El ingrediente seleccionado no existe.');
         }
 
-        setForm({
+        const loadedForm = {
           id: item.id,
           nombre: item.nombre || '',
           unidad: item.unidad_medida || 'kg',
@@ -50,7 +53,9 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           stock_minimo: item.stock_minimo || '0',
           costo_unitario: item.costo_unitario || '0',
           proveedor: item.ultimo_proveedor || '',
-        });
+        };
+        setForm(loadedForm);
+        markClean(loadedForm);
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar el ingrediente.');
       } finally {
@@ -91,6 +96,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
       }
 
       setMessage(data.message || 'Ingrediente actualizado correctamente.');
+      markClean(form);
     } catch (error) {
       setMessage(error.message || 'No se pudo actualizar el ingrediente.');
     } finally {
@@ -125,11 +131,13 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button type="submit" style={primaryButtonStyle} disabled={saving}>{saving ? 'Guardando...' : 'Guardar cambios'}</button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>Volver al reporte</button>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>Volver al reporte</button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

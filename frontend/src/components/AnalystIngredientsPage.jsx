@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const NEW_INGREDIENT_VALUE = '__new__';
 
@@ -31,6 +33,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -149,6 +152,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
 
       setMessage(data.message || 'Ingreso registrado correctamente.');
       setForm(emptyForm);
+      markClean(emptyForm);
       setIngredientSearch('');
       setShowIngredientResults(false);
 
@@ -308,9 +312,11 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         ) : null}
       </form>
 
-      <button type="button" onClick={onBack} style={backButtonStyle}>
+      <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
         Volver al panel del analista
       </button>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

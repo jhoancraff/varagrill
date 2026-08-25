@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 function AnalystPaymentMethodsPage({ isMobile, onBack }) {
   const [metodos, setMetodos] = useState([]);
@@ -8,6 +10,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
   const [nombre, setNombre] = useState('');
   const [moneda, setMoneda] = useState('USD');
   const [esEfectivo, setEsEfectivo] = useState(false);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ nombre, moneda, esEfectivo });
 
   const loadMetodos = async () => {
     setLoading(true);
@@ -52,6 +55,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
       setNombre('');
       setMoneda('USD');
       setEsEfectivo(false);
+      markClean({ nombre: '', moneda: 'USD', esEfectivo: false });
       setMessage(data.message || 'Metodo de pago creado.');
       loadMetodos();
     } catch (error) {
@@ -85,7 +89,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
 
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={onBack} style={backButtonStyle}>
+      <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
         ← Volver al panel
       </button>
 
@@ -154,6 +158,8 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
           </div>
         ) : null}
       </section>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

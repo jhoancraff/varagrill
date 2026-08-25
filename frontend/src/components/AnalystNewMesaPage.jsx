@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   numero: '',
@@ -18,6 +20,7 @@ function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const handleChange = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -46,6 +49,7 @@ function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
 
       setMessage(data.message || 'Mesa creada correctamente.');
       setForm(emptyForm);
+      markClean(emptyForm);
       if (onMesasChanged) {
         onMesasChanged();
       }
@@ -109,11 +113,13 @@ function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
           <button type="submit" style={primaryButtonStyle} disabled={saving}>
             {saving ? 'Guardando...' : 'Crear mesa'}
           </button>
-          <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+          <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
             Volver a mesas
           </button>
         </div>
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

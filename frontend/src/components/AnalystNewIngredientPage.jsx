@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   nombre: '',
@@ -24,6 +26,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
   const [inventory, setInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [isNameFocused, setIsNameFocused] = useState(false);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
     const loadInventory = async () => {
@@ -105,6 +108,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
 
       setMessage(data.message || 'Ingrediente creado correctamente.');
       setForm(emptyForm);
+      markClean(emptyForm);
       setInventory((current) => [...current, { id: data.item?.id, nombre: data.item?.nombre || form.nombre }]);
     } catch (error) {
       setMessage(error.message || 'No se pudo crear el ingrediente.');
@@ -182,9 +186,11 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button type="submit" style={primaryButtonStyle} disabled={saving || Boolean(exactMatch)}>{saving ? 'Guardando...' : 'Crear ingrediente'}</button>
-          <button type="button" onClick={onBack} style={secondaryButtonStyle}>Volver al reporte</button>
+          <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>Volver al reporte</button>
         </div>
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

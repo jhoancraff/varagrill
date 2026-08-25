@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   tipo_descuento: 'porcentaje',
@@ -17,6 +19,7 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
   const [result, setResult] = useState(null);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const requestedIds = useMemo(
     () => (productIds || '')
@@ -119,6 +122,7 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
       setMessage(data.message || 'Promociones creadas correctamente.');
       setResult(data);
       setForm(emptyForm);
+      markClean(emptyForm);
     } catch (error) {
       setMessage(error.message || 'No se pudo guardar la promoción masiva.');
     } finally {
@@ -266,12 +270,14 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
             <button type="submit" style={primaryButtonStyle} disabled={saving}>
               {saving ? 'Guardando...' : `Aplicar a ${eligibleCount} producto(s)`}
             </button>
-            <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+            <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
               Volver al reporte
             </button>
           </div>
         </form>
       ) : null}
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

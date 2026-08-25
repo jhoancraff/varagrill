@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   username: '',
@@ -19,6 +21,7 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -81,6 +84,7 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
 
       setMessage(data.message || 'Usuario creado correctamente.');
       setForm(emptyForm);
+      markClean(emptyForm);
     } catch (error) {
       setMessage(error.message || 'No se pudo crear el usuario.');
     } finally {
@@ -169,13 +173,15 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Crear usuario'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver a usuarios
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

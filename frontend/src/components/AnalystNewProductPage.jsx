@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import { UNIT_OPTIONS, convertirCantidad } from '../utils/unitConversion';
 
 const emptyForm = {
@@ -59,6 +61,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const fileInputRef = useRef(null);
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, ingredientes, gruposOpciones });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -294,6 +297,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       setOpcionDraftByGrupo({});
       setImageFile(null);
       setImagePreview('');
+      markClean({ form: emptyForm, ingredientes: [], gruposOpciones: [] });
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -653,13 +657,15 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Crear producto'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver a productos
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

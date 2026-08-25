@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import BsAmount from './BsAmount';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const todayIsoDate = () => new Date().toISOString().slice(0, 10);
 
@@ -16,6 +18,7 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ productId, fecha, comentario });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -109,7 +112,9 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
       setProductId('');
       setProductSearch('');
       setComentario('');
-      setFecha(todayIsoDate());
+      const resetFecha = todayIsoDate();
+      setFecha(resetFecha);
+      markClean({ productId: '', fecha: resetFecha, comentario: '' });
     } catch (error) {
       setMessage(error.message || 'No se pudo guardar la recomendación.');
     } finally {
@@ -222,13 +227,15 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
                 {saving ? 'Guardando...' : 'Guardar recomendación'}
               </button>
-              <button type="button" onClick={onBack} style={secondaryButtonStyle}>
+              <button type="button" onClick={() => guard(onBack)} style={secondaryButtonStyle}>
                 Volver al reporte
               </button>
             </div>
           </>
         ) : null}
       </form>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

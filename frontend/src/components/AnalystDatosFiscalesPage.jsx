@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   rif: '',
@@ -14,6 +16,7 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const loadDatos = async () => {
     setLoading(true);
@@ -24,7 +27,9 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
         throw new Error(data.message || 'No se pudieron cargar los datos fiscales.');
       }
       if (data.datos_fiscales) {
-        setForm({ ...emptyForm, ...data.datos_fiscales });
+        const loadedForm = { ...emptyForm, ...data.datos_fiscales };
+        setForm(loadedForm);
+        markClean(loadedForm);
       }
     } catch (error) {
       setMessage(error.message || 'No se pudieron cargar los datos fiscales.');
@@ -58,7 +63,9 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
       }
       setMessage(data.message || 'Datos fiscales guardados correctamente.');
       if (data.datos_fiscales) {
-        setForm({ ...emptyForm, ...data.datos_fiscales });
+        const savedForm = { ...emptyForm, ...data.datos_fiscales };
+        setForm(savedForm);
+        markClean(savedForm);
       }
     } catch (error) {
       setMessage(error.message || 'No se pudieron guardar los datos fiscales.');
@@ -69,7 +76,7 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
 
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={onBack} style={backButtonStyle}>
+      <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
         ← Volver al panel
       </button>
 
@@ -159,6 +166,8 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
           </form>
         )}
       </section>
+
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
   );
 }

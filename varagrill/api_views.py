@@ -2530,6 +2530,20 @@ def _delete_product_image(image_url):
         pass
 
 
+def _product_image_url(product):
+    """
+    URL publica de la imagen del producto, con la fecha de actualizacion como
+    query param. El endpoint es siempre /api/productos/<id>/imagen/ sin importar
+    el archivo real, asi que sin este "cache-bust" el navegador (y el
+    Cache-Control de product_image_view) siguen sirviendo la imagen vieja
+    despues de reemplazarla.
+    """
+    if not product.imagen_url:
+        return ''
+    version = int(product.fecha_actualizacion.timestamp()) if product.fecha_actualizacion else 0
+    return f'/api/productos/{product.id}/imagen/?v={version}'
+
+
 def _serialize_product_category(category):
     return {
         'id': category.id,
@@ -2549,7 +2563,7 @@ def _serialize_product(product):
         'disponible': product.disponible,
         'venta_por_peso': product.venta_por_peso,
         'tiempo_preparacion_min': product.tiempo_preparacion_min,
-        'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
+        'imagen_url': _product_image_url(product),
         'receta_vinculada_id': product.receta_vinculada_id,
         'receta_vinculada_nombre': product.receta_vinculada.nombre if product.receta_vinculada_id else '',
         'subreceta_vinculada_id': product.subreceta_vinculada_id,
@@ -2869,6 +2883,8 @@ def admin_products_view(request):
         except (ValueError, TypeError, VGProducto.DoesNotExist):
             return _auth_response({'ok': False, 'message': 'El producto a editar no existe.'}, status=400)
 
+    eliminar_imagen = str(data.get('eliminar_imagen', 'false')).strip().lower() in {'true', '1'}
+
     imagen_url = product.imagen_url if product else ''
     if uploaded_image is not None:
         try:
@@ -2878,6 +2894,9 @@ def admin_products_view(request):
         if product is not None:
             _delete_product_image(product.imagen_url)
         imagen_url = new_imagen_url
+    elif eliminar_imagen and product is not None and product.imagen_url:
+        _delete_product_image(product.imagen_url)
+        imagen_url = ''
 
     with transaction.atomic():
         if action == 'create':
@@ -3154,7 +3173,7 @@ def admin_promotions_view(request):
                     'id': product.id,
                     'nombre': product.nombre,
                     'categoria': product.categoria.nombre if product.categoria else '',
-                    'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
+                    'imagen_url': _product_image_url(product),
                     'precio_venta': str(product.precio_venta),
                     'promocion_activa': product.id in active_promotions,
                     'promocion': (
@@ -3362,7 +3381,7 @@ def promociones_activas_view(request):
             'producto_id': product.id,
             'producto_nombre': product.nombre,
             'categoria': product.categoria.nombre if product.categoria else '',
-            'imagen_url': f'/api/productos/{product.id}/imagen/' if product.imagen_url else '',
+            'imagen_url': _product_image_url(product),
             'precio_original': str(precio_original.quantize(Decimal('0.01'))),
             'precio_descuento': str(precio_descuento.quantize(Decimal('0.01'))),
             'porcentaje_descuento': str(porcentaje.quantize(Decimal('0.1'))),
@@ -3413,7 +3432,7 @@ def recomendaciones_chef_activas_view(request):
             'producto_id': recommendation.producto.id,
             'producto_nombre': recommendation.producto.nombre,
             'categoria': recommendation.producto.categoria.nombre if recommendation.producto.categoria else '',
-            'imagen_url': f'/api/productos/{recommendation.producto.id}/imagen/' if recommendation.producto.imagen_url else '',
+            'imagen_url': _product_image_url(recommendation.producto),
             'precio_venta': str(recommendation.producto.precio_venta),
             'comentario_chef': recommendation.comentario_chef,
             'fecha': recommendation.fecha.isoformat(),
@@ -3453,8 +3472,7 @@ def admin_chef_recommendations_view(request):
                         if recommendation.producto and recommendation.producto.categoria else ''
                     ),
                     'imagen_url': (
-                        f'/api/productos/{recommendation.producto_id}/imagen/'
-                        if recommendation.producto and recommendation.producto.imagen_url else ''
+                        _product_image_url(recommendation.producto) if recommendation.producto else ''
                     ),
                     'comentario_chef': recommendation.comentario_chef,
                     'fecha': recommendation.fecha.isoformat(),

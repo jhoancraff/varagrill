@@ -59,11 +59,15 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
   const [currentImageUrl, setCurrentImageUrl] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [removeImageRequested, setRemoveImageRequested] = useState(false);
+  const [confirmingImageRemoval, setConfirmingImageRemoval] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const fileInputRef = useRef(null);
-  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, ingredientes, gruposOpciones });
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({
+    form, ingredientes, gruposOpciones, hasNewImage: Boolean(imageFile), removeImageRequested,
+  });
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -151,7 +155,10 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
         setForm(loadedForm);
         setIngredientes(loadedIngredientes);
         setGruposOpciones(loadedGruposOpciones);
-        markClean({ form: loadedForm, ingredientes: loadedIngredientes, gruposOpciones: loadedGruposOpciones });
+        markClean({
+          form: loadedForm, ingredientes: loadedIngredientes, gruposOpciones: loadedGruposOpciones,
+          hasNewImage: false, removeImageRequested: false,
+        });
         setCurrentImageUrl(selectedProduct.imagen_url || '');
       } catch (error) {
         setMessage(error.message || 'No se pudo cargar el producto.');
@@ -289,6 +296,32 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
     const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
     setImageFile(file);
     setImagePreview(file ? URL.createObjectURL(file) : '');
+    if (file) {
+      setRemoveImageRequested(false);
+      setConfirmingImageRemoval(false);
+    }
+  };
+
+  const handleRequestRemoveImage = () => {
+    setConfirmingImageRemoval(true);
+  };
+
+  const handleCancelRemoveImage = () => {
+    setConfirmingImageRemoval(false);
+  };
+
+  const handleConfirmRemoveImage = () => {
+    setRemoveImageRequested(true);
+    setConfirmingImageRemoval(false);
+    setImageFile(null);
+    setImagePreview('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleUndoRemoveImage = () => {
+    setRemoveImageRequested(false);
   };
 
   const handleSubmit = async (event) => {
@@ -331,6 +364,8 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
       }))));
       if (imageFile) {
         formData.append('imagen', imageFile);
+      } else if (removeImageRequested) {
+        formData.append('eliminar_imagen', 'true');
       }
 
       const response = await fetch('/api/admin/productos/', {
@@ -344,10 +379,11 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
       }
 
       setMessage(data.message || 'Producto actualizado correctamente.');
-      setCurrentImageUrl(data.product?.imagen_url || currentImageUrl);
+      setCurrentImageUrl(data.product ? data.product.imagen_url : currentImageUrl);
       setImageFile(null);
       setImagePreview('');
-      markClean({ form, ingredientes, gruposOpciones });
+      setRemoveImageRequested(false);
+      markClean({ form, ingredientes, gruposOpciones, hasNewImage: false, removeImageRequested: false });
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -698,14 +734,40 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
             </label>
 
             <div style={previewRowStyle}>
-              {currentImageUrl ? (
+              {currentImageUrl && !removeImageRequested ? (
                 <div>
                   <div style={previewLabelStyle}>Imagen actual</div>
                   <img src={currentImageUrl} alt={form.nombre} style={previewImageStyle} />
+                  {!confirmingImageRemoval ? (
+                    <button type="button" onClick={handleRequestRemoveImage} style={removeImageButtonStyle}>
+                      Eliminar imagen
+                    </button>
+                  ) : (
+                    <div style={confirmRemoveBoxStyle}>
+                      <span style={confirmRemoveTextStyle}>¿Seguro que deseas eliminar la imagen de este producto?</span>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button type="button" onClick={handleConfirmRemoveImage} style={dangerButtonStyle}>
+                          Sí, eliminar imagen
+                        </button>
+                        <button type="button" onClick={handleCancelRemoveImage} style={secondaryButtonStyle}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ) : (
+              ) : null}
+              {currentImageUrl && removeImageRequested ? (
+                <div style={confirmRemoveBoxStyle}>
+                  <span style={confirmRemoveTextStyle}>La imagen se eliminará al guardar los cambios.</span>
+                  <button type="button" onClick={handleUndoRemoveImage} style={secondaryButtonStyle}>
+                    Deshacer
+                  </button>
+                </div>
+              ) : null}
+              {!currentImageUrl ? (
                 <div style={previewLabelStyle}>Este producto aún no tiene imagen.</div>
-              )}
+              ) : null}
               {imagePreview ? (
                 <div>
                   <div style={previewLabelStyle}>Imagen nueva</div>
@@ -988,6 +1050,35 @@ const previewRowStyle = {
   display: 'flex',
   gap: 20,
   flexWrap: 'wrap',
+};
+
+const removeImageButtonStyle = {
+  marginTop: 8,
+  display: 'block',
+  border: '1px solid rgba(255, 126, 126, 0.4)',
+  borderRadius: 999,
+  padding: '7px 12px',
+  background: 'rgba(145, 33, 33, 0.18)',
+  color: '#ffd3d3',
+  fontWeight: 700,
+  fontSize: 12.5,
+  cursor: 'pointer',
+};
+
+const confirmRemoveBoxStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 145, 145, 0.3)',
+  background: 'rgba(255, 98, 98, 0.1)',
+  maxWidth: 320,
+};
+
+const confirmRemoveTextStyle = {
+  color: '#ffd8d8',
+  fontSize: 13,
+  lineHeight: 1.4,
 };
 
 const previewLabelStyle = {

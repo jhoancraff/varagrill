@@ -28,6 +28,19 @@ DOUBLE_HEIGHT = GS + b'!' + b'\x01'
 NORMAL_SIZE = GS + b'!' + b'\x00'
 CUT = GS + b'V' + b'\x00'
 FEED = b'\n'
+# Pulso de apertura de gaveta de dinero (ESC p m t1 t2). Muchas impresoras térmicas de
+# cocina "todo en uno" (clones genéricos, incluida la línea Roccia que reportó el
+# usuario) NO tienen un comando de "pitido" propio en su set ESC/POS: en su lugar, el
+# buzzer interno queda cableado al mismo pulso que abre la gaveta, así que mandar este
+# comando sin gaveta conectada hace sonar el pitido igual. No hay forma de confirmarlo
+# sin la impresora física a mano — si con esto no suena, el siguiente candidato a
+# probar es el comando de buzzer `ESC B n t` (ver BUZZER_ALT más abajo).
+CASH_DRAWER_KICK = ESC + b'p' + b'\x00' + b'\x19' + b'\xfa'
+# Alternativa si CASH_DRAWER_KICK no hace sonar el pitido en el modelo real: algunos
+# clones interpretan `ESC B n t` como "sonar el buzzer n veces, con duración t" (n y t en
+# unidades propias del fabricante, típicamente ~100ms cada una). No se usa por defecto
+# porque en impresoras que NO soportan este comando puede imprimirse como texto basura.
+BUZZER_ALT = ESC + b'B' + b'\x03' + b'\x03'
 
 ENCODING = 'cp1252'
 LINE_WIDTH = 32
@@ -270,6 +283,10 @@ def _build_ticket_bytes(pedido, categorias, items):
     out += INIT
     out += KANJI_OFF
     out += ESC_POS_WCP1252
+    # Pitido apenas llega la comanda (ver CASH_DRAWER_KICK) — antes de imprimir
+    # cualquier texto, para que la cocina lo escuche de inmediato y no al terminar
+    # de imprimir todo el ticket.
+    out += CASH_DRAWER_KICK
     out += ALIGN_CENTER
     out += BOLD_ON
     out += _text('VARAGRILL') + FEED

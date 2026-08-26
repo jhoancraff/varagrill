@@ -35,6 +35,7 @@ from varagrill.api_views import (
     admin_chef_recommendations_view,
     admin_compras_view,
     admin_impresora_caja_view,
+    admin_ingredientes_bulk_create_view,
     admin_ingredientes_import_view,
     admin_mesas_view,
     admin_products_view,
@@ -55,10 +56,26 @@ from varagrill.api_views import (
     reporte_margen_ganancia_view,
     tasa_cambio_view,
 )
+from varagrill.compras_views import (
+    admin_compra_borrador_agregar_view,
+    admin_compra_borrador_confirmar_view,
+    admin_compra_borrador_descartar_view,
+    admin_compra_borrador_quitar_view,
+    admin_compra_borrador_view,
+    compra_abono_view,
+    cuentas_por_pagar_view,
+)
 from varagrill.contabilidad_views import (
     admin_metodos_pago_view,
     metodos_pago_activos_view,
     reporte_cuadre_caja_view,
+    reporte_estado_resultados_view,
+)
+from varagrill.gastos_views import (
+    admin_categorias_gasto_view,
+    admin_gastos_view,
+    gasto_abono_view,
+    gasto_detail_view,
 )
 from varagrill.facturacion_views import (
     clientes_buscar_view,
@@ -97,8 +114,20 @@ urlpatterns = [
     path('api/pedidos/', pedido_create_view, name='pedido-create'),
     path('api/admin/catalogo/', admin_catalog_view, name='admin-catalog'),
     path('api/admin/catalogo/importar/', admin_ingredientes_import_view, name='admin-catalog-import'),
+    path('api/admin/catalogo/importar-simple/', admin_ingredientes_bulk_create_view, name='admin-catalog-bulk-create'),
     path('api/admin/compras/', admin_compras_view, name='admin-compras'),
     path('api/admin/compras/<int:compra_id>/', compra_detail_view, name='admin-compra-detail'),
+    path('api/admin/compras/<int:compra_id>/abonos/', compra_abono_view, name='admin-compra-abono'),
+    path('api/admin/compras/borrador/', admin_compra_borrador_view, name='admin-compra-borrador'),
+    path('api/admin/compras/borrador/agregar/', admin_compra_borrador_agregar_view, name='admin-compra-borrador-agregar'),
+    path('api/admin/compras/borrador/quitar/', admin_compra_borrador_quitar_view, name='admin-compra-borrador-quitar'),
+    path('api/admin/compras/borrador/descartar/', admin_compra_borrador_descartar_view, name='admin-compra-borrador-descartar'),
+    path('api/admin/compras/borrador/confirmar/', admin_compra_borrador_confirmar_view, name='admin-compra-borrador-confirmar'),
+    path('api/cuentas-por-pagar/', cuentas_por_pagar_view, name='cuentas-por-pagar'),
+    path('api/admin/gastos/', admin_gastos_view, name='admin-gastos'),
+    path('api/admin/gastos/<int:gasto_id>/', gasto_detail_view, name='admin-gasto-detail'),
+    path('api/admin/gastos/<int:gasto_id>/abonos/', gasto_abono_view, name='admin-gasto-abono'),
+    path('api/admin/categorias-gasto/', admin_categorias_gasto_view, name='admin-categorias-gasto'),
     path('api/admin/categorias/', admin_categorias_view, name='admin-categorias'),
     path('api/admin/impresora-caja/', admin_impresora_caja_view, name='admin-impresora-caja'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),
@@ -106,6 +135,7 @@ urlpatterns = [
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
     path('api/admin/reportes/cuadre-caja/', reporte_cuadre_caja_view, name='admin-reporte-cuadre-caja'),
     path('api/admin/reportes/margen-ganancia/', reporte_margen_ganancia_view, name='admin-reporte-margen-ganancia'),
+    path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),
     path('api/admin/metodos-pago/', admin_metodos_pago_view, name='admin-metodos-pago'),
     path('api/metodos-pago/', metodos_pago_activos_view, name='metodos-pago-activos'),
     path('api/promociones/', promociones_activas_view, name='promociones-activas'),

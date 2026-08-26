@@ -462,7 +462,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
 
       const mesaLabel = selectedMesa ? `Mesa ${selectedMesa.numero}` : 'Sin mesa';
       setFeedbackType('success');
-      setFeedback(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${data.pedido.total}.`);
+      setFeedback(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${Number(data.pedido.total).toFixed(2)}.`);
 
       setCartItems([]);
       resetArmarPlato();

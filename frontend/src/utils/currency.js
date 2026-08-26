@@ -13,7 +13,12 @@ export function formatBs(amountUsd, tasa) {
     return '';
   }
 
-  return bsFormatter.format(usdAmount * exchangeRate);
+  const bsValue = usdAmount * exchangeRate;
+  // Intl a veces pega el signo negativo justo al símbolo de moneda sin espacio
+  // (ej. "Bs.S-547.491,63"); formateamos siempre el valor absoluto y anteponemos
+  // el signo nosotros para que quede consistente ("-Bs.S 547.491,63").
+  const sign = bsValue < 0 ? '-' : '';
+  return `${sign}${bsFormatter.format(Math.abs(bsValue))}`;
 }
 
 /**

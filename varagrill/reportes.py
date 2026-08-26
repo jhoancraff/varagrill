@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.db.models import Sum
 
-from .models import VGConsignacionCaja, VGMetodoPago, VGPago, VGTasaCambio
+from .models import VGAbonoGasto, VGConsignacionCaja, VGMetodoPago, VGPago, VGTasaCambio
 
 
 def tasa_para_fecha(fecha):
@@ -108,15 +108,30 @@ def desglose_caja_por_moneda(fecha):
     return buckets
 
 
-def efectivo_esperado_dia(fecha):
-    """Suma de VGPago completados en `fecha` cuyo metodo cuenta como efectivo fisico."""
+def gastos_efectivo_dia(fecha):
+    """Suma de VGAbonoGasto en `fecha` pagados con un metodo que cuenta como efectivo fisico."""
     total = (
-        VGPago.objects
-        .filter(fecha_pago__date=fecha, estado='completado', metodo_pago__es_efectivo=True)
+        VGAbonoGasto.objects
+        .filter(fecha_pago__date=fecha, metodo_pago__es_efectivo=True)
         .aggregate(total=Sum('monto'))
         .get('total')
     )
     return total or Decimal('0')
+
+
+def efectivo_esperado_dia(fecha):
+    """
+    Efectivo fisico que deberia haber en caja al final de `fecha`: lo cobrado en efectivo
+    (VGPago) menos lo pagado en efectivo por gastos operativos (VGAbonoGasto) — si un gasto
+    sale de la caja física y no se descuenta aquí, el cierre marcaría un faltante fantasma.
+    """
+    ingresos = (
+        VGPago.objects
+        .filter(fecha_pago__date=fecha, estado='completado', metodo_pago__es_efectivo=True)
+        .aggregate(total=Sum('monto'))
+        .get('total')
+    ) or Decimal('0')
+    return ingresos - gastos_efectivo_dia(fecha)
 
 
 def total_consignado(fecha):

@@ -20,6 +20,7 @@ from django.utils.decorators import method_decorator
 from rest_framework import generics
 
 from .models import (
+    VGAbonoCompra,
     VGCategoriaProducto,
     VGCliente,
     VGCompra,
@@ -593,34 +594,16 @@ def _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_ma
         VGDetallePedido.objects.bulk_update(detalles, ['costo_unitario_venta'])
 
 
-def reporte_margen_ganancia_view(request):
+def _calcular_margen_periodo(desde, hasta):
     """
-    Margen de ganancia por plato vendido en un rango de fechas: cuánto entró
-    (precio de venta x cantidad), cuánto costó y la ganancia resultante,
-    agrupado por producto. Usa el costo histórico congelado al momento del
-    cobro (VGDetallePedido.costo_unitario_venta, ver _snapshot_costo_venta_detalles)
-    cuando existe; para ventas de antes de que ese campo existiera (o cualquier
-    fila vieja sin snapshot), cae al costo_unitario ACTUAL de los ingredientes
-    como estimación — mismo criterio "último costo" que el reporte de
-    referencia (Profit Plus) — y esa fila queda marcada con 'costo_estimado':
-    true para que quede claro que no es un costo histórico real.
+    Ventas, costo de ingredientes y ganancia por producto vendido (pedidos
+    pagados) entre `desde` y `hasta`, ambos inclusive. Extraido de
+    reporte_margen_ganancia_view para que reporte_estado_resultados_view
+    (contabilidad_views.py) pueda reusar el mismo calculo de "ventas totales"
+    y "costo de ingredientes" sin duplicar la logica de costeo — ver el
+    docstring de esa vista para el criterio de costo historico vs. estimado.
+    Devuelve (filas, total_ingreso, total_costo).
     """
-    if request.method != 'GET':
-        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
-
-    if not _is_admin_user(request.user):
-        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
-
-    desde_raw = request.GET.get('desde')
-    hasta_raw = request.GET.get('hasta')
-    try:
-        desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate()
-        hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
-    except ValueError:
-        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
-    if desde > hasta:
-        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
-
     detalles = (
         VGDetallePedido.objects
         .filter(
@@ -688,6 +671,39 @@ def reporte_margen_ganancia_view(request):
         })
 
     filas.sort(key=lambda item: Decimal(item['ingreso_total']), reverse=True)
+
+    return filas, total_ingreso, total_costo
+
+
+def reporte_margen_ganancia_view(request):
+    """
+    Margen de ganancia por plato vendido en un rango de fechas: cuánto entró
+    (precio de venta x cantidad), cuánto costó y la ganancia resultante,
+    agrupado por producto. Usa el costo histórico congelado al momento del
+    cobro (VGDetallePedido.costo_unitario_venta, ver _snapshot_costo_venta_detalles)
+    cuando existe; para ventas de antes de que ese campo existiera (o cualquier
+    fila vieja sin snapshot), cae al costo_unitario ACTUAL de los ingredientes
+    como estimación — mismo criterio "último costo" que el reporte de
+    referencia (Profit Plus) — y esa fila queda marcada con 'costo_estimado':
+    true para que quede claro que no es un costo histórico real.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    try:
+        desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate()
+        hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+
+    filas, total_ingreso, total_costo = _calcular_margen_periodo(desde, hasta)
 
     total_ganancia = total_ingreso - total_costo
     total_ganancia_pct = (total_ganancia / total_ingreso * Decimal('100')) if total_ingreso > 0 else Decimal('0')
@@ -1192,8 +1208,8 @@ def pedido_create_view(request):
                 )
 
         total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
-        pedido.subtotal = subtotal
-        pedido.total = total
+        pedido.subtotal = subtotal.quantize(Decimal('0.01'))
+        pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
         pedido.save(update_fields=['subtotal', 'total', 'actualizado_por'])
 
@@ -1311,8 +1327,8 @@ def pedido_update_view(request, pedido_id):
                 )
 
         total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
-        pedido.subtotal = subtotal
-        pedido.total = total
+        pedido.subtotal = subtotal.quantize(Decimal('0.01'))
+        pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
         pedido.save()
 
@@ -1756,6 +1772,7 @@ def admin_catalog_view(request):
                 compra=compra,
                 creado_por=request.user,
             )
+            _finalizar_estado_pago_compra(compra)
 
         return _auth_response({
             'ok': True,
@@ -2084,6 +2101,9 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 )
                 creados += 1
 
+        if compra is not None:
+            _finalizar_estado_pago_compra(compra)
+
     return {
         'creados': creados, 'actualizados': actualizados, 'ignorados': ignorados, 'errores': errores,
         'compra_id': compra.id if compra else None,
@@ -2152,6 +2172,149 @@ def admin_ingredientes_import_view(request):
     return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
 
 
+def _preview_ingrediente_simple_row(row, vistos):
+    """
+    Clasifica una fila para la carga masiva SIN costo/cantidad (alta inicial de
+    ingredientes al montar el restaurante, ver AnalystIngredientsBulkCreatePage.jsx):
+    solo importa si el nombre ya existe o no. `vistos` acumula (en minúsculas) los
+    nombres ya vistos en filas anteriores del mismo archivo, para detectar duplicados
+    dentro del propio Excel.
+    """
+    nombre = row['nombre']
+    clave = nombre.strip().lower()
+    ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+
+    resultado = {'fila': row['fila'], 'nombre': nombre, 'ingrediente_id': ingrediente.id if ingrediente else None}
+
+    if ingrediente is not None:
+        resultado['accion'] = 'existente'
+        resultado['mensaje'] = 'Ya existe en el inventario, no se vuelve a crear.'
+    elif clave in vistos:
+        resultado['accion'] = 'duplicado'
+        resultado['mensaje'] = 'Nombre repetido en el archivo, ya se creará con la primera fila.'
+    else:
+        resultado['accion'] = 'nuevo'
+        resultado['mensaje'] = ''
+
+    vistos.add(clave)
+    return resultado
+
+
+def _crear_ingredientes_simple(nombres, motivo, operator):
+    """
+    Crea ingredientes nuevos sin stock, costo ni proveedor — solo para dejar
+    registrada su existencia en el catálogo (ej: inversión inicial al abrir el
+    restaurante, antes de que haya nada que inventariar). Cada alta queda registrada
+    como un movimiento de tipo 'ajuste' en cantidad 0 con el motivo dado, para que
+    quede el rastro de auditoría de por qué se creó sin pasar por una compra real.
+    """
+    creados, omitidos = 0, 0
+    creados_nombres = set()
+
+    with transaction.atomic():
+        for nombre in nombres:
+            nombre = str(nombre or '').strip()
+            if not nombre or nombre.lower() in creados_nombres:
+                continue
+
+            if VGIngrediente.objects.filter(nombre__iexact=nombre).exists():
+                omitidos += 1
+                continue
+
+            nuevo = VGIngrediente.objects.create(
+                nombre=nombre,
+                unidad_medida='unidad',
+                stock_actual=Decimal('0'),
+                stock_minimo=Decimal('0'),
+                costo_unitario=Decimal('0'),
+                creado_por=operator,
+                actualizado_por=operator,
+            )
+            VGMovimientoInventario.objects.create(
+                ingrediente=nuevo,
+                tipo_movimiento='ajuste',
+                cantidad=Decimal('0'),
+                motivo=f'Alta inicial sin inventariar: {motivo}',
+                creado_por=operator,
+            )
+            creados_nombres.add(nombre.lower())
+            creados += 1
+
+    return {'creados': creados, 'omitidos': omitidos}
+
+
+@csrf_exempt
+def admin_ingredientes_bulk_create_view(request):
+    """
+    Carga masiva de ingredientes SIN costo ni cantidad/unidad, pensada para el
+    montaje inicial del inventario (apertura de restaurante): solo crea el registro
+    del ingrediente si su nombre no existe todavía, con un motivo general obligatorio
+    para toda la carga. A diferencia de admin_ingredientes_import_view, esto nunca
+    actualiza un ingrediente existente ni genera compras/movimientos de stock real.
+    """
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    is_multipart = bool(request.content_type) and request.content_type.startswith('multipart/form-data')
+    if is_multipart:
+        action = str(request.POST.get('action', '')).strip().lower()
+        data = {}
+    else:
+        try:
+            data = json.loads(request.body.decode('utf-8')) if request.body else {}
+        except json.JSONDecodeError:
+            return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+        action = str(data.get('action', '')).strip().lower()
+
+    if action == 'preview':
+        uploaded_file = request.FILES.get('archivo')
+        if uploaded_file is None:
+            return _auth_response({'ok': False, 'message': 'Debes adjuntar un archivo .xlsx.'}, status=400)
+        if uploaded_file.size > MAX_INGREDIENTES_IMPORT_SIZE_BYTES:
+            return _auth_response({'ok': False, 'message': 'El archivo no debe superar los 5MB.'}, status=400)
+
+        try:
+            filas = parse_ingredientes_workbook(uploaded_file)
+        except InvalidExcelError as error:
+            return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
+        if not filas:
+            return _auth_response({'ok': False, 'message': 'El archivo no tiene filas de ingredientes para importar.'}, status=400)
+
+        vistos = set()
+        return _auth_response({'ok': True, 'filas': [_preview_ingrediente_simple_row(row, vistos) for row in filas]})
+
+    if action == 'confirm':
+        items = data.get('items')
+        if not isinstance(items, list) or not items:
+            return _auth_response({'ok': False, 'message': 'No hay filas para crear.'}, status=400)
+
+        motivo = str(data.get('motivo', '') or '').strip()
+        if not motivo:
+            return _auth_response({'ok': False, 'message': 'El motivo de la carga es obligatorio.'}, status=400)
+
+        nombres = [str(item.get('nombre', '') or '').strip() for item in items]
+        resumen = _crear_ingredientes_simple(nombres, motivo, request.user)
+        return _auth_response({'ok': True, **resumen})
+
+    return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+
+
+def _serialize_abono_compra(abono):
+    return {
+        'id': abono.id,
+        'monto': str(abono.monto),
+        'metodo_pago': abono.metodo_pago.nombre,
+        'metodo_pago_id': abono.metodo_pago_id,
+        'referencia': abono.referencia,
+        'fecha_pago': abono.fecha_pago.isoformat(),
+        'creado_por': (abono.creado_por.get_full_name() or abono.creado_por.username) if abono.creado_por else '',
+    }
+
+
 def _serialize_compra(compra, incluir_detalle=False):
     data = {
         'id': compra.id,
@@ -2161,6 +2324,8 @@ def _serialize_compra(compra, incluir_detalle=False):
         'fecha_creacion': compra.fecha_creacion.isoformat(),
         'total': str(compra.total),
         'estado': compra.estado,
+        'saldo_pendiente': str(compra.saldo_pendiente),
+        'estado_pago': compra.estado_pago,
         'creado_por': (compra.creado_por.get_full_name() or compra.creado_por.username) if compra.creado_por else '',
         'cantidad_items': compra.detalles.count() if incluir_detalle else None,
     }
@@ -2177,7 +2342,23 @@ def _serialize_compra(compra, incluir_detalle=False):
             }
             for detalle in compra.detalles.select_related('ingrediente').all()
         ]
+        data['abonos'] = [
+            _serialize_abono_compra(abono) for abono in compra.abonos.select_related('metodo_pago').order_by('fecha_pago')
+        ]
     return data
+
+
+def _finalizar_estado_pago_compra(compra):
+    """
+    Deja lista la cuenta por pagar de una VGCompra recien creada: el saldo pendiente
+    arranca en el total del lote (nadie ha abonado todavia) y el estado de pago en
+    'pendiente' — salvo un lote en cero, que no genera deuda real. Se llama al final de
+    cada flujo que crea una VGCompra (alta manual, importacion por Excel, carga por
+    lote), una vez que compra.total ya quedo calculado.
+    """
+    compra.saldo_pendiente = compra.total
+    compra.estado_pago = 'pagada' if compra.total <= 0 else 'pendiente'
+    compra.save(update_fields=['saldo_pendiente', 'estado_pago'])
 
 
 def admin_compras_view(request):
@@ -3881,8 +4062,8 @@ def pedidos_cobro_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
-    if not request.user.is_authenticated:
-        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para cobrar pedidos.'}, status=401)
 
     if request.method == 'GET':
         pedidos = (

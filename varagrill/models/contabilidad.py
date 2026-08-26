@@ -356,3 +356,89 @@ class VGOrdenCobro(VGAuditoria):
 
     def __str__(self):
         return f"Orden de cobro — {self.factura}"
+
+
+# ---------------------------------------------------------------------------
+# Gastos operativos (alquiler, servicios, nomina, mantenimiento...)
+# ---------------------------------------------------------------------------
+class VGCategoriaGasto(VGAuditoria):
+    """
+    Clasificacion de gastos operativos (Alquiler, Servicios, Nomina...),
+    configurable por el analista igual que VGMetodoPago. Desactivarla
+    (activo=False) la quita del selector al registrar un gasto nuevo sin
+    borrar el historico de VGGasto que ya la uso (categoria usa PROTECT).
+    """
+    nombre = models.CharField(max_length=80, unique=True)
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "vg_categorias_gasto"
+        verbose_name = "Categoría de gasto"
+        verbose_name_plural = "Categorías de gasto"
+        ordering = ["nombre"]
+
+    def __str__(self):
+        return self.nombre
+
+
+class VGGasto(VGAuditoria):
+    """
+    Un gasto operativo del negocio (alquiler, luz, nomina...) — no pasa por
+    inventario, a diferencia de VGCompra. Arranca con saldo_pendiente=monto
+    y estado_pago='pendiente'; si se registra como ya pagado, el mismo flujo
+    de alta le crea de una vez su VGAbonoGasto por el monto completo (ver
+    gastos_views._registrar_abono_gasto). Un gasto pagado en efectivo se
+    descuenta del efectivo esperado del cuadre de caja del dia
+    (reportes.efectivo_esperado_dia).
+    """
+    ESTADOS_PAGO = [
+        ("pendiente", "Pendiente"),
+        ("abonada_parcial", "Abonado parcialmente"),
+        ("pagado", "Pagado"),
+    ]
+    categoria = models.ForeignKey(VGCategoriaGasto, on_delete=models.PROTECT, related_name="gastos")
+    descripcion = models.CharField(
+        max_length=255, help_text="Ej: Factura de luz de agosto, Alquiler de septiembre.",
+    )
+    proveedor_nombre = models.CharField(
+        max_length=150, blank=True, help_text="A quien se le paga este gasto (opcional).",
+    )
+    numero_comprobante = models.CharField(max_length=100, blank=True)
+    monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    saldo_pendiente = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")
+    fecha_gasto = models.DateField(
+        help_text="Fecha real del gasto/factura (puede ser distinta a cuando se registro en el sistema).",
+    )
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "vg_gastos"
+        verbose_name = "Gasto"
+        verbose_name_plural = "Gastos"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"{self.categoria} — {self.descripcion}"
+
+
+class VGAbonoGasto(models.Model):
+    """
+    Pago del restaurante hacia un gasto operativo (egreso). Modelo aparte de
+    VGPago por la misma razon que VGAbonoCompra: VGPago alimenta el cuadre de
+    caja como dinero que ENTRA, mezclar egresos ahi lo contaminaria.
+    """
+    gasto = models.ForeignKey(VGGasto, on_delete=models.PROTECT, related_name="abonos")
+    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="abonos_gasto")
+    referencia = models.CharField(max_length=100, blank=True)
+    fecha_pago = models.DateTimeField(auto_now_add=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+
+    class Meta:
+        db_table = "vg_abonos_gasto"
+
+    def __str__(self):
+        return f"Abono {self.monto} — Gasto #{self.gasto_id}"

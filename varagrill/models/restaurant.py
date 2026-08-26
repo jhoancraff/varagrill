@@ -390,6 +390,11 @@ class VGCompra(VGAuditoria):
         ("recibido", "Recibido"),
         ("cancelado", "Cancelado"),
     ]
+    ESTADOS_PAGO = [
+        ("pendiente", "Pendiente"),
+        ("abonada_parcial", "Abonada parcialmente"),
+        ("pagada", "Pagada"),
+    ]
     proveedor_nombre = models.CharField(max_length=150)
     numero_factura_proveedor = models.CharField(
         max_length=100, blank=True,
@@ -402,6 +407,11 @@ class VGCompra(VGAuditoria):
     fecha_compra = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+    saldo_pendiente = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Deuda viva con el proveedor por este lote (cuenta por pagar). Baja con cada VGAbonoCompra.",
+    )
+    estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")
 
     class Meta:
         db_table = "vg_compras"
@@ -425,6 +435,75 @@ class VGDetalleCompra(models.Model):
 
     def __str__(self):
         return f"{self.ingrediente} x {self.cantidad}"
+
+
+class VGCompraBorrador(VGAuditoria):
+    """
+    Factura de proveedor a medio armar: el analista va agregando ingredientes uno por
+    uno (ver VGDetalleCompraBorrador) a medida que los lee de la factura física, y esto
+    queda guardado en el servidor entre sesiones — si cierra la pestaña o vuelve al día
+    siguiente, el borrador sigue ahí. Al confirmar (ver compras_views.confirmar_view) se
+    convierte en una VGCompra real y el borrador se elimina. Por decisión del negocio hay
+    un único borrador "abierto" compartido a la vez entre todos los administradores.
+    """
+    ESTADOS = [("abierto", "Abierto"), ("confirmado", "Confirmado")]
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="abierto")
+
+    class Meta:
+        db_table = "vg_compras_borrador"
+
+    def __str__(self):
+        return f"Borrador de compra #{self.pk}"
+
+
+class VGDetalleCompraBorrador(models.Model):
+    borrador = models.ForeignKey(VGCompraBorrador, on_delete=models.CASCADE, related_name="detalles")
+    ingrediente = models.ForeignKey(
+        VGIngrediente, on_delete=models.PROTECT, related_name="detalles_compra_borrador",
+    )
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2)
+    precio_total = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        help_text="Lo pagado por esa cantidad de ese ingrediente, según la factura del proveedor.",
+    )
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vg_detalle_compra_borrador"
+
+    @property
+    def costo_unitario(self):
+        return (self.precio_total / self.cantidad) if self.cantidad else Decimal("0")
+
+    def __str__(self):
+        return f"{self.ingrediente} x {self.cantidad}"
+
+
+class VGAbonoCompra(models.Model):
+    """
+    Pago del restaurante A un proveedor por una VGCompra (egreso). Es un modelo aparte
+    de VGPago a propósito: VGPago representa dinero que ENTRA a caja y alimenta el
+    cuadre de caja diario (reportes.py); mezclar egresos ahí contaminaría ese reporte.
+    """
+    compra = models.ForeignKey(VGCompra, on_delete=models.PROTECT, related_name="abonos")
+    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    metodo_pago = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, related_name="abonos_compra",
+    )
+    referencia = models.CharField(max_length=100, blank=True)
+    fecha_pago = models.DateTimeField(auto_now_add=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+
+    class Meta:
+        db_table = "vg_abonos_compra"
+
+    def __str__(self):
+        return f"Abono {self.monto} — Compra #{self.compra_id}"
 
 
 class VGMovimientoInventario(models.Model):

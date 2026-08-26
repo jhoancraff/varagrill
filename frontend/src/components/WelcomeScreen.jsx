@@ -10,8 +10,11 @@ import AnalystEditMesaPage from './AnalystEditMesaPage';
 import AnalystEditProductPage from './AnalystEditProductPage';
 import AnalystEditRecipePage from './AnalystEditRecipePage';
 import AnalystEditPreparationPage from './AnalystEditPreparationPage';
+import AnalystIngredientsBulkCreatePage from './AnalystIngredientsBulkCreatePage';
+import AnalystIngredientsCreateReportPage from './AnalystIngredientsCreateReportPage';
 import AnalystIngredientsImportPage from './AnalystIngredientsImportPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
+import AnalystInventoryHubPage from './AnalystInventoryHubPage';
 import AnalystMesasPage from './AnalystMesasPage';
 import AnalystNewChefRecommendationPage from './AnalystNewChefRecommendationPage';
 import AnalystNewIngredientPage from './AnalystNewIngredientPage';
@@ -30,7 +33,12 @@ import AnalystRecipesPage from './AnalystRecipesPage';
 import AnalystUsersPage from './AnalystUsersPage';
 import ChefRecommendationsPage from './ChefRecommendationsPage';
 import CheckoutPage from './CheckoutPage';
+import AnalystComprasBorradorPage from './AnalystComprasBorradorPage';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
+import CuentasPorPagarPage from './CuentasPorPagarPage';
+import AnalystGastosPage from './AnalystGastosPage';
+import ComprobantePagoPage from './ComprobantePagoPage';
+import EstadoResultadosPage from './EstadoResultadosPage';
 import HistorialFacturasPage from './HistorialFacturasPage';
 import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
 import AnalystComprasPage from './AnalystComprasPage';
@@ -277,6 +285,11 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
     }
 
     if (!isAdmin && (activeView.startsWith('admin') || activeView.startsWith('contabilidad'))) {
+      setActiveView('home');
+      return;
+    }
+
+    if (!isAdmin && activeView === 'checkout') {
       setActiveView('home');
     }
   }, [activeView, isAdmin, isCajera]);
@@ -573,26 +586,28 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           </button>
         ) : null}
 
-        <button
-          type="button"
-          onClick={() => {
-            setActiveView('checkout');
-            if (isSidebarOverlayMode) {
-              setIsSidebarOpen(false);
-            }
-          }}
-          style={sidebarButtonStyle(activeView === 'checkout')}
-        >
-          <span aria-hidden="true" style={sidebarIconWrapStyle}>
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="6" width="20" height="14" rx="2" />
-              <path d="M2 10h20" />
-              <path d="M6 15h4" />
-            </svg>
-          </span>
-          <span style={{ flex: 1, textAlign: 'left' }}>Cobro</span>
-          <span style={pendingBadgeStyle(readyToBillCount > 0)}>{readyToBillCount}</span>
-        </button>
+        {(isCajera || isAdmin) ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('checkout');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView === 'checkout')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="6" width="20" height="14" rx="2" />
+                <path d="M2 10h20" />
+                <path d="M6 15h4" />
+              </svg>
+            </span>
+            <span style={{ flex: 1, textAlign: 'left' }}>Cobro</span>
+            <span style={pendingBadgeStyle(readyToBillCount > 0)}>{readyToBillCount}</span>
+          </button>
+        ) : null}
 
         {isCajera ? (
           <button
@@ -897,6 +912,26 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
           />
+        ) : activeView === 'cuentas-pagar' ? (
+          <CuentasPorPagarPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('contabilidad')}
+            onVerComprobante={(tipo, documentoId, abonoId) => setActiveView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
+          />
+        ) : activeView === 'gastos-operativos' ? (
+          <AnalystGastosPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('contabilidad')}
+            onVerComprobante={(tipo, documentoId, abonoId) => setActiveView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
+          />
+        ) : activeView.startsWith('comprobante-pago:') ? (
+          <ComprobantePagoPage
+            isMobile={isMobile}
+            tipo={activeView.split(':')[1]}
+            documentoId={activeView.split(':')[2]}
+            abonoId={Number(activeView.split(':')[3])}
+            onBack={() => setActiveView(activeView.split(':')[1] === 'gasto' ? 'gastos-operativos' : 'cuentas-pagar')}
+          />
         ) : activeView === 'facturas-historial' ? (
           <HistorialFacturasPage
             isMobile={isMobile}
@@ -904,6 +939,11 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           />
         ) : activeView === 'margen-ganancia' ? (
           <AnalystMargenGananciaPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('contabilidad')}
+          />
+        ) : activeView === 'estado-resultados' ? (
+          <EstadoResultadosPage
             isMobile={isMobile}
             onBack={() => setActiveView('contabilidad')}
           />
@@ -1005,29 +1045,53 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             onProductsChanged={reloadProducts}
           />
         ) : activeView === 'admin-ingredients' ? (
-          <AnalystIngredientsReportPage
+          <AnalystInventoryHubPage
             isMobile={isMobile}
             onBack={() => setActiveView('contabilidad')}
-            onCreateNew={() => setActiveView('admin-ingredients-new')}
+            onCreate={() => setActiveView('admin-ingredients-create')}
+            onViewInventory={() => setActiveView('admin-ingredients-inventory')}
+          />
+        ) : activeView === 'admin-ingredients-create' ? (
+          <AnalystIngredientsCreateReportPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-ingredients')}
+            onManualCreate={() => setActiveView('admin-ingredients-new')}
+            onBulkCreate={() => setActiveView('admin-ingredients-bulk-create')}
+          />
+        ) : activeView === 'admin-ingredients-inventory' ? (
+          <AnalystIngredientsReportPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-ingredients')}
             onEdit={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
             onImport={() => setActiveView('admin-ingredients-import')}
+            onCargaPorLote={() => setActiveView('admin-ingredients-compras-borrador')}
+          />
+        ) : activeView === 'admin-ingredients-compras-borrador' ? (
+          <AnalystComprasBorradorPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-ingredients-inventory')}
           />
         ) : activeView.startsWith('admin-ingredients-edit:') ? (
           <AnalystEditIngredientPage
             isMobile={isMobile}
             ingredientId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-ingredients')}
+            onBack={() => setActiveView('admin-ingredients-inventory')}
           />
         ) : activeView === 'admin-ingredients-new' ? (
           <AnalystNewIngredientPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients')}
+            onBack={() => setActiveView('admin-ingredients-create')}
             onEditExisting={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
+          />
+        ) : activeView === 'admin-ingredients-bulk-create' ? (
+          <AnalystIngredientsBulkCreatePage
+            isMobile={isMobile}
+            onBack={() => setActiveView('admin-ingredients-create')}
           />
         ) : activeView === 'admin-ingredients-import' ? (
           <AnalystIngredientsImportPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients')}
+            onBack={() => setActiveView('admin-ingredients-inventory')}
           />
         ) : activeView === 'admin-preparations' ? (
           <AnalystPreparationsReportPage

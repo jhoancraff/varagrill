@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 const iconProps = {
   viewBox: '0 0 24 24',
   width: 26,
@@ -49,6 +51,31 @@ const MarginIcon = () => (
   </svg>
 );
 
+const PayablesIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 17V7" />
+    <path d="M8.5 10a2.5 2.5 0 0 1 2.5-2.5h1.5a2 2 0 0 1 0 4h-1a2 2 0 0 0 0 4H13a2.5 2.5 0 0 0 2.5-2.5" />
+  </svg>
+);
+
+const ExpensesIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M3 10h18" />
+    <path d="M7 15h4" />
+  </svg>
+);
+
+const ResultsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M4 19V10" />
+    <path d="M10 19V5" />
+    <path d="M16 19v-7" />
+    <path d="M3 19h18" />
+  </svg>
+);
+
 const reportSections = [
   {
     id: 'contabilidad-cuadre-caja',
@@ -61,6 +88,25 @@ const reportSections = [
     title: 'Cuentas por cobrar',
     description: 'Facturas emitidas con saldo pendiente: registra los abonos de cada cliente hasta saldarlas.',
     icon: ReceivablesIcon,
+  },
+  {
+    id: 'cuentas-pagar',
+    title: 'Cuentas por pagar',
+    description: 'Deudas con proveedores por lotes de compra cargados al inventario: registra los abonos hasta saldarlas.',
+    icon: PayablesIcon,
+    badgeKey: 'cuentasPorPagar',
+  },
+  {
+    id: 'gastos-operativos',
+    title: 'Gastos operativos',
+    description: 'Alquiler, servicios, nómina y demás gastos del negocio — regístralos de una vez o déjalos pendientes para abonar después.',
+    icon: ExpensesIcon,
+  },
+  {
+    id: 'estado-resultados',
+    title: 'Estado de resultados',
+    description: 'Ventas menos costo de ingredientes menos gastos operativos: si el negocio ganó o perdió plata en el período que elijas.',
+    icon: ResultsIcon,
   },
   {
     id: 'facturas-historial',
@@ -76,13 +122,32 @@ const reportSections = [
   },
   {
     id: 'admin-ingredients',
-    title: 'Inventario de Ingredientes',
-    description: 'Abre el reporte con buscador para modificar, eliminar o agregar ingredientes.',
+    title: 'Inventario',
+    description: 'Crea ingredientes nuevos (uno por uno o en lote por Excel) o consulta el stock y costo actual del inventario.',
     icon: IngredientsIcon,
   },
 ];
 
 function ContabilidadPanelPage({ isMobile, onBack, onNavigate }) {
+  const [cuentasPorPagarCount, setCuentasPorPagarCount] = useState(0);
+
+  useEffect(() => {
+    const loadCount = async () => {
+      try {
+        const response = await fetch('/api/cuentas-por-pagar/', { credentials: 'include', cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.ok) {
+          setCuentasPorPagarCount(Array.isArray(data.compras) ? data.compras.length : 0);
+        }
+      } catch (error) {
+        // El badge simplemente no aparece si falla.
+      }
+    };
+    loadCount();
+  }, []);
+
+  const badgeCounts = { cuentasPorPagar: cuentasPorPagarCount };
+
   return (
     <section style={panelContainerStyle(isMobile)}>
       <div style={heroStyle}>
@@ -96,6 +161,7 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate }) {
       <div style={gridStyle(isMobile)}>
         {reportSections.map((section) => {
           const SectionIcon = section.icon;
+          const badgeCount = section.badgeKey ? badgeCounts[section.badgeKey] : 0;
           return (
             <button
               key={section.id}
@@ -103,6 +169,7 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate }) {
               onClick={() => onNavigate(section.id)}
               style={cardButtonStyle}
             >
+              {badgeCount > 0 ? <span style={cardBadgeStyle}>{badgeCount}</span> : null}
               <div style={cardHeaderStyle}>
                 <span style={cardIconWrapStyle} aria-hidden="true">
                   <SectionIcon />
@@ -178,6 +245,7 @@ const gridStyle = (isMobile) => ({
 });
 
 const cardButtonStyle = {
+  position: 'relative',
   display: 'grid',
   gap: 12,
   textAlign: 'left',
@@ -188,6 +256,24 @@ const cardButtonStyle = {
   color: '#fff',
   cursor: 'pointer',
   boxShadow: '0 12px 30px rgba(0, 0, 0, 0.24)',
+};
+
+const cardBadgeStyle = {
+  position: 'absolute',
+  top: -10,
+  right: -10,
+  minWidth: 28,
+  height: 28,
+  padding: '0 6px',
+  display: 'grid',
+  placeItems: 'center',
+  borderRadius: 999,
+  background: '#ff5c5c',
+  color: '#2a0505',
+  fontWeight: 800,
+  fontSize: 13,
+  boxShadow: '0 4px 12px rgba(255, 92, 92, 0.5)',
+  animation: 'pendingPulse 1.1s ease-in-out infinite',
 };
 
 const cardHeaderStyle = {

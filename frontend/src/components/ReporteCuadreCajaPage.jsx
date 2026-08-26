@@ -283,9 +283,14 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
 
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Cierre del dia</div>
+            {Number(data.gastos_efectivo_dia) > 0 ? (
+              <div style={{ color: '#ff9d9d', fontSize: 13 }}>
+                Gastos pagados en efectivo hoy: −${formatMonto(data.gastos_efectivo_dia)}
+              </div>
+            ) : null}
             {cierre ? (
               <div style={{ display: 'grid', gap: 8, color: '#f2e6e6' }}>
-                <div>Efectivo esperado (VGPago): <strong>${formatMonto(cierre.efectivo_esperado)}</strong></div>
+                <div>Efectivo esperado (ventas − gastos en efectivo): <strong>${formatMonto(cierre.efectivo_esperado)}</strong></div>
                 <div>Total consignado: <strong>${formatMonto(cierre.total_consignado)}</strong></div>
                 <div>Efectivo contado al cerrar: <strong>${formatMonto(cierre.efectivo_contado_final)}</strong></div>
                 <div style={{ color: Number(cierre.diferencia) === 0 ? '#8fffb0' : '#ff9d9d', fontWeight: 800 }}>
@@ -298,6 +303,9 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
               </div>
             ) : (
               <form onSubmit={handleCerrarCaja} className="no-print" style={{ display: 'grid', gap: 12, maxWidth: 420 }}>
+                <div style={{ color: '#c8bbbb', fontSize: 13 }}>
+                  Efectivo esperado (ventas − gastos en efectivo): <strong style={{ color: '#fff' }}>${formatMonto(data.efectivo_esperado_preview)}</strong>
+                </div>
                 <label style={{ display: 'grid', gap: 6, color: '#f2e6e6' }}>
                   Efectivo contado fisicamente
                   <input

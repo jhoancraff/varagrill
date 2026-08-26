@@ -77,16 +77,22 @@ def _destino_categoria(categoria):
     return (categoria.ip_impresora, categoria.puerto_impresora)
 
 
-def _render_detalle_principal(detalle):
+def _render_detalle_principal(detalle, cantidad_override=None):
     """
     Línea principal de un detalle (cantidad/peso + nombre + notas + adicionales +
     opciones de grupos CURADOS). Las opciones de grupos DINÁMICOS (categoria_opciones,
     ej. un acompañante elegido de Guarniciones) quedan afuera a propósito: esas se
     imprimen aparte, en la comanda de la categoría de ESE acompañante, ver
     _render_acompanante y _collect_print_items.
+
+    `cantidad_override`, si viene, reemplaza la cantidad/peso propios de ESTE detalle por
+    un conteo consolidado (ver _consolidar_items) — usado cuando el mismo ítem suelto se
+    repite varias veces en el pedido y se quiere imprimir una sola línea "Nx nombre" en
+    vez de una línea por repetición.
     """
     out = bytearray()
-    out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
+    etiqueta = f'{cantidad_override}x' if cantidad_override is not None else _cantidad_label(detalle)
+    out += _text(f'{etiqueta} {detalle.producto.nombre}') + FEED
     if detalle.notas:
         out += _text(f'  * {detalle.notas}') + FEED
     for opcion in detalle.opciones.all():
@@ -98,11 +104,16 @@ def _render_detalle_principal(detalle):
     return bytes(out)
 
 
-def _render_acompanante(opcion):
+def _render_acompanante(opcion, cantidad=1):
     """Línea de un acompañante de grupo dinámico (VGDetallePedidoOpcion.producto), que
-    imprime en su propia comanda en vez de pegado a la línea principal del plato."""
+    imprime en su propia comanda en vez de pegado a la línea principal del plato.
+    `cantidad` > 1 cuando el mismo acompañante se consolidó porque varios platos armados
+    del mismo pedido eligieron la misma guarnición (ver _consolidar_items) — ej. 4 platos
+    con "Yuca al vapor" de acompañante imprimen una sola línea "4x Yuca al vapor" en vez
+    de repetirse dentro de cada bloque "PLATO N"."""
     out = bytearray()
-    out += _text(f'{opcion.grupo_nombre}: {opcion.producto.nombre}') + FEED
+    prefijo = f'{cantidad}x ' if cantidad != 1 else ''
+    out += _text(f'{prefijo}{opcion.producto.nombre}') + FEED
     return bytes(out)
 
 
@@ -118,7 +129,8 @@ def _collect_print_items(detalles):
     siempre, dentro de _render_detalle_principal.
 
     Cada ítem: {'destino': (ip, puerto) | None, 'categoria': VGCategoriaProducto | None,
-                'grupo_armado': int | None, 'render': bytes}.
+                'grupo_armado': int | None, 'tipo': 'principal' | 'acompanante',
+                'detalle': VGDetallePedido | None, 'opcion': VGDetallePedidoOpcion | None}.
     """
     items = []
     for detalle in detalles:
@@ -127,7 +139,9 @@ def _collect_print_items(detalles):
             'destino': _destino_categoria(categoria),
             'categoria': categoria,
             'grupo_armado': detalle.grupo_armado,
-            'render': _render_detalle_principal(detalle),
+            'tipo': 'principal',
+            'detalle': detalle,
+            'opcion': None,
         })
         for opcion in detalle.opciones.all():
             if not opcion.producto_id:
@@ -137,22 +151,108 @@ def _collect_print_items(detalles):
                 'destino': _destino_categoria(acomp_categoria),
                 'categoria': acomp_categoria,
                 'grupo_armado': detalle.grupo_armado,
-                'render': _render_acompanante(opcion),
+                'tipo': 'acompanante',
+                'detalle': None,
+                'opcion': opcion,
             })
     return items
 
 
-def _group_items_por_plato(items):
-    """Agrupa por grupo_armado (ver 'armar plato'), igual que kitchenTicket.js en el frontend."""
-    grupos = {}
-    sueltos = []
+def _render_item_individual(item):
+    """Renderiza un ítem tal cual (sin consolidar), para cuando va dentro de un bloque
+    "PLATO N" — ver _split_items_para_ticket."""
+    if item['tipo'] == 'acompanante':
+        return _render_acompanante(item['opcion'])
+    return _render_detalle_principal(item['detalle'])
+
+
+def _split_items_para_ticket(items):
+    """
+    Separa los ítems YA filtrados para un ticket (una impresora/estación) en bloques
+    "PLATO N" y en un grupo consolidable.
+
+    Un plato armado (grupo_armado) solo conserva su bloque "PLATO N" en ESTE ticket
+    cuando aporta más de un ítem a este mismo ticket — el caso real es una impresora que
+    combina varias categorías (ej. Carnes + Guarniciones en una sola impresora de cocina),
+    donde vale la pena ver "PLATO 1: Churrasco / Yuca al vapor" junto para no partir la
+    composición del plato. Si en cambio cada categoría tiene su propia impresora (lo más
+    común), esta estación solo recibe UN ítem de cada plato armado (ej. solo la guarnición,
+    porque la carne se fue a la impresora de Parrilla) — ese ítem suelto en este ticket
+    entra al grupo consolidable igual que cualquier guarnición pedida aparte, así 1, 2, 3
+    o 4 platos que eligieron la misma guarnición terminan en una sola línea "Nx nombre" en
+    vez de un "PLATO N" por cada uno.
+    """
+    por_grupo = {}
+    consolidables = []
     for item in items:
         if item['grupo_armado']:
-            grupos.setdefault(item['grupo_armado'], []).append(item)
+            por_grupo.setdefault(item['grupo_armado'], []).append(item)
         else:
-            sueltos.append(item)
-    platos = [(grupo_id, grupos[grupo_id]) for grupo_id in sorted(grupos)]
-    return platos, sueltos
+            consolidables.append(item)
+
+    platos = []
+    for grupo_id, grupo_items in por_grupo.items():
+        if len(grupo_items) > 1:
+            platos.append((grupo_id, grupo_items))
+        else:
+            consolidables.extend(grupo_items)
+    platos.sort(key=lambda par: par[0])
+    return platos, consolidables
+
+
+def _clave_consolidacion(item):
+    """Identidad de un ítem consolidable para agrupar repeticiones: mismo producto y
+    mismas personalizaciones (notas/adicionales/opciones curadas) — si algo lo distingue
+    (ej. "sin sal" en una sola de cuatro yucas), esa fila queda en su propio grupo en vez
+    de mezclarse con las demás."""
+    if item['tipo'] == 'acompanante':
+        return ('acompanante', item['opcion'].producto_id)
+    detalle = item['detalle']
+    adicionales = tuple(sorted((a.preparacion_id, a.cantidad) for a in detalle.adicionales.all()))
+    opciones_curadas = tuple(sorted(
+        (o.grupo_nombre, o.preparacion_id) for o in detalle.opciones.all() if not o.producto_id
+    ))
+    return ('principal', detalle.producto_id, detalle.notas or '', adicionales, opciones_curadas)
+
+
+def _cantidad_item(item):
+    if item['tipo'] == 'acompanante':
+        return 1
+    return item['detalle'].cantidad or 1
+
+
+def _consolidar_items(items):
+    """
+    Agrupa ítems consolidables idénticos (mismo producto y misma personalización) y los
+    combina en una sola línea "Nx nombre" — así si el mismo pedido pide 1, 2, 3 o 4
+    guarniciones del mismo tipo, sea como plato suelto o como acompañante de platos
+    armados distintos, la comanda de esa estación imprime un solo renglón consolidado en
+    vez de repetirlo una vez por cada aparición. Si solo hay una fila para ese producto,
+    se imprime igual que siempre (con su cantidad/peso propio, sin forzar el prefijo "1x").
+    Devuelve la lista de renders (bytes), en el orden en que cada producto apareció primero.
+    """
+    grupos = {}
+    orden = []
+    for item in items:
+        clave = _clave_consolidacion(item)
+        if clave not in grupos:
+            grupos[clave] = {'item': item, 'cantidad_total': 0, 'num_filas': 0}
+            orden.append(clave)
+        grupos[clave]['cantidad_total'] += _cantidad_item(item)
+        grupos[clave]['num_filas'] += 1
+
+    renders = []
+    for clave in orden:
+        grupo = grupos[clave]
+        item = grupo['item']
+        hay_repeticion = grupo['num_filas'] > 1
+        if item['tipo'] == 'acompanante':
+            cantidad = grupo['cantidad_total'] if hay_repeticion else 1
+            renders.append(_render_acompanante(item['opcion'], cantidad))
+        else:
+            cantidad_override = grupo['cantidad_total'] if hay_repeticion else None
+            renders.append(_render_detalle_principal(item['detalle'], cantidad_override=cantidad_override))
+    return renders
 
 
 def _build_ticket_bytes(pedido, categorias, items):
@@ -188,14 +288,16 @@ def _build_ticket_bytes(pedido, categorias, items):
     out += _text(hora) + FEED
     out += _text('=' * LINE_WIDTH) + FEED
 
-    # Solo los platos armados (grupo_armado) llevan título "PLATO N" grande y en
-    # negrita; los ítems sueltos que no se armaron como plato se listan tal cual, sin
-    # ese título, para no confundirlos con un plato armado. Cada bloque se separa del
-    # siguiente por una línea punteada. El número de plato usado en el título es el
-    # grupo_armado real (no una posición relativa a este ticket): un plato puede
-    # repartirse entre varias comandas (ej. carne en Parrilla, acompañante en Cocina) y
-    # así el cocinero y el parrillero ven el mismo "PLATO N" para el mismo plato.
-    platos, sueltos = _group_items_por_plato(items)
+    # Un plato armado solo conserva su título "PLATO N" en este ticket cuando aporta más
+    # de un ítem a ESTE ticket (ver _split_items_para_ticket) — el caso de una impresora
+    # que combina varias categorías del mismo plato. Todo lo demás (sueltos, y platos
+    # armados de los que este ticket solo recibió una línea) se consolida (ver
+    # _consolidar_items): si el mismo producto se repite varias veces en el pedido — sea
+    # la guarnición de 4 platos distintos o 4 yucas pedidas sueltas — se imprime una sola
+    # línea "Nx nombre" en vez de repetirla.
+    platos, consolidables = _split_items_para_ticket(items)
+    renders_consolidados = _consolidar_items(consolidables)
+
     primer_bloque = True
     for grupo_id, plato_items in platos:
         if not primer_bloque:
@@ -205,12 +307,12 @@ def _build_ticket_bytes(pedido, categorias, items):
         out += _text(f'PLATO {grupo_id}') + FEED
         out += NORMAL_SIZE + BOLD_OFF
         for item in plato_items:
-            out += item['render']
-    for item in sueltos:
+            out += _render_item_individual(item)
+    for render in renders_consolidados:
         if not primer_bloque:
             out += _text('-' * LINE_WIDTH) + FEED
         primer_bloque = False
-        out += item['render']
+        out += render
 
     if pedido.notas:
         out += _text('=' * LINE_WIDTH) + FEED

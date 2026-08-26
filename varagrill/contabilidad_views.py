@@ -12,11 +12,15 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
+from django.db.models import Sum
+
+from .api_views import _calcular_margen_periodo
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
-from .models import VGCierreCaja, VGConsignacionCaja, VGMetodoPago
+from .models import VGCierreCaja, VGConsignacionCaja, VGGasto, VGMetodoPago
 from .reportes import (
     desglose_caja_por_moneda,
     efectivo_esperado_dia,
+    gastos_efectivo_dia,
     tasa_para_fecha,
     total_consignado,
     totales_pagos_por_metodo,
@@ -188,6 +192,8 @@ def reporte_cuadre_caja_view(request):
             'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
             'total_consignado': str(total_consignado(fecha)),
+            'gastos_efectivo_dia': str(gastos_efectivo_dia(fecha)),
+            'efectivo_esperado_preview': str(efectivo_esperado_dia(fecha)),
             'cierre': _serialize_cierre_caja(cierre),
         })
 
@@ -253,5 +259,65 @@ def reporte_cuadre_caja_view(request):
             'message': 'Caja cerrada correctamente.',
             'cierre': _serialize_cierre_caja(cierre),
         }, status=201)
+
+
+# ---------------------------------------------------------------------------
+# Estado de resultados
+# ---------------------------------------------------------------------------
+def reporte_estado_resultados_view(request):
+    """
+    Ventas − costo de ingredientes = utilidad bruta; utilidad bruta − gastos
+    operativos = utilidad neta, para un rango de fechas. Reusa
+    _calcular_margen_periodo (api_views.py, la misma logica del reporte de
+    margen por plato) para "ventas" y "costo de ingredientes", y suma VGGasto
+    por fecha_gasto (no por fecha de pago: un gasto cuenta para el periodo en
+    que se incurrio, se haya pagado ya o no) para los gastos operativos.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    try:
+        desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate().replace(day=1)
+        hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+
+    _platos, ventas_total, costo_ingredientes_total = _calcular_margen_periodo(desde, hasta)
+    utilidad_bruta = ventas_total - costo_ingredientes_total
+
+    gastos = VGGasto.objects.filter(fecha_gasto__gte=desde, fecha_gasto__lte=hasta).select_related('categoria')
+    gastos_total = gastos.aggregate(total=Sum('monto')).get('total') or Decimal('0')
+
+    totales_por_categoria = {}
+    for gasto in gastos:
+        entry = totales_por_categoria.setdefault(gasto.categoria_id, {'categoria_nombre': gasto.categoria.nombre, 'total': Decimal('0')})
+        entry['total'] += gasto.monto
+    gastos_por_categoria = sorted(
+        [{**entry, 'total': str(entry['total'].quantize(Decimal('0.01')))} for entry in totales_por_categoria.values()],
+        key=lambda item: Decimal(item['total']), reverse=True,
+    )
+
+    utilidad_neta = utilidad_bruta - gastos_total
+    utilidad_neta_pct = (utilidad_neta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
+
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        'ventas_total': str(ventas_total.quantize(Decimal('0.01'))),
+        'costo_ingredientes_total': str(costo_ingredientes_total.quantize(Decimal('0.01'))),
+        'utilidad_bruta': str(utilidad_bruta.quantize(Decimal('0.01'))),
+        'gastos_total': str(gastos_total.quantize(Decimal('0.01'))),
+        'gastos_por_categoria': gastos_por_categoria,
+        'utilidad_neta': str(utilidad_neta.quantize(Decimal('0.01'))),
+        'utilidad_neta_pct': str(utilidad_neta_pct.quantize(Decimal('0.01'))),
+    })
 
     return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)

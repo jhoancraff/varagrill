@@ -1165,10 +1165,10 @@ def pedido_create_view(request):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
-    cliente = None
     cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
-    if cliente_nombre:
-        cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
+    if not cliente_nombre:
+        return _auth_response({'ok': False, 'message': 'El nombre del cliente es obligatorio.'}, status=400)
+    cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
 
     notas = str(data.get('notas', '') or '').strip()
 
@@ -1277,10 +1277,10 @@ def pedido_update_view(request, pedido_id):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
-    cliente = None
     cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
-    if cliente_nombre:
-        cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
+    if not cliente_nombre:
+        return _auth_response({'ok': False, 'message': 'El nombre del cliente es obligatorio.'}, status=400)
+    cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
 
     notas = str(data.get('notas', '') or '').strip()
 
@@ -3909,6 +3909,11 @@ def kitchen_orders_view(request):
         statuses = active_statuses
 
     base_queryset = VGPedido.objects.filter(estado__in=statuses)
+    if _is_mesero_user(request.user):
+        # Un mesero solo debe ver sus propios pedidos, no los de sus compañeros.
+        # Cajera/administrador/dueño sí necesitan visibilidad completa para
+        # cobrar o supervisar cualquier mesa.
+        base_queryset = base_queryset.filter(usuario=request.user)
 
     status_counts = {
         row['estado']: row['total']

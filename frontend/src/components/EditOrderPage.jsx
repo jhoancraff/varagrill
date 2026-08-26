@@ -378,6 +378,12 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const handleSubmit = async (event) => {
     event.preventDefault();
 
+    if (!orderHeader.cliente.trim()) {
+      setFeedbackType('error');
+      setFeedback('Ingresa el nombre del cliente antes de guardar el pedido.');
+      return;
+    }
+
     if (orderHeader.tipoPedido === 'local' && !orderHeader.mesaId) {
       setFeedbackType('error');
       setFeedback('Selecciona una mesa antes de guardar el pedido.');
@@ -643,13 +649,14 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           </label>
 
           <label style={fieldWrapStyle}>
-            <span style={labelStyle}>Cliente</span>
+            <span style={labelStyle}>Cliente *</span>
             <input
               type="text"
               placeholder="Nombre del cliente"
               value={orderHeader.cliente}
               onChange={(event) => setOrderHeader((current) => ({ ...current, cliente: event.target.value }))}
               style={inputStyle(isCompact)}
+              required
             />
           </label>
         </div>

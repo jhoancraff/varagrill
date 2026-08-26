@@ -302,6 +302,8 @@ def _build_ticket_bytes(pedido, categorias, items):
     out += NORMAL_SIZE + BOLD_OFF
     out += _text(_tipo_pedido_label(pedido.tipo_pedido)) + FEED
     out += _text(f'Mesero: {pedido.usuario.username}') + FEED
+    if pedido.cliente:
+        out += _text(f'Cliente: {pedido.cliente.nombre}') + FEED
     out += _text(hora) + FEED
     out += _text('=' * LINE_WIDTH) + FEED
 

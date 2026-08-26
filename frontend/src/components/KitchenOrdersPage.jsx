@@ -292,7 +292,7 @@ function KitchenOrdersPage({
               ) : (
                 <div style={{ display: 'grid', gap: 10 }}>
                   {groupedOrders[column.key].map((order) => (
-                    <article key={order.id} style={cardStyle}>
+                    <article key={order.id} style={cardStyle} className={cardFloatClassName(order.estado)}>
                       <button
                         type="button"
                         onClick={() => setDetailOrder(order)}
@@ -438,6 +438,16 @@ function renderKitchenItem(item) {
       )}
     </div>
   );
+}
+
+function cardFloatClassName(estado) {
+  if (estado === 'en_preparacion') {
+    return 'vg-order-card--preparing';
+  }
+  if (estado === 'listo') {
+    return 'vg-order-card--ready';
+  }
+  return '';
 }
 
 function formatElapsedTime(createdAt) {
@@ -594,15 +604,16 @@ const mobileColumnTabsWrapStyle = {
 };
 
 const mobileColumnTabStyle = (active, accent) => ({
-  border: active ? `1px solid ${accent}` : '1px solid rgba(255,255,255,0.18)',
+  border: `1px solid ${accent}${active ? 'cc' : '55'}`,
   borderRadius: 12,
-  background: active ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.03)',
+  background: active ? `${accent}40` : `${accent}14`,
   color: '#fff',
   textAlign: 'left',
   padding: '10px 12px',
   fontWeight: 700,
   cursor: 'pointer',
   minHeight: 42,
+  boxShadow: active ? `0 0 0 1px ${accent}66 inset` : 'none',
 });
 
 const columnsGridStyle = (isMobile) => ({

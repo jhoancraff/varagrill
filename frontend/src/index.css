@@ -25,3 +25,37 @@ select option {
   background-color: #17100f;
   color: #fff4f4;
 }
+
+/*
+ * Efecto flotante para las tarjetas de pedido "En preparación" y "Listo" en el
+ * panel de cocina (KitchenOrdersPage). El objetivo es que el mesero/cocinero
+ * note de un vistazo, sin tener que leer, en qué transición está cada pedido:
+ * "en preparación" flota suave (aviso pasivo, todavía se está cocinando) y
+ * "listo" flota más rápido y con brillo (aviso activo: hay que recogerlo/
+ * entregarlo ya). Los colores del brillo replican el accent de cada columna
+ * en KitchenOrdersPage.jsx (statusColumns).
+ */
+@keyframes vg-order-float-preparing {
+  0%, 100% { transform: translateY(0); box-shadow: 0 0 0 rgba(56, 189, 248, 0); }
+  50% { transform: translateY(-3px); box-shadow: 0 0 10px 1px rgba(56, 189, 248, 0.35); }
+}
+
+@keyframes vg-order-float-ready {
+  0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 0 0 rgba(52, 211, 153, 0); }
+  50% { transform: translateY(-5px) scale(1.015); box-shadow: 0 0 18px 3px rgba(52, 211, 153, 0.55); }
+}
+
+.vg-order-card--preparing {
+  animation: vg-order-float-preparing 2.6s ease-in-out infinite;
+}
+
+.vg-order-card--ready {
+  animation: vg-order-float-ready 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vg-order-card--preparing,
+  .vg-order-card--ready {
+    animation: none;
+  }
+}

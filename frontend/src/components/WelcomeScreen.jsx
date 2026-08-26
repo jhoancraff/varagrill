@@ -50,10 +50,19 @@ import PromotionsPage from './PromotionsPage';
 import useKitchenSocket from '../hooks/useKitchenSocket';
 import useKitchenAlerts from './useKitchenAlerts';
 
-const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad-cuadre-caja'];
+const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad', 'contabilidad-cuadre-caja', 'cuentas-cobrar'];
+// Mismas 3 tarjetas que AdminPanelPage oculta (CARTAS_RESTRINGIDAS) — reservadas al
+// dueño real del negocio o al Contador, nunca a un Administrador de rol común.
+const RESTRICTED_ADMIN_VIEWS = ['admin-printers', 'admin-datos-fiscales', 'admin-compras'];
 
-function WelcomeScreen({ name, role, isAdmin, onBack }) {
+function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const isCajera = (role || '').trim().toLowerCase() === 'cajera';
+  const isContador = (role || '').trim().toLowerCase() === 'contador';
+  // El Contador ya pasa isAdmin (el backend lo trata como admin), pero algunas tarjetas
+  // sensibles del Panel Analista (impresoras, datos fiscales, historial de compras)
+  // quedan reservadas al dueño real del negocio (isOwner) o al Contador — nunca a un
+  // Administrador de rol común. Ver ContabilidadPanelPage/AdminPanelPage.
+  const canSeeCartasRestringidas = isOwner || isContador;
 
   const isCompactNavigationViewport = () => (
     window.matchMedia('(max-width: 1024px)').matches
@@ -291,8 +300,13 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
 
     if (!isAdmin && activeView === 'checkout') {
       setActiveView('home');
+      return;
     }
-  }, [activeView, isAdmin, isCajera]);
+
+    if (!canSeeCartasRestringidas && RESTRICTED_ADMIN_VIEWS.includes(activeView)) {
+      setActiveView('admin');
+    }
+  }, [activeView, isAdmin, isCajera, canSeeCartasRestringidas]);
 
   const {
     alertPermission,
@@ -653,7 +667,7 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
           </button>
         ) : null}
 
-        {isAdmin ? (
+        {(isAdmin || isCajera) ? (
           <button
             type="button"
             onClick={() => {
@@ -962,12 +976,14 @@ function WelcomeScreen({ name, role, isAdmin, onBack }) {
             isMobile={isMobile}
             onBack={() => setActiveView('home')}
             onNavigate={handleAnalystNavigation}
+            canSeeCartasRestringidas={canSeeCartasRestringidas}
           />
         ) : activeView === 'contabilidad' ? (
           <ContabilidadPanelPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={() => setActiveView(isCajera ? 'checkout' : 'home')}
             onNavigate={handleAnalystNavigation}
+            onlyCardIds={isCajera ? ['contabilidad-cuadre-caja', 'cuentas-cobrar'] : null}
           />
         ) : activeView === 'contabilidad-cuadre-caja' ? (
           <ReporteCuadreCajaPage

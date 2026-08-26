@@ -128,10 +128,15 @@ const reportSections = [
   },
 ];
 
-function ContabilidadPanelPage({ isMobile, onBack, onNavigate }) {
+function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
   const [cuentasPorPagarCount, setCuentasPorPagarCount] = useState(0);
 
   useEffect(() => {
+    // La cajera (onlyCardIds restringido a cuadre de caja + cuentas por cobrar) no tiene
+    // permiso para consultar cuentas por pagar — ni falta le hace ese badge aquí.
+    if (onlyCardIds) {
+      return;
+    }
     const loadCount = async () => {
       try {
         const response = await fetch('/api/cuentas-por-pagar/', { credentials: 'include', cache: 'no-store' });
@@ -144,9 +149,10 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate }) {
       }
     };
     loadCount();
-  }, []);
+  }, [onlyCardIds]);
 
   const badgeCounts = { cuentasPorPagar: cuentasPorPagarCount };
+  const visibleSections = onlyCardIds ? reportSections.filter((section) => onlyCardIds.includes(section.id)) : reportSections;
 
   return (
     <section style={panelContainerStyle(isMobile)}>
@@ -159,7 +165,7 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate }) {
       </div>
 
       <div style={gridStyle(isMobile)}>
-        {reportSections.map((section) => {
+        {visibleSections.map((section) => {
           const SectionIcon = section.icon;
           const badgeCount = section.badgeKey ? badgeCounts[section.badgeKey] : 0;
           return (

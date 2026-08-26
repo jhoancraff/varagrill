@@ -46,7 +46,15 @@ from .models import (
     VGRol,
     VGUsuario,
 )
-from .auth_helpers import _auth_response, _get_role_name, _is_admin_user, _is_cajera_user, _is_mesero_user
+from .auth_helpers import (
+    _auth_response,
+    _get_role_name,
+    _is_admin_user,
+    _is_cajera_user,
+    _is_mesero_user,
+    _is_owner_or_contador_user,
+    _is_owner_user,
+)
 from .impresion_lpd import imprimir_recibo_caja
 from .impresion_termica import imprimir_comandas_pedido
 from .ingredientes_excel import (
@@ -2362,12 +2370,17 @@ def _finalizar_estado_pago_compra(compra):
 
 
 def admin_compras_view(request):
-    """Historial de lotes de compra (VGCompra): de qué proveedor/factura vino cada carga de inventario."""
+    """
+    Historial completo de lotes de compra (VGCompra): de qué proveedor/factura vino cada
+    carga de inventario. A diferencia de compra_detail_view (que también usa Cuentas por
+    Pagar y por eso queda abierto a admin/contador), este historial completo es la
+    tarjeta "Historial de compras" del Panel Analista, restringida a dueño/contador.
+    """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
-    if not _is_admin_user(request.user):
-        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+    if not _is_owner_or_contador_user(request.user):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver el historial de compras.'}, status=401)
 
     compras = VGCompra.objects.select_related('creado_por').prefetch_related('detalles').order_by('-fecha_creacion')
     return _auth_response({
@@ -2635,8 +2648,8 @@ def admin_categorias_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
-    if not _is_admin_user(request.user):
-        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+    if not _is_owner_or_contador_user(request.user):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para configurar las impresoras.'}, status=401)
 
     if request.method == 'GET':
         categorias = VGCategoriaProducto.objects.order_by('nombre')
@@ -2706,8 +2719,8 @@ def admin_impresora_caja_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
-    if not _is_admin_user(request.user):
-        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+    if not _is_owner_or_contador_user(request.user):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para configurar las impresoras.'}, status=401)
 
     if request.method == 'GET':
         return _auth_response({'ok': True, 'impresora_caja': _serialize_impresora_caja(VGImpresoraCaja.obtener_config())})
@@ -4251,6 +4264,7 @@ class LoginView(generics.GenericAPIView):
                 'email': user.email,
                 'role': _get_role_name(user),
                 'is_admin': _is_admin_user(user),
+                'is_owner': _is_owner_user(user),
             },
         })
 
@@ -4267,6 +4281,7 @@ class SessionStatusView(generics.GenericAPIView):
                     'email': request.user.email,
                     'role': _get_role_name(request.user),
                     'is_admin': _is_admin_user(request.user),
+                    'is_owner': _is_owner_user(request.user),
                 },
             })
 

@@ -167,7 +167,15 @@ const analystSections = [
   },
 ];
 
-function AdminPanelPage({ isMobile, onBack, onNavigate }) {
+// Reservadas al dueño real del negocio (superusuario) o al Contador — un Administrador
+// de rol común no las ve, ver WelcomeScreen.jsx (canSeeCartasRestringidas).
+const CARTAS_RESTRINGIDAS = ['admin-printers', 'admin-datos-fiscales', 'admin-compras'];
+
+function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas }) {
+  const visibleSections = canSeeCartasRestringidas
+    ? analystSections
+    : analystSections.filter((section) => !CARTAS_RESTRINGIDAS.includes(section.id));
+
   return (
     <section style={panelContainerStyle(isMobile)}>
       <div style={heroStyle}>
@@ -180,7 +188,7 @@ function AdminPanelPage({ isMobile, onBack, onNavigate }) {
       </div>
 
       <div style={gridStyle(isMobile)}>
-        {analystSections.map((section) => {
+        {visibleSections.map((section) => {
           const SectionIcon = section.icon;
           return (
             <button

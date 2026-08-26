@@ -17,6 +17,7 @@ function App() {
   const [welcomeName, setWelcomeName] = useState('');
   const [welcomeRole, setWelcomeRole] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
     const installedStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
@@ -59,6 +60,7 @@ function App() {
           setWelcomeName('');
           setWelcomeRole('');
           setIsAdmin(false);
+          setIsOwner(false);
           return;
         }
 
@@ -68,6 +70,7 @@ function App() {
           setWelcomeName('');
           setWelcomeRole('');
           setIsAdmin(false);
+          setIsOwner(false);
           return;
         }
 
@@ -79,12 +82,14 @@ function App() {
         setWelcomeName(formattedName || 'Usuario');
         setWelcomeRole(data.user?.role || '');
         setIsAdmin(Boolean(data.user?.is_admin));
+        setIsOwner(Boolean(data.user?.is_owner));
         setIsLoggedIn(true);
       } catch (error) {
         setIsLoggedIn(false);
         setWelcomeName('');
         setWelcomeRole('');
         setIsAdmin(false);
+        setIsOwner(false);
       } finally {
         setCheckingSession(false);
       }
@@ -145,6 +150,7 @@ function App() {
       setWelcomeName(formattedName);
       setWelcomeRole(data.user?.role || '');
       setIsAdmin(Boolean(data.user?.is_admin));
+      setIsOwner(Boolean(data.user?.is_owner));
       setMessage(`Acceso concedido, bienvenido ${formattedName}.`);
       setPassword('');
       setUsername('');
@@ -188,7 +194,7 @@ function App() {
   }
 
   if (isLoggedIn) {
-    return <WelcomeScreen name={welcomeName} role={welcomeRole} isAdmin={isAdmin} onBack={handleLogout} />;
+    return <WelcomeScreen name={welcomeName} role={welcomeRole} isAdmin={isAdmin} isOwner={isOwner} onBack={handleLogout} />;
   }
 
   return (

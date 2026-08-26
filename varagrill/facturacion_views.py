@@ -24,7 +24,7 @@ from .api_views import (
     _load_preparation_structure,
     _snapshot_costo_venta_detalles,
 )
-from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
+from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user, _is_owner_or_contador_user
 from .impresion_lpd import imprimir_factura_caja, imprimir_prefactura_caja
 from .models import (
     VGCliente,
@@ -406,8 +406,8 @@ def datos_fiscales_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
-    if not _is_admin_user(request.user):
-        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+    if not _is_owner_or_contador_user(request.user):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver los datos fiscales.'}, status=401)
 
     emisor = VGDatosFiscalesEmisor.objects.first()
 

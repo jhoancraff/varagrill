@@ -31,6 +31,8 @@ function KitchenOrdersPage({
   lastKitchenEvent,
   onEditOrder,
   onAddRoundToTable,
+  flashMessage,
+  onClearFlashMessage,
 }) {
   const tasaCambio = useExchangeRate();
   const [orders, setOrders] = useState([]);
@@ -82,6 +84,14 @@ function KitchenOrdersPage({
     }
     fetchOrders();
   }, [lastKitchenEvent, fetchOrders]);
+
+  useEffect(() => {
+    if (!flashMessage || !onClearFlashMessage) {
+      return;
+    }
+    const timeoutId = window.setTimeout(onClearFlashMessage, 6000);
+    return () => window.clearTimeout(timeoutId);
+  }, [flashMessage, onClearFlashMessage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -239,6 +249,20 @@ function KitchenOrdersPage({
           <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>Volver</button>
         </div>
       </div>
+
+      {flashMessage ? (
+        <div style={successBannerStyle}>
+          <span>{flashMessage}</span>
+          <button
+            type="button"
+            onClick={onClearFlashMessage}
+            style={successBannerCloseStyle}
+            aria-label="Cerrar aviso"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
 
       <div style={alertPanelStyle(isMobile)}>
         <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
@@ -707,6 +731,30 @@ const errorStyle = {
   color: '#ffe2e2',
   padding: '10px 12px',
   fontSize: 13,
+};
+
+const successBannerStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  borderRadius: 14,
+  border: '1px solid rgba(52, 211, 153, 0.5)',
+  background: 'rgba(16, 90, 63, 0.5)',
+  color: '#d5ffee',
+  padding: '10px 14px',
+  fontSize: 14,
+  fontWeight: 600,
+};
+
+const successBannerCloseStyle = {
+  border: 'none',
+  background: 'transparent',
+  color: '#d5ffee',
+  fontSize: 18,
+  lineHeight: 1,
+  cursor: 'pointer',
+  flexShrink: 0,
 };
 
 const columnStyle = (accent) => ({

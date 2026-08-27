@@ -25,6 +25,7 @@ function NewOrderPage({
   onBack,
   initialMesaId,
   initialCliente,
+  onSubmitSuccess,
 }) {
   const tasaCambio = useExchangeRate();
   const isAddingRound = Boolean(initialMesaId);
@@ -503,6 +504,10 @@ function NewOrderPage({
       resetArmarPlato();
       setOrderHeader((current) => ({ ...current, notas: '' }));
       markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
+
+      if (onSubmitSuccess) {
+        onSubmitSuccess(data.pedido.id);
+      }
     } catch (error) {
       if (!navigator.onLine) {
         const payload = buildPayload();

@@ -16,7 +16,7 @@ function isHiddenMenuCategory(categoriaNombre) {
   return HIDDEN_MENU_CATEGORIES.includes((categoriaNombre || '').trim().toLowerCase());
 }
 
-function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, orderId, onBack }) {
+function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, orderId, onBack, onSubmitSuccess }) {
   const tasaCambio = useExchangeRate();
   const [orderHeader, setOrderHeader] = useState({
     mesaId: '',
@@ -474,6 +474,10 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       setFeedbackType('success');
       setFeedback(`Pedido #${data.pedido.id} actualizado: total $${data.pedido.total}.`);
       markClean({ cartItems, orderHeader });
+
+      if (onSubmitSuccess) {
+        onSubmitSuccess(data.pedido.id);
+      }
     } catch (error) {
       setFeedbackType('error');
       setFeedback('Error de conexion al actualizar el pedido. Verifica la red e intenta otra vez.');

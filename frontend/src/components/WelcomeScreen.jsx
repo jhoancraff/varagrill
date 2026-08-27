@@ -81,11 +81,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const [loadingData, setLoadingData] = useState(true);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [readyToBillCount, setReadyToBillCount] = useState(0);
-  const [listoOrdersCount, setListoOrdersCount] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
   const [lastKitchenEvent, setLastKitchenEvent] = useState(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [newOrderPreset, setNewOrderPreset] = useState(null);
+  const [kitchenFlashMessage, setKitchenFlashMessage] = useState('');
 
   const handleAddRoundToTable = ({ mesaId, cliente }) => {
     setNewOrderPreset({ mesaId, cliente, token: Date.now() });
@@ -93,6 +93,16 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
     }
+  };
+
+  const handleOrderCreated = (pedidoId) => {
+    setKitchenFlashMessage(`Pedido #${pedidoId} registrado con éxito.`);
+    setActiveView('kitchen');
+  };
+
+  const handleOrderUpdated = (pedidoId) => {
+    setKitchenFlashMessage(`Pedido #${pedidoId} actualizado con éxito.`);
+    setActiveView('kitchen');
   };
 
   useEffect(() => {
@@ -235,9 +245,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
         const count = Number(data.counts?.pendiente || 0);
         setPendingOrdersCount(Number.isFinite(count) ? count : 0);
-
-        const listoCount = Number(data.counts?.listo || 0);
-        setListoOrdersCount(Number.isFinite(listoCount) ? listoCount : 0);
       } catch (error) {
         // Keep the last known value when there is a temporary network error.
       }
@@ -389,7 +396,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
       // Aviso personal: solo llega al mesero dueño del pedido (grupo por-usuario en consumers.py).
       triggerKitchenAlert('¡Tu pedido está listo!', `Pedido #${payload.pedido_id} · ${mesaLabel} ya puede salir a la mesa.`);
       setLiveNotice(`Pedido #${payload.pedido_id} (${mesaLabel}) está listo para servir.`);
-      setListoOrdersCount((current) => current + 1);
       window.setTimeout(() => {
         setLiveNotice('');
       }, 8000);
@@ -635,7 +641,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
               </svg>
             </span>
             <span style={{ flex: 1, textAlign: 'left' }}>Mesas atendidas</span>
-            <span style={pendingBadgeStyle(listoOrdersCount > 0)}>{listoOrdersCount}</span>
           </button>
         ) : null}
 
@@ -948,6 +953,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             initialMesaId={newOrderPreset?.mesaId}
             initialCliente={newOrderPreset?.cliente}
             onBack={() => setActiveView('home')}
+            onSubmitSuccess={handleOrderCreated}
           />
         ) : activeView === 'mesas-atendidas' ? (
           <MesasAtendidasPage
@@ -965,6 +971,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             loadingData={loadingData}
             orderId={activeView.split(':')[1] || ''}
             onBack={() => setActiveView('kitchen')}
+            onSubmitSuccess={handleOrderUpdated}
           />
         ) : activeView === 'checkout' ? (
           <CheckoutPage
@@ -1257,6 +1264,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             lastKitchenEvent={lastKitchenEvent}
             onEditOrder={(orderId) => setActiveView(`orders-edit:${orderId}`)}
             onAddRoundToTable={handleAddRoundToTable}
+            flashMessage={kitchenFlashMessage}
+            onClearFlashMessage={() => setKitchenFlashMessage('')}
           />
         )}
       </div>

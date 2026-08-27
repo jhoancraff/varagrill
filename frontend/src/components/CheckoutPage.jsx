@@ -356,7 +356,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                   <span style={groupCountStyle}>{group.pedidos.length} pedido(s)</span>
                 </div>
 
-                <div style={{ display: 'grid', gap: 8 }}>
+                <div style={ordersScrollStyle}>
                   {group.pedidos.map((pedido) => {
                     const isExpanded = expandedOrderIds.has(pedido.id);
                     const items = Array.isArray(pedido.items) ? pedido.items : [];
@@ -435,7 +435,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                 </div>
 
                 {!prefactura ? (
-                  <>
+                  <div style={footerSectionStyle}>
                     <div style={clienteFormStyle(isMobile)}>
                       <input
                         placeholder="Cliente (opcional, solo para pre-factura/factura)"
@@ -509,7 +509,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                         {isBusy ? 'Emitiendo...' : 'Factura directa'}
                       </button>
                     </div>
-                  </>
+                  </div>
                 ) : (
                   <div style={prefacturaPanelStyle}>
                     <div style={{ color: '#ffb0b0', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -704,12 +704,28 @@ const feedbackStyle = (feedbackType) => ({
 const groupsGridStyle = (isMobile) => ({
   display: 'grid',
   gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))',
+  // Sin esto, CSS Grid estira cada tarjeta a la altura de la más alta de su
+  // fila (comportamiento por defecto de `align-items: stretch`) — con mesas
+  // de tamaños muy distintos (18 pedidos vs 2), la mesa chica queda con un
+  // hueco enorme y sus pedidos/botones repartidos de forma rara. `start`
+  // deja que cada tarjeta mida su propia altura fija (ver groupCardStyle),
+  // sin que la de al lado la afecte.
+  alignItems: 'start',
   gap: 14,
 });
 
+// Tamaño fijo para TODAS las tarjetas de mesa, sin importar cuántos pedidos
+// tenga cada una — la lista de pedidos hace scroll interno (ver
+// ordersScrollStyle) y el encabezado/footer con los botones de cobro quedan
+// siempre visibles, en vez de que la tarjeta crezca sin límite con mesas de
+// muchos pedidos.
+const GROUP_CARD_HEIGHT = 560;
+
 const groupCardStyle = {
-  display: 'grid',
+  display: 'flex',
+  flexDirection: 'column',
   gap: 12,
+  height: GROUP_CARD_HEIGHT,
   padding: '18px 18px',
   borderRadius: 20,
   background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
@@ -722,6 +738,31 @@ const groupHeaderStyle = {
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 10,
+  flexShrink: 0,
+};
+
+// Única zona de la tarjeta que crece/encoge y hace scroll — todo lo demás
+// (header arriba, formulario de cliente + totales + botones abajo) queda
+// fijo y siempre visible sin importar cuántos pedidos tenga la mesa.
+const ordersScrollStyle = {
+  // display:grid aquí (con altura ya acotada por el flex padre) hacía que
+  // Chrome/Edge colapsaran cada fila casi a 0px en vez de desbordar y dejar
+  // scroll — un problema conocido de grid+overflow:auto dentro de un flex
+  // item con minHeight:0. flex-column no tiene ese bug: cada pedido conserva
+  // su alto natural y el contenedor sí scrollea de verdad.
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  flex: '1 1 auto',
+  minHeight: 0,
+  overflowY: 'auto',
+  paddingRight: 4,
+};
+
+const footerSectionStyle = {
+  display: 'grid',
+  gap: 12,
+  flexShrink: 0,
 };
 
 const groupCountStyle = {
@@ -738,6 +779,7 @@ const orderCardStyle = {
   border: '1px solid rgba(255, 255, 255, 0.08)',
   background: 'rgba(255, 255, 255, 0.03)',
   overflow: 'hidden',
+  flexShrink: 0,
 };
 
 const orderRowStyle = {
@@ -906,6 +948,13 @@ const prefacturaPanelStyle = {
   borderRadius: 14,
   border: '1px solid rgba(255, 190, 120, 0.3)',
   background: 'rgba(255, 190, 120, 0.06)',
+  // Comparte el espacio flexible restante de la tarjeta con la lista de
+  // pedidos de arriba (que sigue montada) y hace su propio scroll interno
+  // si la pre-factura tiene muchas líneas — así la tarjeta nunca se sale de
+  // su alto fijo (GROUP_CARD_HEIGHT).
+  flex: '1 1 auto',
+  minHeight: 0,
+  overflowY: 'auto',
 };
 
 const lineaRowStyle = {

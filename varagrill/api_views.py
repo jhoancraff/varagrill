@@ -262,12 +262,15 @@ def _resolve_recipe_components_for_save(parsed_components):
     return resolved, None
 
 
-def _notify_cocina_event(event_name, pedido, actor_user):
+def _notify_cocina_event(event_name, pedido, actor_user, previous_estado=None):
     # Se imprime la comanda física solo al pasar el pedido a "en preparación"
     # (cocina confirma que arranca a cocinarlo), no al registrarlo. No debe
     # depender de que el canal de WebSocket esté disponible: se intenta
     # siempre, aunque channel_layer sea None.
-    if event_name == 'PEDIDO_ACTUALIZADO' and pedido.estado == 'en_preparacion':
+    # Excepción: si viene de "listo" (el mesero le dio "Volver a preparar" por
+    # un error), no se reimprime la comanda — ya se imprimió la primera vez y
+    # no se quiere duplicar el ticket en cocina por una corrección de estado.
+    if event_name == 'PEDIDO_ACTUALIZADO' and pedido.estado == 'en_preparacion' and previous_estado != 'listo':
         try:
             imprimir_comandas_pedido(pedido)
         except Exception:
@@ -1122,6 +1125,8 @@ def _serialize_order_detail(pedido):
         'mesa_id': pedido.mesa_id,
         'mesa': pedido.mesa.numero if pedido.mesa else None,
         'cliente_nombre': pedido.cliente.nombre if pedido.cliente else '',
+        'cliente_cedula': pedido.cliente.numero_documento if pedido.cliente else '',
+        'cliente_telefono': pedido.cliente.telefono if pedido.cliente else '',
         'notas': pedido.notas,
         'impuesto': str(pedido.impuesto),
         'descuento': str(pedido.descuento),
@@ -1148,6 +1153,28 @@ def _serialize_order_detail(pedido):
     }
 
 
+def _resolve_or_create_cliente(nombre, cedula, telefono):
+    """
+    Resuelve el cliente por cédula cuando se da (identificador confiable para
+    historial de movimientos y futuros sorteos): si ya existe un VGCliente con
+    esa cédula, se reutiliza tal cual (no se pisa nombre/teléfono ya guardados
+    con lo que haya escrito el mesero esta vez). Si no existe, se crea con los
+    datos capturados ahora. Sin cédula, cae al comportamiento previo
+    (get_or_create solo por nombre), ya que no hay forma confiable de saber si
+    es el mismo cliente.
+    """
+    cedula = cedula.strip()
+    if cedula:
+        cliente, _ = VGCliente.objects.get_or_create(
+            tipo_documento='V',
+            numero_documento=cedula,
+            defaults={'nombre': nombre, 'telefono': telefono},
+        )
+        return cliente
+    cliente, _ = VGCliente.objects.get_or_create(nombre=nombre)
+    return cliente
+
+
 @csrf_exempt
 def pedido_create_view(request):
     if request.method != 'POST':
@@ -1168,7 +1195,9 @@ def pedido_create_view(request):
     cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
     if not cliente_nombre:
         return _auth_response({'ok': False, 'message': 'El nombre del cliente es obligatorio.'}, status=400)
-    cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
+    cliente_cedula = str(data.get('cliente_cedula', '') or '').strip()
+    cliente_telefono = str(data.get('cliente_telefono', '') or '').strip()
+    cliente = _resolve_or_create_cliente(cliente_nombre, cliente_cedula, cliente_telefono)
 
     notas = str(data.get('notas', '') or '').strip()
 
@@ -1280,7 +1309,9 @@ def pedido_update_view(request, pedido_id):
     cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
     if not cliente_nombre:
         return _auth_response({'ok': False, 'message': 'El nombre del cliente es obligatorio.'}, status=400)
-    cliente, _ = VGCliente.objects.get_or_create(nombre=cliente_nombre)
+    cliente_cedula = str(data.get('cliente_cedula', '') or '').strip()
+    cliente_telefono = str(data.get('cliente_telefono', '') or '').strip()
+    cliente = _resolve_or_create_cliente(cliente_nombre, cliente_cedula, cliente_telefono)
 
     notas = str(data.get('notas', '') or '').strip()
 
@@ -3953,6 +3984,7 @@ def kitchen_orders_view(request):
             'estado': pedido.estado,
             'tipo_pedido': pedido.tipo_pedido,
             'mesa': pedido.mesa.numero if pedido.mesa else None,
+            'mesa_id': pedido.mesa_id,
             'mesero': pedido.usuario.username,
             'cliente': pedido.cliente.nombre if pedido.cliente else '',
             'notas': pedido.notas,
@@ -3981,6 +4013,140 @@ def kitchen_orders_view(request):
         'server_time': timezone.now().isoformat(),
         'counts': counts,
         'orders': payload_orders,
+    })
+
+
+# Estados que mantienen una mesa "abierta" en el reporte de mesas atendidas: si
+# algún pedido de la mesa sigue en uno de estos, todavía falta que caja lo cobre
+# o facture. Una mesa pasa a "cerrada" cuando ningún pedido queda en este
+# conjunto (todos terminaron en 'pagado', o se cancelaron antes de cocina).
+MESA_ABIERTA_ORDER_STATES = {'pendiente', 'en_preparacion', 'listo', 'entregado'}
+
+
+def mesas_atendidas_view(request):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para ver tus mesas atendidas.'}, status=401)
+
+    hoy = timezone.localdate()
+    pedidos = (
+        VGPedido.objects
+        .filter(usuario=request.user, mesa__isnull=False, fecha_creacion__date=hoy)
+        .select_related('mesa', 'cliente')
+        .order_by('mesa__numero', 'fecha_creacion')
+    )
+
+    mesas_por_id = {}
+    for pedido in pedidos:
+        entry = mesas_por_id.setdefault(pedido.mesa_id, {
+            'mesa_id': pedido.mesa_id,
+            'mesa_numero': pedido.mesa.numero,
+            'pedidos': [],
+        })
+        entry['pedidos'].append(pedido)
+
+    mesas_payload = []
+    for entry in mesas_por_id.values():
+        pedidos_mesa = entry['pedidos']
+        esta_abierta = any(p.estado in MESA_ABIERTA_ORDER_STATES for p in pedidos_mesa)
+        total = sum((p.total for p in pedidos_mesa if p.estado != 'cancelado'), Decimal('0.00'))
+        mesas_payload.append({
+            'mesa_id': entry['mesa_id'],
+            'mesa_numero': entry['mesa_numero'],
+            'estado': 'abierta' if esta_abierta else 'cerrada',
+            'total': str(total),
+            'pedidos': [
+                {
+                    'id': p.id,
+                    'cliente': p.cliente.nombre if p.cliente else '',
+                    'estado': p.estado,
+                    'total': str(p.total),
+                    'creado_en': p.fecha_creacion.isoformat(),
+                }
+                for p in pedidos_mesa
+            ],
+        })
+
+    mesas_payload.sort(key=lambda m: m['mesa_numero'])
+
+    return _auth_response({
+        'ok': True,
+        'server_time': timezone.now().isoformat(),
+        'mesas': mesas_payload,
+    })
+
+
+@csrf_exempt
+def mesa_atendida_mover_view(request):
+    """
+    Mueve TODOS los pedidos abiertos (no pagados/cancelados) de una mesa del
+    mesero a otra mesa — para cuando el cliente cambia de puesto. Solo mueve
+    los pedidos del propio mesero (mismo criterio de privacidad que el resto
+    de "mesas atendidas"); los ya pagados/cancelados de esa mesa se quedan
+    donde estaban, son historial cerrado.
+    """
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    try:
+        mesa_origen_id = int(data.get('mesa_origen_id'))
+        mesa_destino_id = int(data.get('mesa_destino_id'))
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'Mesa origen o destino invalida.'}, status=400)
+
+    if mesa_origen_id == mesa_destino_id:
+        return _auth_response({'ok': False, 'message': 'La mesa destino debe ser distinta a la actual.'}, status=400)
+
+    try:
+        mesa_destino = VGMesa.objects.get(pk=mesa_destino_id)
+    except VGMesa.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'La mesa destino no existe.'}, status=404)
+
+    with transaction.atomic():
+        ocupada = (
+            VGPedido.objects
+            .select_for_update()
+            .filter(mesa_id=mesa_destino_id, estado__in=MESA_ABIERTA_ORDER_STATES)
+            .exists()
+        )
+        if ocupada:
+            return _auth_response(
+                {'ok': False, 'message': f'La mesa {mesa_destino.numero} ya tiene un pedido abierto.'},
+                status=409,
+            )
+
+        pedidos = list(
+            VGPedido.objects
+            .select_for_update()
+            .filter(usuario=request.user, mesa_id=mesa_origen_id, estado__in=MESA_ABIERTA_ORDER_STATES)
+        )
+        if not pedidos:
+            return _auth_response(
+                {'ok': False, 'message': 'No hay pedidos abiertos en esa mesa para mover.'},
+                status=404,
+            )
+
+        for pedido in pedidos:
+            pedido.mesa = mesa_destino
+            pedido.actualizado_por = request.user
+            pedido.save(update_fields=['mesa', 'actualizado_por', 'fecha_actualizacion'])
+
+    return _auth_response({
+        'ok': True,
+        'message': f'{len(pedidos)} pedido(s) movido(s) a la Mesa {mesa_destino.numero}.',
+        'mesa_destino_id': mesa_destino.id,
+        'mesa_destino_numero': mesa_destino.numero,
+        'pedidos_movidos': len(pedidos),
     })
 
 
@@ -4024,6 +4190,7 @@ def kitchen_order_status_update_view(request, pedido_id):
                 status=400,
             )
 
+        previous_estado = pedido.estado
         pedido.estado = next_state
         pedido.actualizado_por = request.user
         pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
@@ -4035,7 +4202,7 @@ def kitchen_order_status_update_view(request, pedido_id):
         elif next_state == 'entregado':
             pedido.detalles.filter(estado='listo').update(estado='entregado')
 
-    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
+    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user, previous_estado=previous_estado)
     if next_state == 'listo':
         _notify_usuario_event('PEDIDO_LISTO', pedido, request.user)
 
@@ -4072,7 +4239,11 @@ def pedido_reimprimir_comanda_view(request, pedido_id):
     return _auth_response({'ok': True, 'message': 'Comanda reimpresa correctamente.'})
 
 
-BILLABLE_ORDER_STATES = ['listo', 'entregado']
+# Caja solo debe poder cobrar/facturar un pedido una vez que el mesero
+# confirmó que ya llegó a la mesa (estado 'entregado') — no apenas cocina lo
+# marca 'listo', porque en ese punto todavía puede estar esperando a que lo
+# sirvan y no debería poder cobrarse.
+BILLABLE_ORDER_STATES = ['entregado']
 
 
 @csrf_exempt

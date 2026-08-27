@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import BsAmount from './BsAmount';
+import useExchangeRate from '../hooks/useExchangeRate';
 
 const ACTIVE_FILTER = 'activos';
 const ALL_FILTER = 'todos';
@@ -9,9 +11,11 @@ const statusColumns = [
   { key: 'listo', title: 'Listos', accent: '#34d399' },
 ];
 
+// Solo cubre "listo", el único estado que todavía necesita un listado genérico
+// de próximas acciones — pendiente y en_preparacion tienen su propio set fijo
+// de botones (ver el render de cada columna) porque ahora mezclan acciones que
+// no son simples transiciones de estado (editar, cancelar).
 const nextActionsByState = {
-  pendiente: [{ next: 'en_preparacion', label: 'Iniciar preparación' }],
-  en_preparacion: [{ next: 'listo', label: 'Marcar listo' }],
   listo: [
     { next: 'en_preparacion', label: 'Volver a preparar' },
     { next: 'entregado', label: 'Entregado' },
@@ -26,7 +30,9 @@ function KitchenOrdersPage({
   onRequestPermission,
   lastKitchenEvent,
   onEditOrder,
+  onAddRoundToTable,
 }) {
+  const tasaCambio = useExchangeRate();
   const [orders, setOrders] = useState([]);
   const [counts, setCounts] = useState({ pendiente: 0, en_preparacion: 0, listo: 0 });
   const [loading, setLoading] = useState(true);
@@ -132,7 +138,7 @@ function KitchenOrdersPage({
       }
 
       setOrders((current) => {
-        if (nextState === 'entregado' && statusFilter === ACTIVE_FILTER) {
+        if ((nextState === 'entregado' || nextState === 'cancelado') && statusFilter === ACTIVE_FILTER) {
           return current.filter((order) => order.id !== orderId);
         }
 
@@ -167,6 +173,13 @@ function KitchenOrdersPage({
         return copy;
       });
     }
+  };
+
+  const handleCancelOrder = (orderId) => {
+    if (!window.confirm('¿Cancelar este pedido? Quedará registrado como cancelado en el historial, no se borra.')) {
+      return;
+    }
+    handleUpdateOrderState(orderId, 'cancelado');
   };
 
   const handleReprintComanda = async (orderId) => {
@@ -312,9 +325,9 @@ function KitchenOrdersPage({
                         </div>
                       </button>
 
-                      {(order.estado === 'pendiente' || (nextActionsByState[order.estado] || []).length > 0) && (
+                      {order.estado === 'pendiente' ? (
                         <div style={actionsWrapStyle(isMobile)}>
-                          {order.estado === 'pendiente' && onEditOrder ? (
+                          {onEditOrder ? (
                             <button
                               type="button"
                               onClick={() => onEditOrder(order.id)}
@@ -323,16 +336,36 @@ function KitchenOrdersPage({
                               Editar pedido
                             </button>
                           ) : null}
-                          {order.estado === 'en_preparacion' || order.estado === 'listo' ? (
-                            <button
-                              type="button"
-                              onClick={() => handleReprintComanda(order.id)}
-                              style={editButtonStyle(isMobile)}
-                              disabled={Boolean(printingMap[order.id])}
-                            >
-                              {printingMap[order.id] ? 'Imprimiendo...' : 'Imprimir comanda'}
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateOrderState(order.id, 'en_preparacion')}
+                            style={actionButtonStyle('en_preparacion', isMobile)}
+                            disabled={Boolean(updatingMap[order.id])}
+                          >
+                            {updatingMap[order.id] ? 'Actualizando...' : 'Iniciar preparación'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelOrder(order.id)}
+                            style={cancelButtonStyle(isMobile)}
+                            disabled={Boolean(updatingMap[order.id])}
+                          >
+                            Cancelar pedido
+                          </button>
+                        </div>
+                      ) : order.estado === 'en_preparacion' ? (
+                        <div style={actionsWrapStyle(isMobile)}>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateOrderState(order.id, 'listo')}
+                            style={actionButtonStyle('listo', isMobile)}
+                            disabled={Boolean(updatingMap[order.id])}
+                          >
+                            {updatingMap[order.id] ? 'Actualizando...' : 'Marcar listo'}
+                          </button>
+                        </div>
+                      ) : (nextActionsByState[order.estado] || []).length > 0 ? (
+                        <div style={actionsWrapStyle(isMobile)}>
                           {(nextActionsByState[order.estado] || []).map((action) => (
                             <button
                               key={action.next}
@@ -345,7 +378,7 @@ function KitchenOrdersPage({
                             </button>
                           ))}
                         </div>
-                      )}
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -356,14 +389,23 @@ function KitchenOrdersPage({
       )}
 
       {detailOrder ? (
-        <OrderDetailModal order={detailOrder} onClose={() => setDetailOrder(null)} />
+        <OrderDetailModal
+          order={detailOrder}
+          onClose={() => setDetailOrder(null)}
+          onAddRoundToTable={onAddRoundToTable}
+          onReprintComanda={handleReprintComanda}
+          isPrinting={Boolean(printingMap[detailOrder.id])}
+          tasaCambio={tasaCambio}
+        />
       ) : null}
     </section>
   );
 }
 
-function OrderDetailModal({ order, onClose }) {
+function OrderDetailModal({ order, onClose, onAddRoundToTable, onReprintComanda, isPrinting, tasaCambio }) {
   const { platos, sueltos } = groupItemsByPlato(order.items);
+  const showAddRound = Boolean(order.mesa_id && onAddRoundToTable);
+  const showReprint = order.estado === 'en_preparacion' || order.estado === 'listo';
 
   return (
     <div style={modalBackdropStyle} onClick={onClose}>
@@ -371,27 +413,56 @@ function OrderDetailModal({ order, onClose }) {
         <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
           ×
         </button>
-        <div style={modalBodyStyle}>
-          <div style={modalTitleStyle}>Pedido #{order.id}</div>
-          <div style={modalSubtitleStyle}>
-            {order.mesa ? `Mesa ${order.mesa}` : 'Sin mesa'} · {order.tipo_pedido} · Mesero: {order.mesero}
+        <div style={modalScrollAreaStyle}>
+          <div style={modalBodyStyle}>
+            <div style={modalTitleStyle}>Pedido #{order.id}</div>
+            <div style={modalSubtitleStyle}>
+              {order.mesa ? `Mesa ${order.mesa}` : 'Sin mesa'} · {order.tipo_pedido} · Mesero: {order.mesero}
+            </div>
+            {order.cliente ? <div style={modalSubtitleStyle}>Cliente: {order.cliente}</div> : null}
+
+            <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+              {platos.map(({ grupoId, items }) => (
+                <div key={`plato-${grupoId}`} style={platoGroupStyle}>
+                  <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
+                  {items.map((item) => renderKitchenItem(item))}
+                </div>
+              ))}
+              {sueltos.map((item) => renderKitchenItem(item))}
+            </div>
+
+            {!!order.notas && <p style={orderNoteStyle}>Nota general: {order.notas}</p>}
+
+            <div style={modalTotalStyle}>
+              Total: ${Number(order.total || 0).toFixed(2)}
+              <BsAmount amountUsd={order.total} tasa={tasaCambio} />
+            </div>
           </div>
-          {order.cliente ? <div style={modalSubtitleStyle}>Cliente: {order.cliente}</div> : null}
-
-          <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
-            {platos.map(({ grupoId, items }) => (
-              <div key={`plato-${grupoId}`} style={platoGroupStyle}>
-                <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
-                {items.map((item) => renderKitchenItem(item))}
-              </div>
-            ))}
-            {sueltos.map((item) => renderKitchenItem(item))}
-          </div>
-
-          {!!order.notas && <p style={orderNoteStyle}>Nota general: {order.notas}</p>}
-
-          <div style={modalTotalStyle}>Total: ${Number(order.total || 0).toFixed(2)}</div>
         </div>
+
+        {showAddRound || showReprint ? (
+          <div style={modalFooterStyle}>
+            {showAddRound ? (
+              <button
+                type="button"
+                onClick={() => onAddRoundToTable({ mesaId: order.mesa_id, cliente: order.cliente || '' })}
+                style={modalFooterButtonStyle('round')}
+              >
+                Agregar ronda a esta mesa
+              </button>
+            ) : null}
+            {showReprint ? (
+              <button
+                type="button"
+                onClick={() => onReprintComanda(order.id)}
+                style={modalFooterButtonStyle('print')}
+                disabled={isPrinting}
+              >
+                {isPrinting ? 'Imprimiendo...' : 'Imprimir comanda'}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -710,11 +781,55 @@ const modalCardStyle = {
   width: '100%',
   maxWidth: 420,
   maxHeight: '88vh',
-  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
   borderRadius: 20,
   border: '1px solid rgba(255,255,255,0.14)',
   background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
   boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+};
+
+// El padre es flex-column con altura máxima fija; este área es el único
+// hijo que hace scroll (min-height:0 es necesario para que un hijo flex
+// pueda encogerse por debajo de su contenido y así habilitar el scroll),
+// dejando el footer de acciones siempre visible y fijo debajo.
+const modalScrollAreaStyle = {
+  overflowY: 'auto',
+  flex: '1 1 auto',
+  minHeight: 0,
+};
+
+const modalFooterStyle = {
+  flexShrink: 0,
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
+  padding: '12px 20px',
+  borderTop: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(8, 8, 8, 0.98)',
+};
+
+// "round" (agregar ronda) en azul y "print" (imprimir comanda) en ámbar, para
+// distinguirlos de un vistazo en vez del mismo gris neutro de antes.
+const MODAL_FOOTER_ACCENTS = {
+  round: '#58a6ff',
+  print: '#f59e0b',
+};
+
+const modalFooterButtonStyle = (kind) => {
+  const accent = MODAL_FOOTER_ACCENTS[kind] || '#fff';
+  return {
+    flex: '1 1 auto',
+    border: `1px solid ${accent}80`,
+    borderRadius: 999,
+    padding: '10px 14px',
+    background: `${accent}1f`,
+    color: accent,
+    fontWeight: 700,
+    cursor: 'pointer',
+    minHeight: 42,
+  };
 };
 
 const modalCloseButtonStyle = {
@@ -837,6 +952,18 @@ const editButtonStyle = (isMobile) => ({
   padding: isMobile ? '10px 14px' : '8px 12px',
   background: 'rgba(255, 255, 255, 0.04)',
   color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  minHeight: isMobile ? 42 : 36,
+  width: isMobile ? '100%' : 'auto',
+});
+
+const cancelButtonStyle = (isMobile) => ({
+  border: '1px solid rgba(239, 68, 68, 0.5)',
+  borderRadius: 999,
+  padding: isMobile ? '10px 14px' : '8px 12px',
+  background: 'rgba(239, 68, 68, 0.1)',
+  color: '#fca5a5',
   fontWeight: 700,
   cursor: 'pointer',
   minHeight: isMobile ? 42 : 36,

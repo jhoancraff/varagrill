@@ -4,12 +4,36 @@ import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
-function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, waiterName, onBack }) {
+// Los productos de estas categorías se piden únicamente como acompañante
+// (grupo de opciones dinámico) de un plato principal, nunca sueltos desde el
+// menú — por eso no deben aparecer en la barra de categorías ni en la grilla
+// principal. El picker de acompañantes las sigue leyendo directo de `products`
+// por categoria_id, así que esto no le afecta.
+const HIDDEN_MENU_CATEGORIES = ['guarniciones'];
+
+function isHiddenMenuCategory(categoriaNombre) {
+  return HIDDEN_MENU_CATEGORIES.includes((categoriaNombre || '').trim().toLowerCase());
+}
+
+function NewOrderPage({
+  isMobile,
+  mesas,
+  products,
+  adicionales = [],
+  loadingData,
+  waiterName,
+  onBack,
+  initialMesaId,
+  initialCliente,
+}) {
   const tasaCambio = useExchangeRate();
+  const isAddingRound = Boolean(initialMesaId);
   const [orderHeader, setOrderHeader] = useState({
-    mesaId: '',
+    mesaId: initialMesaId ? String(initialMesaId) : '',
     tipoPedido: 'local',
-    cliente: '',
+    cliente: initialCliente || '',
+    clienteCedula: '',
+    clienteTelefono: '',
     notas: '',
   });
   const [cartItems, setCartItems] = useState([]);
@@ -65,7 +89,7 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   const categories = useMemo(() => {
     const names = new Set();
     products.forEach((product) => {
-      if (product.categoria_nombre) {
+      if (product.categoria_nombre && !isHiddenMenuCategory(product.categoria_nombre)) {
         names.add(product.categoria_nombre);
       }
     });
@@ -75,6 +99,9 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
   const visibleProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return products.filter((product) => {
+      if (isHiddenMenuCategory(product.categoria_nombre)) {
+        return false;
+      }
       const matchesCategory = catalogType === 'Todos' || product.categoria_nombre === catalogType;
       const matchesSearch = !term || product.nombre.toLowerCase().includes(term);
       return matchesCategory && matchesSearch;
@@ -386,6 +413,8 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
     mesa_id: orderHeader.mesaId ? Number(orderHeader.mesaId) : null,
     tipo_pedido: orderHeader.tipoPedido,
     cliente_nombre: orderHeader.cliente,
+    cliente_cedula: orderHeader.clienteCedula,
+    cliente_telefono: orderHeader.clienteTelefono,
     notas: orderHeader.notas,
     items: cartItems.map((item) => ({
       product_id: Number(item.productId),
@@ -644,6 +673,14 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
         </button>
       </div>
 
+      {isAddingRound ? (
+        <div style={addRoundBannerStyle}>
+          Agregando una ronda nueva a {selectedMesa ? `Mesa ${selectedMesa.numero}` : 'la mesa seleccionada'}.
+          El cliente se rellenó con <strong>{initialCliente || 'el cliente actual'}</strong> — si es una cuenta
+          separada en la misma mesa, cambia el nombre antes de registrar.
+        </div>
+      ) : null}
+
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: isCompact ? 14 : 16, marginTop: 18 }}>
         <div style={{
           display: 'grid',
@@ -689,6 +726,28 @@ function NewOrderPage({ isMobile, mesas, products, adicionales = [], loadingData
               onChange={(event) => setOrderHeader((current) => ({ ...current, cliente: event.target.value }))}
               style={inputStyle(isCompact)}
               required
+            />
+          </label>
+
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Cédula</span>
+            <input
+              type="text"
+              placeholder="V-12345678"
+              value={orderHeader.clienteCedula}
+              onChange={(event) => setOrderHeader((current) => ({ ...current, clienteCedula: event.target.value }))}
+              style={inputStyle(isCompact)}
+            />
+          </label>
+
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Teléfono</span>
+            <input
+              type="text"
+              placeholder="0412-1234567"
+              value={orderHeader.clienteTelefono}
+              onChange={(event) => setOrderHeader((current) => ({ ...current, clienteTelefono: event.target.value }))}
+              style={inputStyle(isCompact)}
             />
           </label>
         </div>
@@ -1133,9 +1192,12 @@ function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
     }
     setError('');
 
-    // Los grupos dinámicos (acompañantes) nunca bloquean, pero si el mesero no
-    // eligió ninguno se le avisa una vez antes de continuar sin acompañante.
-    const sinElegir = grupos.filter((grupo) => grupo.categoria_opciones_id && (seleccion[grupo.id] || []).length === 0);
+    // A esta altura, cualquier grupo curado obligatorio sin elección ya hizo
+    // return arriba — lo que queda son grupos dinámicos (nunca bloquean) y
+    // grupos curados opcionales (ej. acompañantes por subreceta). Ninguno de
+    // los dos debe bloquear, pero si el mesero no eligió nada se le avisa una
+    // vez antes de continuar sin acompañante, igual que con las guarniciones.
+    const sinElegir = grupos.filter((grupo) => (seleccion[grupo.id] || []).length === 0);
     if (sinElegir.length > 0) {
       setGruposSinElegir(sinElegir.map((grupo) => grupo.nombre));
       return;
@@ -1368,6 +1430,17 @@ const feedbackStyle = (feedbackType) => ({
   padding: '10px 12px',
   fontSize: 13,
 });
+
+const addRoundBannerStyle = {
+  marginTop: 14,
+  borderRadius: 12,
+  border: '1px solid rgba(88, 166, 255, 0.4)',
+  background: 'rgba(30, 64, 110, 0.35)',
+  color: '#fff',
+  padding: '10px 12px',
+  fontSize: 13,
+  lineHeight: 1.5,
+};
 
 const offlineBannerStyle = (isOnline, hasQueue) => ({
   marginTop: 14,

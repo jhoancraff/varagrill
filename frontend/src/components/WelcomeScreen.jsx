@@ -45,6 +45,7 @@ import AnalystComprasPage from './AnalystComprasPage';
 import AnalystMargenGananciaPage from './AnalystMargenGananciaPage';
 import EditOrderPage from './EditOrderPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
+import MesasAtendidasPage from './MesasAtendidasPage';
 import NewOrderPage from './NewOrderPage';
 import PromotionsPage from './PromotionsPage';
 import useKitchenSocket from '../hooks/useKitchenSocket';
@@ -80,9 +81,19 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const [loadingData, setLoadingData] = useState(true);
   const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [readyToBillCount, setReadyToBillCount] = useState(0);
+  const [listoOrdersCount, setListoOrdersCount] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
   const [lastKitchenEvent, setLastKitchenEvent] = useState(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const [newOrderPreset, setNewOrderPreset] = useState(null);
+
+  const handleAddRoundToTable = ({ mesaId, cliente }) => {
+    setNewOrderPreset({ mesaId, cliente, token: Date.now() });
+    setActiveView('orders');
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
+  };
 
   useEffect(() => {
     const handleEscapeClose = (event) => {
@@ -224,6 +235,9 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
         const count = Number(data.counts?.pendiente || 0);
         setPendingOrdersCount(Number.isFinite(count) ? count : 0);
+
+        const listoCount = Number(data.counts?.listo || 0);
+        setListoOrdersCount(Number.isFinite(listoCount) ? listoCount : 0);
       } catch (error) {
         // Keep the last known value when there is a temporary network error.
       }
@@ -311,7 +325,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const {
     alertPermission,
     alertsEnabled,
-    triggerAlert,
+    triggerKitchenAlert,
     requestAlertPermission,
   } = useKitchenAlerts();
 
@@ -358,7 +372,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     if (message.event === 'NUEVA_COMANDAS' || message.event === 'PEDIDO_ACTUALIZADO') {
       // Solo cocina se une al grupo que emite estos eventos (ver consumers.py),
       // así que si este socket los recibe es porque este usuario es cocinero.
-      triggerAlert('Nueva orden en cocina', `Pedido #${payload.pedido_id || payload.order_id || 'N/A'} · ${mesaLabel}`);
+      triggerKitchenAlert('Nueva orden en cocina', `Pedido #${payload.pedido_id || payload.order_id || 'N/A'} · ${mesaLabel}`);
       setLastKitchenEvent({ ...message, receivedAt: Date.now() });
     }
 
@@ -373,13 +387,14 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
     if (message.event === 'PEDIDO_LISTO') {
       // Aviso personal: solo llega al mesero dueño del pedido (grupo por-usuario en consumers.py).
-      triggerAlert('¡Tu pedido está listo!', `Pedido #${payload.pedido_id} · ${mesaLabel} ya puede salir a la mesa.`);
+      triggerKitchenAlert('¡Tu pedido está listo!', `Pedido #${payload.pedido_id} · ${mesaLabel} ya puede salir a la mesa.`);
       setLiveNotice(`Pedido #${payload.pedido_id} (${mesaLabel}) está listo para servir.`);
+      setListoOrdersCount((current) => current + 1);
       window.setTimeout(() => {
         setLiveNotice('');
       }, 8000);
     }
-  }, [triggerAlert]);
+  }, [triggerKitchenAlert]);
 
   // Socket único para todo el equipo autenticado: cocina recibe comandas
   // nuevas/actualizadas y cada usuario recibe además sus propios avisos
@@ -554,6 +569,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
+              setNewOrderPreset(null);
               setActiveView('orders');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
@@ -597,6 +613,29 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             </span>
             <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
             <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
+          </button>
+        ) : null}
+
+        {!isCajera ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView('mesas-atendidas');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView === 'mesas-atendidas')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M3 10h18" />
+                <path d="M9 10v10" />
+              </svg>
+            </span>
+            <span style={{ flex: 1, textAlign: 'left' }}>Mesas atendidas</span>
+            <span style={pendingBadgeStyle(listoOrdersCount > 0)}>{listoOrdersCount}</span>
           </button>
         ) : null}
 
@@ -826,7 +865,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
               <button
                 type="button"
-                onClick={() => setActiveView('orders')}
+                onClick={() => {
+                  setNewOrderPreset(null);
+                  setActiveView('orders');
+                }}
                 style={newOrderButtonStyle}
               >
                 <span aria-hidden="true" style={sidebarIconWrapStyle}>
@@ -896,13 +938,23 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           />
         ) : activeView === 'orders' ? (
           <NewOrderPage
+            key={newOrderPreset ? `preset-${newOrderPreset.token}` : 'blank'}
             isMobile={isMobile}
             mesas={mesas}
             products={products}
             adicionales={adicionales}
             loadingData={loadingData}
             waiterName={displayName}
+            initialMesaId={newOrderPreset?.mesaId}
+            initialCliente={newOrderPreset?.cliente}
             onBack={() => setActiveView('home')}
+          />
+        ) : activeView === 'mesas-atendidas' ? (
+          <MesasAtendidasPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('home')}
+            onAddRoundToTable={handleAddRoundToTable}
+            mesasCatalogo={mesas}
           />
         ) : activeView.startsWith('orders-edit:') ? (
           <EditOrderPage
@@ -1204,6 +1256,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onRequestPermission={requestAlertPermission}
             lastKitchenEvent={lastKitchenEvent}
             onEditOrder={(orderId) => setActiveView(`orders-edit:${orderId}`)}
+            onAddRoundToTable={handleAddRoundToTable}
           />
         )}
       </div>

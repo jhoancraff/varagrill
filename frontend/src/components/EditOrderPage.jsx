@@ -5,12 +5,25 @@ import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import { formatBs } from '../utils/currency';
 
+// Los productos de estas categorías se piden únicamente como acompañante
+// (grupo de opciones dinámico) de un plato principal, nunca sueltos desde el
+// menú — por eso no deben aparecer en la barra de categorías ni en la grilla
+// principal. El picker de acompañantes las sigue leyendo directo de `products`
+// por categoria_id, así que esto no le afecta.
+const HIDDEN_MENU_CATEGORIES = ['guarniciones'];
+
+function isHiddenMenuCategory(categoriaNombre) {
+  return HIDDEN_MENU_CATEGORIES.includes((categoriaNombre || '').trim().toLowerCase());
+}
+
 function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingData, orderId, onBack }) {
   const tasaCambio = useExchangeRate();
   const [orderHeader, setOrderHeader] = useState({
     mesaId: '',
     tipoPedido: 'local',
     cliente: '',
+    clienteCedula: '',
+    clienteTelefono: '',
     notas: '',
   });
   const [cartItems, setCartItems] = useState([]);
@@ -86,6 +99,8 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           mesaId: pedido.mesa_id ? String(pedido.mesa_id) : '',
           tipoPedido: pedido.tipo_pedido,
           cliente: pedido.cliente_nombre || '',
+          clienteCedula: pedido.cliente_cedula || '',
+          clienteTelefono: pedido.cliente_telefono || '',
           notas: pedido.notas || '',
         };
         setOrderHeader(loadedHeader);
@@ -162,7 +177,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const categories = useMemo(() => {
     const names = new Set();
     products.forEach((product) => {
-      if (product.categoria_nombre) {
+      if (product.categoria_nombre && !isHiddenMenuCategory(product.categoria_nombre)) {
         names.add(product.categoria_nombre);
       }
     });
@@ -172,6 +187,9 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const visibleProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return products.filter((product) => {
+      if (isHiddenMenuCategory(product.categoria_nombre)) {
+        return false;
+      }
       const matchesCategory = catalogType === 'Todos' || product.categoria_nombre === catalogType;
       const matchesSearch = !term || product.nombre.toLowerCase().includes(term);
       return matchesCategory && matchesSearch;
@@ -408,6 +426,8 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
         mesa_id: orderHeader.mesaId ? Number(orderHeader.mesaId) : null,
         tipo_pedido: orderHeader.tipoPedido,
         cliente_nombre: orderHeader.cliente,
+        cliente_cedula: orderHeader.clienteCedula,
+        cliente_telefono: orderHeader.clienteTelefono,
         notas: orderHeader.notas,
         items: cartItems.map((item) => ({
           product_id: Number(item.productId),
@@ -657,6 +677,28 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
               onChange={(event) => setOrderHeader((current) => ({ ...current, cliente: event.target.value }))}
               style={inputStyle(isCompact)}
               required
+            />
+          </label>
+
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Cédula</span>
+            <input
+              type="text"
+              placeholder="V-12345678"
+              value={orderHeader.clienteCedula}
+              onChange={(event) => setOrderHeader((current) => ({ ...current, clienteCedula: event.target.value }))}
+              style={inputStyle(isCompact)}
+            />
+          </label>
+
+          <label style={fieldWrapStyle}>
+            <span style={labelStyle}>Teléfono</span>
+            <input
+              type="text"
+              placeholder="0412-1234567"
+              value={orderHeader.clienteTelefono}
+              onChange={(event) => setOrderHeader((current) => ({ ...current, clienteTelefono: event.target.value }))}
+              style={inputStyle(isCompact)}
             />
           </label>
         </div>
@@ -1015,9 +1057,12 @@ function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
     }
     setError('');
 
-    // Los grupos dinámicos (acompañantes) nunca bloquean, pero si el mesero no
-    // eligió ninguno se le avisa una vez antes de continuar sin acompañante.
-    const sinElegir = grupos.filter((grupo) => grupo.categoria_opciones_id && (seleccion[grupo.id] || []).length === 0);
+    // A esta altura, cualquier grupo curado obligatorio sin elección ya hizo
+    // return arriba — lo que queda son grupos dinámicos (nunca bloquean) y
+    // grupos curados opcionales (ej. acompañantes por subreceta). Ninguno de
+    // los dos debe bloquear, pero si el mesero no eligió nada se le avisa una
+    // vez antes de continuar sin acompañante, igual que con las guarniciones.
+    const sinElegir = grupos.filter((grupo) => (seleccion[grupo.id] || []).length === 0);
     if (sinElegir.length > 0) {
       setGruposSinElegir(sinElegir.map((grupo) => grupo.nombre));
       return;

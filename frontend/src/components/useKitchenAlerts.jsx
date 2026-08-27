@@ -154,7 +154,7 @@ function useKitchenAlerts() {
     playAlertTone(audioContext);
   }, [ensureAudioContext, playAlertTone, tryResumeAudioContext]);
 
-  const showKitchenNotification = useCallback((message, options = {}) => {
+  const showKitchenNotification = useCallback((title, body, options = {}) => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       return;
     }
@@ -167,12 +167,8 @@ function useKitchenAlerts() {
       return;
     }
 
-    const payload = message?.payload || {};
-    const pedidoId = payload.pedido_id || payload.order_id || 'N/A';
-    const mesaLabel = payload.mesa ? `Mesa ${payload.mesa}` : 'Sin mesa';
-
-    new Notification('Nueva orden en cocina', {
-      body: `Pedido #${pedidoId} · ${mesaLabel}`,
+    new Notification(title, {
+      body,
       icon: '/assets/varagrill-logo.jpg',
       tag: 'kitchen-order-alert',
       renotify: true,
@@ -193,7 +189,7 @@ function useKitchenAlerts() {
     return `${audioState} · ${notificationState} · ${vibrationState}`;
   }, [audioUnlocked]);
 
-  const triggerKitchenAlert = useCallback((message) => {
+  const triggerKitchenAlert = useCallback((title, body) => {
     const now = Date.now();
     if (now - lastAlertAtRef.current < 4000) {
       return;
@@ -201,7 +197,7 @@ function useKitchenAlerts() {
 
     lastAlertAtRef.current = now;
     playKitchenAlertSound();
-    showKitchenNotification(message);
+    showKitchenNotification(title, body);
 
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       navigator.vibrate([140, 60, 140]);
@@ -228,7 +224,7 @@ function useKitchenAlerts() {
     }
 
     if (notificationSupported && nextPermission === 'granted') {
-      showKitchenNotification({ payload: { pedido_id: 'PRUEBA', mesa: 'Test' } }, { force: true });
+      showKitchenNotification('Alerta de prueba', 'Pedido #PRUEBA · Mesa Test', { force: true });
     }
 
     setAlertDiagnostics(buildAlertDiagnostics(audioReady, nextPermission));

@@ -2674,12 +2674,20 @@ def _serialize_categoria_impresora(categoria):
         'nombre': categoria.nombre,
         'ip_impresora': categoria.ip_impresora,
         'puerto_impresora': categoria.puerto_impresora,
+        'ip_impresora_secundaria': categoria.ip_impresora_secundaria,
+        'puerto_impresora_secundaria': categoria.puerto_impresora_secundaria,
+        'arma_plato_automatico': categoria.arma_plato_automatico,
     }
 
 
 @csrf_exempt
 def admin_categorias_view(request):
-    """Asigna qué impresora térmica (IP:puerto en la LAN) imprime las comandas de cada categoría."""
+    """
+    Asigna qué impresora térmica (IP:puerto en la LAN) imprime las comandas de cada
+    categoría — la primaria (ticket completo) y, opcionalmente, una secundaria (copia
+    reducida, ver impresion_termica._build_ticket_secundario_bytes). También activa
+    arma_plato_automatico por categoría (ver NewOrderPage/EditOrderPage).
+    """
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
@@ -2723,10 +2731,32 @@ def admin_categorias_view(request):
     if not (1 <= puerto_impresora <= 65535):
         return _auth_response({'ok': False, 'message': 'El puerto debe estar entre 1 y 65535.'}, status=400)
 
+    ip_impresora_secundaria = str(data.get('ip_impresora_secundaria', '') or '').strip()
+    if ip_impresora_secundaria:
+        try:
+            ipaddress.ip_address(ip_impresora_secundaria)
+        except ValueError:
+            return _auth_response({'ok': False, 'message': 'La IP de la impresora secundaria no es válida.'}, status=400)
+
+    puerto_secundario_raw = data.get('puerto_impresora_secundaria', categoria.puerto_impresora_secundaria)
+    try:
+        puerto_impresora_secundaria = int(puerto_secundario_raw)
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'El puerto de la impresora secundaria no es válido.'}, status=400)
+    if not (1 <= puerto_impresora_secundaria <= 65535):
+        return _auth_response({'ok': False, 'message': 'El puerto secundario debe estar entre 1 y 65535.'}, status=400)
+
     categoria.ip_impresora = ip_impresora
     categoria.puerto_impresora = puerto_impresora
+    categoria.ip_impresora_secundaria = ip_impresora_secundaria
+    categoria.puerto_impresora_secundaria = puerto_impresora_secundaria
+    categoria.arma_plato_automatico = bool(data.get('arma_plato_automatico', categoria.arma_plato_automatico))
     categoria.actualizado_por = request.user
-    categoria.save(update_fields=['ip_impresora', 'puerto_impresora', 'actualizado_por', 'fecha_actualizacion'])
+    categoria.save(update_fields=[
+        'ip_impresora', 'puerto_impresora',
+        'ip_impresora_secundaria', 'puerto_impresora_secundaria',
+        'arma_plato_automatico', 'actualizado_por', 'fecha_actualizacion',
+    ])
 
     return _auth_response({
         'ok': True,

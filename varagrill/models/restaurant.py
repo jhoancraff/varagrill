@@ -118,6 +118,25 @@ class VGCategoriaProducto(VGAuditoria):
         default=9100,
         help_text="Puerto TCP de impresión cruda de la impresora (ESC/POS estándar: 9100).",
     )
+    ip_impresora_secundaria = models.CharField(
+        max_length=45, blank=True,
+        help_text=(
+            "IP de una segunda impresora que también recibe la comanda de esta categoría, en versión "
+            "reducida (solo cantidad/peso + nota, sin guarniciones ni adicionales) — ej: Especialidad de "
+            "la Casa imprimiendo la carne en cocina Y en la parrilla. Vacío = no duplica."
+        ),
+    )
+    puerto_impresora_secundaria = models.PositiveIntegerField(
+        default=9100,
+        help_text="Puerto TCP de la impresora secundaria (ESC/POS estándar: 9100).",
+    )
+    arma_plato_automatico = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si está activo, al mesero agregar un producto de esta categoría al pedido se arma y cierra "
+            "su propio 'plato' automáticamente, sin pasar por los botones 'Armar plato'/'Terminar'."
+        ),
+    )
 
     class Meta:
         db_table = "vg_categorias_productos"

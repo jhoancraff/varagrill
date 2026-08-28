@@ -89,6 +89,17 @@ def _destino_categoria(categoria):
     return (categoria.ip_impresora, categoria.puerto_impresora)
 
 
+def _destino_categoria_secundaria(categoria):
+    """(ip, puerto) de la impresora SECUNDARIA de esta categoría, o None si no tiene una
+    asignada. A diferencia de _destino_categoria, esta impresora nunca recibe el ticket
+    completo: solo una copia reducida de las líneas principales de la categoría (ver
+    _render_linea_reducida) — ej: Especialidad de la Casa imprimiendo el corte en cocina
+    (destino primario) Y en la parrilla (destino secundario)."""
+    if categoria is None or not categoria.ip_impresora_secundaria:
+        return None
+    return (categoria.ip_impresora_secundaria, categoria.puerto_impresora_secundaria)
+
+
 def _render_detalle_principal(detalle, cantidad_override=None):
     """
     Línea principal de un detalle (cantidad/peso + nombre + notas + adicionales +
@@ -342,6 +353,87 @@ def _build_ticket_bytes(pedido, categorias, items):
     return bytes(out)
 
 
+def _render_linea_reducida(detalle):
+    """Línea mínima de un detalle para la impresora SECUNDARIA de su categoría (ej.
+    Parrilla): cantidad/peso + nombre + nota — sin guarniciones (VGDetallePedidoOpcion)
+    ni adicionales, que no le competen a quien solo cocina el corte."""
+    out = bytearray()
+    out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
+    if detalle.notas:
+        out += _text(f'  * {detalle.notas}') + FEED
+    return bytes(out)
+
+
+def _build_ticket_secundario_bytes(pedido, categoria, detalles):
+    """
+    Ticket reducido para la impresora secundaria de `categoria`: mismo encabezado que el
+    ticket normal, pero el cuerpo son solo las líneas principales de esta categoría (sin
+    guarniciones ni adicionales — ver _render_linea_reducida), una por una y sin
+    consolidar: cada línea es una pieza física distinta con su propio peso, consolidarlas
+    (como hace _consolidar_items en el ticket primario) perdería esa información. Si el
+    detalle tiene grupo_armado se antepone 'Plato N' como referencia para cruzarlo con la
+    comanda completa de cocina.
+    """
+    mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
+    hora = pedido.fecha_creacion.strftime('%d/%m %H:%M')
+
+    out = bytearray()
+    out += INIT
+    out += KANJI_OFF
+    out += ESC_POS_WCP1252
+    out += CASH_DRAWER_KICK
+    out += BUZZER_ALT
+    out += ALIGN_CENTER
+    out += BOLD_ON
+    out += _text('VARAGRILL') + FEED
+    out += BOLD_OFF
+    out += _text(categoria.nombre.upper()) + FEED
+    out += ALIGN_LEFT
+    out += _text('=' * LINE_WIDTH) + FEED
+    out += BOLD_ON + DOUBLE_HEIGHT
+    out += _text(f'Pedido #{pedido.id}') + FEED
+    out += _text(mesa_label) + FEED
+    out += NORMAL_SIZE + BOLD_OFF
+    out += _text(_tipo_pedido_label(pedido.tipo_pedido)) + FEED
+    out += _text(hora) + FEED
+    out += _text('=' * LINE_WIDTH) + FEED
+
+    for detalle in detalles:
+        if detalle.grupo_armado:
+            out += BOLD_ON + _text(f'Plato {detalle.grupo_armado}') + BOLD_OFF + FEED
+        out += _render_linea_reducida(detalle)
+
+    out += FEED + FEED + FEED + FEED
+    out += CUT
+    return bytes(out)
+
+
+def _enviar_ticket_comanda(ip_impresora, puerto_impresora, ticket, pedido_id, etiqueta):
+    """
+    Abre un socket a (ip_impresora, puerto_impresora) y manda `ticket` (bytes ESC/POS ya
+    armados), silencioso ante cualquier fallo (impresora apagada/inalcanzable) — usado
+    tanto para el destino primario como para el secundario de una categoría, para que un
+    fallo en un ticket no afecte a los demás ni al registro del pedido.
+    """
+    destino = f'{ip_impresora}:{puerto_impresora}'
+    try:
+        logger.info(
+            'Enviando comanda pedido %s [%s] a %s (%s bytes)',
+            pedido_id, etiqueta, destino, len(ticket),
+        )
+        with socket.create_connection((ip_impresora, puerto_impresora), timeout=CONNECT_TIMEOUT_SECONDS) as conexion:
+            conexion.sendall(ticket)
+            # Algunas impresoras térmicas de red (controladores clon) necesitan un
+            # respiro entre el sendall() y el cierre del socket para volcar su
+            # buffer de recepción al cabezal antes de que la conexión se corte;
+            # cerrar de inmediato puede producir un ticket en blanco.
+            conexion.shutdown(socket.SHUT_WR)
+            time.sleep(0.3)
+        logger.info('Comanda pedido %s [%s] enviada a %s', pedido_id, etiqueta, destino)
+    except Exception:
+        logger.exception('No se pudo imprimir pedido %s [%s] hacia %s', pedido_id, etiqueta, destino)
+
+
 def imprimir_comandas_pedido(pedido):
     """
     Imprime una comanda por cada impresora física con ítems asignados (ip:puerto),
@@ -353,6 +445,13 @@ def imprimir_comandas_pedido(pedido):
     apagada o inalcanzable, esa comanda se omite sin afectar a las demás ni al registro
     del pedido (llamar siempre envuelto en try/except desde el caller, igual que
     send_whatsapp_new_order_alert).
+
+    Además, cada categoría con impresora secundaria configurada (VGCategoriaProducto.
+    ip_impresora_secundaria, ver _destino_categoria_secundaria) recibe APARTE una copia
+    reducida (solo cantidad/peso + nota, ver _build_ticket_secundario_bytes) de sus
+    propias líneas — sin tocar el reparto por impresora primaria de arriba. Así una
+    categoría como Especialidad de la Casa puede imprimir el ticket completo en su
+    estación de siempre y, además, solo el corte de carne en una segunda impresora.
     """
     detalles = list(
         pedido.detalles
@@ -378,30 +477,25 @@ def imprimir_comandas_pedido(pedido):
 
     for (ip_impresora, puerto_impresora), datos in por_destino.items():
         categorias = list(datos['categorias'].values())
-        items_destino = datos['items']
-        destino = f'{ip_impresora}:{puerto_impresora}'
         nombres_categorias = ', '.join(c.nombre for c in categorias)
-        try:
-            ticket = _build_ticket_bytes(pedido, categorias, items_destino)
-            logger.info(
-                'Enviando comanda pedido %s categorias [%s] a %s (%s bytes)',
-                pedido.id, nombres_categorias, destino, len(ticket),
-            )
-            with socket.create_connection(
-                (ip_impresora, puerto_impresora),
-                timeout=CONNECT_TIMEOUT_SECONDS,
-            ) as conexion:
-                conexion.sendall(ticket)
-                # Algunas impresoras térmicas de red (controladores clon) necesitan un
-                # respiro entre el sendall() y el cierre del socket para volcar su
-                # buffer de recepción al cabezal antes de que la conexión se corte;
-                # cerrar de inmediato puede producir un ticket en blanco.
-                conexion.shutdown(socket.SHUT_WR)
-                time.sleep(0.3)
-            logger.info('Comanda pedido %s categorias [%s] enviada a %s', pedido.id, nombres_categorias, destino)
-        except Exception:
-            logger.exception(
-                'No se pudo imprimir pedido %s en categorias [%s] hacia %s',
-                pedido.id, nombres_categorias, destino,
-            )
+        ticket = _build_ticket_bytes(pedido, categorias, datos['items'])
+        _enviar_ticket_comanda(
+            ip_impresora, puerto_impresora, ticket, pedido.id, f'categorias [{nombres_categorias}]',
+        )
+
+    por_destino_secundario = {}
+    for detalle in detalles:
+        destino_secundario = _destino_categoria_secundaria(detalle.producto.categoria)
+        if destino_secundario is None:
             continue
+        entry = por_destino_secundario.setdefault(
+            destino_secundario, {'categoria': detalle.producto.categoria, 'detalles': []},
+        )
+        entry['detalles'].append(detalle)
+
+    for (ip_impresora, puerto_impresora), datos in por_destino_secundario.items():
+        categoria = datos['categoria']
+        ticket = _build_ticket_secundario_bytes(pedido, categoria, datos['detalles'])
+        _enviar_ticket_comanda(
+            ip_impresora, puerto_impresora, ticket, pedido.id, f'{categoria.nombre} (secundaria)',
+        )

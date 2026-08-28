@@ -10,6 +10,7 @@ class MesaSerializer(serializers.ModelSerializer):
 
 class ProductoSerializer(serializers.ModelSerializer):
     categoria_nombre = serializers.CharField(source='categoria.nombre', read_only=True)
+    categoria_arma_plato_automatico = serializers.BooleanField(source='categoria.arma_plato_automatico', read_only=True)
     imagen_url = serializers.SerializerMethodField()
     composicion = serializers.SerializerMethodField()
     grupos_opciones = serializers.SerializerMethodField()
@@ -53,5 +54,6 @@ class ProductoSerializer(serializers.ModelSerializer):
         model = VGProducto
         fields = [
             'id', 'nombre', 'descripcion', 'precio_venta', 'venta_por_peso', 'tiempo_preparacion_min',
-            'categoria_id', 'categoria_nombre', 'imagen_url', 'composicion', 'grupos_opciones',
+            'categoria_id', 'categoria_nombre', 'categoria_arma_plato_automatico', 'imagen_url',
+            'composicion', 'grupos_opciones',
         ]

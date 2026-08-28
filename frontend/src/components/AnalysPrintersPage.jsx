@@ -38,6 +38,9 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
           initialDrafts[categoria.id] = {
             ip_impresora: categoria.ip_impresora || '',
             puerto_impresora: String(categoria.puerto_impresora || 9100),
+            ip_impresora_secundaria: categoria.ip_impresora_secundaria || '',
+            puerto_impresora_secundaria: String(categoria.puerto_impresora_secundaria || 9100),
+            arma_plato_automatico: Boolean(categoria.arma_plato_automatico),
           };
         });
         setDrafts(initialDrafts);
@@ -127,8 +130,16 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
     }));
   };
 
+  const emptyDraft = {
+    ip_impresora: '',
+    puerto_impresora: '9100',
+    ip_impresora_secundaria: '',
+    puerto_impresora_secundaria: '9100',
+    arma_plato_automatico: false,
+  };
+
   const handleSave = async (categoria) => {
-    const draft = drafts[categoria.id] || { ip_impresora: '', puerto_impresora: '9100' };
+    const draft = drafts[categoria.id] || emptyDraft;
     setSavingId(categoria.id);
     setMessage('');
     try {
@@ -141,6 +152,9 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
           id: categoria.id,
           ip_impresora: draft.ip_impresora.trim(),
           puerto_impresora: draft.puerto_impresora,
+          ip_impresora_secundaria: draft.ip_impresora_secundaria.trim(),
+          puerto_impresora_secundaria: draft.puerto_impresora_secundaria,
+          arma_plato_automatico: draft.arma_plato_automatico,
         }),
       });
       const data = await response.json();
@@ -181,8 +195,12 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
           <h2 style={titleStyle(isMobile)}>Impresoras de cocina</h2>
           <p style={subtitleStyle}>
             Asigna la IP fija (y puerto, normalmente 9100) de la impresora térmica que debe imprimir la comanda de
-            cada categoría. Las categorías sin IP asignada simplemente no imprimen nada. Los cambios aplican al
-            siguiente pedido que se registre.
+            cada categoría. Las categorías sin IP asignada simplemente no imprimen nada. Opcionalmente, la
+            impresora secundaria recibe además una copia reducida (solo cantidad/peso y nota, sin guarniciones ni
+            adicionales) de la misma categoría — ej: Especialidad de la Casa imprimiendo el corte en cocina y,
+            aparte, en la parrilla. "Arma plato automático" hace que, al mesero agregar un producto de esa
+            categoría, el plato se arme y cierre solo, sin usar los botones "Armar plato"/"Terminar". Los cambios
+            aplican al siguiente pedido que se registre.
           </p>
         </div>
       </div>
@@ -201,10 +219,13 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
               <div style={tableHeadStyle}>Categoría</div>
               <div style={tableHeadStyle}>IP de la impresora</div>
               <div style={tableHeadStyle}>Puerto</div>
+              <div style={tableHeadStyle}>IP secundaria</div>
+              <div style={tableHeadStyle}>Puerto secundario</div>
+              <div style={tableHeadStyle}>Arma plato automático</div>
               <div style={tableHeadStyle}>Acciones</div>
 
               {categorias.map((categoria) => {
-                const draft = drafts[categoria.id] || { ip_impresora: '', puerto_impresora: '9100' };
+                const draft = drafts[categoria.id] || emptyDraft;
                 return (
                   <>
                     <div key={`nombre-${categoria.id}`} style={tableCellPrimaryStyle}>
@@ -229,6 +250,35 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
                         style={{ ...inputStyle, width: 100 }}
                       />
                     </div>
+                    <div key={`ip-sec-${categoria.id}`} style={tableCellStyle}>
+                      <input
+                        type="text"
+                        placeholder="192.168.1.201"
+                        value={draft.ip_impresora_secundaria}
+                        onChange={(event) => updateDraft(categoria.id, 'ip_impresora_secundaria', event.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div key={`puerto-sec-${categoria.id}`} style={tableCellStyle}>
+                      <input
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={draft.puerto_impresora_secundaria}
+                        onChange={(event) => updateDraft(categoria.id, 'puerto_impresora_secundaria', event.target.value)}
+                        style={{ ...inputStyle, width: 100 }}
+                      />
+                    </div>
+                    <div key={`auto-plato-${categoria.id}`} style={{ ...tableCellStyle, alignItems: 'center' }}>
+                      <label style={autoPlatoCheckboxRowStyle}>
+                        <input
+                          type="checkbox"
+                          checked={draft.arma_plato_automatico}
+                          onChange={(event) => updateDraft(categoria.id, 'arma_plato_automatico', event.target.checked)}
+                        />
+                        <span>Sí</span>
+                      </label>
+                    </div>
                     <div key={`actions-${categoria.id}`} style={tableCellActionStyle}>
                       <button
                         type="button"
@@ -243,6 +293,11 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
                       ) : (
                         <span style={unassignedPillStyle}>Sin impresora</span>
                       )}
+                      {categoria.ip_impresora_secundaria ? (
+                        <span style={assignedPillStyle}>
+                          + {categoria.ip_impresora_secundaria}:{categoria.puerto_impresora_secundaria}
+                        </span>
+                      ) : null}
                     </div>
                   </>
                 );
@@ -383,12 +438,13 @@ const tableWrapStyle = {
 
 const tableStyle = {
   display: 'grid',
-  gridTemplateColumns: 'minmax(160px, 0.8fr) minmax(180px, 1fr) minmax(100px, 0.5fr) minmax(260px, 1.2fr)',
+  gridTemplateColumns:
+    'minmax(150px, 0.8fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(130px, 0.6fr) minmax(260px, 1.2fr)',
   alignItems: 'stretch',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   borderRadius: 18,
   overflow: 'hidden',
-  minWidth: 760,
+  minWidth: 1320,
 };
 
 const tableHeadStyle = {
@@ -422,6 +478,15 @@ const tableCellActionStyle = {
   alignItems: 'center',
   gap: 8,
   flexWrap: 'wrap',
+};
+
+const autoPlatoCheckboxRowStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  color: '#f2e6e6',
+  fontWeight: 600,
+  fontSize: 13,
 };
 
 const categoriaNameStyle = {

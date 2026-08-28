@@ -267,11 +267,23 @@ function NewOrderPage({
   };
 
   const addToCart = (product, options = {}) => {
-    const grupoArmado = armarPlatoActivo ? grupoActual : null;
     const opciones = options.opcionesElegidas || [];
-    // Primer producto que cae en este plato: recién ahora se "consume" su número, para
-    // que el próximo "+ Nuevo plato" avance de verdad en vez de saltar números vacíos.
-    const consumesGrupo = grupoArmado && grupoArmado === nextGrupoId;
+    // Categorías con arma_plato_automatico (ej. Entrada, Especialidad de la Casa) no
+    // pasan por la barra manual "Armar plato"/"Terminar": cada producto agregado reserva
+    // y cierra su propio número de plato en el momento, sin tocar armarPlatoActivo ni
+    // grupoActual — así no interfiere con un armado manual en curso de otra categoría.
+    const autoArmarPlato = Boolean(product.categoria_arma_plato_automatico);
+    let grupoArmado = null;
+    let consumesGrupo = false;
+    if (autoArmarPlato) {
+      grupoArmado = nextGrupoId;
+      consumesGrupo = true;
+    } else if (armarPlatoActivo) {
+      grupoArmado = grupoActual;
+      // Primer producto que cae en este plato: recién ahora se "consume" su número, para
+      // que el próximo "+ Nuevo plato" avance de verdad en vez de saltar números vacíos.
+      consumesGrupo = grupoArmado === nextGrupoId;
+    }
 
     if (product.venta_por_peso) {
       const pesoGramos = Number(options.pesoGramos);

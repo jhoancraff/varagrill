@@ -182,10 +182,12 @@ class VGProducto(VGAuditoria):
 # Inventario
 # ---------------------------------------------------------------------------
 class VGIngrediente(VGAuditoria):
+    # Solo estas tres: el negocio ya no maneja kilos ni litros, todo se carga
+    # directo en gramos/mililitros/unidad (ej. 100 kg de carne se registra
+    # como 100000 g). Ver migración 00XX_solo_gramos_ml_unidad para el
+    # reescalado de los datos que ya existían en kg/l.
     UNIDADES = [
-        ("kg", "Kilogramos"),
         ("g", "Gramos"),
-        ("l", "Litros"),
         ("ml", "Mililitros"),
         ("unidad", "Unidad"),
     ]
@@ -193,7 +195,10 @@ class VGIngrediente(VGAuditoria):
     unidad_medida = models.CharField(max_length=10, choices=UNIDADES)
     stock_actual = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     stock_minimo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    costo_unitario = models.DecimalField(max_digits=12, decimal_places=4, default=0)
+    # decimal_places=6 (antes 4): al pasar de "costo por kg" a "costo por
+    # gramo" (÷1000), un ingrediente barato (ej. sal, hielo) puede quedar por
+    # debajo de $0.01/g — con 4 decimales eso se truncaba a 0.
+    costo_unitario = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     ultimo_proveedor = models.CharField(
         max_length=150, blank=True,
         help_text="Nombre del último proveedor que despachó este ingrediente (sin tabla propia: los proveedores cambian seguido).",
@@ -424,7 +429,7 @@ class VGDetalleCompra(models.Model):
     compra = models.ForeignKey(VGCompra, on_delete=models.CASCADE, related_name="detalles")
     ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.PROTECT, related_name="compras")
     cantidad = models.DecimalField(max_digits=10, decimal_places=2)
-    costo_unitario = models.DecimalField(max_digits=12, decimal_places=4)
+    costo_unitario = models.DecimalField(max_digits=14, decimal_places=6)
 
     class Meta:
         db_table = "vg_detalle_compras"

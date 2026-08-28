@@ -134,10 +134,14 @@ def _serialize_recipe_product(product):
     }
 
 
+# Solo g/ml/unidad (el negocio ya no maneja kg/l — ver migración
+# 0025_solo_gramos_ml_unidad). Cada familia queda con un único miembro, así
+# que _convertir_cantidad_a_unidad_ingrediente ahora siempre es un factor 1
+# que no cambia nada; se deja la tabla (en vez de eliminar la función) porque
+# sigue siendo el único punto de validación de "familia compatible" — evita
+# mezclar, por ejemplo, una cantidad en 'unidad' contra un ingrediente en 'g'.
 _UNIDAD_FAMILIA = {
-    'kg': ('masa', Decimal('1000')),
     'g': ('masa', Decimal('1')),
-    'l': ('volumen', Decimal('1000')),
     'ml': ('volumen', Decimal('1')),
     'unidad': ('conteo', Decimal('1')),
 }
@@ -1741,7 +1745,7 @@ def admin_catalog_view(request):
         # El costo unitario nunca se recibe precalculado: se deriva siempre del precio
         # total pagado dividido entre la cantidad realmente recibida, para que
         # presentaciones no redondas (ej. potes de 910 g) queden bien costeadas.
-        costo_unitario_value = (precio_total_value / cantidad_value).quantize(Decimal('0.0001'))
+        costo_unitario_value = (precio_total_value / cantidad_value).quantize(Decimal('0.000001'))
 
         ingredient = None
         if ingredient_id not in [None, '']:
@@ -2014,7 +2018,7 @@ def _preview_ingrediente_row(row):
             resultado['mensaje'] = ''
     elif not unidad_normalizada:
         resultado['accion'] = 'error'
-        resultado['mensaje'] = 'Ingrediente nuevo: falta una unidad válida (kg, g, l, ml o unidad).'
+        resultado['mensaje'] = 'Ingrediente nuevo: falta una unidad válida (g, ml o unidad).'
     else:
         resultado['accion'] = 'nuevo'
         resultado['mensaje'] = ''
@@ -2084,7 +2088,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 ingrediente.stock_actual = cantidad
                 update_fields = ['stock_actual', 'actualizado_por', 'fecha_actualizacion']
                 if delta > 0 and precio_total is not None:
-                    ingrediente.costo_unitario = (precio_total / delta).quantize(Decimal('0.0001'))
+                    ingrediente.costo_unitario = (precio_total / delta).quantize(Decimal('0.000001'))
                     update_fields.append('costo_unitario')
                 ingrediente.actualizado_por = operator
                 ingrediente.save(update_fields=update_fields)
@@ -2092,7 +2096,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 movimiento_compra = None
                 if delta > 0:
                     lote = _obtener_compra()
-                    costo_linea = (precio_total / delta).quantize(Decimal('0.0001')) if precio_total is not None else Decimal('0')
+                    costo_linea = (precio_total / delta).quantize(Decimal('0.000001')) if precio_total is not None else Decimal('0')
                     VGDetalleCompra.objects.create(
                         compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
                     )
@@ -2112,9 +2116,9 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
             else:
                 unidad_normalizada = normalize_unidad(item.get('unidad'))
                 if not unidad_normalizada:
-                    errores.append(f'{nombre}: falta una unidad válida (kg, g, l, ml o unidad) para crearlo.')
+                    errores.append(f'{nombre}: falta una unidad válida (g, ml o unidad) para crearlo.')
                     continue
-                costo_inicial = (precio_total / cantidad).quantize(Decimal('0.0001')) if precio_total is not None else Decimal('0')
+                costo_inicial = (precio_total / cantidad).quantize(Decimal('0.000001')) if precio_total is not None else Decimal('0')
                 nuevo = VGIngrediente.objects.create(
                     nombre=nombre,
                     unidad_medida=unidad_normalizada,

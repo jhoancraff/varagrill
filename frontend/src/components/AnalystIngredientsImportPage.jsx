@@ -206,7 +206,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           ) : null}
         </div>
         <p style={hintStyle}>
-          La plantilla trae las columnas Ingrediente, Unidad (kg, g, l, ml o unidad) y Cantidad. Puedes usar tus
+          La plantilla trae las columnas Ingrediente, Unidad (g, ml o unidad) y Cantidad. Puedes usar tus
           propios encabezados siempre que incluyan una columna "Ingrediente". Si además agregas una columna
           "Precio total" (lo pagado por esa cantidad de ese ingrediente), el sistema calcula solo el costo por
           unidad — igual que al registrar un ingreso individual.
@@ -258,7 +258,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                         value={row.unidad || ''}
                         onChange={(event) => updateRow(row.fila, { unidad: event.target.value })}
                         style={editInputStyle}
-                        placeholder="kg, g, l, ml, unidad"
+                        placeholder="g, ml, unidad"
                       />
                     </div>
                     <div key={`qty-${row.fila}`} style={cellStyle}>

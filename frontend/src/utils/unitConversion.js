@@ -1,31 +1,26 @@
 // Conversión de unidades para la receta de ingredientes de un producto (ver
-// VGIngrediente.UNIDADES en el backend). El analista puede teclear la cantidad en la
-// unidad que le resulte más cómoda (ej. gramos) aunque el inventario del ingrediente
-// viva en otra (ej. kilogramos); el backend hace la conversión real al guardar
-// (_convertir_cantidad_a_unidad_ingrediente en api_views.py) — esto es solo para
-// mostrarle al analista una vista previa antes de enviar el formulario.
+// VGIngrediente.UNIDADES en el backend). Solo g/ml/unidad — el negocio ya no
+// maneja kg/l (ver migración 0025_solo_gramos_ml_unidad), así que cada
+// familia queda con un único miembro y convertirCantidad ahora siempre es un
+// factor 1. El backend sigue siendo la conversión real al guardar
+// (_convertir_cantidad_a_unidad_ingrediente en api_views.py) — esto es solo
+// para mostrarle al analista una vista previa antes de enviar el formulario.
 
 export const UNIT_FAMILY = {
-  kg: 'masa',
   g: 'masa',
-  l: 'volumen',
   ml: 'volumen',
   unidad: 'conteo',
 };
 
 const UNIT_TO_BASE = {
-  kg: 1000,
   g: 1,
-  l: 1000,
   ml: 1,
   unidad: 1,
 };
 
 export const UNIT_OPTIONS = {
-  kg: ['kg', 'g'],
-  g: ['kg', 'g'],
-  l: ['l', 'ml'],
-  ml: ['l', 'ml'],
+  g: ['g'],
+  ml: ['ml'],
   unidad: ['unidad'],
 };
 

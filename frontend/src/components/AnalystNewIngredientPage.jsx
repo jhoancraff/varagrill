@@ -4,7 +4,7 @@ import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyForm = {
   nombre: '',
-  unidad: 'kg',
+  unidad: 'g',
   stock_actual: '',
   stock_minimo: '',
   costo_unitario: '',
@@ -12,9 +12,7 @@ const emptyForm = {
 };
 
 const unidadOptions = [
-  { value: 'kg', label: 'Kilogramos (kg)' },
   { value: 'g', label: 'Gramos (g)' },
-  { value: 'l', label: 'Litros (l)' },
   { value: 'ml', label: 'Mililitros (ml)' },
   { value: 'unidad', label: 'Unidad' },
 ];

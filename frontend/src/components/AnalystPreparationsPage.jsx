@@ -195,9 +195,7 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
               <label style={fieldStyle}>
                 <span style={labelStyle}>Unidad del rendimiento</span>
                 <select value={form.rendimiento_unidad} onChange={(event) => handleFormChange('rendimiento_unidad', event.target.value)} style={selectStyle} className="subrecipe-dark-select">
-                  <option value="kg">Kilogramos</option>
                   <option value="g">Gramos</option>
-                  <option value="l">Litros</option>
                   <option value="ml">Mililitros</option>
                   <option value="unidad">Unidad</option>
                 </select>

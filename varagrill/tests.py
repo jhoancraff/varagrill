@@ -7,7 +7,9 @@ from unittest.mock import patch
 from varagrill.models import (
     VGCategoriaProducto,
     VGCompra,
+    VGCompraBorrador,
     VGDetalleCompra,
+    VGDetalleCompraBorrador,
     VGDetallePedido,
     VGDetallePedidoAdicional,
     VGIngrediente,
@@ -21,6 +23,7 @@ from varagrill.models import (
     VGRol,
     VGUsuario,
 )
+from varagrill.unit_rescale import rescale_legacy_units
 
 
 class LoginViewTests(TestCase):
@@ -139,10 +142,12 @@ class AdminCatalogApiTests(TestCase):
             'nombre': 'Tomate',
             'ingrediente_id': '',
             'cantidad': '5.5',
-            'unidad': 'kg',
+            'unidad': 'g',
             'proveedor': 'Proveedor Uno',
             'stock_minimo': '1.0',
-            'costo_unitario': '2.25',
+            # El endpoint deriva costo_unitario de precio_total/cantidad (nunca
+            # lee un costo_unitario recibido) -- 12.375 / 5.5 = 2.25.
+            'precio_total': '12.375',
         }
         response = self.client.post(
             '/api/admin/catalogo/',
@@ -153,7 +158,7 @@ class AdminCatalogApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         ingredient = VGIngrediente.objects.get(nombre='Tomate')
         self.assertEqual(ingredient.stock_actual, 5.5)
-        self.assertEqual(ingredient.unidad_medida, 'kg')
+        self.assertEqual(ingredient.unidad_medida, 'g')
         self.assertEqual(ingredient.ultimo_proveedor, 'Proveedor Uno')
         self.assertEqual(ingredient.stock_minimo, Decimal('1.0'))
         self.assertEqual(ingredient.costo_unitario, Decimal('2.25'))
@@ -217,7 +222,7 @@ class AdminCatalogApiTests(TestCase):
     def test_admin_catalog_endpoint_updates_existing_records(self):
         ingredient = VGIngrediente.objects.create(
             nombre='Cebolla',
-            unidad_medida='kg',
+            unidad_medida='g',
             stock_actual='2.00',
             stock_minimo='1.00',
             costo_unitario='0.50',
@@ -226,7 +231,7 @@ class AdminCatalogApiTests(TestCase):
         preparation = VGPreparacion.objects.create(
             nombre='Salsa base',
             rendimiento_cantidad='1.000',
-            rendimiento_unidad='l',
+            rendimiento_unidad='ml',
         )
         category = VGCategoriaProducto.objects.create(nombre='Jugos')
         beverage = VGProducto.objects.create(
@@ -244,10 +249,11 @@ class AdminCatalogApiTests(TestCase):
                 'ingrediente_id': ingredient.id,
                 'nombre': 'Cebolla',
                 'cantidad': '7.25',
-                'unidad': 'kg',
+                'unidad': 'g',
                 'proveedor': 'Proveedor Editado',
                 'stock_minimo': '1.50',
-                'costo_unitario': '0.90',
+                # 6.525 / 7.25 = 0.90 (el endpoint deriva costo_unitario de precio_total/cantidad).
+                'precio_total': '6.525',
             }),
             content_type='application/json',
         )
@@ -294,7 +300,7 @@ class AdminCatalogApiTests(TestCase):
     def test_admin_catalog_endpoint_deletes_existing_records(self):
         ingredient = VGIngrediente.objects.create(
             nombre='Pimenton',
-            unidad_medida='kg',
+            unidad_medida='g',
             stock_actual='1.00',
             stock_minimo='1.00',
             costo_unitario='1.00',
@@ -302,7 +308,7 @@ class AdminCatalogApiTests(TestCase):
         preparation = VGPreparacion.objects.create(
             nombre='Salsa temporal',
             rendimiento_cantidad='1.000',
-            rendimiento_unidad='l',
+            rendimiento_unidad='ml',
         )
         category = VGCategoriaProducto.objects.create(nombre='Jugos')
         beverage = VGProducto.objects.create(
@@ -538,9 +544,13 @@ class KitchenOrdersApiTests(TestCase):
         self.assertEqual(pedido.estado, 'pendiente')
 
     @patch('varagrill.api_views._notify_cocina_event')
-    def test_create_order_triggers_notification_only_for_mesero(self, notify_mock):
+    def test_create_order_triggers_notification_regardless_of_role(self, notify_mock):
+        # pedido_create_view llama a _notify_cocina_event('NUEVA_COMANDAS', ...)
+        # sin chequeo de rol -- cocina necesita enterarse de CUALQUIER pedido
+        # nuevo, sin importar quién lo registró.
         payload = {
             'tipo_pedido': 'local',
+            'cliente_nombre': 'Cliente de prueba',
             'items': [
                 {
                     'product_id': self.product.id,
@@ -570,7 +580,7 @@ class KitchenOrdersApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertFalse(notify_mock.called)
+        self.assertTrue(notify_mock.called)
 
 
 class PedidoCobroInventoryDeductionTests(TestCase):
@@ -581,7 +591,7 @@ class PedidoCobroInventoryDeductionTests(TestCase):
     """
 
     def setUp(self):
-        self.cajero_role, _ = VGRol.objects.get_or_create(nombre_role='Cajero')
+        self.cajero_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
         self.user = VGUsuario.objects.create_user(
             username='cajera',
             password='claveCajera123',
@@ -612,10 +622,10 @@ class PedidoCobroInventoryDeductionTests(TestCase):
         VGRecetaProducto.objects.create(producto=plato, ingrediente=arroz, cantidad_requerida='150.000')
 
         pedido = VGPedido.objects.create(
-            usuario=self.user, tipo_pedido='local', estado='listo', subtotal='6.00', total='6.00',
+            usuario=self.user, tipo_pedido='local', estado='entregado', subtotal='6.00', total='6.00',
         )
         VGDetallePedido.objects.create(
-            pedido=pedido, producto=plato, cantidad=2, precio_unitario='3.00', estado='listo',
+            pedido=pedido, producto=plato, cantidad=2, precio_unitario='3.00', estado='entregado',
         )
 
         response = self._cobrar([pedido.id])
@@ -651,10 +661,10 @@ class PedidoCobroInventoryDeductionTests(TestCase):
         VGRecetaProducto.objects.create(producto=plato, preparacion=salsa, cantidad_requerida='200.000')
 
         pedido = VGPedido.objects.create(
-            usuario=self.user, tipo_pedido='local', estado='listo', subtotal='8.00', total='8.00',
+            usuario=self.user, tipo_pedido='local', estado='entregado', subtotal='8.00', total='8.00',
         )
         VGDetallePedido.objects.create(
-            pedido=pedido, producto=plato, cantidad=1, precio_unitario='8.00', estado='listo',
+            pedido=pedido, producto=plato, cantidad=1, precio_unitario='8.00', estado='entregado',
         )
 
         response = self._cobrar([pedido.id])
@@ -707,10 +717,10 @@ class PedidoCobroInventoryDeductionTests(TestCase):
         )
 
         pedido = VGPedido.objects.create(
-            usuario=self.user, tipo_pedido='local', estado='listo', subtotal='6.00', total='6.00',
+            usuario=self.user, tipo_pedido='local', estado='entregado', subtotal='6.00', total='6.00',
         )
         detalle = VGDetallePedido.objects.create(
-            pedido=pedido, producto=plato, cantidad=1, precio_unitario='6.00', estado='listo',
+            pedido=pedido, producto=plato, cantidad=1, precio_unitario='6.00', estado='entregado',
         )
         VGDetallePedidoAdicional.objects.create(
             detalle_pedido=detalle, preparacion=extra_queso, cantidad=100, precio_unitario='0.30',
@@ -722,3 +732,159 @@ class PedidoCobroInventoryDeductionTests(TestCase):
         queso.refresh_from_db()
         # 100g de "queso extra" a partir de un lote 1:1 -> 100g de queso descontados.
         self.assertEqual(queso.stock_actual, Decimal('1900.00'))
+
+
+class UnidadesMedidaTests(TestCase):
+    """
+    El negocio ya no maneja kg/l: el catálogo de unidades solo admite
+    gramos/mililitros/unidad, los formularios que crean ingredientes lo
+    validan, y los datos que ya existían en kg/l se reescalan correctamente
+    (misma cantidad física, mismo dinero total) al pasar a g/ml — ver
+    varagrill/unit_rescale.py y la migración 0025_solo_gramos_ml_unidad.
+    """
+
+    def test_unidades_de_ingrediente_son_solo_gramos_mililitros_unidad(self):
+        self.assertEqual(
+            VGIngrediente.UNIDADES,
+            [('g', 'Gramos'), ('ml', 'Mililitros'), ('unidad', 'Unidad')],
+        )
+
+    def test_crear_ingrediente_con_unidad_kg_es_rechazado(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        admin = VGUsuario.objects.create_superuser(
+            username='adminunidades',
+            password='claveAdmin123',
+            cedula='88888888',
+            email='adminunidades@varagrill.test',
+            id_role=admin_role,
+        )
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            '/api/admin/compras/borrador/agregar/',
+            data=json.dumps({
+                'nombre': 'Ingrediente en kilos',
+                'unidad': 'kg',
+                'cantidad': '10',
+                'precio_total': '20',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload['ok'])
+        self.assertIn('g, ml o unidad', payload['message'])
+        self.assertFalse(VGIngrediente.objects.filter(nombre='Ingrediente en kilos').exists())
+
+    def test_rescale_legacy_units_convierte_kg_y_litros_manteniendo_el_dinero(self):
+        # Ingrediente en kg, con stock/costo, una compra histórica y una receta que lo usa.
+        carne = VGIngrediente.objects.create(
+            nombre='Carne (legacy kg)', unidad_medida='kg',
+            stock_actual='100.00', stock_minimo='10.00', costo_unitario='5.0000',
+        )
+        compra = VGCompra.objects.create(proveedor_nombre='Frigorifico X')
+        detalle_compra = VGDetalleCompra.objects.create(
+            compra=compra, ingrediente=carne, cantidad='50.00', costo_unitario='4.0000',
+        )
+        borrador = VGCompraBorrador.objects.create()
+        detalle_borrador = VGDetalleCompraBorrador.objects.create(
+            borrador=borrador, ingrediente=carne, cantidad='20.00', precio_total='80.00',
+        )
+        category = VGCategoriaProducto.objects.create(nombre='Platos legacy')
+        plato = VGProducto.objects.create(
+            nombre='Bistec (legacy)', categoria=category, precio_venta='10.00', disponible=True,
+        )
+        receta_directa = VGRecetaProducto.objects.create(
+            producto=plato, ingrediente=carne, cantidad_requerida='0.200',
+        )
+
+        # Subreceta en litros que también usa el ingrediente en kg, y un plato
+        # que a su vez usa esa subreceta -- para probar la cascada de las dos
+        # direcciones (por ingrediente Y por preparación) en un solo test.
+        salsa = VGPreparacion.objects.create(
+            nombre='Salsa (legacy l)', rendimiento_cantidad='2.000', rendimiento_unidad='l',
+        )
+        receta_salsa = VGRecetaPreparacion.objects.create(
+            preparacion=salsa, ingrediente=carne, cantidad_requerida='0.500',
+        )
+        receta_plato_salsa = VGRecetaProducto.objects.create(
+            producto=plato, preparacion=salsa, cantidad_requerida='0.300',
+        )
+
+        # Ingrediente que YA estaba en gramos no debe tocarse.
+        sal = VGIngrediente.objects.create(
+            nombre='Sal (ya en g)', unidad_medida='g', stock_actual='500.00', costo_unitario='0.01',
+        )
+
+        counts = rescale_legacy_units(
+            VGIngrediente=VGIngrediente,
+            VGPreparacion=VGPreparacion,
+            VGDetalleCompra=VGDetalleCompra,
+            VGDetalleCompraBorrador=VGDetalleCompraBorrador,
+            VGRecetaProducto=VGRecetaProducto,
+            VGRecetaPreparacion=VGRecetaPreparacion,
+        )
+
+        self.assertEqual(counts, {
+            'ingredientes': 1,
+            'preparaciones': 1,
+            'detalle_compra': 1,
+            'detalle_compra_borrador': 1,
+            'receta_producto': 2,
+            'receta_preparacion': 1,
+        })
+
+        carne.refresh_from_db()
+        self.assertEqual(carne.unidad_medida, 'g')
+        self.assertEqual(carne.stock_actual, Decimal('100000.00'))
+        self.assertEqual(carne.stock_minimo, Decimal('10000.00'))
+        self.assertEqual(carne.costo_unitario, Decimal('0.005000'))
+        # El valor total del inventario (cantidad x costo) no cambia.
+        self.assertEqual(Decimal('100.00') * Decimal('5.0000'), Decimal('100000.00') * Decimal('0.005000'))
+
+        detalle_compra.refresh_from_db()
+        self.assertEqual(detalle_compra.cantidad, Decimal('50000.00'))
+        self.assertEqual(detalle_compra.costo_unitario, Decimal('0.004000'))
+        self.assertEqual(detalle_compra.subtotal, Decimal('50.00') * Decimal('4.0000'))  # $200, invariante
+
+        detalle_borrador.refresh_from_db()
+        self.assertEqual(detalle_borrador.cantidad, Decimal('20000.00'))
+        self.assertEqual(detalle_borrador.precio_total, Decimal('80.00'))  # dinero total, no se toca
+        self.assertEqual(detalle_borrador.costo_unitario, Decimal('80.00') / Decimal('20000.00'))
+
+        receta_directa.refresh_from_db()
+        self.assertEqual(receta_directa.cantidad_requerida, Decimal('200.000'))
+
+        salsa.refresh_from_db()
+        self.assertEqual(salsa.rendimiento_unidad, 'ml')
+        self.assertEqual(salsa.rendimiento_cantidad, Decimal('2000.000'))
+
+        receta_salsa.refresh_from_db()
+        self.assertEqual(receta_salsa.cantidad_requerida, Decimal('500.000'))
+
+        receta_plato_salsa.refresh_from_db()
+        self.assertEqual(receta_plato_salsa.cantidad_requerida, Decimal('300.000'))
+
+        sal.refresh_from_db()
+        self.assertEqual(sal.unidad_medida, 'g')
+        self.assertEqual(sal.stock_actual, Decimal('500.00'))
+        self.assertEqual(sal.costo_unitario, Decimal('0.010000'))
+
+        # Correr la función una segunda vez es un no-op: ya no queda nada en kg/l.
+        second_pass_counts = rescale_legacy_units(
+            VGIngrediente=VGIngrediente,
+            VGPreparacion=VGPreparacion,
+            VGDetalleCompra=VGDetalleCompra,
+            VGDetalleCompraBorrador=VGDetalleCompraBorrador,
+            VGRecetaProducto=VGRecetaProducto,
+            VGRecetaPreparacion=VGRecetaPreparacion,
+        )
+        self.assertEqual(second_pass_counts, {
+            'ingredientes': 0,
+            'preparaciones': 0,
+            'detalle_compra': 0,
+            'detalle_compra_borrador': 0,
+            'receta_producto': 0,
+            'receta_preparacion': 0,
+        })

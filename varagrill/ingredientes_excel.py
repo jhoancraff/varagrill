@@ -20,10 +20,10 @@ R_NS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 
 ACCENTS_TABLE = str.maketrans('áéíóúñÁÉÍÓÚÑ', 'aeiounAEIOUN')
 
+# Solo g/ml/unidad — el negocio ya no maneja kg/l, una fila de Excel con
+# "kg"/"litro" deja de reconocerse a propósito (fuerza a cargar en gramos).
 UNIDAD_ALIASES = {
-    'kg': 'kg', 'kilo': 'kg', 'kilos': 'kg', 'kilogramo': 'kg', 'kilogramos': 'kg',
     'g': 'g', 'gr': 'g', 'gramo': 'g', 'gramos': 'g',
-    'l': 'l', 'lt': 'l', 'litro': 'l', 'litros': 'l',
     'ml': 'ml', 'mililitro': 'ml', 'mililitros': 'ml',
     'unidad': 'unidad', 'unidades': 'unidad', 'und': 'unidad', 'u': 'unidad',
 }

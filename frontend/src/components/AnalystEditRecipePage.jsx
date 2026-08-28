@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyDraft = {
   ingredientSearch: '',
@@ -31,7 +33,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
   const [showPreparationResults, setShowPreparationResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, components });
 
   useEffect(() => {
@@ -96,7 +98,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
         setComponents(loadedComponents);
         markClean({ form: loadedForm, components: loadedComponents });
       } catch (error) {
-        setMessage(error.message || 'No se pudieron cargar los datos de recetas.');
+        showError(error.message || 'No se pudieron cargar los datos de recetas.');
       } finally {
         setLoading(false);
       }
@@ -156,18 +158,18 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
 
   const handleAddIngredient = () => {
     if (!draft.ingredientId || !draft.cantidad) {
-      setMessage('Selecciona un ingrediente y define la cantidad a descontar.');
+      showError('Selecciona un ingrediente y define la cantidad a descontar.');
       return;
     }
 
     const ingredient = ingredients.find((item) => String(item.id) === String(draft.ingredientId));
     if (!ingredient) {
-      setMessage('El ingrediente seleccionado ya no existe.');
+      showError('El ingrediente seleccionado ya no existe.');
       return;
     }
 
     if (components.some((item) => item.tipo === 'ingrediente' && String(item.referencia_id) === String(ingredient.id))) {
-      setMessage('Ese ingrediente ya está agregado a la receta.');
+      showError('Ese ingrediente ya está agregado a la receta.');
       return;
     }
 
@@ -184,23 +186,22 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
       },
     ]));
     setDraft((current) => ({ ...current, ingredientId: '', ingredientSearch: '', cantidad: '' }));
-    setMessage('');
   };
 
   const handleAddPreparation = () => {
     if (!draft.preparationId || !draft.cantidad) {
-      setMessage('Selecciona una subreceta y define la cantidad a usar.');
+      showError('Selecciona una subreceta y define la cantidad a usar.');
       return;
     }
 
     const preparation = preparations.find((item) => String(item.id) === String(draft.preparationId));
     if (!preparation) {
-      setMessage('La subreceta seleccionada ya no existe.');
+      showError('La subreceta seleccionada ya no existe.');
       return;
     }
 
     if (components.some((item) => item.tipo === 'sub_preparacion' && String(item.referencia_id) === String(preparation.id))) {
-      setMessage('Esa subreceta ya está agregada a la receta.');
+      showError('Esa subreceta ya está agregada a la receta.');
       return;
     }
 
@@ -217,7 +218,6 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
       },
     ]));
     setDraft((current) => ({ ...current, preparationId: '', preparationSearch: '', cantidad: '' }));
-    setMessage('');
   };
 
   const handleRemoveComponent = (uid) => {
@@ -228,12 +228,12 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
     event.preventDefault();
 
     if (!form.nombre.trim()) {
-      setMessage('Debes indicar el nombre de la receta.');
+      showError('Debes indicar el nombre de la receta.');
       return;
     }
 
     if (components.length === 0) {
-      setMessage('Debes agregar ingredientes o subrecetas a la receta.');
+      showError('Debes agregar ingredientes o subrecetas a la receta.');
       return;
     }
 
@@ -260,10 +260,10 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
         throw new Error(data.message || 'No se pudo actualizar la receta.');
       }
 
-      setMessage(data.message || 'Receta actualizada correctamente.');
+      showSuccess(data.message || 'Receta actualizada correctamente.');
       markClean({ form, components });
     } catch (error) {
-      setMessage(error.message || 'No se pudo actualizar la receta.');
+      showError(error.message || 'No se pudo actualizar la receta.');
     } finally {
       setSaving(false);
     }
@@ -299,7 +299,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando receta...</div> : null}

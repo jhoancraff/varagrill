@@ -7,7 +7,7 @@ const NEW_INGREDIENT_VALUE = '__new__';
 const emptyForm = {
   ingrediente_id: '',
   nombre: '',
-  unidad: 'kg',
+  unidad: 'g',
   cantidad: '',
   stock_minimo: '',
   precio_total: '',
@@ -17,9 +17,7 @@ const emptyForm = {
 };
 
 const UNIDAD_LABELS = {
-  kg: 'kg',
   g: 'g',
-  l: 'L',
   ml: 'ml',
   unidad: 'unidad',
 };
@@ -94,7 +92,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         ...current,
         ingrediente_id: NEW_INGREDIENT_VALUE,
         nombre: '',
-        unidad: 'kg',
+        unidad: 'g',
         stock_minimo: '',
         precio_total: '',
         proveedor: '',
@@ -256,9 +254,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
               <label style={fieldStyle}>
                 <span style={labelStyle}>Unidad de medida</span>
                 <select value={form.unidad} onChange={(event) => handleChange('unidad', event.target.value)} style={selectStyle} className="admin-dark-select">
-                  <option value="kg">Kilogramos</option>
                   <option value="g">Gramos</option>
-                  <option value="l">Litros</option>
                   <option value="ml">Mililitros</option>
                   <option value="unidad">Unidad</option>
                 </select>

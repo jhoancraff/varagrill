@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 import { UNIT_OPTIONS, convertirCantidad } from '../utils/unitConversion';
 
 const emptyForm = {
@@ -62,7 +64,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
   const [imagePreview, setImagePreview] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const fileInputRef = useRef(null);
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, ingredientes, gruposOpciones });
 
@@ -104,7 +106,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
         setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudieron cargar las categorías.');
+        showError(error.message || 'No se pudieron cargar las categorías.');
       } finally {
         setLoading(false);
       }
@@ -143,22 +145,22 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
 
   const handleAddIngrediente = () => {
     if (!ingredientDraft.id) {
-      setMessage('Selecciona un ingrediente.');
+      showError('Selecciona un ingrediente.');
       return;
     }
     if (!ingredientDraft.cantidad && !form.venta_por_peso) {
-      setMessage('Define la cantidad que lleva el producto.');
+      showError('Define la cantidad que lleva el producto.');
       return;
     }
 
     const ingredient = ingredients.find((item) => String(item.id) === String(ingredientDraft.id));
     if (!ingredient) {
-      setMessage('El ingrediente seleccionado ya no existe.');
+      showError('El ingrediente seleccionado ya no existe.');
       return;
     }
 
     if (ingredientes.some((item) => String(item.referencia_id) === String(ingredient.id))) {
-      setMessage('Ese ingrediente ya está agregado a este producto.');
+      showError('Ese ingrediente ya está agregado a este producto.');
       return;
     }
 
@@ -177,7 +179,6 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       },
     ]));
     setIngredientDraft(emptyIngredientDraft);
-    setMessage('');
   };
 
   const handleRemoveIngrediente = (uid) => {
@@ -212,12 +213,12 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
   const handleAddOpcionAGrupo = (grupoUid) => {
     const draft = opcionDraftByGrupo[grupoUid] || { preparacion_id: '', precio_adicional: '0' };
     if (!draft.preparacion_id) {
-      setMessage('Selecciona una subreceta para la opción.');
+      showError('Selecciona una subreceta para la opción.');
       return;
     }
     const preparacion = subrecetas.find((item) => String(item.id) === String(draft.preparacion_id));
     if (!preparacion) {
-      setMessage('Esa subreceta ya no existe.');
+      showError('Esa subreceta ya no existe.');
       return;
     }
     setGruposOpciones((current) => current.map((grupo) => {
@@ -225,7 +226,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         return grupo;
       }
       if (grupo.opciones.some((opcion) => String(opcion.preparacion_id) === String(preparacion.id))) {
-        setMessage('Esa opción ya está agregada a este grupo.');
+        showError('Esa opción ya está agregada a este grupo.');
         return grupo;
       }
       return {
@@ -237,7 +238,6 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       };
     }));
     setOpcionDraftByGrupo((current) => ({ ...current, [grupoUid]: { preparacion_id: '', precio_adicional: '0' } }));
-    setMessage('');
   };
 
   const handleRemoveOpcionDeGrupo = (grupoUid, opcionUid) => {
@@ -256,7 +256,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
     event.preventDefault();
 
     if (!form.categoria_id) {
-      setMessage('Debes seleccionar una categoría para el producto.');
+      showError('Debes seleccionar una categoría para el producto.');
       return;
     }
 
@@ -309,7 +309,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         throw new Error(data.message || 'No se pudo crear el producto.');
       }
 
-      setMessage(data.message || 'Producto creado correctamente.');
+      showSuccess(data.message || 'Producto creado correctamente.');
       setForm(emptyForm);
       setIngredientes([]);
       setIngredientDraft(emptyIngredientDraft);
@@ -325,7 +325,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         onProductsChanged();
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo crear el producto.');
+      showError(error.message || 'No se pudo crear el producto.');
     } finally {
       setSaving(false);
     }
@@ -354,7 +354,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando categorías...</div> : null}

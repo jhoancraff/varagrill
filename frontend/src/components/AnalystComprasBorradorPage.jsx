@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-const emptyItemForm = { nombre: '', unidad: 'kg', cantidad: '', precio_total: '' };
+const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
 const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '' };
 
 function AnalystComprasBorradorPage({ isMobile, onBack }) {
@@ -243,9 +243,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                 <label style={fieldStyle}>
                   <span style={labelStyle}>Unidad</span>
                   <select value={itemForm.unidad} onChange={(e) => setItemForm((c) => ({ ...c, unidad: e.target.value }))} style={inputStyle}>
-                    <option value="kg">Kilogramos (kg)</option>
                     <option value="g">Gramos (g)</option>
-                    <option value="l">Litros (l)</option>
                     <option value="ml">Mililitros (ml)</option>
                     <option value="unidad">Unidad</option>
                   </select>

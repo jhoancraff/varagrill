@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyDraft = { ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' };
 
 const unidadOptions = [
-  { value: 'kg', label: 'Kilogramos (kg)' },
   { value: 'g', label: 'Gramos (g)' },
-  { value: 'l', label: 'Litros (l)' },
   { value: 'ml', label: 'Mililitros (ml)' },
   { value: 'unidad', label: 'Unidad' },
 ];
@@ -33,7 +33,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
   const [showPreparationResults, setShowPreparationResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ form, components });
 
   useEffect(() => {
@@ -91,7 +91,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
         setComponents(loadedComponents);
         markClean({ form: loadedForm, components: loadedComponents });
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar la data.');
+        showError(error.message || 'No se pudo cargar la data.');
       } finally {
         setLoading(false);
       }
@@ -130,19 +130,19 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
     const isIngredient = type === 'ingrediente';
     const referenceId = isIngredient ? draft.ingredientId : draft.preparationId;
     if (!referenceId || !draft.cantidad) {
-      setMessage('Debes seleccionar un componente y su cantidad.');
+      showError('Debes seleccionar un componente y su cantidad.');
       return;
     }
 
     const sourceList = isIngredient ? inventory : preparations;
     const selected = sourceList.find((item) => String(item.id) === String(referenceId));
     if (!selected) {
-      setMessage('El componente seleccionado no existe.');
+      showError('El componente seleccionado no existe.');
       return;
     }
 
     if (components.some((item) => item.tipo === type && String(item.referencia_id) === String(referenceId))) {
-      setMessage('Ese componente ya fue agregado.');
+      showError('Ese componente ya fue agregado.');
       return;
     }
 
@@ -160,21 +160,20 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
       },
     ]));
     setDraft((current) => ({ ...current, ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' }));
-    setMessage('');
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.nombre.trim()) {
-      setMessage('Debes indicar el nombre de la subreceta.');
+      showError('Debes indicar el nombre de la subreceta.');
       return;
     }
     if (components.length === 0) {
-      setMessage('Debes agregar al menos un componente.');
+      showError('Debes agregar al menos un componente.');
       return;
     }
     if (form.es_adicional && form.margen_ganancia === '') {
-      setMessage('Debes indicar el margen de ganancia del adicional.');
+      showError('Debes indicar el margen de ganancia del adicional.');
       return;
     }
 
@@ -200,10 +199,10 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
         throw new Error(data.message || 'No se pudo actualizar la subreceta.');
       }
 
-      setMessage(data.message || 'Subreceta actualizada correctamente.');
+      showSuccess(data.message || 'Subreceta actualizada correctamente.');
       markClean({ form, components });
     } catch (error) {
-      setMessage(error.message || 'No se pudo actualizar la subreceta.');
+      showError(error.message || 'No se pudo actualizar la subreceta.');
     } finally {
       setSaving(false);
     }
@@ -212,7 +211,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
   return (
     <section style={containerStyle(isMobile)}>
       <h2 style={titleStyle(isMobile)}>Editar subreceta</h2>
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStyle}>Cargando datos...</div> : null}

@@ -40,7 +40,7 @@ def _serialize_detalle_borrador(detalle):
         'unidad_medida': detalle.ingrediente.unidad_medida,
         'cantidad': str(detalle.cantidad),
         'precio_total': str(detalle.precio_total),
-        'costo_unitario': str(detalle.costo_unitario.quantize(Decimal('0.0001'))) if detalle.cantidad else '0',
+        'costo_unitario': str(detalle.costo_unitario.quantize(Decimal('0.000001'))) if detalle.cantidad else '0',
     }
 
 
@@ -104,7 +104,7 @@ def admin_compra_borrador_agregar_view(request):
                 return _auth_response({'ok': False, 'message': 'El nombre del ingrediente es obligatorio.'}, status=400)
             unidad = str(data.get('unidad', '') or '').strip()
             if unidad not in dict(VGIngrediente.UNIDADES):
-                return _auth_response({'ok': False, 'message': 'Indica una unidad valida (kg, g, l, ml o unidad) para crear el ingrediente.'}, status=400)
+                return _auth_response({'ok': False, 'message': 'Indica una unidad valida (g, ml o unidad) para crear el ingrediente.'}, status=400)
 
             existente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
             if existente is not None:
@@ -213,7 +213,7 @@ def admin_compra_borrador_confirmar_view(request):
 
         total = Decimal('0')
         for detalle in borrador.detalles.select_related('ingrediente'):
-            costo_unitario = (detalle.precio_total / detalle.cantidad).quantize(Decimal('0.0001'))
+            costo_unitario = (detalle.precio_total / detalle.cantidad).quantize(Decimal('0.000001'))
             ingrediente = detalle.ingrediente
             ingrediente.stock_actual = Decimal(str(ingrediente.stock_actual)) + detalle.cantidad
             ingrediente.costo_unitario = costo_unitario

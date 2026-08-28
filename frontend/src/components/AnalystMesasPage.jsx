@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -14,7 +16,7 @@ function AnalystMesasPage({ isMobile, isAdmin, onBack, onCreateNewMesa, onEditMe
   const [mesas, setMesas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -36,7 +38,7 @@ function AnalystMesasPage({ isMobile, isAdmin, onBack, onCreateNewMesa, onEditMe
         }
         setMesas(Array.isArray(data.mesas) ? data.mesas : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar la gestión de mesas.');
+        showError(error.message || 'No se pudo cargar la gestión de mesas.');
       } finally {
         setLoading(false);
       }
@@ -63,12 +65,12 @@ function AnalystMesasPage({ isMobile, isAdmin, onBack, onCreateNewMesa, onEditMe
         throw new Error(data.message || 'No se pudo eliminar la mesa.');
       }
       setMesas((current) => current.filter((entry) => entry.id !== mesa.id));
-      setMessage(data.message || 'Mesa eliminada correctamente.');
+      showSuccess(data.message || 'Mesa eliminada correctamente.');
       if (onMesasChanged) {
         onMesasChanged();
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar la mesa.');
+      showError(error.message || 'No se pudo eliminar la mesa.');
     } finally {
       setSaving(false);
     }
@@ -108,7 +110,7 @@ function AnalystMesasPage({ isMobile, isAdmin, onBack, onCreateNewMesa, onEditMe
         </button>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <div style={summaryGridStyle(isMobile)}>
         <article style={summaryCardStyle}>

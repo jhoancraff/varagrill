@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 import { formatBs } from '../utils/currency';
 
 // Los productos de estas categorías se piden únicamente como acompañante
@@ -30,8 +32,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   const [originalEstado, setOriginalEstado] = useState('');
   const [loadingOrder, setLoadingOrder] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [feedbackType, setFeedbackType] = useState('success');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [catalogType, setCatalogType] = useState('Todos');
   const [searchTerm, setSearchTerm] = useState('');
   const [isTablet, setIsTablet] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
@@ -397,20 +398,17 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
     event.preventDefault();
 
     if (!orderHeader.cliente.trim()) {
-      setFeedbackType('error');
-      setFeedback('Ingresa el nombre del cliente antes de guardar el pedido.');
+      showError('Ingresa el nombre del cliente antes de guardar el pedido.');
       return;
     }
 
     if (orderHeader.tipoPedido === 'local' && !orderHeader.mesaId) {
-      setFeedbackType('error');
-      setFeedback('Selecciona una mesa antes de guardar el pedido.');
+      showError('Selecciona una mesa antes de guardar el pedido.');
       return;
     }
 
     if (cartItems.length === 0) {
-      setFeedbackType('error');
-      setFeedback('Agrega al menos un plato para el pedido.');
+      showError('Agrega al menos un plato para el pedido.');
       return;
     }
 
@@ -419,7 +417,6 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
     }
 
     setIsSubmitting(true);
-    setFeedback('');
 
     try {
       const payload = {
@@ -463,24 +460,21 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo actualizar el pedido.');
+        showError(data.message || 'No se pudo actualizar el pedido.');
         if (response.status === 409) {
           setOriginalEstado(data.pedido?.estado || 'en_preparacion');
         }
         return;
       }
 
-      setFeedbackType('success');
-      setFeedback(`Pedido #${data.pedido.id} actualizado: total $${data.pedido.total}.`);
+      showSuccess(`Pedido #${data.pedido.id} actualizado: total $${data.pedido.total}.`);
       markClean({ cartItems, orderHeader });
 
       if (onSubmitSuccess) {
         onSubmitSuccess(data.pedido.id);
       }
     } catch (error) {
-      setFeedbackType('error');
-      setFeedback('Error de conexion al actualizar el pedido. Verifica la red e intenta otra vez.');
+      showError('Error de conexion al actualizar el pedido. Verifica la red e intenta otra vez.');
     } finally {
       setIsSubmitting(false);
     }
@@ -619,6 +613,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 
   return (
     <section style={orderContainerStyle(isCompact)}>
+      <Toast toast={toast} onClose={hideToast} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#f7a5a5', marginBottom: 8 }}>
@@ -865,8 +860,6 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
             <button type="submit" style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
               {isSubmitting ? 'Guardando...' : 'Guardar cambios'}
             </button>
-
-            {feedback && <div style={feedbackStyle(feedbackType)}>{feedback}</div>}
           </aside>
         </div>
       </form>

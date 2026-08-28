@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
 import BsAmount from './BsAmount';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -11,7 +13,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -28,7 +30,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
         }
         setItems(Array.isArray(data.recipes) ? data.recipes : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el reporte de subrecetas.');
+        showError(error.message || 'No se pudo cargar el reporte de subrecetas.');
       } finally {
         setLoading(false);
       }
@@ -70,9 +72,9 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
         throw new Error(data.message || 'No se pudo eliminar la subreceta.');
       }
       setItems((current) => current.filter((entry) => entry.id !== item.id));
-      setMessage(data.message || 'Subreceta eliminada correctamente.');
+      showSuccess(data.message || 'Subreceta eliminada correctamente.');
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar la subreceta.');
+      showError(error.message || 'No se pudo eliminar la subreceta.');
     } finally {
       setSaving(false);
     }
@@ -92,7 +94,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
         <button type="button" onClick={onCreateNew} style={primaryButtonStyle}>Agregar subreceta</button>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={toolbarStyle(isMobile)}>
@@ -179,7 +181,6 @@ const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', 
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center', gap: 4 };
 const cellPrimaryStyle = { ...cellStyle, background: 'rgba(255,255,255,0.02)' };
 const cellActionsStyle = { ...cellStyle, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '10px 16px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };

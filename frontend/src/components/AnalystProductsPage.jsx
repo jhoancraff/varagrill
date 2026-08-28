@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -8,12 +10,11 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   const loadProducts = async () => {
     setLoading(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/productos/', {
         credentials: 'include',
@@ -26,7 +27,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
       setProducts(Array.isArray(data.products) ? data.products : []);
       setCategories(Array.isArray(data.categories) ? data.categories : []);
     } catch (error) {
-      setMessage(error.message || 'No se pudo cargar la gestión de productos.');
+      showError(error.message || 'No se pudo cargar la gestión de productos.');
     } finally {
       setLoading(false);
     }
@@ -60,12 +61,12 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
       }
 
       setProducts((current) => current.filter((entry) => entry.id !== product.id));
-      setMessage(data.message || 'Producto eliminado correctamente.');
+      showSuccess(data.message || 'Producto eliminado correctamente.');
       if (onProductsChanged) {
         onProductsChanged();
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar el producto.');
+      showError(error.message || 'No se pudo eliminar el producto.');
     } finally {
       setSaving(false);
     }
@@ -106,7 +107,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
         </button>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <div style={summaryGridStyle(isMobile)}>
         <article style={summaryCardStyle}>

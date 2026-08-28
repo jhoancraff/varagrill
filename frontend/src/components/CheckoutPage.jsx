@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import ConfirmModal from './ConfirmModal';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatMontoDocumento } from '../utils/currency';
@@ -37,6 +38,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const [feedbackType, setFeedbackType] = useState('success');
   const [expandedOrderIds, setExpandedOrderIds] = useState(() => new Set());
   const [cuentasRefreshToken, setCuentasRefreshToken] = useState(0);
+  const [pendingConfirm, setPendingConfirm] = useState(null);
 
   const toggleExpanded = (pedidoId) => {
     setExpandedOrderIds((current) => {
@@ -123,6 +125,22 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     }));
   };
 
+  // La nota de entrega no lleva numeracion fiscal, asi que no necesita
+  // documento del cliente — pero una pre-factura o factura si, para poder
+  // identificar al cliente en el documento fiscal. Se valida en el frontend
+  // antes de llamar al backend (que hoy acepta el documento vacio y cae a
+  // "Consumidor Final") para forzar la politica del negocio de siempre
+  // pedirlo en estos dos flujos.
+  const validateClienteDocumento = (group) => {
+    const cliente = clienteByGroup[group.key] || emptyCliente;
+    if (!cliente.tipo_documento || !cliente.numero_documento.trim()) {
+      setFeedbackType('error');
+      setFeedback(`Indica el tipo y número de documento del cliente de ${group.label} antes de generar la pre-factura o factura.`);
+      return false;
+    }
+    return true;
+  };
+
   const clearGroupState = (groupKey) => {
     setSelectedByGroup((current) => {
       const copy = { ...current };
@@ -171,7 +189,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
 
       setFeedbackType('success');
       setFeedback(
-        `Nota de entrega registrada: $${data.factura.total} (${data.factura.pedidos.length} pedido(s)). Referencia ${data.factura.referencia}.`,
+        `Nota de entrega registrada: ${formatMontoDocumento(data.factura.total, data.factura.moneda, tasaCambio)} `
+        + `(${data.factura.pedidos.length} pedido(s)). Referencia ${data.factura.referencia}.`,
       );
       clearGroupState(group.key);
       await fetchPedidos();
@@ -254,7 +273,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       setFeedbackType('success');
       setFeedback(
         `Factura Nº ${data.factura.numero_factura} emitida (Control ${data.factura.numero_control}). `
-        + `Total $${data.factura.total} — saldo pendiente $${data.factura.saldo_pendiente}. Cóbrala desde Cuentas por cobrar, abajo.`,
+        + `Total ${formatMontoDocumento(data.factura.total, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)} `
+        + `— saldo pendiente ${formatMontoDocumento(data.factura.saldo_pendiente, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)}. `
+        + 'Cóbrala desde Cuentas por cobrar, abajo.',
       );
       clearGroupState(group.key);
       setCuentasRefreshToken((current) => current + 1);
@@ -300,7 +321,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       setFeedbackType('success');
       setFeedback(
         `Factura Nº ${data.factura.numero_factura} emitida (Control ${data.factura.numero_control}). `
-        + `Total $${data.factura.total} — saldo pendiente $${data.factura.saldo_pendiente}. Cóbrala desde Cuentas por cobrar, abajo.`,
+        + `Total ${formatMontoDocumento(data.factura.total, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)} `
+        + `— saldo pendiente ${formatMontoDocumento(data.factura.saldo_pendiente, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)}. `
+        + 'Cóbrala desde Cuentas por cobrar, abajo.',
       );
       clearGroupState(group.key);
       setCuentasRefreshToken((current) => current + 1);
@@ -311,6 +334,72 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     } finally {
       setBusyGroup('');
     }
+  };
+
+  // Arma el título/mensaje/etiqueta del modal de confirmación según qué botón
+  // se apretó (nota de entrega, factura directa, o confirmar factura desde
+  // una pre-factura ya generada) — se recalcula en cada render a partir de
+  // los mismos mapas por-grupo que ya alimentan las tarjetas, así el monto y
+  // la cantidad de pedidos que se muestran siempre coinciden con lo que el
+  // usuario seleccionó.
+  const buildConfirmContent = (pending) => {
+    if (!pending) {
+      return { title: '', message: '', confirmLabel: 'Confirmar' };
+    }
+    const { action, group } = pending;
+
+    if (action === 'prefactura') {
+      const prefactura = prefacturaByGroup[group.key];
+      const totalLabel = prefactura
+        ? formatMontoDocumento(prefactura.total, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)
+        : '';
+      return {
+        title: 'Emitir factura',
+        message: `Vas a emitir la factura fiscal${prefactura ? ` de la pre-factura ${prefactura.codigo}` : ''} de ${group.label} por ${totalLabel}. Esta acción no se puede deshacer. ¿Confirmas?`,
+        confirmLabel: 'Sí, emitir factura',
+      };
+    }
+
+    const selectedSet = selectedByGroup[group.key] || new Set();
+    const selectedTotal = group.pedidos
+      .filter((pedido) => selectedSet.has(pedido.id))
+      .reduce((sum, pedido) => sum + Number(pedido.total), 0);
+    const totalLabel = `$${selectedTotal.toFixed(2)}`;
+
+    if (action === 'nota') {
+      return {
+        title: 'Registrar nota de entrega',
+        message: `Vas a cobrar ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel} con una nota de entrega (sin factura fiscal). ¿Confirmas?`,
+        confirmLabel: 'Sí, registrar',
+      };
+    }
+
+    if (action === 'factura') {
+      return {
+        title: 'Emitir factura directa',
+        message: `Vas a emitir una factura fiscal para ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel}. Esta acción no se puede deshacer. ¿Confirmas?`,
+        confirmLabel: 'Sí, emitir factura',
+      };
+    }
+
+    return { title: '', message: '', confirmLabel: 'Confirmar' };
+  };
+
+  const confirmContent = buildConfirmContent(pendingConfirm);
+
+  const handleConfirmPendingAction = async () => {
+    if (!pendingConfirm) {
+      return;
+    }
+    const { action, group } = pendingConfirm;
+    if (action === 'nota') {
+      await handleNotaEntrega(group);
+    } else if (action === 'factura') {
+      await handleFacturaDirecta(group);
+    } else if (action === 'prefactura') {
+      await handleConfirmarFacturaDesdePrefactura(group);
+    }
+    setPendingConfirm(null);
   };
 
   return (
@@ -463,6 +552,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                         style={inputStyle}
                       />
                     </div>
+                    <p style={clienteHintStyle}>
+                      El tipo y número de documento son obligatorios para generar pre-factura o factura fiscal (no aplica a la nota de entrega).
+                    </p>
 
                     <div style={groupFooterStyle(isMobile)}>
                       <div style={{ color: '#fff', fontWeight: 700 }}>
@@ -482,7 +574,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                         </select>
                         <button
                           type="button"
-                          onClick={() => handleNotaEntrega(group)}
+                          onClick={() => setPendingConfirm({ action: 'nota', group })}
                           style={checkoutButtonStyle}
                           disabled={selectedSet.size === 0 || isBusy}
                         >
@@ -494,7 +586,10 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                     <div style={docButtonsRowStyle(isMobile)}>
                       <button
                         type="button"
-                        onClick={() => handleGenerarPrefactura(group)}
+                        onClick={() => {
+                          if (!validateClienteDocumento(group)) return;
+                          handleGenerarPrefactura(group);
+                        }}
                         style={secondaryButtonStyle}
                         disabled={selectedSet.size === 0 || isBusy}
                       >
@@ -502,7 +597,10 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleFacturaDirecta(group)}
+                        onClick={() => {
+                          if (!validateClienteDocumento(group)) return;
+                          setPendingConfirm({ action: 'factura', group });
+                        }}
                         style={primaryButtonStyle}
                         disabled={selectedSet.size === 0 || isBusy}
                       >
@@ -542,7 +640,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleConfirmarFacturaDesdePrefactura(group)}
+                        onClick={() => setPendingConfirm({ action: 'prefactura', group })}
                         style={primaryButtonStyle}
                         disabled={isBusy}
                       >
@@ -560,6 +658,16 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       <div style={cuentasPorCobrarWrapStyle}>
         <CuentasPorCobrarPage isMobile={isMobile} embedded refreshToken={cuentasRefreshToken} />
       </div>
+
+      <ConfirmModal
+        open={Boolean(pendingConfirm)}
+        title={confirmContent.title}
+        message={confirmContent.message}
+        confirmLabel={confirmContent.confirmLabel}
+        busy={pendingConfirm ? busyGroup === pendingConfirm.group.key : false}
+        onCancel={() => setPendingConfirm(null)}
+        onConfirm={handleConfirmPendingAction}
+      />
     </section>
   );
 }
@@ -708,28 +816,20 @@ const groupsGridStyle = (isMobile) => ({
   // fila (comportamiento por defecto de `align-items: stretch`) — con mesas
   // de tamaños muy distintos (18 pedidos vs 2), la mesa chica queda con un
   // hueco enorme y sus pedidos/botones repartidos de forma rara. `start`
-  // deja que cada tarjeta mida su propia altura fija (ver groupCardStyle),
-  // sin que la de al lado la afecte.
+  // deja que cada tarjeta mida su propia altura según su contenido (ver
+  // groupCardStyle), sin que la de al lado la afecte.
   alignItems: 'start',
   gap: 14,
 });
-
-// Tamaño fijo para TODAS las tarjetas de mesa, sin importar cuántos pedidos
-// tenga cada una — la lista de pedidos hace scroll interno (ver
-// ordersScrollStyle) y el encabezado/footer con los botones de cobro quedan
-// siempre visibles, en vez de que la tarjeta crezca sin límite con mesas de
-// muchos pedidos.
-const GROUP_CARD_HEIGHT = 560;
 
 const groupCardStyle = {
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  height: GROUP_CARD_HEIGHT,
   padding: '18px 18px',
   borderRadius: 20,
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  border: '1px solid rgba(255, 255, 255, 0.1)',
+  background: 'linear-gradient(180deg, rgba(46, 25, 25, 0.95) 0%, rgba(24, 14, 14, 0.97) 100%)',
+  border: '1px solid rgba(255, 255, 255, 0.14)',
   boxShadow: '0 12px 28px rgba(0,0,0,0.24)',
 };
 
@@ -741,22 +841,15 @@ const groupHeaderStyle = {
   flexShrink: 0,
 };
 
-// Única zona de la tarjeta que crece/encoge y hace scroll — todo lo demás
-// (header arriba, formulario de cliente + totales + botones abajo) queda
-// fijo y siempre visible sin importar cuántos pedidos tenga la mesa.
+// Cada tarjeta mide lo que necesita su propio contenido — sin alto fijo ni
+// scroll interno, así el botón de cobro queda siempre justo debajo del
+// último pedido de esa mesa (nunca escondido detrás de un scroll interno).
+// `align-items: start` en groupsGridStyle evita que una mesa con pocos
+// pedidos se estire para igualar a la más alta de su fila.
 const ordersScrollStyle = {
-  // display:grid aquí (con altura ya acotada por el flex padre) hacía que
-  // Chrome/Edge colapsaran cada fila casi a 0px en vez de desbordar y dejar
-  // scroll — un problema conocido de grid+overflow:auto dentro de un flex
-  // item con minHeight:0. flex-column no tiene ese bug: cada pedido conserva
-  // su alto natural y el contenedor sí scrollea de verdad.
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
-  flex: '1 1 auto',
-  minHeight: 0,
-  overflowY: 'auto',
-  paddingRight: 4,
 };
 
 const footerSectionStyle = {
@@ -903,6 +996,12 @@ const clienteFormStyle = (isMobile) => ({
   gap: 8,
 });
 
+const clienteHintStyle = {
+  margin: 0,
+  color: '#a89999',
+  fontSize: 12,
+};
+
 const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
@@ -948,13 +1047,6 @@ const prefacturaPanelStyle = {
   borderRadius: 14,
   border: '1px solid rgba(255, 190, 120, 0.3)',
   background: 'rgba(255, 190, 120, 0.06)',
-  // Comparte el espacio flexible restante de la tarjeta con la lista de
-  // pedidos de arriba (que sigue montada) y hace su propio scroll interno
-  // si la pre-factura tiene muchas líneas — así la tarjeta nunca se sale de
-  // su alto fijo (GROUP_CARD_HEIGHT).
-  flex: '1 1 auto',
-  minHeight: 0,
-  overflowY: 'auto',
 };
 
 const lineaRowStyle = {

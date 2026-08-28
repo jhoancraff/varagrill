@@ -36,6 +36,18 @@ const ReceivablesIcon = () => (
   </svg>
 );
 
+const DateRangeIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="4" width="18" height="17" rx="2" />
+    <path d="M3 9h18" />
+    <path d="M8 2v4" />
+    <path d="M16 2v4" />
+    <path d="M7 13h3v3H7z" />
+    <path d="M13 13h4" />
+    <path d="M13 17h4" />
+  </svg>
+);
+
 const HistoryIcon = () => (
   <svg {...iconProps}>
     <path d="M3 3v5h5" />
@@ -56,6 +68,15 @@ const PayablesIcon = () => (
     <circle cx="12" cy="12" r="9" />
     <path d="M12 17V7" />
     <path d="M8.5 10a2.5 2.5 0 0 1 2.5-2.5h1.5a2 2 0 0 1 0 4h-1a2 2 0 0 0 0 4H13a2.5 2.5 0 0 0 2.5-2.5" />
+  </svg>
+);
+
+const AvailabilityIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <circle cx="12" cy="12" r="3" />
+    <path d="M6 5v14" />
+    <path d="M18 5v14" />
   </svg>
 );
 
@@ -82,6 +103,18 @@ const reportSections = [
     title: 'Cuadre de caja diario',
     description: 'Compara el efectivo esperado contra lo contado en físico, con consignaciones del turno y el cierre del día.',
     icon: CashRegisterIcon,
+  },
+  {
+    id: 'contabilidad-cuadre-caja-rango',
+    title: 'Cuadre de caja por rango',
+    description: 'El mismo cuadre de caja, pero sumado a lo largo de varios días — para revisar una semana o un mes completo de una vez.',
+    icon: DateRangeIcon,
+  },
+  {
+    id: 'contabilidad-disponibilidad-cuentas',
+    title: 'Disponibilidad por cuenta',
+    description: 'Saldo acumulado de cada método de pago (efectivo, bancos, Binance, Zelle...) hasta el día que elijas.',
+    icon: AvailabilityIcon,
   },
   {
     id: 'cuentas-cobrar',

@@ -19,8 +19,10 @@ from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import VGCierreCaja, VGConsignacionCaja, VGGasto, VGMetodoPago
 from .reportes import (
     desglose_caja_por_moneda,
+    disponibilidad_por_cuenta,
     efectivo_esperado_dia,
     gastos_efectivo_dia,
+    resumen_cuadre_caja_rango,
     tasa_para_fecha,
     total_consignado,
     totales_pagos_por_metodo,
@@ -259,6 +261,121 @@ def reporte_cuadre_caja_view(request):
             'message': 'Caja cerrada correctamente.',
             'cierre': _serialize_cierre_caja(cierre),
         }, status=201)
+
+
+MAX_DIAS_RANGO_CUADRE_CAJA = 92
+
+
+def reporte_cuadre_caja_rango_view(request):
+    """
+    Cuadre de caja para un rango de fechas — de solo lectura (no permite
+    agregar consignaciones ni cerrar caja, eso sigue siendo por dia
+    individual desde reporte_cuadre_caja_view, atado a un conteo fisico de
+    efectivo de ese dia). Pensado para que un dueno/administrador revise
+    varios dias o una semana completa de una vez, con el desglose dia por
+    dia debajo para ver cuales de esos dias ya se cerraron.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
+
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    try:
+        desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate().replace(day=1)
+        hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+    if (hasta - desde).days + 1 > MAX_DIAS_RANGO_CUADRE_CAJA:
+        return _auth_response({
+            'ok': False,
+            'message': f'El rango no puede superar {MAX_DIAS_RANGO_CUADRE_CAJA} dias.',
+        }, status=400)
+
+    resumen = resumen_cuadre_caja_rango(desde, hasta)
+
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        'dias': [
+            {
+                'fecha': dia['fecha'].isoformat(),
+                'tasa_bcv': str(dia['tasa_bcv']) if dia['tasa_bcv'] is not None else None,
+                'total_general': str(dia['total_general']),
+                'total_consignado': str(dia['total_consignado']),
+                'gastos_efectivo': str(dia['gastos_efectivo']),
+                'efectivo_esperado': str(dia['efectivo_esperado']),
+                'cierre': _serialize_cierre_caja(dia['cierre']),
+            }
+            for dia in resumen['dias']
+        ],
+        'totales_por_metodo': [
+            {
+                **item,
+                'total': str(item['total']),
+                'total_bs': str(item['total_bs']) if item['total_bs'] is not None else None,
+            }
+            for item in resumen['totales_por_metodo']
+        ],
+        'total_general': str(resumen['total_general']),
+        'desglose_caja': _serialize_desglose_caja(resumen['desglose_caja']),
+        'total_consignado': str(resumen['total_consignado']),
+        'gastos_efectivo': str(resumen['gastos_efectivo']),
+        'efectivo_esperado': str(resumen['efectivo_esperado']),
+    })
+
+
+def reporte_disponibilidad_cuentas_view(request):
+    """
+    Saldo acumulado disponible en cada cuenta/metodo de pago hasta una
+    fecha elegida (por defecto, hoy) — cuanto dinero neto tiene cada cuenta
+    contando todo lo cobrado y pagado con ella desde que existe el sistema.
+    De solo lectura; no modifica nada (a diferencia del cuadre de caja, aqui
+    no hay cierre ni consignacion que registrar).
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
+    if fecha is None:
+        return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+    cuentas = disponibilidad_por_cuenta(fecha)
+    tasa = tasa_para_fecha(fecha)
+
+    return _auth_response({
+        'ok': True,
+        'fecha': fecha.isoformat(),
+        'tasa_bcv': str(tasa) if tasa is not None else None,
+        'cuentas': [
+            {
+                'id': cuenta['id'],
+                'nombre': cuenta['nombre'],
+                'moneda': cuenta['moneda'],
+                'es_efectivo': cuenta['es_efectivo'],
+                'activo': cuenta['activo'],
+                'ingresos_acumulados': str(cuenta['ingresos_acumulados']),
+                'gastos_acumulados': str(cuenta['gastos_acumulados']),
+                'compras_acumuladas': str(cuenta['compras_acumuladas']),
+                'consignado_acumulado': str(cuenta['consignado_acumulado']),
+                'saldo_disponible': str(cuenta['saldo_disponible']),
+                'saldo_disponible_bs': (
+                    str((cuenta['saldo_disponible'] * tasa).quantize(Decimal('0.01')))
+                    if cuenta['moneda'] == 'VES' and tasa is not None else None
+                ),
+            }
+            for cuenta in cuentas
+        ],
+        'total_disponible': str(sum((cuenta['saldo_disponible'] for cuenta in cuentas), Decimal('0'))),
+    })
 
 
 # ---------------------------------------------------------------------------

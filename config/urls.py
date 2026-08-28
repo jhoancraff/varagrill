@@ -70,7 +70,9 @@ from varagrill.compras_views import (
 from varagrill.contabilidad_views import (
     admin_metodos_pago_view,
     metodos_pago_activos_view,
+    reporte_cuadre_caja_rango_view,
     reporte_cuadre_caja_view,
+    reporte_disponibilidad_cuentas_view,
     reporte_estado_resultados_view,
 )
 from varagrill.gastos_views import (
@@ -136,6 +138,8 @@ urlpatterns = [
     path('api/admin/promociones/', admin_promotions_view, name='admin-promotions'),
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
     path('api/admin/reportes/cuadre-caja/', reporte_cuadre_caja_view, name='admin-reporte-cuadre-caja'),
+    path('api/admin/reportes/cuadre-caja-rango/', reporte_cuadre_caja_rango_view, name='admin-reporte-cuadre-caja-rango'),
+    path('api/admin/reportes/disponibilidad-cuentas/', reporte_disponibilidad_cuentas_view, name='admin-reporte-disponibilidad-cuentas'),
     path('api/admin/reportes/margen-ganancia/', reporte_margen_ganancia_view, name='admin-reporte-margen-ganancia'),
     path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),
     path('api/admin/metodos-pago/', admin_metodos_pago_view, name='admin-metodos-pago'),

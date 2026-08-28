@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   id: null,
@@ -21,7 +23,7 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
@@ -57,7 +59,7 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
         setForm(loadedForm);
         markClean(loadedForm);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar la mesa.');
+        showError(error.message || 'No se pudo cargar la mesa.');
       } finally {
         setLoading(false);
       }
@@ -92,13 +94,13 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
         throw new Error(data.message || 'No se pudo actualizar la mesa.');
       }
 
-      setMessage(data.message || 'Mesa actualizada correctamente.');
+      showSuccess(data.message || 'Mesa actualizada correctamente.');
       markClean(form);
       if (onMesasChanged) {
         onMesasChanged();
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo actualizar la mesa.');
+      showError(error.message || 'No se pudo actualizar la mesa.');
     } finally {
       setSaving(false);
     }
@@ -127,7 +129,7 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando mesa...</div> : null}

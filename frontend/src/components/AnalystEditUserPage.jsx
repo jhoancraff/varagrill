@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   id: null,
@@ -21,7 +23,7 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
@@ -64,7 +66,7 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
         setForm(loadedForm);
         markClean(loadedForm);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el usuario.');
+        showError(error.message || 'No se pudo cargar el usuario.');
       } finally {
         setLoading(false);
       }
@@ -105,12 +107,12 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
         throw new Error(data.message || 'No se pudo actualizar el usuario.');
       }
 
-      setMessage(data.message || 'Usuario actualizado correctamente.');
+      showSuccess(data.message || 'Usuario actualizado correctamente.');
       const nextForm = { ...form, password: '' };
       setForm(nextForm);
       markClean(nextForm);
     } catch (error) {
-      setMessage(error.message || 'No se pudo actualizar el usuario.');
+      showError(error.message || 'No se pudo actualizar el usuario.');
     } finally {
       setSaving(false);
     }
@@ -139,7 +141,7 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando usuario...</div> : null}

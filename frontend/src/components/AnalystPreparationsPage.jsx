@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   nombre: '',
@@ -21,7 +23,7 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
   const [components, setComponents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [showIngredientResults, setShowIngredientResults] = useState(false);
 
   useEffect(() => {
@@ -54,7 +56,7 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
         }
         setInventory(Array.isArray(data.inventory) ? data.inventory : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudieron cargar los ingredientes.');
+        showError(error.message || 'No se pudieron cargar los ingredientes.');
       } finally {
         setLoading(false);
       }
@@ -87,12 +89,12 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
 
   const handleAddComponent = () => {
     if (!componentDraft.ingredientName.trim() || !componentDraft.cantidad.trim()) {
-      setMessage('Selecciona un ingrediente y define cuánto se descontará.');
+      showError('Selecciona un ingrediente y define cuánto se descontará.');
       return;
     }
 
     if (components.some((item) => item.ingredientName.toLowerCase() === componentDraft.ingredientName.trim().toLowerCase())) {
-      setMessage('Ese ingrediente ya está agregado en la subreceta.');
+      showError('Ese ingrediente ya está agregado en la subreceta.');
       return;
     }
 
@@ -108,7 +110,6 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
     ]));
     setComponentDraft(emptyDraft);
     setShowIngredientResults(false);
-    setMessage('');
   };
 
   const handleRemoveComponent = (ingredientName) => {
@@ -118,11 +119,11 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.nombre.trim()) {
-      setMessage('Debes indicar el nombre de la subreceta.');
+      showError('Debes indicar el nombre de la subreceta.');
       return;
     }
     if (components.length === 0) {
-      setMessage('Agrega al menos un ingrediente a la subreceta.');
+      showError('Agrega al menos un ingrediente a la subreceta.');
       return;
     }
 
@@ -149,13 +150,13 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
         throw new Error(data.message || 'No se pudo guardar la subreceta.');
       }
 
-      setMessage(data.message || 'Subreceta guardada correctamente.');
+      showSuccess(data.message || 'Subreceta guardada correctamente.');
       setForm(emptyForm);
       setComponentDraft(emptyDraft);
       setComponents([]);
       setShowIngredientResults(false);
     } catch (error) {
-      setMessage(error.message || 'No se pudo guardar la subreceta.');
+      showError(error.message || 'No se pudo guardar la subreceta.');
     } finally {
       setSaving(false);
     }
@@ -177,7 +178,7 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando ingredientes...</div> : null}

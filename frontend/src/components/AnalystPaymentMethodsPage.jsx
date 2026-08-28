@@ -1,12 +1,14 @@
 import { Fragment, useEffect, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 function AnalystPaymentMethodsPage({ isMobile, onBack }) {
   const [metodos, setMetodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [nombre, setNombre] = useState('');
   const [moneda, setMoneda] = useState('USD');
   const [esEfectivo, setEsEfectivo] = useState(false);
@@ -22,7 +24,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
       }
       setMetodos(Array.isArray(data.metodos_pago) ? data.metodos_pago : []);
     } catch (error) {
-      setMessage(error.message || 'No se pudieron cargar los metodos de pago.');
+      showError(error.message || 'No se pudieron cargar los metodos de pago.');
     } finally {
       setLoading(false);
     }
@@ -35,12 +37,11 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
   const handleCreate = async (event) => {
     event.preventDefault();
     if (!nombre.trim()) {
-      setMessage('Escribe un nombre para el metodo de pago.');
+      showError('Escribe un nombre para el metodo de pago.');
       return;
     }
 
     setSaving(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/metodos-pago/', {
         method: 'POST',
@@ -56,10 +57,10 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
       setMoneda('USD');
       setEsEfectivo(false);
       markClean({ nombre: '', moneda: 'USD', esEfectivo: false });
-      setMessage(data.message || 'Metodo de pago creado.');
+      showSuccess(data.message || 'Metodo de pago creado.');
       loadMetodos();
     } catch (error) {
-      setMessage(error.message || 'No se pudo crear el metodo de pago.');
+      showError(error.message || 'No se pudo crear el metodo de pago.');
     } finally {
       setSaving(false);
     }
@@ -67,7 +68,6 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
 
   const handleToggleActivo = async (metodo) => {
     setSaving(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/metodos-pago/', {
         method: 'POST',
@@ -81,7 +81,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
       }
       loadMetodos();
     } catch (error) {
-      setMessage(error.message || 'No se pudo actualizar el metodo de pago.');
+      showError(error.message || 'No se pudo actualizar el metodo de pago.');
     } finally {
       setSaving(false);
     }
@@ -98,7 +98,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
         <p style={subtitleStyle}>Agrega los tipos de pago que se pueden usar al cobrar (efectivo, tarjeta, Binance, Zelle, etc.).</p>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={sectionTitleStyle}>Agregar metodo de pago</div>
@@ -175,7 +175,6 @@ const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) mi
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const cellActionsStyle = { ...cellStyle, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const formRowStyle = (isMobile) => ({ display: 'flex', gap: 12, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' });
 const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

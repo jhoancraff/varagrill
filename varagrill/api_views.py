@@ -4412,6 +4412,7 @@ def pedidos_cobro_view(request):
         'factura': {
             'referencia': referencia,
             'total': str(total_cobrado),
+            'moneda': metodo_pago.moneda,
             'pedidos': [pedido.id for pedido in pedidos],
         },
     }, status=201)

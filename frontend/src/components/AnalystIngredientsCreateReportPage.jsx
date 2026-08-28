@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -7,7 +9,7 @@ function AnalystIngredientsCreateReportPage({ isMobile, onBack, onManualCreate, 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [message, setMessage] = useState('');
+  const { toast, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -24,7 +26,7 @@ function AnalystIngredientsCreateReportPage({ isMobile, onBack, onManualCreate, 
         }
         setItems(Array.isArray(data.inventory) ? data.inventory : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el inventario.');
+        showError(error.message || 'No se pudo cargar el inventario.');
       } finally {
         setLoading(false);
       }
@@ -66,7 +68,7 @@ function AnalystIngredientsCreateReportPage({ isMobile, onBack, onManualCreate, 
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={toolbarStyle(isMobile)}>
@@ -135,7 +137,6 @@ const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(220px,1.6fr) 
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const cellPrimaryStyle = { ...cellStyle, background: 'rgba(255,255,255,0.02)' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };

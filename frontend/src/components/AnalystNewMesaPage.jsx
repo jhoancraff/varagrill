@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   numero: '',
@@ -19,7 +21,7 @@ const estadoOptions = [
 function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const handleChange = (field, value) => {
@@ -47,14 +49,14 @@ function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
         throw new Error(data.message || 'No se pudo crear la mesa.');
       }
 
-      setMessage(data.message || 'Mesa creada correctamente.');
+      showSuccess(data.message || 'Mesa creada correctamente.');
       setForm(emptyForm);
       markClean(emptyForm);
       if (onMesasChanged) {
         onMesasChanged();
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo crear la mesa.');
+      showError(error.message || 'No se pudo crear la mesa.');
     } finally {
       setSaving(false);
     }
@@ -83,7 +85,7 @@ function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         <div style={formGridStyle(isMobile)}>

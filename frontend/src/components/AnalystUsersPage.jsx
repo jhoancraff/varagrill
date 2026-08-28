@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -7,7 +9,7 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -29,7 +31,7 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
         }
         setUsers(Array.isArray(data.users) ? data.users : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar la gestión de usuarios.');
+        showError(error.message || 'No se pudo cargar la gestión de usuarios.');
       } finally {
         setLoading(false);
       }
@@ -56,9 +58,9 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
         throw new Error(data.message || 'No se pudo eliminar el usuario.');
       }
       setUsers((current) => current.filter((entry) => entry.id !== user.id));
-      setMessage(data.message || 'Usuario eliminado correctamente.');
+      showSuccess(data.message || 'Usuario eliminado correctamente.');
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar el usuario.');
+      showError(error.message || 'No se pudo eliminar el usuario.');
     } finally {
       setSaving(false);
     }
@@ -98,7 +100,7 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
         </button>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <div style={summaryGridStyle(isMobile)}>
         <article style={summaryCardStyle}>

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const NEW_INGREDIENT_VALUE = '__new__';
 
@@ -30,7 +32,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
   const [showIngredientResults, setShowIngredientResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
@@ -63,7 +65,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         }
         setInventory(Array.isArray(data.inventory) ? data.inventory : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el inventario.');
+        showError(error.message || 'No se pudo cargar el inventario.');
       } finally {
         setLoading(false);
       }
@@ -148,7 +150,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         throw new Error(data.message || 'No se pudo registrar el ingreso.');
       }
 
-      setMessage(data.message || 'Ingreso registrado correctamente.');
+      showSuccess(data.message || 'Ingreso registrado correctamente.');
       setForm(emptyForm);
       markClean(emptyForm);
       setIngredientSearch('');
@@ -163,7 +165,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         setInventory(Array.isArray(refreshData.inventory) ? refreshData.inventory : []);
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo registrar el ingreso.');
+      showError(error.message || 'No se pudo registrar el ingreso.');
     } finally {
       setSaving(false);
     }
@@ -185,7 +187,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando ingredientes...</div> : null}

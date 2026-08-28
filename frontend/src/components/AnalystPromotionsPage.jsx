@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
 import BsAmount from './BsAmount';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -11,7 +13,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [page, setPage] = useState(0);
 
@@ -28,7 +30,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
       }
       setProducts(Array.isArray(data.products) ? data.products : []);
     } catch (error) {
-      setMessage(error.message || 'No se pudo cargar el reporte de productos.');
+      showError(error.message || 'No se pudo cargar el reporte de productos.');
     } finally {
       setLoading(false);
     }
@@ -64,10 +66,10 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo eliminar la promoción.');
       }
-      setMessage(data.message || 'Promoción eliminada correctamente.');
+      showSuccess(data.message || 'Promoción eliminada correctamente.');
       await loadProducts();
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar la promoción.');
+      showError(error.message || 'No se pudo eliminar la promoción.');
     } finally {
       setSaving(false);
     }
@@ -146,7 +148,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       {selectedIds.size > 0 ? (
         <div style={bulkBarStyle(isMobile)}>

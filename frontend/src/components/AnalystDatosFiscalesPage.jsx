@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   rif: '',
@@ -15,7 +17,7 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const loadDatos = async () => {
@@ -32,7 +34,7 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
         markClean(loadedForm);
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudieron cargar los datos fiscales.');
+      showError(error.message || 'No se pudieron cargar los datos fiscales.');
     } finally {
       setLoading(false);
     }
@@ -49,7 +51,6 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setSaving(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/datos-fiscales/', {
         method: 'POST',
@@ -61,14 +62,14 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudieron guardar los datos fiscales.');
       }
-      setMessage(data.message || 'Datos fiscales guardados correctamente.');
+      showSuccess(data.message || 'Datos fiscales guardados correctamente.');
       if (data.datos_fiscales) {
         const savedForm = { ...emptyForm, ...data.datos_fiscales };
         setForm(savedForm);
         markClean(savedForm);
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudieron guardar los datos fiscales.');
+      showError(error.message || 'No se pudieron guardar los datos fiscales.');
     } finally {
       setSaving(false);
     }
@@ -88,7 +89,7 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
         </p>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         {loading ? (
@@ -206,13 +207,6 @@ const inputStyle = {
   background: '#161010',
   padding: '10px 12px',
   color: '#fff',
-};
-const noticeStyle = {
-  padding: '12px 14px',
-  borderRadius: 12,
-  border: '1px solid rgba(255,145,145,0.22)',
-  background: 'rgba(255,98,98,0.12)',
-  color: '#ffd8d8',
 };
 const primaryButtonStyle = {
   border: 'none',

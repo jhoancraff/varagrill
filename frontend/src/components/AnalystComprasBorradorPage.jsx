@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
 const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '' };
@@ -13,8 +15,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [lote, setLote] = useState(emptyLote);
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState('success');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [summary, setSummary] = useState(null);
 
   useEffect(() => {
@@ -33,12 +34,10 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
         if (borradorRes.ok && borradorData.ok) {
           setBorrador(borradorData.borrador);
         } else {
-          setMessageType('error');
-          setMessage(borradorData.message || 'No se pudo cargar el borrador.');
+          showError(borradorData.message || 'No se pudo cargar el borrador.');
         }
       } catch (error) {
-        setMessageType('error');
-        setMessage('No se pudo cargar la informacion inicial.');
+        showError('No se pudo cargar la informacion inicial.');
       } finally {
         setLoading(false);
       }
@@ -66,13 +65,11 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const handleAddItem = async (event) => {
     event.preventDefault();
     if (!itemForm.nombre.trim()) {
-      setMessageType('error');
-      setMessage('Escribe el nombre del ingrediente.');
+      showError('Escribe el nombre del ingrediente.');
       return;
     }
 
     setAddingItem(true);
-    setMessage('');
     try {
       const body = exactMatch
         ? { ingrediente_id: exactMatch.id, cantidad: itemForm.cantidad, precio_total: itemForm.precio_total }
@@ -94,15 +91,13 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
         setInventory((current) => [...current, { id: undefined, nombre: itemForm.nombre }]);
       }
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo agregar el ingrediente al borrador.');
+      showError(error.message || 'No se pudo agregar el ingrediente al borrador.');
     } finally {
       setAddingItem(false);
     }
   };
 
   const handleRemoveItem = async (detalleId) => {
-    setMessage('');
     try {
       const response = await fetch('/api/admin/compras/borrador/quitar/', {
         method: 'POST',
@@ -116,8 +111,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       }
       setBorrador(data.borrador);
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo quitar esa fila.');
+      showError(error.message || 'No se pudo quitar esa fila.');
     }
   };
 
@@ -126,7 +120,6 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       return;
     }
     setDiscarding(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/compras/borrador/descartar/', {
         method: 'POST',
@@ -139,8 +132,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       setBorrador(data.borrador);
       setSummary(null);
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo descartar el borrador.');
+      showError(error.message || 'No se pudo descartar el borrador.');
     } finally {
       setDiscarding(false);
     }
@@ -149,13 +141,11 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const handleConfirm = async (event) => {
     event.preventDefault();
     if (!lote.proveedor_nombre.trim()) {
-      setMessageType('error');
-      setMessage('El proveedor es obligatorio para confirmar la carga.');
+      showError('El proveedor es obligatorio para confirmar la carga.');
       return;
     }
 
     setConfirming(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/compras/borrador/confirmar/', {
         method: 'POST',
@@ -170,11 +160,9 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       setSummary(data.compra);
       setBorrador({ id: null, detalles: [], total: '0' });
       setLote(emptyLote);
-      setMessageType('success');
-      setMessage(data.message || 'Carga confirmada.');
+      showSuccess(data.message || 'Carga confirmada.');
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo confirmar la carga.');
+      showError(error.message || 'No se pudo confirmar la carga.');
     } finally {
       setConfirming(false);
     }
@@ -197,7 +185,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
         </p>
       </div>
 
-      {message ? <div style={noticeStyle(messageType)}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       {loading ? (
         <div style={emptyStyle}>Cargando...</div>
@@ -374,12 +362,5 @@ const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isM
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
-
-const noticeStyle = (type) => ({
-  padding: '12px 14px', borderRadius: 16,
-  border: type === 'error' ? '1px solid rgba(255, 145, 145, 0.22)' : '1px solid rgba(125, 255, 160, 0.3)',
-  background: type === 'error' ? 'rgba(255, 98, 98, 0.12)' : 'rgba(70, 200, 120, 0.1)',
-  color: type === 'error' ? '#ffd8d8' : '#bdf0cf',
-});
 
 export default AnalystComprasBorradorPage;

@@ -16,7 +16,14 @@ function Toast({ toast, onClose }) {
       </style>
       <div style={isError ? errorCardStyle : successCardStyle} role="status">
         <span style={iconStyle}>{isError ? '⚠' : '✓'}</span>
-        <span style={textStyle}>{toast.message}</span>
+        <span style={textStyle}>
+          {toast.message}
+          {toast.action ? (
+            <button type="button" onClick={toast.action.onClick} style={actionButtonStyle}>
+              {toast.action.label}
+            </button>
+          ) : null}
+        </span>
         <button type="button" onClick={onClose} style={closeButtonStyle} aria-label="Cerrar aviso">×</button>
       </div>
     </div>
@@ -67,6 +74,19 @@ const textStyle = {
   fontSize: 13.5,
   fontWeight: 600,
   lineHeight: 1.5,
+};
+
+const actionButtonStyle = {
+  display: 'block',
+  marginTop: 6,
+  border: 'none',
+  background: 'transparent',
+  color: 'inherit',
+  textDecoration: 'underline',
+  fontWeight: 700,
+  cursor: 'pointer',
+  padding: 0,
+  fontSize: 13,
 };
 
 const closeButtonStyle = {

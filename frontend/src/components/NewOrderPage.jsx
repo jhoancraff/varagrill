@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 // Los productos de estas categorías se piden únicamente como acompañante
 // (grupo de opciones dinámico) de un plato principal, nunca sueltos desde el
@@ -38,8 +40,7 @@ function NewOrderPage({
     notas: '',
   });
   const [cartItems, setCartItems] = useState([]);
-  const [feedback, setFeedback] = useState('');
-  const [feedbackType, setFeedbackType] = useState('success');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [catalogType, setCatalogType] = useState('Todos');
   const [searchTerm, setSearchTerm] = useState('');
   const [isTablet, setIsTablet] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
@@ -237,8 +238,7 @@ function NewOrderPage({
     setIsSyncingQueue(false);
 
     if (synced > 0) {
-      setFeedbackType('success');
-      setFeedback(`Se sincronizaron ${synced} pedido(s) en cola.`);
+      showSuccess(`Se sincronizaron ${synced} pedido(s) en cola.`);
     }
   };
 
@@ -443,20 +443,17 @@ function NewOrderPage({
     event.preventDefault();
 
     if (!orderHeader.cliente.trim()) {
-      setFeedbackType('error');
-      setFeedback('Ingresa el nombre del cliente antes de registrar el pedido.');
+      showError('Ingresa el nombre del cliente antes de registrar el pedido.');
       return;
     }
 
     if (orderHeader.tipoPedido === 'local' && !orderHeader.mesaId) {
-      setFeedbackType('error');
-      setFeedback('Selecciona una mesa antes de registrar el pedido.');
+      showError('Selecciona una mesa antes de registrar el pedido.');
       return;
     }
 
     if (cartItems.length === 0) {
-      setFeedbackType('error');
-      setFeedback('Agrega al menos un plato para registrar el pedido.');
+      showError('Agrega al menos un plato para registrar el pedido.');
       return;
     }
 
@@ -465,7 +462,6 @@ function NewOrderPage({
     }
 
     setIsSubmitting(true);
-    setFeedback('');
 
     try {
       const payload = buildPayload();
@@ -483,22 +479,19 @@ function NewOrderPage({
       if (!response.ok || !data.ok) {
         if (!navigator.onLine) {
           queueCurrentOrder(payload);
-          setFeedbackType('success');
-          setFeedback(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
+          showSuccess(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
           setCartItems([]);
           resetArmarPlato();
           setOrderHeader((current) => ({ ...current, notas: '' }));
           markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
           return;
         }
-        setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo registrar el pedido. Intenta nuevamente.');
+        showError(data.message || 'No se pudo registrar el pedido. Intenta nuevamente.');
         return;
       }
 
       const mesaLabel = selectedMesa ? `Mesa ${selectedMesa.numero}` : 'Sin mesa';
-      setFeedbackType('success');
-      setFeedback(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${Number(data.pedido.total).toFixed(2)}.`);
+      showSuccess(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${Number(data.pedido.total).toFixed(2)}.`);
 
       setCartItems([]);
       resetArmarPlato();
@@ -512,15 +505,13 @@ function NewOrderPage({
       if (!navigator.onLine) {
         const payload = buildPayload();
         queueCurrentOrder(payload);
-        setFeedbackType('success');
-        setFeedback(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
+        showSuccess(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
         setCartItems([]);
         resetArmarPlato();
         setOrderHeader((current) => ({ ...current, notas: '' }));
         markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
       } else {
-        setFeedbackType('error');
-        setFeedback('Error de conexion al registrar el pedido. Verifica la red e intenta otra vez.');
+        showError('Error de conexion al registrar el pedido. Verifica la red e intenta otra vez.');
       }
     } finally {
       setIsSubmitting(false);
@@ -646,6 +637,7 @@ function NewOrderPage({
 
   return (
     <section style={orderContainerStyle(isCompact)}>
+      <Toast toast={toast} onClose={hideToast} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#f7a5a5', marginBottom: 8 }}>
@@ -924,8 +916,6 @@ function NewOrderPage({
             <button type="submit" style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
               {isSubmitting ? 'Guardando...' : 'Registrar pedido'}
             </button>
-
-            {feedback && <div style={feedbackStyle(feedbackType)}>{feedback}</div>}
           </aside>
         </div>
       </form>
@@ -1424,16 +1414,6 @@ const catalogTypeChipStyle = (active, isCompact) => ({
   whiteSpace: 'nowrap',
   minHeight: 40,
   flexShrink: 0,
-});
-
-const feedbackStyle = (feedbackType) => ({
-  marginTop: 4,
-  borderRadius: 12,
-  border: feedbackType === 'error' ? '1px solid rgba(223, 102, 102, 0.5)' : '1px solid rgba(82, 206, 123, 0.35)',
-  background: feedbackType === 'error' ? 'rgba(102, 29, 29, 0.55)' : 'rgba(31, 89, 48, 0.45)',
-  color: feedbackType === 'error' ? '#ffe2e2' : '#dbffe4',
-  padding: '10px 12px',
-  fontSize: 13,
 });
 
 const addRoundBannerStyle = {

@@ -4,6 +4,12 @@
     {
       "name": "varagrill-dev",
       "url": "http://127.0.0.1:8000"
+    },
+    {
+      "name": "varagrill-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "port": 3000
     }
   ]
 }

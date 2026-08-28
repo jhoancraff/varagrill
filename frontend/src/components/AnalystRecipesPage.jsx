@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -8,7 +10,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -30,7 +32,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
         }
         setRecipes(Array.isArray(data.recipes) ? data.recipes : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el reporte de recetas.');
+        showError(error.message || 'No se pudo cargar el reporte de recetas.');
       } finally {
         setLoading(false);
       }
@@ -73,9 +75,9 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
         throw new Error(data.message || 'No se pudo eliminar la receta.');
       }
       setRecipes((current) => current.filter((entry) => entry.id !== recipe.id));
-      setMessage(data.message || 'Receta eliminada correctamente.');
+      showSuccess(data.message || 'Receta eliminada correctamente.');
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar la receta.');
+      showError(error.message || 'No se pudo eliminar la receta.');
     } finally {
       setSaving(false);
     }
@@ -111,7 +113,7 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
         </button>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={reportHeaderStyle(isMobile)}>

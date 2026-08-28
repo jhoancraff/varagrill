@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useToast from '../hooks/useToast';
 import { formatBs } from '../utils/currency';
 
 function formatUsdBs(amount, tasa) {
@@ -43,8 +45,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [metodosPago, setMetodosPago] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState('success');
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
   const [fechaDesde, setFechaDesde] = useState(firstDayOfMonthIso());
   const [fechaHasta, setFechaHasta] = useState(todayIso());
@@ -64,7 +65,6 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [nuevaCategoria, setNuevaCategoria] = useState('');
   const [savingCategoria, setSavingCategoria] = useState(false);
 
-  const [ultimoComprobante, setUltimoComprobante] = useState(null);
   const [verAbonosId, setVerAbonosId] = useState(null);
   const [abonosDetalle, setAbonosDetalle] = useState([]);
   const [loadingAbonosDetalle, setLoadingAbonosDetalle] = useState(false);
@@ -108,8 +108,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       setTotalesPorCategoria(Array.isArray(data.totales_por_categoria) ? data.totales_por_categoria : []);
       setTotalGeneral(data.total_general || '0');
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudieron cargar los gastos.');
+      showError(error.message || 'No se pudieron cargar los gastos.');
     } finally {
       setLoadingGastos(false);
     }
@@ -123,22 +122,20 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.categoria_id) {
-      setMessageType('error'); setMessage('Elige una categoria.'); return;
+      showError('Elige una categoria.'); return;
     }
     if (!form.descripcion.trim()) {
-      setMessageType('error'); setMessage('Escribe una descripcion del gasto.'); return;
+      showError('Escribe una descripcion del gasto.'); return;
     }
     if (!form.monto || Number(form.monto) <= 0) {
-      setMessageType('error'); setMessage('Indica un monto valido.'); return;
+      showError('Indica un monto valido.'); return;
     }
     const metodoPagoId = form.metodo_pago_id || (metodosPago[0] && metodosPago[0].id);
     if (form.pagado && !metodoPagoId) {
-      setMessageType('error'); setMessage('No hay metodos de pago activos configurados.'); return;
+      showError('No hay metodos de pago activos configurados.'); return;
     }
 
     setSaving(true);
-    setMessage('');
-    setUltimoComprobante(null);
     try {
       const response = await fetch('/api/admin/gastos/', {
         method: 'POST',
@@ -159,16 +156,22 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo registrar el gasto.');
       }
-      setMessageType('success');
-      setMessage(form.pagado ? 'Gasto registrado y pagado.' : 'Gasto registrado como pendiente.');
-      if (form.pagado && Array.isArray(data.gasto.abonos) && data.gasto.abonos.length > 0) {
-        setUltimoComprobante({ gastoId: data.gasto.id, abonoId: data.gasto.abonos[0].id });
-      }
+      const comprobante = form.pagado && Array.isArray(data.gasto.abonos) && data.gasto.abonos.length > 0
+        ? { gastoId: data.gasto.id, abonoId: data.gasto.abonos[0].id }
+        : null;
+      showSuccess(
+        form.pagado ? 'Gasto registrado y pagado.' : 'Gasto registrado como pendiente.',
+        comprobante && onVerComprobante ? {
+          action: {
+            label: 'Ver comprobante de pago',
+            onClick: () => onVerComprobante('gasto', comprobante.gastoId, comprobante.abonoId),
+          },
+        } : undefined,
+      );
       setForm({ ...emptyForm, fecha_gasto: form.fecha_gasto });
       loadGastos();
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo registrar el gasto.');
+      showError(error.message || 'No se pudo registrar el gasto.');
     } finally {
       setSaving(false);
     }
@@ -178,18 +181,15 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
     setAbonandoId(gasto.id === abonandoId ? null : gasto.id);
     setMontoAbono('');
     setMetodoAbono('');
-    setMessage('');
   };
 
   const handleRegistrarAbono = async (event, gastoId) => {
     event.preventDefault();
     const metodoPagoId = metodoAbono || (metodosPago[0] && metodosPago[0].id);
     if (!metodoPagoId) {
-      setMessageType('error'); setMessage('No hay metodos de pago activos configurados.'); return;
+      showError('No hay metodos de pago activos configurados.'); return;
     }
     setSavingAbono(true);
-    setMessage('');
-    setUltimoComprobante(null);
     try {
       const response = await fetch(`/api/admin/gastos/${gastoId}/abonos/`, {
         method: 'POST',
@@ -201,14 +201,19 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo registrar el abono.');
       }
-      setMessageType('success');
-      setMessage(`Abono de $${data.abono.monto} registrado.`);
-      setUltimoComprobante({ gastoId, abonoId: data.abono.id });
+      showSuccess(
+        `Abono de $${data.abono.monto} registrado.`,
+        onVerComprobante ? {
+          action: {
+            label: 'Ver comprobante de pago',
+            onClick: () => onVerComprobante('gasto', gastoId, data.abono.id),
+          },
+        } : undefined,
+      );
       setAbonandoId(null);
       loadGastos();
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo registrar el abono.');
+      showError(error.message || 'No se pudo registrar el abono.');
     } finally {
       setSavingAbono(false);
     }
@@ -252,8 +257,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       setNuevaCategoria('');
       loadCategorias();
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo crear la categoria.');
+      showError(error.message || 'No se pudo crear la categoria.');
     } finally {
       setSavingCategoria(false);
     }
@@ -290,20 +294,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
         </p>
       </div>
 
-      {message ? (
-        <div style={noticeStyle(messageType)}>
-          {message}
-          {ultimoComprobante && onVerComprobante ? (
-            <button
-              type="button"
-              onClick={() => onVerComprobante('gasto', ultimoComprobante.gastoId, ultimoComprobante.abonoId)}
-              style={comprobanteLinkStyle}
-            >
-              Ver comprobante de pago
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={sectionTitleStyle}>Registrar gasto</div>
@@ -559,13 +550,6 @@ const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: is
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
-const noticeStyle = (type) => ({
-  padding: '12px 14px', borderRadius: 16,
-  border: type === 'error' ? '1px solid rgba(255, 145, 145, 0.22)' : '1px solid rgba(125, 255, 160, 0.3)',
-  background: type === 'error' ? 'rgba(255, 98, 98, 0.12)' : 'rgba(70, 200, 120, 0.1)',
-  color: type === 'error' ? '#ffd8d8' : '#bdf0cf',
-});
-const comprobanteLinkStyle = { display: 'block', marginTop: 8, border: 'none', background: 'transparent', color: 'inherit', textDecoration: 'underline', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 13 };
 const miniPrintButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
 
 export default AnalystGastosPage;

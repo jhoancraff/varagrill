@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   tipo_descuento: 'porcentaje',
@@ -17,7 +19,7 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [result, setResult] = useState(null);
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
@@ -50,7 +52,7 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
         const idSet = new Set(requestedIds);
         setProducts(allProducts.filter((product) => idSet.has(product.id)));
       } catch (error) {
-        setMessage(error.message || 'No se pudieron cargar los productos seleccionados.');
+        showError(error.message || 'No se pudieron cargar los productos seleccionados.');
       } finally {
         setLoading(false);
       }
@@ -84,15 +86,15 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
     event.preventDefault();
 
     if (products.length === 0) {
-      setMessage('No hay productos válidos seleccionados.');
+      showError('No hay productos válidos seleccionados.');
       return;
     }
     if (!form.valor_descuento || Number(form.valor_descuento) <= 0) {
-      setMessage('Debes indicar un valor de descuento mayor a cero.');
+      showError('Debes indicar un valor de descuento mayor a cero.');
       return;
     }
     if (!form.duracion_dias || Number(form.duracion_dias) <= 0) {
-      setMessage('Debes indicar cuántos días durará la promoción.');
+      showError('Debes indicar cuántos días durará la promoción.');
       return;
     }
 
@@ -114,17 +116,17 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
-        setMessage(data.message || 'No se pudo guardar la promoción masiva.');
+        showError(data.message || 'No se pudo guardar la promoción masiva.');
         setResult(data);
         return;
       }
 
-      setMessage(data.message || 'Promociones creadas correctamente.');
+      showSuccess(data.message || 'Promociones creadas correctamente.');
       setResult(data);
       setForm(emptyForm);
       markClean(emptyForm);
     } catch (error) {
-      setMessage(error.message || 'No se pudo guardar la promoción masiva.');
+      showError(error.message || 'No se pudo guardar la promoción masiva.');
     } finally {
       setSaving(false);
     }
@@ -155,7 +157,7 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       {result?.omitidas?.length > 0 ? (
         <div style={warningStyle}>

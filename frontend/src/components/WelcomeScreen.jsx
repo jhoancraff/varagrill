@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import AdminPanelPage from './AdminPanelPage';
 import ContabilidadPanelPage from './ContabilidadPanelPage';
 import ReporteCuadreCajaPage from './ReporteCuadreCajaPage';
+import ReporteCuadreCajaRangoPage from './ReporteCuadreCajaRangoPage';
+import ReporteDisponibilidadCuentasPage from './ReporteDisponibilidadCuentasPage';
 import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
 import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
 import AnalystEditUserPage from './AnalystEditUserPage';
@@ -1049,6 +1051,16 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             isMobile={isMobile}
             onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
             backLabel={isCajera ? '← Volver a Cobro' : '← Volver a Contabilidad'}
+          />
+        ) : activeView === 'contabilidad-cuadre-caja-rango' ? (
+          <ReporteCuadreCajaRangoPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('contabilidad')}
+          />
+        ) : activeView === 'contabilidad-disponibilidad-cuentas' ? (
+          <ReporteDisponibilidadCuentasPage
+            isMobile={isMobile}
+            onBack={() => setActiveView('contabilidad')}
           />
         ) : activeView === 'admin-users' ? (
           <AnalystUsersPage

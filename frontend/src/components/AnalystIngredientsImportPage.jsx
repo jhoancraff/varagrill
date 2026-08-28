@@ -1,4 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const ACCION_LABELS = {
   nuevo: { label: 'Nuevo', color: '#8ff0b8', background: 'rgba(80, 200, 130, 0.18)' },
@@ -19,8 +21,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const [lote, setLote] = useState(emptyLote);
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState('success');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [summary, setSummary] = useState(null);
 
   const counts = useMemo(() => {
@@ -43,18 +44,15 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     setFile(selected);
     setRows(null);
     setSummary(null);
-    setMessage('');
   };
 
   const handlePreview = async () => {
     if (!file) {
-      setMessageType('error');
-      setMessage('Selecciona primero un archivo .xlsx.');
+      showError('Selecciona primero un archivo .xlsx.');
       return;
     }
 
     setPreviewing(true);
-    setMessage('');
     try {
       const formData = new FormData();
       formData.append('action', 'preview');
@@ -77,8 +75,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       })));
       setSummary(null);
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo leer el archivo.');
+      showError(error.message || 'No se pudo leer el archivo.');
     } finally {
       setPreviewing(false);
     }
@@ -96,13 +93,11 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       }));
 
     if (items.length === 0) {
-      setMessageType('error');
-      setMessage('Marca al menos una fila para importar.');
+      showError('Marca al menos una fila para importar.');
       return;
     }
 
     setConfirming(true);
-    setMessage('');
     try {
       const response = await fetch('/api/admin/catalogo/importar/', {
         method: 'POST',
@@ -122,11 +117,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       }
 
       setSummary(data);
-      setMessageType('success');
-      setMessage('Importación completada.');
+      showSuccess('Importación completada.');
     } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'No se pudo completar la importación.');
+      showError(error.message || 'No se pudo completar la importación.');
     } finally {
       setConfirming(false);
     }
@@ -136,7 +129,6 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     setFile(null);
     setRows(null);
     setSummary(null);
-    setMessage('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -156,7 +148,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         </p>
       </div>
 
-      {message ? <div style={noticeStyle(messageType)}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={sectionTitleStyle}>Datos del lote (de dónde viene esta carga)</div>
@@ -355,12 +347,5 @@ const confirmRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space
 
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-
-const noticeStyle = (type) => ({
-  padding: '12px 14px', borderRadius: 16,
-  border: type === 'error' ? '1px solid rgba(255, 145, 145, 0.22)' : '1px solid rgba(125, 255, 160, 0.3)',
-  background: type === 'error' ? 'rgba(255, 98, 98, 0.12)' : 'rgba(70, 200, 120, 0.1)',
-  color: type === 'error' ? '#ffd8d8' : '#bdf0cf',
-});
 
 export default AnalystIngredientsImportPage;

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -8,7 +10,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -30,7 +32,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
         }
         setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el reporte de recomendaciones.');
+        showError(error.message || 'No se pudo cargar el reporte de recomendaciones.');
       } finally {
         setLoading(false);
       }
@@ -72,9 +74,9 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
         throw new Error(data.message || 'No se pudo eliminar la recomendación.');
       }
       setRecommendations((current) => current.filter((entry) => entry.id !== recommendation.id));
-      setMessage(data.message || 'Recomendación eliminada correctamente.');
+      showSuccess(data.message || 'Recomendación eliminada correctamente.');
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar la recomendación.');
+      showError(error.message || 'No se pudo eliminar la recomendación.');
     } finally {
       setSaving(false);
     }
@@ -110,7 +112,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
         </button>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={reportHeaderStyle(isMobile)}>

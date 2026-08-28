@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from './Pagination';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 const PAGE_SIZE = 50;
 
@@ -8,7 +10,7 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
   useEffect(() => {
@@ -25,7 +27,7 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
         }
         setItems(Array.isArray(data.inventory) ? data.inventory : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el inventario.');
+        showError(error.message || 'No se pudo cargar el inventario.');
       } finally {
         setLoading(false);
       }
@@ -67,9 +69,9 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
         throw new Error(data.message || 'No se pudo eliminar el ingrediente.');
       }
       setItems((current) => current.filter((entry) => entry.id !== item.id));
-      setMessage(data.message || 'Ingrediente eliminado correctamente.');
+      showSuccess(data.message || 'Ingrediente eliminado correctamente.');
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar el ingrediente.');
+      showError(error.message || 'No se pudo eliminar el ingrediente.');
     } finally {
       setSaving(false);
     }
@@ -100,7 +102,7 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <section style={panelStyle}>
         <div style={toolbarStyle(isMobile)}>
@@ -179,7 +181,6 @@ const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', 
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const cellPrimaryStyle = { ...cellStyle, background: 'rgba(255,255,255,0.02)' };
 const cellActionsStyle = { ...cellStyle, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '10px 16px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };

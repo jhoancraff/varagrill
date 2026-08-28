@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   username: '',
@@ -20,7 +22,7 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
@@ -42,7 +44,7 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
         }
         setRoles(Array.isArray(data.roles) ? data.roles : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudieron cargar los roles.');
+        showError(error.message || 'No se pudieron cargar los roles.');
       } finally {
         setLoading(false);
       }
@@ -82,11 +84,11 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
         throw new Error(data.message || 'No se pudo crear el usuario.');
       }
 
-      setMessage(data.message || 'Usuario creado correctamente.');
+      showSuccess(data.message || 'Usuario creado correctamente.');
       setForm(emptyForm);
       markClean(emptyForm);
     } catch (error) {
-      setMessage(error.message || 'No se pudo crear el usuario.');
+      showError(error.message || 'No se pudo crear el usuario.');
     } finally {
       setSaving(false);
     }
@@ -115,7 +117,7 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando roles...</div> : null}

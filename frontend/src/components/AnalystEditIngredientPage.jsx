@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   id: '',
@@ -22,7 +24,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   useEffect(() => {
@@ -55,7 +57,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
         setForm(loadedForm);
         markClean(loadedForm);
       } catch (error) {
-        setMessage(error.message || 'No se pudo cargar el ingrediente.');
+        showError(error.message || 'No se pudo cargar el ingrediente.');
       } finally {
         setLoading(false);
       }
@@ -93,10 +95,10 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
         throw new Error(data.message || 'No se pudo actualizar el ingrediente.');
       }
 
-      setMessage(data.message || 'Ingrediente actualizado correctamente.');
+      showSuccess(data.message || 'Ingrediente actualizado correctamente.');
       markClean(form);
     } catch (error) {
-      setMessage(error.message || 'No se pudo actualizar el ingrediente.');
+      showError(error.message || 'No se pudo actualizar el ingrediente.');
     } finally {
       setSaving(false);
     }
@@ -105,7 +107,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
   return (
     <section style={containerStyle(isMobile)}>
       <h2 style={titleStyle(isMobile)}>Editar ingrediente</h2>
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStyle}>Cargando ingrediente...</div> : null}

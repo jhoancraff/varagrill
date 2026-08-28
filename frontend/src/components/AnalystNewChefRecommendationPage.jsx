@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const todayIsoDate = () => new Date().toISOString().slice(0, 10);
 
@@ -17,7 +19,7 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
   const [comentario, setComentario] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ productId, fecha, comentario });
 
   useEffect(() => {
@@ -55,7 +57,7 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
         }
         setProducts(Array.isArray(data.products) ? data.products : []);
       } catch (error) {
-        setMessage(error.message || 'No se pudieron cargar los productos.');
+        showError(error.message || 'No se pudieron cargar los productos.');
       } finally {
         setLoading(false);
       }
@@ -82,11 +84,11 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
     event.preventDefault();
 
     if (!productId) {
-      setMessage('Debes seleccionar un producto para la recomendación.');
+      showError('Debes seleccionar un producto para la recomendación.');
       return;
     }
     if (!fecha) {
-      setMessage('Debes indicar la fecha en la que aplica la recomendación.');
+      showError('Debes indicar la fecha en la que aplica la recomendación.');
       return;
     }
 
@@ -108,7 +110,7 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
         throw new Error(data.message || 'No se pudo guardar la recomendación.');
       }
 
-      setMessage(data.message || 'Recomendación creada correctamente.');
+      showSuccess(data.message || 'Recomendación creada correctamente.');
       setProductId('');
       setProductSearch('');
       setComentario('');
@@ -116,7 +118,7 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
       setFecha(resetFecha);
       markClean({ productId: '', fecha: resetFecha, comentario: '' });
     } catch (error) {
-      setMessage(error.message || 'No se pudo guardar la recomendación.');
+      showError(error.message || 'No se pudo guardar la recomendación.');
     } finally {
       setSaving(false);
     }
@@ -152,7 +154,7 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         {loading ? <div style={emptyStateStyle}>Cargando productos...</div> : null}

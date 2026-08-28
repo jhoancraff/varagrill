@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   titulo: '',
@@ -18,7 +20,7 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const isEditMode = Boolean(product?.promocion);
@@ -53,7 +55,7 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
         markClean(loadedForm);
       }
     } catch (error) {
-      setMessage(error.message || 'No se pudo cargar el producto seleccionado.');
+      showError(error.message || 'No se pudo cargar el producto seleccionado.');
     } finally {
       setLoading(false);
     }
@@ -92,15 +94,15 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
     event.preventDefault();
 
     if (!product) {
-      setMessage('No hay un producto válido seleccionado.');
+      showError('No hay un producto válido seleccionado.');
       return;
     }
     if (!form.valor_descuento || Number(form.valor_descuento) <= 0) {
-      setMessage('Debes indicar un valor de descuento mayor a cero.');
+      showError('Debes indicar un valor de descuento mayor a cero.');
       return;
     }
     if (!form.duracion_dias || Number(form.duracion_dias) <= 0) {
-      setMessage('Debes indicar cuántos días durará la promoción.');
+      showError('Debes indicar cuántos días durará la promoción.');
       return;
     }
 
@@ -133,10 +135,10 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
         throw new Error(data.message || 'No se pudo guardar la promoción.');
       }
 
-      setMessage(data.message || (isEditMode ? 'Promoción actualizada correctamente.' : 'Promoción creada correctamente.'));
+      showSuccess(data.message || (isEditMode ? 'Promoción actualizada correctamente.' : 'Promoción creada correctamente.'));
       await loadProduct();
     } catch (error) {
-      setMessage(error.message || 'No se pudo guardar la promoción.');
+      showError(error.message || 'No se pudo guardar la promoción.');
     } finally {
       setSaving(false);
     }
@@ -162,10 +164,10 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo eliminar la promoción.');
       }
-      setMessage(data.message || 'Promoción eliminada correctamente.');
+      showSuccess(data.message || 'Promoción eliminada correctamente.');
       onBack();
     } catch (error) {
-      setMessage(error.message || 'No se pudo eliminar la promoción.');
+      showError(error.message || 'No se pudo eliminar la promoción.');
     } finally {
       setSaving(false);
     }
@@ -198,7 +200,7 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
         </div>
       </div>
 
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       {loading ? <div style={emptyStateStyle}>Cargando producto...</div> : null}
 

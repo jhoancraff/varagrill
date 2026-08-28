@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import UnsavedChangesModal from './UnsavedChangesModal';
+import Toast from './Toast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useToast from '../hooks/useToast';
 
 const emptyForm = {
   nombre: '',
@@ -20,7 +22,7 @@ const unidadOptions = [
 function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [inventory, setInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [isNameFocused, setIsNameFocused] = useState(false);
@@ -78,7 +80,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
     event.preventDefault();
 
     if (exactMatch) {
-      setMessage(`Ya existe un ingrediente llamado "${exactMatch.nombre}". Edítalo en vez de crear uno duplicado.`);
+      showError(`Ya existe un ingrediente llamado "${exactMatch.nombre}". Edítalo en vez de crear uno duplicado.`);
       return;
     }
 
@@ -104,12 +106,12 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
         throw new Error(data.message || 'No se pudo crear el ingrediente.');
       }
 
-      setMessage(data.message || 'Ingrediente creado correctamente.');
+      showSuccess(data.message || 'Ingrediente creado correctamente.');
       setForm(emptyForm);
       markClean(emptyForm);
       setInventory((current) => [...current, { id: data.item?.id, nombre: data.item?.nombre || form.nombre }]);
     } catch (error) {
-      setMessage(error.message || 'No se pudo crear el ingrediente.');
+      showError(error.message || 'No se pudo crear el ingrediente.');
     } finally {
       setSaving(false);
     }
@@ -119,7 +121,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
     <section style={containerStyle(isMobile)}>
       <h2 style={titleStyle(isMobile)}>Nuevo ingrediente</h2>
       <p style={subtitleStyle}>Para el ingreso de mercancía: busca primero si el ingrediente ya existe antes de crear uno nuevo.</p>
-      {message ? <div style={noticeStyle}>{message}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
         <div style={gridStyle(isMobile)}>

@@ -9,9 +9,11 @@ const emptyForm = {
   unidad: 'g',
   stock_actual: '',
   stock_minimo: '',
-  costo_unitario: '',
   contenido_envase: '',
   peso_real: '',
+  precio_compra: '',
+  ingrediente_crudo_equivalente_id: '',
+  rendimiento_ingrediente_crudo: '',
   proveedor: '',
 };
 
@@ -69,6 +71,15 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
     [inventory, nameQuery],
   );
 
+  const costoUnitarioCalculado = useMemo(() => {
+    const precio = Number(form.precio_compra);
+    const peso = Number(form.peso_real);
+    if (!form.precio_compra || !form.peso_real || !Number.isFinite(precio) || !Number.isFinite(peso) || peso <= 0) {
+      return null;
+    }
+    return precio / peso;
+  }, [form.precio_compra, form.peso_real]);
+
   const handleChange = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
@@ -86,8 +97,8 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
       return;
     }
 
-    if (!form.contenido_envase || !form.peso_real) {
-      showError('El contenido del envase y el peso real son obligatorios para calcular bien el costo por gramo.');
+    if (!form.contenido_envase || !form.peso_real || !form.precio_compra) {
+      showError('El contenido del envase, el peso real y el precio de compra son obligatorios para calcular bien el costo por gramo.');
       return;
     }
 
@@ -104,9 +115,11 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
           unidad: form.unidad,
           stock_actual: form.stock_actual || '0',
           stock_minimo: form.stock_minimo || '0',
-          costo_unitario: form.costo_unitario || '0',
           contenido_envase: form.contenido_envase,
           peso_real: form.peso_real,
+          precio_compra: form.precio_compra,
+          ingrediente_crudo_equivalente_id: form.ingrediente_crudo_equivalente_id || '',
+          rendimiento_ingrediente_crudo: form.rendimiento_ingrediente_crudo || '',
           proveedor: form.proveedor,
         }),
       });
@@ -189,7 +202,6 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
 
           <label style={fieldStyle}><span style={labelStyle}>Stock inicial</span><input type="number" step="0.001" value={form.stock_actual} onChange={(e) => handleChange('stock_actual', e.target.value)} style={inputStyle} /></label>
           <label style={fieldStyle}><span style={labelStyle}>Stock minimo</span><input type="number" step="0.001" value={form.stock_minimo} onChange={(e) => handleChange('stock_minimo', e.target.value)} style={inputStyle} /></label>
-          <label style={fieldStyle}><span style={labelStyle}>Costo unitario</span><input type="number" step="0.01" value={form.costo_unitario} onChange={(e) => handleChange('costo_unitario', e.target.value)} style={inputStyle} /></label>
           <label style={fieldStyle}><span style={labelStyle}>Proveedor</span><input value={form.proveedor} onChange={(e) => handleChange('proveedor', e.target.value)} style={inputStyle} /></label>
           <label style={fieldStyle}>
             <span style={labelStyle}>Contenido del envase *</span>
@@ -199,10 +211,48 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
             <span style={labelStyle}>Peso real (utilizable) *</span>
             <input type="number" step="0.01" required value={form.peso_real} onChange={(e) => handleChange('peso_real', e.target.value)} style={inputStyle} placeholder="Igual al de arriba si no hay pérdida" />
           </label>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Precio de compra *</span>
+            <input type="number" step="0.01" required value={form.precio_compra} onChange={(e) => handleChange('precio_compra', e.target.value)} style={inputStyle} placeholder="Lo pagado por ese envase" />
+          </label>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Costo unitario (calculado)</span>
+            <input type="text" disabled value={costoUnitarioCalculado !== null ? costoUnitarioCalculado.toFixed(6) : '—'} style={{ ...inputStyle, color: '#c8bbbb', cursor: 'not-allowed' }} />
+          </label>
           <p style={helpTextStyle}>
-            Cuánto trae el envase según la etiqueta, y cuánto queda realmente utilizable después de pelar, deshuesar o
-            limpiar. Con esto el sistema calcula el costo por gramo/ml/unidad correctamente al confirmar una compra —
-            igualá los dos campos si el ingrediente no tiene ninguna merma.
+            Cuánto trae el envase según la etiqueta, cuánto queda realmente utilizable después de pelar, deshuesar o
+            limpiar, y cuánto costó ese envase. Con esto el costo unitario se calcula solo (precio de compra ÷ peso
+            real) — igualá contenido del envase y peso real si el ingrediente no tiene ninguna merma.
+          </p>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Ingrediente crudo equivalente</span>
+            <select
+              value={form.ingrediente_crudo_equivalente_id}
+              onChange={(e) => handleChange('ingrediente_crudo_equivalente_id', e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">No es un empacado / no aplica</option>
+              {inventory.map((item) => (
+                <option key={item.id} value={item.id}>{item.nombre}</option>
+              ))}
+            </select>
+          </label>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Rinde (cantidad de crudo por paquete)</span>
+            <input
+              type="number"
+              step="0.01"
+              value={form.rendimiento_ingrediente_crudo}
+              onChange={(e) => handleChange('rendimiento_ingrediente_crudo', e.target.value)}
+              style={inputStyle}
+              placeholder="Ej: 500 (500g de carne cruda por paquete)"
+            />
+          </label>
+          <p style={helpTextStyle}>
+            Completá esto solo si este ingrediente es un producto empacado para reventa (ej. carne al vacío,
+            patacones empacados): permite usar la acción "Reponer cocina" para abrir paquetes y sumar su
+            contenido al ingrediente crudo cuando la cocina se quede sin materia prima.
           </p>
         </div>
 

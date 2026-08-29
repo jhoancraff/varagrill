@@ -42,6 +42,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
             puerto_impresora_secundaria: String(categoria.puerto_impresora_secundaria || 9100),
             arma_plato_automatico: Boolean(categoria.arma_plato_automatico),
             prioridad_comanda: Boolean(categoria.prioridad_comanda),
+            no_requiere_cocina: Boolean(categoria.no_requiere_cocina),
           };
         });
         setDrafts(initialDrafts);
@@ -138,6 +139,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
     puerto_impresora_secundaria: '9100',
     arma_plato_automatico: false,
     prioridad_comanda: false,
+    no_requiere_cocina: false,
   };
 
   const handleSave = async (categoria) => {
@@ -158,6 +160,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
           puerto_impresora_secundaria: draft.puerto_impresora_secundaria,
           arma_plato_automatico: draft.arma_plato_automatico,
           prioridad_comanda: draft.prioridad_comanda,
+          no_requiere_cocina: draft.no_requiere_cocina,
         }),
       });
       const data = await response.json();
@@ -205,7 +208,10 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
             categoría, el plato se arme y cierre solo, sin usar los botones "Armar plato"/"Terminar".
             "Prioridad en comanda" hace que esos platos salgan siempre primero en la comanda —antes que
             cualquier otro plato del pedido— con su propio encabezado "PLATO N - CATEGORÍA" bien grande, sin
-            importar el orden en que el mesero los agregó (pensado para entradas). Los cambios aplican al
+            importar el orden en que el mesero los agregó (pensado para entradas). "No requiere cocina" hace
+            que un pedido con solo productos de esa categoría se registre directo como "entregado" — salta
+            el panel de cocina y no imprime comanda, quedando listo para cobrar de inmediato (pensado para
+            empacados para llevar: carnes al vacío, patacones, empanaditas...). Los cambios aplican al
             siguiente pedido que se registre.
           </p>
         </div>
@@ -229,6 +235,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
               <div style={tableHeadStyle}>Puerto secundario</div>
               <div style={tableHeadStyle}>Arma plato automático</div>
               <div style={tableHeadStyle}>Prioridad en comanda</div>
+              <div style={tableHeadStyle}>No requiere cocina</div>
               <div style={tableHeadStyle}>Acciones</div>
 
               {categorias.map((categoria) => {
@@ -292,6 +299,16 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
                           type="checkbox"
                           checked={draft.prioridad_comanda}
                           onChange={(event) => updateDraft(categoria.id, 'prioridad_comanda', event.target.checked)}
+                        />
+                        <span>Sí</span>
+                      </label>
+                    </div>
+                    <div key={`no-cocina-${categoria.id}`} style={{ ...tableCellStyle, alignItems: 'center' }}>
+                      <label style={autoPlatoCheckboxRowStyle}>
+                        <input
+                          type="checkbox"
+                          checked={draft.no_requiere_cocina}
+                          onChange={(event) => updateDraft(categoria.id, 'no_requiere_cocina', event.target.checked)}
                         />
                         <span>Sí</span>
                       </label>
@@ -456,12 +473,12 @@ const tableWrapStyle = {
 const tableStyle = {
   display: 'grid',
   gridTemplateColumns:
-    'minmax(150px, 0.8fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(260px, 1.2fr)',
+    'minmax(150px, 0.8fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(260px, 1.2fr)',
   alignItems: 'stretch',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   borderRadius: 18,
   overflow: 'hidden',
-  minWidth: 1450,
+  minWidth: 1580,
 };
 
 const tableHeadStyle = {

@@ -146,6 +146,16 @@ class VGCategoriaProducto(VGAuditoria):
             "entradas, que deben salir antes que el plato principal."
         ),
     )
+    no_requiere_cocina = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si está activo, un pedido donde TODOS los productos sean de categorías marcadas así se "
+            "registra directamente como 'entregado' — salta cocina y queda listo para cobrar de "
+            "inmediato, sin imprimir comanda. Pensado para productos empacados para llevar (carnes al "
+            "vacío, patacones, empanaditas...) que no necesitan preparación. Si el pedido combina esto "
+            "con un plato normal, ese plato sigue el flujo de cocina de siempre."
+        ),
+    )
 
     class Meta:
         db_table = "vg_categorias_productos"
@@ -245,9 +255,35 @@ class VGIngrediente(VGAuditoria):
             "calcula con la cantidad comprada tal cual, sin ajustar por merma."
         ),
     )
+    precio_compra = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text=(
+            "Precio pagado por el envase/paquete tal como viene etiquetado (el mismo envase "
+            "de 'Contenido del envase'). Junto con 'Peso real' determina el costo real por "
+            "gramo/ml/unidad (costo_unitario = precio_compra / peso_real), independiente del "
+            "contenido nominal del envase — se recalcula automáticamente al crear/editar el "
+            "ingrediente."
+        ),
+    )
     ultimo_proveedor = models.CharField(
         max_length=150, blank=True,
         help_text="Nombre del último proveedor que despachó este ingrediente (sin tabla propia: los proveedores cambian seguido).",
+    )
+    ingrediente_crudo_equivalente = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="empacados_equivalentes",
+        help_text=(
+            "Si este ingrediente es un producto empacado para reventa (ej. carne al vacío, patacones "
+            "empacados), a qué ingrediente crudo se le repone el stock al abrir un paquete — ver la "
+            "acción 'Reponer cocina' en el reporte de ingredientes. Vacío si este ingrediente no es un "
+            "empacado."
+        ),
+    )
+    rendimiento_ingrediente_crudo = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text=(
+            "Cuánto (en la unidad del ingrediente crudo equivalente) rinde CADA paquete de este "
+            "empacado — ej. 500 si cada paquete de churrasco al vacío trae 500g de carne cruda."
+        ),
     )
 
     class Meta:

@@ -41,6 +41,12 @@ HEADER_ALIASES = {
     'precio': 'precio_total',
     'costo total': 'precio_total',
     'costo': 'precio_total',
+    'peso neto': 'contenido_envase',
+    'contenido del envase': 'contenido_envase',
+    'contenido envase': 'contenido_envase',
+    'peso real': 'peso_real',
+    'precio de compra': 'precio_compra',
+    'precio compra': 'precio_compra',
 }
 
 
@@ -96,6 +102,12 @@ def _first_sheet_path(archive):
     for rel in rels_root.findall(f'{REL_NS}Relationship'):
         if rel.get('Id') == r_id:
             target = rel.get('Target', '')
+            # Un Target puede venir relativo a xl/ ("worksheets/sheet1.xml", como en la
+            # plantilla escrita a mano) o absoluto al paquete ("/xl/worksheets/sheet1.xml",
+            # como lo escriben openpyxl y otras herramientas) — en ese segundo caso NO hay
+            # que anteponerle "xl/" de nuevo, o queda una ruta duplicada e inválida.
+            if target.startswith('/'):
+                return target.lstrip('/')
             return target if target.startswith('xl/') else f'xl/{target}'
 
     raise InvalidExcelError('No se pudo ubicar la hoja dentro del archivo.')
@@ -180,12 +192,18 @@ def parse_ingredientes_workbook(file_obj):
             unidad = str(row_cells.get(columns.get('unidad', -1), '') or '').strip()
             cantidad_raw = row_cells.get(columns.get('cantidad', -1), '')
             precio_total_raw = row_cells.get(columns.get('precio_total', -1), '')
+            contenido_envase_raw = row_cells.get(columns.get('contenido_envase', -1), '')
+            peso_real_raw = row_cells.get(columns.get('peso_real', -1), '')
+            precio_compra_raw = row_cells.get(columns.get('precio_compra', -1), '')
             parsed_rows.append({
                 'fila': idx + 1,
                 'nombre': nombre,
                 'unidad': unidad,
                 'cantidad': str(cantidad_raw or '').strip(),
                 'precio_total': str(precio_total_raw or '').strip(),
+                'contenido_envase': str(contenido_envase_raw or '').strip(),
+                'peso_real': str(peso_real_raw or '').strip(),
+                'precio_compra': str(precio_compra_raw or '').strip(),
             })
 
         return parsed_rows
@@ -211,16 +229,21 @@ def parse_cantidad(raw_cantidad):
         return None, f'"{raw_cantidad}" no es una cantidad numérica válida.'
 
 
-def parse_precio_total(raw_precio):
+def parse_decimal_opcional(raw_valor, etiqueta):
     """
-    Devuelve (Decimal, None) o (None, mensaje_error). A diferencia de parse_cantidad,
-    una celda vacía se distingue de un 0 explícito: vacía significa "no se sabe el
-    costo de esta fila" (no se toca costo_unitario), 0 significa "se sabe y es gratis".
+    Devuelve (Decimal, None) o (None, mensaje_error). Una celda vacía se distingue de un
+    0 explícito: vacía significa "no se cargó este dato en esta fila" (no se toca), 0
+    significa "se sabe y es cero/gratis". Usado para precio_total, contenido_envase,
+    peso_real y precio_compra — todas columnas opcionales por fila.
     """
-    text = str(raw_precio or '').strip().replace(',', '.')
+    text = str(raw_valor or '').strip().replace(',', '.')
     if not text:
         return None, None
     try:
         return Decimal(text), None
     except InvalidOperation:
-        return None, f'"{raw_precio}" no es un precio numérico válido.'
+        return None, f'"{raw_valor}" no es un {etiqueta} numérico válido.'
+
+
+def parse_precio_total(raw_precio):
+    return parse_decimal_opcional(raw_precio, 'precio')

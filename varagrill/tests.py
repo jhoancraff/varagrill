@@ -23,6 +23,7 @@ from varagrill.models import (
     VGRol,
     VGUsuario,
 )
+from varagrill.api_views import _importar_ingredientes, _preview_ingrediente_row
 from varagrill.unit_rescale import rescale_legacy_units
 
 
@@ -341,6 +342,240 @@ class AdminCatalogApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(VGProducto.objects.filter(pk=beverage.id).exists())
+
+    def test_crear_ingrediente_requiere_precio_compra(self):
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'crear_ingrediente',
+                'nombre': 'Aji dulce',
+                'unidad': 'g',
+                'contenido_envase': '500',
+                'peso_real': '450',
+                # precio_compra ausente a propósito.
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(VGIngrediente.objects.filter(nombre='Aji dulce').exists())
+
+    def test_crear_ingrediente_deriva_costo_unitario_de_precio_compra(self):
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'crear_ingrediente',
+                'nombre': 'Costillas',
+                'unidad': 'g',
+                'contenido_envase': '1000',
+                'peso_real': '850',
+                'precio_compra': '4250',
+                # Un costo_unitario mandado por el cliente se debe ignorar por completo.
+                'costo_unitario': '999',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        ingredient = VGIngrediente.objects.get(nombre='Costillas')
+        self.assertEqual(ingredient.precio_compra, Decimal('4250.00'))
+        self.assertEqual(ingredient.costo_unitario, Decimal('5.000000'))
+
+    def test_actualizar_ingrediente_recalcula_al_completar_triple(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Queso amarillo',
+            unidad_medida='g',
+            stock_actual='0',
+            costo_unitario='0.30',
+        )
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'actualizar_ingrediente',
+                'id': ingredient.id,
+                'nombre': 'Queso amarillo',
+                'unidad': 'g',
+                'contenido_envase': '2000',
+                'peso_real': '2000',
+                'precio_compra': '900',
+                # También se ignora al completar el trío.
+                'costo_unitario': '0.10',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.costo_unitario, Decimal('0.450000'))
+
+    def test_actualizar_ingrediente_legacy_sin_precio_compra_respeta_costo_manual(self):
+        """
+        Regresión: el frontend real siempre manda contenido_envase/peso_real (con su
+        valor guardado) pero puede mandar precio_compra vacío si el ingrediente es de
+        antes de este campo. Editar otro dato (ej. proveedor) sin tocar precio de compra
+        NO debe bloquear el guardado ni recalcular el costo.
+        """
+        ingredient = VGIngrediente.objects.create(
+            nombre='Yuca',
+            unidad_medida='g',
+            stock_actual='0',
+            costo_unitario='0.02',
+            contenido_envase='1000',
+            peso_real='1000',
+        )
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'actualizar_ingrediente',
+                'id': ingredient.id,
+                'nombre': 'Yuca',
+                'unidad': 'g',
+                'proveedor': 'Agromercado Andino',
+                'contenido_envase': '1000',
+                'peso_real': '1000',
+                'precio_compra': None,
+                'costo_unitario': '0.02',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.ultimo_proveedor, 'Agromercado Andino')
+        self.assertEqual(ingredient.costo_unitario, Decimal('0.02'))
+        self.assertIsNone(ingredient.precio_compra)
+
+    def test_actualizar_ingrediente_envase_peso_parcial_rechazada(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Pimienta blanca', unidad_medida='g', stock_actual='0', costo_unitario='0.05',
+        )
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'actualizar_ingrediente',
+                'id': ingredient.id,
+                'nombre': 'Pimienta blanca',
+                'unidad': 'g',
+                'contenido_envase': '500',
+                # peso_real ausente: sigue siendo un par obligatorio, sin cambios.
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        ingredient.refresh_from_db()
+        self.assertIsNone(ingredient.contenido_envase)
+
+    def test_ingreso_administrativo_no_desincroniza_costo_unitario_existente(self):
+        """
+        Ver _costo_unitario_por_compra vs. la división simple: reponer stock desde
+        "Ingreso administrativo" (tipo='inventario') sobre un ingrediente que ya tiene su
+        trío completo debe respetar la merma, no pisarlo con precio_total/cantidad.
+        """
+        ingredient = VGIngrediente.objects.create(
+            nombre='Punta trasera QA',
+            unidad_medida='g',
+            stock_actual='0',
+            costo_unitario='5.00',
+            contenido_envase='1000',
+            peso_real='850',
+            precio_compra='4250',
+        )
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'inventario',
+                'ingrediente_id': ingredient.id,
+                'nombre': 'Punta trasera QA',
+                'cantidad': '2000',
+                'unidad': 'g',
+                'precio_total': '8500',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        ingredient.refresh_from_db()
+        # Naive: 8500/2000 = 4.25. Ajustado por merma (850/1000): 8500/(2000*0.85) = 5.00.
+        self.assertEqual(ingredient.costo_unitario, Decimal('5.000000'))
+
+
+class ImportarIngredientesExcelTests(TestCase):
+    def setUp(self):
+        self.admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='adminimportexcel',
+            password='claveAdmin123',
+            cedula='99999998',
+            email='adminimportexcel@varagrill.test',
+            id_role=self.admin_role,
+        )
+
+    def test_preview_ingrediente_nuevo_sin_trio_es_error(self):
+        row = {
+            'fila': 2, 'nombre': 'Chorizo', 'unidad': 'g', 'cantidad': '5000',
+            'precio_total': '', 'contenido_envase': '', 'peso_real': '', 'precio_compra': '',
+        }
+        resultado = _preview_ingrediente_row(row)
+        self.assertEqual(resultado['accion'], 'error')
+
+    def test_importar_ingrediente_nuevo_sin_trio_no_crea_nada(self):
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Chorizo', 'unidad': 'g', 'cantidad': '5000'}],
+            self.admin,
+        )
+        self.assertEqual(resumen['creados'], 0)
+        self.assertEqual(len(resumen['errores']), 1)
+        self.assertFalse(VGIngrediente.objects.filter(nombre='Chorizo').exists())
+
+    def test_importar_ingrediente_nuevo_con_trio_crea_y_deriva_costo(self):
+        resumen = _importar_ingredientes(
+            [{
+                'nombre': 'Chorizo', 'unidad': 'g', 'cantidad': '5000',
+                'contenido_envase': '1000', 'peso_real': '1000', 'precio_compra': '4500',
+            }],
+            self.admin,
+        )
+        self.assertEqual(resumen['creados'], 1)
+        self.assertEqual(resumen['errores'], [])
+        ingredient = VGIngrediente.objects.get(nombre='Chorizo')
+        self.assertEqual(ingredient.stock_actual, Decimal('5000'))
+        self.assertEqual(ingredient.precio_compra, Decimal('4500.00'))
+        self.assertEqual(ingredient.costo_unitario, Decimal('4.500000'))
+
+    def test_importar_ingrediente_existente_actualiza_precio_sin_tocar_stock(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Papeleta', unidad_medida='g', stock_actual='5000', costo_unitario='0.01',
+        )
+        movimientos_antes = VGMovimientoInventario.objects.filter(ingrediente=ingredient).count()
+
+        resumen = _importar_ingredientes(
+            [{
+                'nombre': 'Papeleta', 'unidad': 'g', 'cantidad': '',
+                'contenido_envase': '1000', 'peso_real': '950', 'precio_compra': '950',
+            }],
+            self.admin,
+        )
+        self.assertEqual(resumen['errores'], [])
+        self.assertEqual(resumen['actualizados'], 1)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.stock_actual, Decimal('5000'))
+        self.assertEqual(ingredient.contenido_envase, Decimal('1000'))
+        self.assertEqual(ingredient.peso_real, Decimal('950'))
+        self.assertEqual(ingredient.precio_compra, Decimal('950.00'))
+        self.assertEqual(ingredient.costo_unitario, Decimal('1.000000'))
+        self.assertEqual(
+            VGMovimientoInventario.objects.filter(ingrediente=ingredient).count(),
+            movimientos_antes,
+        )
+
+    def test_importar_ingrediente_existente_trio_parcial_da_error(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Cilantro', unidad_medida='g', stock_actual='500', costo_unitario='0.02',
+        )
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Cilantro', 'unidad': 'g', 'cantidad': '', 'peso_real': '900'}],
+            self.admin,
+        )
+        self.assertEqual(resumen['actualizados'], 0)
+        self.assertEqual(len(resumen['errores']), 1)
+        ingredient.refresh_from_db()
+        self.assertIsNone(ingredient.peso_real)
+        self.assertEqual(ingredient.stock_actual, Decimal('500'))
 
 
 class AdminUsersApiTests(TestCase):

@@ -61,6 +61,7 @@ from .ingredientes_excel import (
     InvalidExcelError,
     normalize_unidad,
     parse_cantidad,
+    parse_decimal_opcional,
     parse_ingredientes_workbook,
     parse_precio_total,
 )
@@ -983,7 +984,9 @@ def _parse_order_payload(data):
 
     products_map = {
         product.id: product
-        for product in VGProducto.objects.filter(id__in=product_ids, disponible=True)
+        # select_related('categoria'): pedido_create_view/pedido_update_view necesitan
+        # producto.categoria.no_requiere_cocina para decidir si el pedido salta cocina.
+        for product in VGProducto.objects.filter(id__in=product_ids, disponible=True).select_related('categoria')
     }
     preparaciones_map = {
         preparacion.id: preparacion
@@ -1206,12 +1209,22 @@ def pedido_create_view(request):
     notas = str(data.get('notas', '') or '').strip()
 
     with transaction.atomic():
+        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
+        # Si TODOS los productos del pedido son de categorías "no_requiere_cocina" (ej.
+        # empacados para llevar), el pedido nace 'entregado': nunca pasa por el panel de
+        # cocina (kitchen_orders_view solo lista pendiente/en_preparacion/listo) ni imprime
+        # comanda (imprimir_comandas_pedido solo se dispara al pasar a en_preparacion), y
+        # aparece de inmediato en Cobro (BILLABLE_ORDER_STATES). Si se mezcla con un plato
+        # normal, todo el pedido sigue el flujo de cocina de siempre.
+        requiere_cocina = any(not line['producto'].categoria.no_requiere_cocina for line in built_lines)
+        estado_inicial = 'pendiente' if requiere_cocina else 'entregado'
+
         pedido = VGPedido.objects.create(
             mesa=parsed['mesa'],
             usuario=request.user,
             cliente=cliente,
             tipo_pedido=parsed['tipo_pedido'],
-            estado='pendiente',
+            estado=estado_inicial,
             notas=notas,
             impuesto=parsed['impuesto'],
             descuento=parsed['descuento'],
@@ -1220,7 +1233,6 @@ def pedido_create_view(request):
             actualizado_por=request.user,
         )
 
-        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         for line in built_lines:
             detalle = VGDetallePedido.objects.create(
                 pedido=pedido,
@@ -1229,7 +1241,7 @@ def pedido_create_view(request):
                 precio_unitario=line['precio_unitario'],
                 peso_gramos=line['peso_gramos'],
                 grupo_armado=line['grupo_armado'],
-                estado='pendiente',
+                estado=estado_inicial,
                 notas=line['notas'],
             )
             for addon in line['adicionales']:
@@ -1331,6 +1343,12 @@ def pedido_update_view(request, pedido_id):
                 status=409,
             )
 
+        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
+        # Mismo criterio que pedido_create_view: si el pedido editado queda compuesto
+        # solo por categorías "no_requiere_cocina", pasa a 'entregado' de una vez.
+        requiere_cocina = any(not line['producto'].categoria.no_requiere_cocina for line in built_lines)
+        estado_inicial = 'pendiente' if requiere_cocina else 'entregado'
+
         pedido.mesa = parsed['mesa']
         pedido.tipo_pedido = parsed['tipo_pedido']
         pedido.cliente = cliente
@@ -1338,10 +1356,10 @@ def pedido_update_view(request, pedido_id):
         pedido.impuesto = parsed['impuesto']
         pedido.descuento = parsed['descuento']
         pedido.propina = parsed['propina']
+        pedido.estado = estado_inicial
 
         pedido.detalles.all().delete()
 
-        built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         for line in built_lines:
             detalle = VGDetallePedido.objects.create(
                 pedido=pedido,
@@ -1350,7 +1368,7 @@ def pedido_update_view(request, pedido_id):
                 precio_unitario=line['precio_unitario'],
                 peso_gramos=line['peso_gramos'],
                 grupo_armado=line['grupo_armado'],
-                estado='pendiente',
+                estado=estado_inicial,
                 notas=line['notas'],
             )
             for addon in line['adicionales']:
@@ -1403,6 +1421,35 @@ def _costo_unitario_por_compra(precio_total, cantidad, ingrediente):
     return (precio_total / cantidad_utilizable).quantize(Decimal('0.000001'))
 
 
+def _costo_unitario_desde_precio(precio_compra, peso_real):
+    """
+    precio_compra ÷ peso_real: caso particular de _costo_unitario_por_compra cuando se
+    compra un solo envase de referencia (cantidad == contenido_envase). Es la fórmula que
+    se usa para mantener VGIngrediente.costo_unitario siempre sincronizado con el trío
+    contenido_envase/peso_real/precio_compra cargado directamente en el ingrediente,
+    fuera del flujo de compras por lote (VGCompraBorrador).
+    """
+    if not peso_real:
+        return Decimal('0')
+    return (precio_compra / peso_real).quantize(Decimal('0.000001'))
+
+
+def _validar_envase_peso_precio(contenido_envase, peso_real, precio_compra):
+    """
+    Valida el trío contenido_envase/peso_real/precio_compra ya parseado a Decimal (no
+    None). Devuelve un mensaje de error en español, o None si todo está en regla.
+    Comparte esta regla crear_ingrediente, actualizar_ingrediente y la importación por
+    Excel para no repetir el mismo chequeo tres veces.
+    """
+    if contenido_envase <= 0 or peso_real <= 0:
+        return 'El contenido del envase y el peso real deben ser mayores a cero.'
+    if peso_real > contenido_envase:
+        return 'El peso real no puede ser mayor que el contenido del envase.'
+    if precio_compra < 0:
+        return 'El precio de compra no puede ser negativo.'
+    return None
+
+
 @csrf_exempt
 def admin_catalog_view(request):
     if request.method not in ['GET', 'POST']:
@@ -1436,7 +1483,8 @@ def admin_catalog_view(request):
         inventory = list(
             VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values(
                 'id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario',
-                'stock_minimo', 'contenido_envase', 'peso_real',
+                'stock_minimo', 'contenido_envase', 'peso_real', 'precio_compra',
+                'ingrediente_crudo_equivalente', 'rendimiento_ingrediente_crudo',
             )
         )
         preparation_cost_map = _load_preparation_cost_map()
@@ -1511,31 +1559,63 @@ def admin_catalog_view(request):
         proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
         stock_actual = data.get('stock_actual', 0)
         stock_minimo = data.get('stock_minimo', 0)
-        costo_unitario = data.get('costo_unitario', 0)
         contenido_envase = data.get('contenido_envase')
         peso_real = data.get('peso_real')
+        precio_compra = data.get('precio_compra')
 
         try:
             stock_actual_value = Decimal(str(stock_actual or 0))
             stock_minimo_value = Decimal(str(stock_minimo or 0))
-            costo_unitario_value = Decimal(str(costo_unitario or 0))
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
 
-        if contenido_envase in [None, ''] or peso_real in [None, '']:
+        if contenido_envase in [None, ''] or peso_real in [None, ''] or precio_compra in [None, '']:
             return _auth_response(
-                {'ok': False, 'message': 'El contenido del envase y el peso real son obligatorios para calcular el costo correctamente.'},
+                {
+                    'ok': False,
+                    'message': (
+                        'El contenido del envase, el peso real y el precio de compra son obligatorios '
+                        'para calcular el costo correctamente.'
+                    ),
+                },
                 status=400,
             )
         try:
             contenido_envase_value = Decimal(str(contenido_envase))
             peso_real_value = Decimal(str(peso_real))
+            precio_compra_value = Decimal(str(precio_compra))
         except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El contenido del envase y el peso real deben ser numéricos.'}, status=400)
-        if contenido_envase_value <= 0 or peso_real_value <= 0:
-            return _auth_response({'ok': False, 'message': 'El contenido del envase y el peso real deben ser mayores a cero.'}, status=400)
-        if peso_real_value > contenido_envase_value:
-            return _auth_response({'ok': False, 'message': 'El peso real no puede ser mayor que el contenido del envase.'}, status=400)
+            return _auth_response(
+                {'ok': False, 'message': 'El contenido del envase, el peso real y el precio de compra deben ser numéricos.'},
+                status=400,
+            )
+        error_trio = _validar_envase_peso_precio(contenido_envase_value, peso_real_value, precio_compra_value)
+        if error_trio:
+            return _auth_response({'ok': False, 'message': error_trio}, status=400)
+        costo_unitario_value = _costo_unitario_desde_precio(precio_compra_value, peso_real_value)
+
+        # Opcional: solo aplica a ingredientes empacados para reventa (ver
+        # VGIngrediente.ingrediente_crudo_equivalente). Van juntos igual que envase/peso real.
+        ingrediente_crudo_equivalente_id = data.get('ingrediente_crudo_equivalente_id')
+        rendimiento_ingrediente_crudo = data.get('rendimiento_ingrediente_crudo')
+        ingrediente_crudo_equivalente = None
+        rendimiento_ingrediente_crudo_value = None
+        if ingrediente_crudo_equivalente_id not in [None, ''] or rendimiento_ingrediente_crudo not in [None, '']:
+            if ingrediente_crudo_equivalente_id in [None, ''] or rendimiento_ingrediente_crudo in [None, '']:
+                return _auth_response(
+                    {'ok': False, 'message': 'El ingrediente crudo equivalente y su rendimiento van juntos: completá los dos o dejá los dos vacíos.'},
+                    status=400,
+                )
+            try:
+                ingrediente_crudo_equivalente = VGIngrediente.objects.get(pk=int(ingrediente_crudo_equivalente_id))
+            except (ValueError, TypeError, VGIngrediente.DoesNotExist):
+                return _auth_response({'ok': False, 'message': 'El ingrediente crudo equivalente no existe.'}, status=400)
+            try:
+                rendimiento_ingrediente_crudo_value = Decimal(str(rendimiento_ingrediente_crudo))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El rendimiento del ingrediente crudo debe ser numérico.'}, status=400)
+            if rendimiento_ingrediente_crudo_value <= 0:
+                return _auth_response({'ok': False, 'message': 'El rendimiento del ingrediente crudo debe ser mayor a cero.'}, status=400)
 
         existing = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
         if existing is not None:
@@ -1549,6 +1629,9 @@ def admin_catalog_view(request):
             costo_unitario=costo_unitario_value,
             contenido_envase=contenido_envase_value,
             peso_real=peso_real_value,
+            precio_compra=precio_compra_value,
+            ingrediente_crudo_equivalente=ingrediente_crudo_equivalente,
+            rendimiento_ingrediente_crudo=rendimiento_ingrediente_crudo_value,
             ultimo_proveedor=proveedor,
             creado_por=request.user,
             actualizado_por=request.user,
@@ -1574,6 +1657,7 @@ def admin_catalog_view(request):
         costo_unitario = data.get('costo_unitario', ingredient.costo_unitario)
         contenido_envase = data.get('contenido_envase', ingredient.contenido_envase)
         peso_real = data.get('peso_real', ingredient.peso_real)
+        precio_compra = data.get('precio_compra', ingredient.precio_compra)
 
         try:
             stock_actual_value = Decimal(str(stock_actual or 0))
@@ -1582,9 +1666,17 @@ def admin_catalog_view(request):
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
 
-        # A diferencia de crear_ingrediente, acá quedan opcionales (pueden venir vacíos si
-        # el ingrediente es viejo y todavía no se completó este dato) — solo se validan si
-        # se cargó alguno de los dos.
+        # A diferencia de crear_ingrediente, acá contenido_envase/peso_real quedan
+        # opcionales (pueden venir vacíos si el ingrediente es viejo y todavía no se
+        # completó este dato) — solo se validan entre sí si se cargó alguno de los dos.
+        # Nota: el frontend siempre manda las tres claves (con null si el campo está
+        # vacío), así que NO se puede exigir que precio_compra venga junto con estos dos
+        # como un trío obligatorio — eso bloquearía para siempre cualquier edición (ni
+        # siquiera cambiar el nombre) de todo ingrediente que ya tenga envase/peso
+        # cargados de antes de que existiera este campo. En cambio, precio_compra se
+        # valida por su cuenta y solo dispara el cálculo automático cuando los tres
+        # datos efectivos (recién editados o ya guardados) están disponibles a la vez;
+        # si falta alguno, costo_unitario sigue siendo el valor manual de siempre.
         contenido_envase_value = ingredient.contenido_envase
         peso_real_value = ingredient.peso_real
         if contenido_envase not in [None, ''] or peso_real not in [None, '']:
@@ -1603,6 +1695,44 @@ def admin_catalog_view(request):
             if peso_real_value > contenido_envase_value:
                 return _auth_response({'ok': False, 'message': 'El peso real no puede ser mayor que el contenido del envase.'}, status=400)
 
+        precio_compra_value = ingredient.precio_compra
+        if precio_compra not in [None, '']:
+            try:
+                precio_compra_value = Decimal(str(precio_compra))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El precio de compra debe ser numérico.'}, status=400)
+            if precio_compra_value < 0:
+                return _auth_response({'ok': False, 'message': 'El precio de compra no puede ser negativo.'}, status=400)
+        elif precio_compra in ['']:
+            precio_compra_value = None
+
+        if contenido_envase_value and peso_real_value and precio_compra_value is not None:
+            costo_unitario_value = _costo_unitario_desde_precio(precio_compra_value, peso_real_value)
+
+        # Mismo criterio opcional que envase/peso real — solo aplica a empacados.
+        ingrediente_crudo_equivalente_id = data.get('ingrediente_crudo_equivalente_id', ingredient.ingrediente_crudo_equivalente_id)
+        rendimiento_ingrediente_crudo = data.get('rendimiento_ingrediente_crudo', ingredient.rendimiento_ingrediente_crudo)
+        ingrediente_crudo_equivalente = ingredient.ingrediente_crudo_equivalente
+        rendimiento_ingrediente_crudo_value = ingredient.rendimiento_ingrediente_crudo
+        if ingrediente_crudo_equivalente_id not in [None, ''] or rendimiento_ingrediente_crudo not in [None, '']:
+            if ingrediente_crudo_equivalente_id in [None, ''] or rendimiento_ingrediente_crudo in [None, '']:
+                return _auth_response(
+                    {'ok': False, 'message': 'El ingrediente crudo equivalente y su rendimiento van juntos: completá los dos o dejá los dos vacíos.'},
+                    status=400,
+                )
+            if str(ingrediente_crudo_equivalente_id) == str(ingredient.pk):
+                return _auth_response({'ok': False, 'message': 'Un ingrediente no puede ser su propio equivalente crudo.'}, status=400)
+            try:
+                ingrediente_crudo_equivalente = VGIngrediente.objects.get(pk=int(ingrediente_crudo_equivalente_id))
+            except (ValueError, TypeError, VGIngrediente.DoesNotExist):
+                return _auth_response({'ok': False, 'message': 'El ingrediente crudo equivalente no existe.'}, status=400)
+            try:
+                rendimiento_ingrediente_crudo_value = Decimal(str(rendimiento_ingrediente_crudo))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El rendimiento del ingrediente crudo debe ser numérico.'}, status=400)
+            if rendimiento_ingrediente_crudo_value <= 0:
+                return _auth_response({'ok': False, 'message': 'El rendimiento del ingrediente crudo debe ser mayor a cero.'}, status=400)
+
         duplicate = VGIngrediente.objects.filter(nombre__iexact=nombre).exclude(pk=ingredient.pk).exists()
         if duplicate:
             return _auth_response({'ok': False, 'message': 'Ya existe otro ingrediente con ese nombre.'}, status=400)
@@ -1615,13 +1745,83 @@ def admin_catalog_view(request):
         ingredient.costo_unitario = costo_unitario_value
         ingredient.contenido_envase = contenido_envase_value
         ingredient.peso_real = peso_real_value
+        ingredient.precio_compra = precio_compra_value
+        ingredient.ingrediente_crudo_equivalente = ingrediente_crudo_equivalente
+        ingredient.rendimiento_ingrediente_crudo = rendimiento_ingrediente_crudo_value
         ingredient.actualizado_por = request.user
         ingredient.save(update_fields=[
             'nombre', 'unidad_medida', 'ultimo_proveedor', 'stock_actual', 'stock_minimo', 'costo_unitario',
-            'contenido_envase', 'peso_real', 'actualizado_por', 'fecha_actualizacion',
+            'contenido_envase', 'peso_real', 'precio_compra', 'ingrediente_crudo_equivalente', 'rendimiento_ingrediente_crudo',
+            'actualizado_por', 'fecha_actualizacion',
         ])
 
         return _auth_response({'ok': True, 'message': 'Ingrediente actualizado correctamente.', 'item': {'id': ingredient.id, 'nombre': ingredient.nombre}})
+
+    if tipo == 'reponer_desde_empacado':
+        # "Abrir" N paquetes de un ingrediente empacado (ver VGIngrediente.
+        # ingrediente_crudo_equivalente/rendimiento_ingrediente_crudo) para sumar su
+        # contenido al ingrediente crudo de cocina — independiente de facturar: esto NO
+        # crea ninguna VGFactura ni consume numeración fiscal, es un ajuste de inventario
+        # interno, trazable via VGMovimientoInventario (misma tabla que compras/ajustes).
+        empacado_id = data.get('empacado_id')
+        try:
+            empacado = VGIngrediente.objects.select_related('ingrediente_crudo_equivalente').get(pk=int(empacado_id))
+        except (ValueError, TypeError, VGIngrediente.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El ingrediente empacado no existe.'}, status=400)
+
+        crudo = empacado.ingrediente_crudo_equivalente
+        if crudo is None or not empacado.rendimiento_ingrediente_crudo:
+            return _auth_response(
+                {
+                    'ok': False,
+                    'message': f'"{empacado.nombre}" no tiene configurado un ingrediente crudo equivalente. '
+                    + 'Completalo desde "Editar ingrediente" antes de reponer.',
+                },
+                status=400,
+            )
+
+        try:
+            cantidad_paquetes = Decimal(str(data.get('cantidad_paquetes')))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'La cantidad de paquetes no es válida.'}, status=400)
+        if cantidad_paquetes <= 0:
+            return _auth_response({'ok': False, 'message': 'La cantidad de paquetes debe ser mayor a cero.'}, status=400)
+        if cantidad_paquetes > empacado.stock_actual:
+            return _auth_response(
+                {'ok': False, 'message': f'Solo hay {empacado.stock_actual} {empacado.unidad_medida} de "{empacado.nombre}" en stock.'},
+                status=400,
+            )
+
+        cantidad_credito = cantidad_paquetes * empacado.rendimiento_ingrediente_crudo
+
+        with transaction.atomic():
+            empacado.stock_actual = empacado.stock_actual - cantidad_paquetes
+            empacado.actualizado_por = request.user
+            empacado.save(update_fields=['stock_actual', 'actualizado_por', 'fecha_actualizacion'])
+
+            crudo.stock_actual = crudo.stock_actual + cantidad_credito
+            crudo.actualizado_por = request.user
+            crudo.save(update_fields=['stock_actual', 'actualizado_por', 'fecha_actualizacion'])
+
+            VGMovimientoInventario.objects.create(
+                ingrediente=empacado,
+                tipo_movimiento='salida',
+                cantidad=cantidad_paquetes,
+                motivo=f'Reposición de cocina: se abrieron para reponer "{crudo.nombre}".',
+                creado_por=request.user,
+            )
+            VGMovimientoInventario.objects.create(
+                ingrediente=crudo,
+                tipo_movimiento='entrada',
+                cantidad=cantidad_credito,
+                motivo=f'Reposición desde empacados: se abrieron {cantidad_paquetes} {empacado.unidad_medida} de "{empacado.nombre}".',
+                creado_por=request.user,
+            )
+
+        return _auth_response({
+            'ok': True,
+            'message': f'Se repuso {cantidad_credito} {crudo.unidad_medida} de "{crudo.nombre}" desde {cantidad_paquetes} {empacado.unidad_medida} de "{empacado.nombre}".',
+        })
 
     if tipo == 'crear_preparacion':
         nombre = str(data.get('nombre', '')).strip()
@@ -1838,10 +2038,14 @@ def admin_catalog_view(request):
                     },
                 )
                 if not created:
+                    # A diferencia de la creación (arriba), acá el ingrediente ya existe:
+                    # si tiene contenido_envase/peso_real cargados hay que respetar esa
+                    # merma en vez de la división simple, o se desincroniza el costo_unitario
+                    # calculado en "Nuevo/Editar ingrediente" (ver _costo_unitario_por_compra).
                     ingredient.nombre = nombre
                     ingredient.unidad_medida = unidad
                     ingredient.stock_minimo = stock_minimo_value
-                    ingredient.costo_unitario = costo_unitario_value
+                    ingredient.costo_unitario = _costo_unitario_por_compra(precio_total_value, cantidad_value, ingredient)
                     ingredient.ultimo_proveedor = proveedor
                     ingredient.actualizado_por = request.user
                     ingredient.save(update_fields=['nombre', 'unidad_medida', 'stock_minimo', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
@@ -1849,7 +2053,7 @@ def admin_catalog_view(request):
                 ingredient.nombre = nombre
                 ingredient.unidad_medida = unidad
                 ingredient.stock_minimo = stock_minimo_value
-                ingredient.costo_unitario = costo_unitario_value
+                ingredient.costo_unitario = _costo_unitario_por_compra(precio_total_value, cantidad_value, ingredient)
                 ingredient.ultimo_proveedor = proveedor
                 ingredient.actualizado_por = request.user
                 ingredient.save(update_fields=['nombre', 'unidad_medida', 'stock_minimo', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
@@ -2045,6 +2249,38 @@ def admin_catalog_view(request):
 MAX_INGREDIENTES_IMPORT_SIZE_BYTES = 5 * 1024 * 1024
 
 
+def _parse_trio_envase_peso_precio(row):
+    """
+    Parsea las 3 columnas opcionales del Excel "peso neto"/"peso real"/"precio de
+    compra" (ver ingredientes_excel.HEADER_ALIASES) de un `row`/`item` ya extraído.
+    Devuelve (trio, error):
+    - los 3 vacíos -> ({}, None): la fila no toca estos datos.
+    - los 3 presentes y válidos -> ({'contenido_envase':D,'peso_real':D,'precio_compra':D}, None)
+    - cualquier combinación parcial, o algún valor fuera de rango -> (None, mensaje_error)
+    """
+    contenido_envase, error = parse_decimal_opcional(row.get('contenido_envase'), 'peso neto')
+    if error:
+        return None, error
+    peso_real, error = parse_decimal_opcional(row.get('peso_real'), 'peso real')
+    if error:
+        return None, error
+    precio_compra, error = parse_decimal_opcional(row.get('precio_compra'), 'precio de compra')
+    if error:
+        return None, error
+
+    valores = (contenido_envase, peso_real, precio_compra)
+    if all(valor is None for valor in valores):
+        return {}, None
+    if any(valor is None for valor in valores):
+        return None, 'El peso neto, el peso real y el precio de compra van juntos: completá los tres o dejá los tres vacíos.'
+
+    error_rango = _validar_envase_peso_precio(contenido_envase, peso_real, precio_compra)
+    if error_rango:
+        return None, error_rango
+
+    return {'contenido_envase': contenido_envase, 'peso_real': peso_real, 'precio_compra': precio_compra}, None
+
+
 def _preview_ingrediente_row(row):
     """
     Clasifica una fila ya parseada del Excel (ver ingredientes_excel.parse_ingredientes_workbook)
@@ -2055,6 +2291,7 @@ def _preview_ingrediente_row(row):
     unidad_normalizada = normalize_unidad(row['unidad'])
     cantidad, error_cantidad = parse_cantidad(row['cantidad'])
     precio_total, error_precio = parse_precio_total(row.get('precio_total'))
+    trio, error_trio = _parse_trio_envase_peso_precio(row)
     ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
 
     resultado = {
@@ -2063,9 +2300,15 @@ def _preview_ingrediente_row(row):
         'unidad': unidad_normalizada or row['unidad'],
         'cantidad': str(cantidad) if cantidad is not None else row['cantidad'],
         'precio_total': str(precio_total) if precio_total is not None else (row.get('precio_total') or ''),
+        'contenido_envase': str(trio['contenido_envase']) if trio else (row.get('contenido_envase') or ''),
+        'peso_real': str(trio['peso_real']) if trio else (row.get('peso_real') or ''),
+        'precio_compra': str(trio['precio_compra']) if trio else (row.get('precio_compra') or ''),
         'ingrediente_id': ingrediente.id if ingrediente else None,
         'stock_actual': str(ingrediente.stock_actual) if ingrediente else None,
         'unidad_actual': ingrediente.unidad_medida if ingrediente else None,
+        'contenido_envase_actual': str(ingrediente.contenido_envase) if ingrediente and ingrediente.contenido_envase is not None else None,
+        'peso_real_actual': str(ingrediente.peso_real) if ingrediente and ingrediente.peso_real is not None else None,
+        'precio_compra_actual': str(ingrediente.precio_compra) if ingrediente and ingrediente.precio_compra is not None else None,
     }
 
     if error_precio:
@@ -2074,19 +2317,34 @@ def _preview_ingrediente_row(row):
     elif error_cantidad:
         resultado['accion'] = 'error'
         resultado['mensaje'] = error_cantidad
+    elif error_trio:
+        resultado['accion'] = 'error'
+        resultado['mensaje'] = error_trio
+    elif ingrediente is not None:
+        cambia_stock = cantidad != 0 and cantidad != ingrediente.stock_actual
+        if cambia_stock or trio:
+            resultado['accion'] = 'actualizar'
+            partes = []
+            if cambia_stock:
+                partes.append('el stock')
+            if trio:
+                partes.append('el peso neto, el peso real y el precio de compra')
+            resultado['mensaje'] = 'Va a actualizar ' + ' y '.join(partes) + '.'
+        elif cantidad == 0:
+            resultado['accion'] = 'ignorado'
+            resultado['mensaje'] = 'Cantidad vacía o en 0: no se toca este ingrediente.'
+        else:
+            resultado['accion'] = 'sin_cambios'
+            resultado['mensaje'] = 'El stock ya coincide, no hay nada que actualizar.'
     elif cantidad == 0:
         resultado['accion'] = 'ignorado'
         resultado['mensaje'] = 'Cantidad vacía o en 0: no se toca este ingrediente.'
-    elif ingrediente is not None:
-        if cantidad == ingrediente.stock_actual:
-            resultado['accion'] = 'sin_cambios'
-            resultado['mensaje'] = 'El stock ya coincide, no hay nada que actualizar.'
-        else:
-            resultado['accion'] = 'actualizar'
-            resultado['mensaje'] = ''
     elif not unidad_normalizada:
         resultado['accion'] = 'error'
         resultado['mensaje'] = 'Ingrediente nuevo: falta una unidad válida (g, ml o unidad).'
+    elif not trio:
+        resultado['accion'] = 'error'
+        resultado['mensaje'] = 'Ingrediente nuevo: faltan el peso neto, el peso real y el precio de compra para calcular el costo.'
     else:
         resultado['accion'] = 'nuevo'
         resultado['mensaje'] = ''
@@ -2100,16 +2358,20 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
     _preview_ingrediente_row): por cada fila, si el ingrediente existe se actualiza su
     stock_actual y se registra un movimiento de 'ajuste' con el delta; si no existe se
     crea con ese stock inicial y se registra un movimiento de 'entrada'. Cantidad vacía o
-    en 0 se ignora — mismo criterio que sync_inventario_pesaje (management command).
+    en 0 se ignora para ingredientes NUEVOS — mismo criterio que sync_inventario_pesaje
+    (management command). Para un ingrediente EXISTENTE, en cambio, una fila puede traer
+    solo peso neto/peso real/precio de compra (ver _parse_trio_envase_peso_precio) sin
+    tocar el stock — sirve para refrescar el costeo sin hacer un reconteo físico.
 
     La parte de "cantidad" (sincronizar el stock al valor de la planilla) se comporta
-    exactamente igual que antes — no se toca ese comportamiento para no romper el uso de
-    esta pantalla como reconteo físico. Lo nuevo: cuando una fila resulta en un aumento de
-    stock (ingrediente nuevo, o existente cuyo delta es positivo), esa porción SÍ se
-    registra como una compra real — un único VGCompra (el "lote") para todo el archivo,
-    con un VGDetalleCompra por cada fila que aumentó stock, costeado con precio_total/
-    cantidad_agregada si se dio un precio (mismo criterio que el alta manual de un
-    ingrediente). Si ninguna fila aumenta stock, no se crea ningún VGCompra.
+    exactamente igual que antes para reconteos puros — no se toca ese comportamiento.
+    Cuando una fila resulta en un aumento de stock (ingrediente nuevo, o existente cuyo
+    delta es positivo), esa porción SÍ se registra como una compra real — un único
+    VGCompra (el "lote") para todo el archivo, con un VGDetalleCompra por cada fila que
+    aumentó stock. El costeo de esa línea prioriza el trío nuevo
+    (costo_unitario = precio_compra/peso_real) sobre el criterio viejo de precio_total/
+    delta ajustado por el envase ya guardado (_costo_unitario_por_compra) si una fila
+    trajera los dos. Si ninguna fila aumenta stock, no se crea ningún VGCompra.
     """
     creados, actualizados, ignorados = 0, 0, 0
     errores = []
@@ -2138,33 +2400,54 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
             if error_cantidad:
                 errores.append(f'{nombre}: {error_cantidad}')
                 continue
-            if cantidad == 0:
-                ignorados += 1
-                continue
 
             precio_total, error_precio = parse_precio_total(item.get('precio_total'))
             if error_precio:
                 errores.append(f'{nombre}: {error_precio}')
                 continue
 
+            trio, error_trio = _parse_trio_envase_peso_precio(item)
+            if error_trio:
+                errores.append(f'{nombre}: {error_trio}')
+                continue
+
             ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+
             if ingrediente is not None:
-                if cantidad == ingrediente.stock_actual:
-                    continue
                 stock_anterior = ingrediente.stock_actual
-                delta = cantidad - stock_anterior
-                ingrediente.stock_actual = cantidad
-                update_fields = ['stock_actual', 'actualizado_por', 'fecha_actualizacion']
-                if delta > 0 and precio_total is not None:
+                cambia_stock = cantidad != 0 and cantidad != stock_anterior
+                if not cambia_stock and not trio:
+                    if cantidad == 0:
+                        ignorados += 1
+                    # cantidad dada pero igual al stock actual, y sin trío: nada que
+                    # hacer en esta fila — no se cuenta ni como ignorada ni actualizada,
+                    # igual que el comportamiento de siempre.
+                    continue
+
+                delta = (cantidad - stock_anterior) if cambia_stock else Decimal('0')
+                update_fields = ['actualizado_por', 'fecha_actualizacion']
+
+                if trio:
+                    ingrediente.contenido_envase = trio['contenido_envase']
+                    ingrediente.peso_real = trio['peso_real']
+                    ingrediente.precio_compra = trio['precio_compra']
+                    ingrediente.costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
+                    update_fields += ['contenido_envase', 'peso_real', 'precio_compra', 'costo_unitario']
+                elif delta > 0 and precio_total is not None:
                     ingrediente.costo_unitario = _costo_unitario_por_compra(precio_total, delta, ingrediente)
                     update_fields.append('costo_unitario')
+
+                if cambia_stock:
+                    ingrediente.stock_actual = cantidad
+                    update_fields.append('stock_actual')
+
                 ingrediente.actualizado_por = operator
                 ingrediente.save(update_fields=update_fields)
 
                 movimiento_compra = None
                 if delta > 0:
                     lote = _obtener_compra()
-                    costo_linea = _costo_unitario_por_compra(precio_total, delta, ingrediente) if precio_total is not None else Decimal('0')
+                    costo_linea = ingrediente.costo_unitario if (trio or precio_total is not None) else Decimal('0')
                     VGDetalleCompra.objects.create(
                         compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
                     )
@@ -2172,27 +2455,37 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                     lote.save(update_fields=['total'])
                     movimiento_compra = lote
 
-                VGMovimientoInventario.objects.create(
-                    ingrediente=ingrediente,
-                    tipo_movimiento='entrada' if movimiento_compra else 'ajuste',
-                    cantidad=delta,
-                    motivo=f'Carga por Excel: {stock_anterior} -> {cantidad} {ingrediente.unidad_medida}',
-                    compra=movimiento_compra,
-                    creado_por=operator,
-                )
+                if delta != 0:
+                    VGMovimientoInventario.objects.create(
+                        ingrediente=ingrediente,
+                        tipo_movimiento='entrada' if movimiento_compra else 'ajuste',
+                        cantidad=delta,
+                        motivo=f'Carga por Excel: {stock_anterior} -> {cantidad} {ingrediente.unidad_medida}',
+                        compra=movimiento_compra,
+                        creado_por=operator,
+                    )
                 actualizados += 1
             else:
+                if cantidad == 0:
+                    ignorados += 1
+                    continue
                 unidad_normalizada = normalize_unidad(item.get('unidad'))
                 if not unidad_normalizada:
                     errores.append(f'{nombre}: falta una unidad válida (g, ml o unidad) para crearlo.')
                     continue
-                costo_inicial = (precio_total / cantidad).quantize(Decimal('0.000001')) if precio_total is not None else Decimal('0')
+                if not trio:
+                    errores.append(f'{nombre}: faltan el peso neto, el peso real y el precio de compra para crearlo.')
+                    continue
+                costo_inicial = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
                 nuevo = VGIngrediente.objects.create(
                     nombre=nombre,
                     unidad_medida=unidad_normalizada,
                     stock_actual=cantidad,
                     stock_minimo=Decimal('0'),
                     costo_unitario=costo_inicial,
+                    contenido_envase=trio['contenido_envase'],
+                    peso_real=trio['peso_real'],
+                    precio_compra=trio['precio_compra'],
                     creado_por=operator,
                     actualizado_por=operator,
                 )
@@ -2746,6 +3039,7 @@ def _serialize_categoria_impresora(categoria):
         'puerto_impresora_secundaria': categoria.puerto_impresora_secundaria,
         'arma_plato_automatico': categoria.arma_plato_automatico,
         'prioridad_comanda': categoria.prioridad_comanda,
+        'no_requiere_cocina': categoria.no_requiere_cocina,
     }
 
 
@@ -2821,11 +3115,12 @@ def admin_categorias_view(request):
     categoria.puerto_impresora_secundaria = puerto_impresora_secundaria
     categoria.arma_plato_automatico = bool(data.get('arma_plato_automatico', categoria.arma_plato_automatico))
     categoria.prioridad_comanda = bool(data.get('prioridad_comanda', categoria.prioridad_comanda))
+    categoria.no_requiere_cocina = bool(data.get('no_requiere_cocina', categoria.no_requiere_cocina))
     categoria.actualizado_por = request.user
     categoria.save(update_fields=[
         'ip_impresora', 'puerto_impresora',
         'ip_impresora_secundaria', 'puerto_impresora_secundaria',
-        'arma_plato_automatico', 'prioridad_comanda', 'actualizado_por', 'fecha_actualizacion',
+        'arma_plato_automatico', 'prioridad_comanda', 'no_requiere_cocina', 'actualizado_por', 'fecha_actualizacion',
     ])
 
     return _auth_response({

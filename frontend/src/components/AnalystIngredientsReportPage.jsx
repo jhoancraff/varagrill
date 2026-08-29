@@ -13,26 +13,26 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch('/api/admin/catalogo/', {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          throw new Error(data.message || 'No se pudo cargar el inventario.');
-        }
-        setItems(Array.isArray(data.inventory) ? data.inventory : []);
-      } catch (error) {
-        showError(error.message || 'No se pudo cargar el inventario.');
-      } finally {
-        setLoading(false);
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/catalogo/', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo cargar el inventario.');
       }
-    };
+      setItems(Array.isArray(data.inventory) ? data.inventory : []);
+    } catch (error) {
+      showError(error.message || 'No se pudo cargar el inventario.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadData();
   }, []);
 
@@ -72,6 +72,46 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
       showSuccess(data.message || 'Ingrediente eliminado correctamente.');
     } catch (error) {
       showError(error.message || 'No se pudo eliminar el ingrediente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Acción independiente de facturar (ver VGIngrediente.ingrediente_crudo_equivalente):
+  // "abre" N paquetes de un empacado y suma su contenido al ingrediente crudo, sin tocar
+  // ninguna factura ni numeración fiscal — solo un ajuste de inventario trazable.
+  const handleReponer = async (item) => {
+    const crudo = items.find((entry) => String(entry.id) === String(item.ingrediente_crudo_equivalente));
+    const crudoNombre = crudo ? crudo.nombre : 'el ingrediente crudo configurado';
+    const cantidadStr = window.prompt(
+      `¿Cuántos paquetes de "${item.nombre}" vas a abrir para reponer "${crudoNombre}"?`,
+      '1',
+    );
+    if (!cantidadStr) {
+      return;
+    }
+    const cantidad = Number(cantidadStr);
+    if (!cantidad || cantidad <= 0) {
+      showError('La cantidad de paquetes no es válida.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch('/api/admin/catalogo/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo: 'reponer_desde_empacado', empacado_id: item.id, cantidad_paquetes: cantidad }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo reponer el inventario.');
+      }
+      showSuccess(data.message || 'Inventario repuesto correctamente.');
+      await loadData();
+    } catch (error) {
+      showError(error.message || 'No se pudo reponer el inventario.');
     } finally {
       setSaving(false);
     }
@@ -123,6 +163,7 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
             <div style={tableStyle}>
               <div style={headStyle}>Ingrediente</div>
               <div style={headStyle}>Stock</div>
+              <div style={headStyle}>Precio compra</div>
               <div style={headStyle}>Costo</div>
               <div style={headStyle}>Proveedor</div>
               <div style={headStyle}>Acciones</div>
@@ -136,6 +177,9 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
                   <div key={`stock-${item.id}`} style={cellStyle}>
                     {item.stock_actual || '0'} {item.unidad_medida || 'unidad'}
                   </div>
+                  <div key={`precio-compra-${item.id}`} style={cellStyle}>
+                    {item.precio_compra || 'Sin dato'}
+                  </div>
                   <div key={`cost-${item.id}`} style={cellStyle}>
                     {item.costo_unitario || '0'}
                   </div>
@@ -144,6 +188,11 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
                   </div>
                   <div key={`actions-${item.id}`} style={cellActionsStyle}>
                     <button type="button" onClick={() => onEdit(item.id)} style={secondaryButtonStyle}>Modificar</button>
+                    {item.ingrediente_crudo_equivalente ? (
+                      <button type="button" onClick={() => handleReponer(item)} style={reponerButtonStyle} disabled={saving}>
+                        Reponer cocina
+                      </button>
+                    ) : null}
                     <button type="button" onClick={() => handleDelete(item)} style={dangerButtonStyle} disabled={saving}>Eliminar</button>
                   </div>
                 </>
@@ -176,7 +225,7 @@ const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const searchInputStyle = (isMobile) => ({ width: isMobile ? '100%' : 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' });
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(200px,1.2fr) minmax(150px,1fr) minmax(120px,0.8fr) minmax(160px,1fr) minmax(220px,1fr)', minWidth: 900, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(200px,1.2fr) minmax(130px,0.9fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(160px,1fr) minmax(220px,1fr)', minWidth: 1050, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const cellPrimaryStyle = { ...cellStyle, background: 'rgba(255,255,255,0.02)' };
@@ -184,6 +233,7 @@ const cellActionsStyle = { ...cellStyle, display: 'flex', gap: 8, alignItems: 'c
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '10px 16px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
+const reponerButtonStyle = { border: '1px solid rgba(52, 211, 153, 0.4)', borderRadius: 999, padding: '10px 16px', background: 'rgba(52, 211, 153, 0.12)', color: '#7ce8bd', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default AnalystIngredientsReportPage;

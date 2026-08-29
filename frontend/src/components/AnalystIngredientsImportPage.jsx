@@ -71,6 +71,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       setRows((data.filas || []).map((row) => ({
         ...row,
         precio_total: row.precio_total || '',
+        contenido_envase: row.contenido_envase || '',
+        peso_real: row.peso_real || '',
+        precio_compra: row.precio_compra || '',
         selected: SELECTABLE_ACCIONES.has(row.accion),
       })));
       setSummary(null);
@@ -90,6 +93,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       .filter((row) => row.selected)
       .map((row) => ({
         nombre: row.nombre, unidad: row.unidad, cantidad: row.cantidad, precio_total: row.precio_total,
+        contenido_envase: row.contenido_envase, peso_real: row.peso_real, precio_compra: row.precio_compra,
       }));
 
     if (items.length === 0) {
@@ -199,9 +203,12 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         </div>
         <p style={hintStyle}>
           La plantilla trae las columnas Ingrediente, Unidad (g, ml o unidad) y Cantidad. Puedes usar tus
-          propios encabezados siempre que incluyan una columna "Ingrediente". Si además agregas una columna
-          "Precio total" (lo pagado por esa cantidad de ese ingrediente), el sistema calcula solo el costo por
-          unidad — igual que al registrar un ingreso individual.
+          propios encabezados siempre que incluyan una columna "Ingrediente". Si además agregas "Peso neto",
+          "Peso real" y "Precio de compra" (las tres juntas), el costo unitario de esa fila se calcula solo
+          (precio de compra ÷ peso real) — para un ingrediente que ya existe, esas tres columnas pueden venir
+          solas, sin tocar la Cantidad, para actualizar el costeo sin hacer un reconteo. Si en cambio solo
+          agregas "Precio total" (lo pagado por el aumento de esta carga), el sistema usa el criterio anterior
+          — pero si una fila trae las dos cosas, gana el peso neto/peso real/precio de compra.
         </p>
       </section>
 
@@ -225,6 +232,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
               <div style={headStyle}>Unidad</div>
               <div style={headStyle}>Cantidad</div>
               <div style={headStyle}>Precio total</div>
+              <div style={headStyle}>Peso neto</div>
+              <div style={headStyle}>Peso real</div>
+              <div style={headStyle}>Precio compra</div>
               <div style={headStyle}>Estado</div>
               <div style={headStyle}>Detalle</div>
 
@@ -268,11 +278,38 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                         placeholder="Opcional"
                       />
                     </div>
+                    <div key={`envase-${row.fila}`} style={cellStyle}>
+                      <input
+                        value={row.contenido_envase || ''}
+                        onChange={(event) => updateRow(row.fila, { contenido_envase: event.target.value })}
+                        style={editInputStyle}
+                        placeholder="Opcional"
+                      />
+                    </div>
+                    <div key={`peso-real-${row.fila}`} style={cellStyle}>
+                      <input
+                        value={row.peso_real || ''}
+                        onChange={(event) => updateRow(row.fila, { peso_real: event.target.value })}
+                        style={editInputStyle}
+                        placeholder="Opcional"
+                      />
+                    </div>
+                    <div key={`precio-compra-${row.fila}`} style={cellStyle}>
+                      <input
+                        value={row.precio_compra || ''}
+                        onChange={(event) => updateRow(row.fila, { precio_compra: event.target.value })}
+                        style={editInputStyle}
+                        placeholder="Opcional"
+                      />
+                    </div>
                     <div key={`state-${row.fila}`} style={cellStyle}>
                       <span style={countBadgeStyle(badge)}>{badge.label}</span>
                     </div>
                     <div key={`detail-${row.fila}`} style={{ ...cellStyle, fontSize: 12, color: '#c8bbbb' }}>
-                      {row.ingrediente_id ? `Stock actual: ${row.stock_actual} ${row.unidad_actual}` : ''}
+                      {row.ingrediente_id ? <div>Stock actual: {row.stock_actual} {row.unidad_actual}</div> : null}
+                      {row.precio_compra_actual ? (
+                        <div>Ya tiene: envase {row.contenido_envase_actual}, real {row.peso_real_actual}, precio {row.precio_compra_actual}</div>
+                      ) : null}
                       {row.mensaje ? <div>{row.mensaje}</div> : null}
                     </div>
                   </>
@@ -337,7 +374,7 @@ const countBadgeStyle = (badge) => ({
 const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr 1fr', gap: 10 });
 
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 110px 100px 110px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 820 };
+const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 100px 90px 100px 100px 100px 110px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 1320 };
 const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
 const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
 const cellPrimaryStyle = { ...cellStyle };

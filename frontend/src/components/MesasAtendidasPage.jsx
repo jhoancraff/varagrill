@@ -15,7 +15,7 @@ function estadoLabel(estado) {
   return ESTADO_LABELS[estado] || estado;
 }
 
-function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, mesasCatalogo = [] }) {
+function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, mesasCatalogo = [] }) {
   const tasaCambio = useExchangeRate();
   const [mesas, setMesas] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -343,6 +343,11 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, mesasCatalogo
           <p style={subtitleStyle}>Solo tus mesas — abiertas y cerradas de hoy.</p>
         </div>
         <div style={headerActionsStyle(isMobile)}>
+          {onNuevoPedido ? (
+            <button type="button" onClick={onNuevoPedido} style={newOrderButtonStyle(isMobile)}>
+              + Nuevo pedido
+            </button>
+          ) : null}
           <button type="button" onClick={() => fetchMesas()} style={secondaryButtonStyle(isMobile)}>
             Actualizar
           </button>
@@ -526,6 +531,18 @@ const backButtonStyle = (isMobile) => ({
   background: 'rgba(255,255,255,0.03)',
   color: '#fff',
   fontWeight: 600,
+  cursor: 'pointer',
+  minHeight: isMobile ? 42 : 38,
+  width: isMobile ? '100%' : 'auto',
+});
+
+const newOrderButtonStyle = (isMobile) => ({
+  border: 'none',
+  borderRadius: 999,
+  padding: isMobile ? '10px 14px' : '9px 14px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  color: '#fff',
+  fontWeight: 700,
   cursor: 'pointer',
   minHeight: isMobile ? 42 : 38,
   width: isMobile ? '100%' : 'auto',

@@ -61,6 +61,7 @@ const RESTRICTED_ADMIN_VIEWS = ['admin-printers', 'admin-datos-fiscales', 'admin
 function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const isCajera = (role || '').trim().toLowerCase() === 'cajera';
   const isContador = (role || '').trim().toLowerCase() === 'contador';
+  const isMesero = (role || '').trim().toLowerCase() === 'mesero';
   // El Contador ya pasa isAdmin (el backend lo trata como admin), pero algunas tarjetas
   // sensibles del Panel Analista (impresoras, datos fiscales, historial de compras)
   // quedan reservadas al dueño real del negocio (isOwner) o al Contador — nunca a un
@@ -88,6 +89,14 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [newOrderPreset, setNewOrderPreset] = useState(null);
   const [kitchenFlashMessage, setKitchenFlashMessage] = useState('');
+
+  const handleNuevoPedido = () => {
+    setNewOrderPreset(null);
+    setActiveView('orders');
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
+  };
 
   const handleAddRoundToTable = ({ mesaId, cliente }) => {
     setNewOrderPreset({ mesaId, cliente, token: Date.now() });
@@ -316,6 +325,15 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
       return;
     }
 
+    // El home genérico (promociones/recomendación del chef) no le sirve de mucho al
+    // mesero en su día a día — lo que necesita ver apenas entra (o cuando recarga, o
+    // cuando toca "Inicio") son sus mesas atendidas. Solo se redirige desde 'home': el
+    // resto de sus vistas (Nuevo pedido, Pedidos, etc.) siguen libres.
+    if (isMesero && activeView === 'home') {
+      setActiveView('mesas-atendidas');
+      return;
+    }
+
     if (!isAdmin && (activeView.startsWith('admin') || activeView.startsWith('contabilidad'))) {
       setActiveView('home');
       return;
@@ -329,7 +347,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     if (!canSeeCartasRestringidas && RESTRICTED_ADMIN_VIEWS.includes(activeView)) {
       setActiveView('admin');
     }
-  }, [activeView, isAdmin, isCajera, canSeeCartasRestringidas]);
+  }, [activeView, isAdmin, isCajera, isMesero, canSeeCartasRestringidas]);
 
   const {
     alertPermission,
@@ -576,13 +594,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
         {!isCajera ? (
           <button
             type="button"
-            onClick={() => {
-              setNewOrderPreset(null);
-              setActiveView('orders');
-              if (isSidebarOverlayMode) {
-                setIsSidebarOpen(false);
-              }
-            }}
+            onClick={handleNuevoPedido}
             style={sidebarButtonStyle(activeView === 'orders')}
           >
             <span aria-hidden="true" style={sidebarIconWrapStyle}>
@@ -962,6 +974,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             isMobile={isMobile}
             onBack={() => setActiveView('home')}
             onAddRoundToTable={handleAddRoundToTable}
+            onNuevoPedido={handleNuevoPedido}
             mesasCatalogo={mesas}
           />
         ) : activeView.startsWith('orders-edit:') ? (

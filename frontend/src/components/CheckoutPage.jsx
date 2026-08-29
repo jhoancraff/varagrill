@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import ConfirmModal from './ConfirmModal';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
+import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useToast from '../hooks/useToast';
 import { formatMontoDocumento } from '../utils/currency';
 
 const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
@@ -34,8 +36,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     loadMetodosPago();
   }, []);
   const [busyGroup, setBusyGroup] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [feedbackType, setFeedbackType] = useState('success');
+  const { toast, showSuccess, showError, hideToast } = useToast();
   const [expandedOrderIds, setExpandedOrderIds] = useState(() => new Set());
   const [cuentasRefreshToken, setCuentasRefreshToken] = useState(0);
   const [pendingConfirm, setPendingConfirm] = useState(null);
@@ -134,8 +135,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const validateClienteDocumento = (group) => {
     const cliente = clienteByGroup[group.key] || emptyCliente;
     if (!cliente.tipo_documento || !cliente.numero_documento.trim()) {
-      setFeedbackType('error');
-      setFeedback(`Indica el tipo y número de documento del cliente de ${group.label} antes de generar la pre-factura o factura.`);
+      showError(`Indica el tipo y número de documento del cliente de ${group.label} antes de generar la pre-factura o factura.`);
       return false;
     }
     return true;
@@ -162,13 +162,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     }
     const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
     if (!metodoPagoId) {
-      setFeedbackType('error');
-      setFeedback('No hay metodos de pago activos configurados.');
+      showError('No hay metodos de pago activos configurados.');
       return;
     }
 
     setBusyGroup(group.key);
-    setFeedback('');
     try {
       const response = await fetch('/api/pedidos/cobro/', {
         method: 'POST',
@@ -181,22 +179,19 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo procesar la nota de entrega.');
+        showError(data.message || 'No se pudo procesar la nota de entrega.');
         await fetchPedidos();
         return;
       }
 
-      setFeedbackType('success');
-      setFeedback(
+      showSuccess(
         `Nota de entrega registrada: ${formatMontoDocumento(data.factura.total, data.factura.moneda, tasaCambio)} `
         + `(${data.factura.pedidos.length} pedido(s)). Referencia ${data.factura.referencia}.`,
       );
       clearGroupState(group.key);
       await fetchPedidos();
     } catch (requestError) {
-      setFeedbackType('error');
-      setFeedback('Error de red al procesar la nota de entrega.');
+      showError('Error de red al procesar la nota de entrega.');
     } finally {
       setBusyGroup('');
     }
@@ -212,7 +207,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
 
     setBusyGroup(group.key);
-    setFeedback('');
     try {
       const response = await fetch('/api/prefacturas/', {
         method: 'POST',
@@ -228,16 +222,13 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo generar la pre-factura.');
+        showError(data.message || 'No se pudo generar la pre-factura.');
         return;
       }
-      setFeedbackType('success');
-      setFeedback(`Pre-factura ${data.prefactura.codigo} generada. Revisa la cuenta con el cliente antes de confirmar.`);
+      showSuccess(`Pre-factura ${data.prefactura.codigo} generada. Revisa la cuenta con el cliente antes de confirmar.`);
       setPrefacturaByGroup((current) => ({ ...current, [group.key]: data.prefactura }));
     } catch (requestError) {
-      setFeedbackType('error');
-      setFeedback('Error de red al generar la pre-factura.');
+      showError('Error de red al generar la pre-factura.');
     } finally {
       setBusyGroup('');
     }
@@ -257,7 +248,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       return;
     }
     setBusyGroup(group.key);
-    setFeedback('');
     try {
       const response = await fetch(`/api/prefacturas/${prefactura.id}/convertir/`, {
         method: 'POST',
@@ -266,12 +256,10 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo emitir la factura.');
+        showError(data.message || 'No se pudo emitir la factura.');
         return;
       }
-      setFeedbackType('success');
-      setFeedback(
+      showSuccess(
         `Factura Nº ${data.factura.numero_factura} emitida (Control ${data.factura.numero_control}). `
         + `Total ${formatMontoDocumento(data.factura.total, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)} `
         + `— saldo pendiente ${formatMontoDocumento(data.factura.saldo_pendiente, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)}. `
@@ -281,8 +269,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       setCuentasRefreshToken((current) => current + 1);
       await fetchPedidos();
     } catch (requestError) {
-      setFeedbackType('error');
-      setFeedback('Error de red al emitir la factura.');
+      showError('Error de red al emitir la factura.');
     } finally {
       setBusyGroup('');
     }
@@ -298,7 +285,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
 
     setBusyGroup(group.key);
-    setFeedback('');
     try {
       const response = await fetch('/api/facturas/', {
         method: 'POST',
@@ -314,12 +300,10 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo emitir la factura.');
+        showError(data.message || 'No se pudo emitir la factura.');
         return;
       }
-      setFeedbackType('success');
-      setFeedback(
+      showSuccess(
         `Factura Nº ${data.factura.numero_factura} emitida (Control ${data.factura.numero_control}). `
         + `Total ${formatMontoDocumento(data.factura.total, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)} `
         + `— saldo pendiente ${formatMontoDocumento(data.factura.saldo_pendiente, data.factura.moneda, data.factura.tasa_cambio_referencia || tasaCambio)}. `
@@ -329,8 +313,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       setCuentasRefreshToken((current) => current + 1);
       await fetchPedidos();
     } catch (requestError) {
-      setFeedbackType('error');
-      setFeedback('Error de red al emitir la factura.');
+      showError('Error de red al emitir la factura.');
     } finally {
       setBusyGroup('');
     }
@@ -418,7 +401,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
         </button>
       </div>
 
-      {feedback ? <div style={feedbackStyle(feedbackType)}>{feedback}</div> : null}
+      <Toast toast={toast} onClose={hideToast} />
 
       {loading ? <div style={emptyStateStyle}>Cargando pedidos...</div> : null}
       {!loading && error ? <div style={errorStyle}>{error}</div> : null}
@@ -525,7 +508,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
 
                 {!prefactura ? (
                   <div style={footerSectionStyle}>
-                    <div style={clienteFormStyle(isMobile)}>
+                    <div style={clienteFormStyle}>
                       <input
                         placeholder="Cliente (opcional, solo para pre-factura/factura)"
                         value={cliente.nombre}
@@ -561,29 +544,27 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                         Total seleccionado: ${selectedTotal.toFixed(2)}
                         <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
                       </div>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <select
-                          value={metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id) || ''}
-                          onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: Number(event.target.value) }))}
-                          style={selectStyle}
-                          className="admin-dark-select"
-                        >
-                          {metodosPago.map((metodo) => (
-                            <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setPendingConfirm({ action: 'nota', group })}
-                          style={checkoutButtonStyle}
-                          disabled={selectedSet.size === 0 || isBusy}
-                        >
-                          {isBusy ? 'Procesando...' : 'Nota de entrega'}
-                        </button>
-                      </div>
+                      <select
+                        value={metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id) || ''}
+                        onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: Number(event.target.value) }))}
+                        style={selectStyle}
+                        className="admin-dark-select"
+                      >
+                        {metodosPago.map((metodo) => (
+                          <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+                        ))}
+                      </select>
                     </div>
 
                     <div style={docButtonsRowStyle(isMobile)}>
+                      <button
+                        type="button"
+                        onClick={() => setPendingConfirm({ action: 'nota', group })}
+                        style={checkoutButtonStyle}
+                        disabled={selectedSet.size === 0 || isBusy}
+                      >
+                        {isBusy ? 'Procesando...' : 'Nota de entrega'}
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -800,15 +781,6 @@ const errorStyle = {
   color: '#ffd8d8',
 };
 
-const feedbackStyle = (feedbackType) => ({
-  borderRadius: 12,
-  border: feedbackType === 'error' ? '1px solid rgba(223, 102, 102, 0.5)' : '1px solid rgba(82, 206, 123, 0.35)',
-  background: feedbackType === 'error' ? 'rgba(102, 29, 29, 0.55)' : 'rgba(31, 89, 48, 0.45)',
-  color: feedbackType === 'error' ? '#ffe2e2' : '#dbffe4',
-  padding: '10px 12px',
-  fontSize: 13,
-});
-
 const groupsGridStyle = (isMobile) => ({
   display: 'grid',
   gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))',
@@ -990,11 +962,11 @@ const checkoutButtonStyle = {
   cursor: 'pointer',
 };
 
-const clienteFormStyle = (isMobile) => ({
+const clienteFormStyle = {
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : '2fr 1.4fr 1fr',
+  gridTemplateColumns: '1fr',
   gap: 8,
-});
+};
 
 const clienteHintStyle = {
   margin: 0,

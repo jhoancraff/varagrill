@@ -14,7 +14,12 @@ from decimal import Decimal, InvalidOperation
 from django.db import transaction
 from django.views.decorators.csrf import csrf_exempt
 
-from .api_views import _finalizar_estado_pago_compra, _serialize_abono_compra, _serialize_compra
+from .api_views import (
+    _costo_unitario_por_compra,
+    _finalizar_estado_pago_compra,
+    _serialize_abono_compra,
+    _serialize_compra,
+)
 from .auth_helpers import _auth_response, _is_admin_user
 from .models import (
     VGAbonoCompra,
@@ -213,8 +218,8 @@ def admin_compra_borrador_confirmar_view(request):
 
         total = Decimal('0')
         for detalle in borrador.detalles.select_related('ingrediente'):
-            costo_unitario = (detalle.precio_total / detalle.cantidad).quantize(Decimal('0.000001'))
             ingrediente = detalle.ingrediente
+            costo_unitario = _costo_unitario_por_compra(detalle.precio_total, detalle.cantidad, ingrediente)
             ingrediente.stock_actual = Decimal(str(ingrediente.stock_actual)) + detalle.cantidad
             ingrediente.costo_unitario = costo_unitario
             ingrediente.ultimo_proveedor = proveedor_nombre

@@ -227,6 +227,24 @@ class VGIngrediente(VGAuditoria):
     # gramo" (÷1000), un ingrediente barato (ej. sal, hielo) puede quedar por
     # debajo de $0.01/g — con 4 decimales eso se truncaba a 0.
     costo_unitario = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    contenido_envase = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text=(
+            "Contenido del envase tal como viene etiquetado, en la misma unidad del "
+            "ingrediente (g/ml/unidad) — ej. 1000 para una bolsa de 1kg. Junto con "
+            "'Peso real' se usa para calcular el costo real por gramo/ml/unidad al "
+            "confirmar una compra (ver compras_views.admin_compra_borrador_confirmar_view)."
+        ),
+    )
+    peso_real = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text=(
+            "Cuánto de ese envase queda realmente utilizable después de mermas de "
+            "preparación (pelado, deshuesado, limpieza...). Igual al contenido del envase "
+            "si no hay pérdida. Si falta este dato o 'Contenido del envase', el costo se "
+            "calcula con la cantidad comprada tal cual, sin ajustar por merma."
+        ),
+    )
     ultimo_proveedor = models.CharField(
         max_length=150, blank=True,
         help_text="Nombre del último proveedor que despachó este ingrediente (sin tabla propia: los proveedores cambian seguido).",

@@ -11,6 +11,8 @@ const emptyForm = {
   stock_actual: '',
   stock_minimo: '',
   costo_unitario: '',
+  contenido_envase: '',
+  peso_real: '',
   proveedor: '',
 };
 
@@ -52,6 +54,8 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           stock_actual: item.stock_actual || '0',
           stock_minimo: item.stock_minimo || '0',
           costo_unitario: item.costo_unitario || '0',
+          contenido_envase: item.contenido_envase ?? '',
+          peso_real: item.peso_real ?? '',
           proveedor: item.ultimo_proveedor || '',
         };
         setForm(loadedForm);
@@ -87,6 +91,8 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           stock_actual: form.stock_actual,
           stock_minimo: form.stock_minimo,
           costo_unitario: form.costo_unitario,
+          contenido_envase: form.contenido_envase || null,
+          peso_real: form.peso_real || null,
           proveedor: form.proveedor,
         }),
       });
@@ -127,6 +133,19 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
               <label style={fieldStyle}><span style={labelStyle}>Stock minimo</span><input type="number" step="0.001" value={form.stock_minimo} onChange={(e) => handleChange('stock_minimo', e.target.value)} style={inputStyle} /></label>
               <label style={fieldStyle}><span style={labelStyle}>Costo unitario</span><input type="number" step="0.01" value={form.costo_unitario} onChange={(e) => handleChange('costo_unitario', e.target.value)} style={inputStyle} /></label>
               <label style={fieldStyle}><span style={labelStyle}>Proveedor</span><input value={form.proveedor} onChange={(e) => handleChange('proveedor', e.target.value)} style={inputStyle} /></label>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Contenido del envase</span>
+                <input type="number" step="0.01" value={form.contenido_envase} onChange={(e) => handleChange('contenido_envase', e.target.value)} style={inputStyle} placeholder="Ej: 1000 (una bolsa de 1kg)" />
+              </label>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Peso real (utilizable)</span>
+                <input type="number" step="0.01" value={form.peso_real} onChange={(e) => handleChange('peso_real', e.target.value)} style={inputStyle} placeholder="Igual al de arriba si no hay pérdida" />
+              </label>
+              <p style={helpTextStyle}>
+                Cuánto trae el envase según la etiqueta, y cuánto queda realmente utilizable después de pelar,
+                deshuesar o limpiar — se usan juntos para calcular el costo por gramo/ml/unidad al confirmar una
+                compra. Completá los dos o dejá los dos vacíos.
+              </p>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -151,6 +170,7 @@ const fieldStyle = { display: 'grid', gap: 6 };
 const labelStyle = { color: '#f0b4b4', fontSize: 13, fontWeight: 700 };
 const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const helpTextStyle = { gridColumn: '1 / -1', margin: 0, color: '#c8bbbb', fontSize: 12, lineHeight: 1.5 };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 

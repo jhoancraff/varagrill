@@ -1385,6 +1385,24 @@ def pedido_update_view(request, pedido_id):
     })
 
 
+def _costo_unitario_por_compra(precio_total, cantidad, ingrediente):
+    """
+    Precio de compra ÷ cantidad REALMENTE utilizable. Si el ingrediente tiene
+    contenido_envase y peso_real cargados, la cantidad comprada se ajusta por esa razón
+    (peso_real / contenido_envase) antes de dividir — así una compra de 5000g de algo que
+    rinde 85% por envase cuesta lo mismo por gramo útil que una de 1000g (ver
+    VGIngrediente.contenido_envase/peso_real). Sin esos dos datos, se divide por la
+    cantidad comprada tal cual, igual que antes de que existiera este ajuste.
+    """
+    if ingrediente.contenido_envase and ingrediente.peso_real:
+        cantidad_utilizable = cantidad * (ingrediente.peso_real / ingrediente.contenido_envase)
+    else:
+        cantidad_utilizable = cantidad
+    if not cantidad_utilizable:
+        return Decimal('0')
+    return (precio_total / cantidad_utilizable).quantize(Decimal('0.000001'))
+
+
 @csrf_exempt
 def admin_catalog_view(request):
     if request.method not in ['GET', 'POST']:
@@ -1416,7 +1434,10 @@ def admin_catalog_view(request):
                 })
 
         inventory = list(
-            VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values('id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario', 'stock_minimo')
+            VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values(
+                'id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario',
+                'stock_minimo', 'contenido_envase', 'peso_real',
+            )
         )
         preparation_cost_map = _load_preparation_cost_map()
         recipes = []
@@ -1491,6 +1512,8 @@ def admin_catalog_view(request):
         stock_actual = data.get('stock_actual', 0)
         stock_minimo = data.get('stock_minimo', 0)
         costo_unitario = data.get('costo_unitario', 0)
+        contenido_envase = data.get('contenido_envase')
+        peso_real = data.get('peso_real')
 
         try:
             stock_actual_value = Decimal(str(stock_actual or 0))
@@ -1498,6 +1521,21 @@ def admin_catalog_view(request):
             costo_unitario_value = Decimal(str(costo_unitario or 0))
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
+
+        if contenido_envase in [None, ''] or peso_real in [None, '']:
+            return _auth_response(
+                {'ok': False, 'message': 'El contenido del envase y el peso real son obligatorios para calcular el costo correctamente.'},
+                status=400,
+            )
+        try:
+            contenido_envase_value = Decimal(str(contenido_envase))
+            peso_real_value = Decimal(str(peso_real))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El contenido del envase y el peso real deben ser numéricos.'}, status=400)
+        if contenido_envase_value <= 0 or peso_real_value <= 0:
+            return _auth_response({'ok': False, 'message': 'El contenido del envase y el peso real deben ser mayores a cero.'}, status=400)
+        if peso_real_value > contenido_envase_value:
+            return _auth_response({'ok': False, 'message': 'El peso real no puede ser mayor que el contenido del envase.'}, status=400)
 
         existing = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
         if existing is not None:
@@ -1509,6 +1547,8 @@ def admin_catalog_view(request):
             stock_actual=stock_actual_value,
             stock_minimo=stock_minimo_value,
             costo_unitario=costo_unitario_value,
+            contenido_envase=contenido_envase_value,
+            peso_real=peso_real_value,
             ultimo_proveedor=proveedor,
             creado_por=request.user,
             actualizado_por=request.user,
@@ -1532,6 +1572,8 @@ def admin_catalog_view(request):
         stock_actual = data.get('stock_actual', ingredient.stock_actual)
         stock_minimo = data.get('stock_minimo', ingredient.stock_minimo)
         costo_unitario = data.get('costo_unitario', ingredient.costo_unitario)
+        contenido_envase = data.get('contenido_envase', ingredient.contenido_envase)
+        peso_real = data.get('peso_real', ingredient.peso_real)
 
         try:
             stock_actual_value = Decimal(str(stock_actual or 0))
@@ -1539,6 +1581,27 @@ def admin_catalog_view(request):
             costo_unitario_value = Decimal(str(costo_unitario or 0))
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
+
+        # A diferencia de crear_ingrediente, acá quedan opcionales (pueden venir vacíos si
+        # el ingrediente es viejo y todavía no se completó este dato) — solo se validan si
+        # se cargó alguno de los dos.
+        contenido_envase_value = ingredient.contenido_envase
+        peso_real_value = ingredient.peso_real
+        if contenido_envase not in [None, ''] or peso_real not in [None, '']:
+            if contenido_envase in [None, ''] or peso_real in [None, '']:
+                return _auth_response(
+                    {'ok': False, 'message': 'El contenido del envase y el peso real van juntos: completá los dos o dejá los dos vacíos.'},
+                    status=400,
+                )
+            try:
+                contenido_envase_value = Decimal(str(contenido_envase))
+                peso_real_value = Decimal(str(peso_real))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El contenido del envase y el peso real deben ser numéricos.'}, status=400)
+            if contenido_envase_value <= 0 or peso_real_value <= 0:
+                return _auth_response({'ok': False, 'message': 'El contenido del envase y el peso real deben ser mayores a cero.'}, status=400)
+            if peso_real_value > contenido_envase_value:
+                return _auth_response({'ok': False, 'message': 'El peso real no puede ser mayor que el contenido del envase.'}, status=400)
 
         duplicate = VGIngrediente.objects.filter(nombre__iexact=nombre).exclude(pk=ingredient.pk).exists()
         if duplicate:
@@ -1550,8 +1613,13 @@ def admin_catalog_view(request):
         ingredient.stock_actual = stock_actual_value
         ingredient.stock_minimo = stock_minimo_value
         ingredient.costo_unitario = costo_unitario_value
+        ingredient.contenido_envase = contenido_envase_value
+        ingredient.peso_real = peso_real_value
         ingredient.actualizado_por = request.user
-        ingredient.save(update_fields=['nombre', 'unidad_medida', 'ultimo_proveedor', 'stock_actual', 'stock_minimo', 'costo_unitario', 'actualizado_por', 'fecha_actualizacion'])
+        ingredient.save(update_fields=[
+            'nombre', 'unidad_medida', 'ultimo_proveedor', 'stock_actual', 'stock_minimo', 'costo_unitario',
+            'contenido_envase', 'peso_real', 'actualizado_por', 'fecha_actualizacion',
+        ])
 
         return _auth_response({'ok': True, 'message': 'Ingrediente actualizado correctamente.', 'item': {'id': ingredient.id, 'nombre': ingredient.nombre}})
 
@@ -2088,7 +2156,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 ingrediente.stock_actual = cantidad
                 update_fields = ['stock_actual', 'actualizado_por', 'fecha_actualizacion']
                 if delta > 0 and precio_total is not None:
-                    ingrediente.costo_unitario = (precio_total / delta).quantize(Decimal('0.000001'))
+                    ingrediente.costo_unitario = _costo_unitario_por_compra(precio_total, delta, ingrediente)
                     update_fields.append('costo_unitario')
                 ingrediente.actualizado_por = operator
                 ingrediente.save(update_fields=update_fields)
@@ -2096,7 +2164,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 movimiento_compra = None
                 if delta > 0:
                     lote = _obtener_compra()
-                    costo_linea = (precio_total / delta).quantize(Decimal('0.000001')) if precio_total is not None else Decimal('0')
+                    costo_linea = _costo_unitario_por_compra(precio_total, delta, ingrediente) if precio_total is not None else Decimal('0')
                     VGDetalleCompra.objects.create(
                         compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
                     )

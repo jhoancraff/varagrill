@@ -120,6 +120,20 @@ function NewOrderPage({
     [cartItems, products, promotionsByProductId],
   );
 
+  // Los grupoArmado internos son ids únicos que solo crecen (nunca se reasignan, ver
+  // addToCart) — así el merge de líneas repetidas y la comparación con grupoActual
+  // siguen siendo estables aunque el carrito cambie. El número "Plato N" que ve el
+  // mesero es otra cosa: una posición 1..N recalculada de los grupos que quedan vivos
+  // en este momento, para que quitar el "Plato 2" no dej un hueco (el próximo plato pasa
+  // a ocupar el 2, y si se quita el "Plato 1" el que era "Plato 2" pasa a ser el 1). Se
+  // usa tanto para mostrar el carrito como para lo que se manda al backend (buildPayload),
+  // así lo que se ve mientras se arma el pedido es exactamente lo que se imprime.
+  const grupoDisplayMap = useMemo(() => {
+    const rawIds = Array.from(new Set(cartItems.filter((item) => item.grupoArmado).map((item) => item.grupoArmado)))
+      .sort((a, b) => a - b);
+    return new Map(rawIds.map((rawId, index) => [rawId, index + 1]));
+  }, [cartItems]);
+
   const groupedCartItems = useMemo(() => {
     const groups = new Map();
     const ungrouped = [];
@@ -135,9 +149,9 @@ function NewOrderPage({
     });
     const platos = Array.from(groups.entries())
       .sort((a, b) => a[0] - b[0])
-      .map(([grupoId, items]) => ({ grupoId, items }));
+      .map(([grupoId, items]) => ({ grupoId, displayNumber: grupoDisplayMap.get(grupoId) || grupoId, items }));
     return { platos, ungrouped };
-  }, [cartItems]);
+  }, [cartItems, grupoDisplayMap]);
 
   const selectedMesa = useMemo(
     () => mesas.find((mesa) => String(mesa.id) === String(orderHeader.mesaId)),
@@ -433,7 +447,9 @@ function NewOrderPage({
       product_id: Number(item.productId),
       cantidad: Number(item.quantity || 1),
       peso_gramos: item.pesoGramos ? Number(item.pesoGramos) : null,
-      grupo_armado: item.grupoArmado ? Number(item.grupoArmado) : null,
+      // Se manda el número renumerado (1..N sin huecos), no el id interno crudo — así el
+      // "Plato N" que imprime cocina coincide con el que el mesero vio en el carrito.
+      grupo_armado: item.grupoArmado ? grupoDisplayMap.get(item.grupoArmado) : null,
       notas: item.notes,
       adicionales: (item.adicionales || []).map((addon) => ({
         preparacion_id: Number(addon.preparacionId),
@@ -861,7 +877,9 @@ function NewOrderPage({
                 </button>
               ) : (
                 <>
-                  <span style={armarPlatoLabelStyle}>Armando Plato {grupoActual}</span>
+                  <span style={armarPlatoLabelStyle}>
+                    Armando Plato {grupoDisplayMap.get(grupoActual) || grupoDisplayMap.size + 1}
+                  </span>
                   <button type="button" onClick={handleNuevoPlato} style={nuevoPlatoButtonStyle}>+ Nuevo plato</button>
                   <button type="button" onClick={handleTerminarArmado} style={terminarArmadoButtonStyle}>Terminar</button>
                 </>
@@ -873,13 +891,13 @@ function NewOrderPage({
                 <div style={cartEmptyStyle}>Toca un plato del menú para agregarlo aquí.</div>
               ) : (
                 <>
-                  {groupedCartItems.platos.map(({ grupoId, items }) => {
+                  {groupedCartItems.platos.map(({ grupoId, displayNumber, items }) => {
                     const isActivePlato = armarPlatoActivo && grupoId === grupoActual;
                     return (
                       <div key={`plato-${grupoId}`} style={platoGroupStyle(isActivePlato)}>
                         <div style={platoGroupHeaderStyle}>
                           <span style={platoGroupTitleRowStyle}>
-                            <span>Plato {grupoId}</span>
+                            <span>Plato {displayNumber}</span>
                             <span style={platoStatusBadgeStyle(isActivePlato)}>
                               {isActivePlato ? '● Armando' : '✓ Armado'}
                             </span>

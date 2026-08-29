@@ -189,21 +189,46 @@ def _render_item_individual(item):
     return _render_detalle_principal(item['detalle'])
 
 
+def _es_prioritario(grupo_items):
+    """True si algún ítem del plato pertenece a una categoría con prioridad_comanda (ej.
+    Entrada) — ese plato debe imprimirse primero y con su propio encabezado "PLATO N"
+    aunque sea una sola línea (ver _split_items_para_ticket y _plato_categoria_label)."""
+    return any(item['categoria'] is not None and item['categoria'].prioridad_comanda for item in grupo_items)
+
+
+def _plato_categoria_label(items):
+    """Nombres de categoría (sin repetir, en mayúsculas) de los ítems de un plato, para el
+    encabezado "PLATO N - CATEGORÍA". Normalmente es una sola (ej. "ENTRADA"); si el plato
+    combina categorías distintas (armado manual mezclando productos) se listan todas."""
+    nombres = sorted({item['categoria'].nombre.upper() for item in items if item['categoria'] is not None})
+    return ' / '.join(nombres)
+
+
 def _split_items_para_ticket(items):
     """
     Separa los ítems YA filtrados para un ticket (una impresora/estación) en bloques
     "PLATO N" y en un grupo consolidable.
 
-    Un plato armado (grupo_armado) solo conserva su bloque "PLATO N" en ESTE ticket
-    cuando aporta más de un ítem a este mismo ticket — el caso real es una impresora que
-    combina varias categorías (ej. Carnes + Guarniciones en una sola impresora de cocina),
-    donde vale la pena ver "PLATO 1: Churrasco / Yuca al vapor" junto para no partir la
-    composición del plato. Si en cambio cada categoría tiene su propia impresora (lo más
-    común), esta estación solo recibe UN ítem de cada plato armado (ej. solo la guarnición,
-    porque la carne se fue a la impresora de Parrilla) — ese ítem suelto en este ticket
-    entra al grupo consolidable igual que cualquier guarnición pedida aparte, así 1, 2, 3
-    o 4 platos que eligieron la misma guarnición terminan en una sola línea "Nx nombre" en
-    vez de un "PLATO N" por cada uno.
+    Un plato armado (grupo_armado) conserva su bloque "PLATO N" en ESTE ticket cuando
+    aporta más de un ítem a este mismo ticket — el caso real es una impresora que combina
+    varias categorías (ej. Carnes + Guarniciones en una sola impresora de cocina), donde
+    vale la pena ver "PLATO 1: Churrasco / Yuca al vapor" junto para no partir la
+    composición del plato — o cuando el plato pertenece a una categoría con
+    prioridad_comanda (ver _es_prioritario): esas siempre se muestran en su propio bloque,
+    aunque sea una sola línea, porque lo que importa ahí es que resalten, no agrupar
+    varias líneas. Si en cambio cada categoría tiene su propia impresora (lo más común) y
+    ninguna es prioritaria, esta estación solo recibe UN ítem de ese plato armado (ej. solo
+    la guarnición, porque la carne se fue a la impresora de Parrilla) — ese ítem suelto en
+    este ticket entra al grupo consolidable igual que cualquier guarnición pedida aparte,
+    así 1, 2, 3 o 4 platos que eligieron la misma guarnición terminan en una sola línea
+    "Nx nombre" en vez de un "PLATO N" por cada uno.
+
+    Los platos prioritarios siempre se ordenan antes que el resto (y entre ellos, por
+    grupo_id) para que impriman primero en el ticket sin importar en qué orden el mesero
+    los agregó al pedido — el número que se les asignó (grupo_id) ya viene renumerado con
+    ese mismo criterio desde el carrito (ver grupoDisplayMap en NewOrderPage/EditOrderPage),
+    pero este orden de impresión no depende de eso: se recalcula acá también para que un
+    pedido viejo (de antes de esta prioridad) o una reimpresión salgan igual de bien.
     """
     por_grupo = {}
     consolidables = []
@@ -215,11 +240,11 @@ def _split_items_para_ticket(items):
 
     platos = []
     for grupo_id, grupo_items in por_grupo.items():
-        if len(grupo_items) > 1:
+        if len(grupo_items) > 1 or _es_prioritario(grupo_items):
             platos.append((grupo_id, grupo_items))
         else:
             consolidables.extend(grupo_items)
-    platos.sort(key=lambda par: par[0])
+    platos.sort(key=lambda par: (0 if _es_prioritario(par[1]) else 1, par[0]))
     return platos, consolidables
 
 
@@ -333,8 +358,10 @@ def _build_ticket_bytes(pedido, categorias, items):
         if not primer_bloque:
             out += _text('-' * LINE_WIDTH) + FEED
         primer_bloque = False
+        etiqueta_categoria = _plato_categoria_label(plato_items)
+        texto_plato = f'PLATO {grupo_id} - {etiqueta_categoria}' if etiqueta_categoria else f'PLATO {grupo_id}'
         out += BOLD_ON + DOUBLE_HEIGHT
-        out += _text(f'PLATO {grupo_id}') + FEED
+        out += _text(texto_plato) + FEED
         out += NORMAL_SIZE + BOLD_OFF
         for item in plato_items:
             out += _render_item_individual(item)
@@ -400,7 +427,7 @@ def _build_ticket_secundario_bytes(pedido, categoria, detalles):
 
     for detalle in detalles:
         if detalle.grupo_armado:
-            out += BOLD_ON + _text(f'Plato {detalle.grupo_armado}') + BOLD_OFF + FEED
+            out += BOLD_ON + _text(f'Plato {detalle.grupo_armado} - {categoria.nombre.upper()}') + BOLD_OFF + FEED
         out += _render_linea_reducida(detalle)
 
     out += FEED + FEED + FEED + FEED

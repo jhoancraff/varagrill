@@ -2677,6 +2677,7 @@ def _serialize_categoria_impresora(categoria):
         'ip_impresora_secundaria': categoria.ip_impresora_secundaria,
         'puerto_impresora_secundaria': categoria.puerto_impresora_secundaria,
         'arma_plato_automatico': categoria.arma_plato_automatico,
+        'prioridad_comanda': categoria.prioridad_comanda,
     }
 
 
@@ -2751,11 +2752,12 @@ def admin_categorias_view(request):
     categoria.ip_impresora_secundaria = ip_impresora_secundaria
     categoria.puerto_impresora_secundaria = puerto_impresora_secundaria
     categoria.arma_plato_automatico = bool(data.get('arma_plato_automatico', categoria.arma_plato_automatico))
+    categoria.prioridad_comanda = bool(data.get('prioridad_comanda', categoria.prioridad_comanda))
     categoria.actualizado_por = request.user
     categoria.save(update_fields=[
         'ip_impresora', 'puerto_impresora',
         'ip_impresora_secundaria', 'puerto_impresora_secundaria',
-        'arma_plato_automatico', 'actualizado_por', 'fecha_actualizacion',
+        'arma_plato_automatico', 'prioridad_comanda', 'actualizado_por', 'fecha_actualizacion',
     ])
 
     return _auth_response({

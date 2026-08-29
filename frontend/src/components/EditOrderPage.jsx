@@ -211,15 +211,34 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
   // addToCart) — así el merge de líneas repetidas y la comparación con grupoActual
   // siguen siendo estables aunque el carrito cambie. El número "Plato N" que ve el
   // mesero es otra cosa: una posición 1..N recalculada de los grupos que quedan vivos
-  // en este momento, para que quitar el "Plato 2" no dej un hueco (el próximo plato pasa
+  // en este momento, para que quitar el "Plato 2" no deje un hueco (el próximo plato pasa
   // a ocupar el 2, y si se quita el "Plato 1" el que era "Plato 2" pasa a ser el 1). Se
   // usa tanto para mostrar el carrito como para lo que se manda al backend (buildPayload),
   // así lo que se ve mientras se arma el pedido es exactamente lo que se imprime.
+  //
+  // Los grupos de una categoría con prioridad_comanda (ej. Entrada) siempre quedan primero
+  // en esta numeración —antes que cualquier otro plato—, sin importar en qué orden el
+  // mesero los agregó al carrito: así el "Plato 1" que ve el mesero es el mismo que sale
+  // primero (y resaltado como "PLATO 1 - ENTRADA") en la comanda de cocina.
   const grupoDisplayMap = useMemo(() => {
+    const prioritarioPorGrupo = new Map();
+    cartItems.forEach((item) => {
+      if (!item.grupoArmado || prioritarioPorGrupo.get(item.grupoArmado)) {
+        return;
+      }
+      const product = products.find((entry) => String(entry.id) === String(item.productId));
+      if (product && product.categoria_prioridad_comanda) {
+        prioritarioPorGrupo.set(item.grupoArmado, true);
+      }
+    });
     const rawIds = Array.from(new Set(cartItems.filter((item) => item.grupoArmado).map((item) => item.grupoArmado)))
-      .sort((a, b) => a - b);
+      .sort((a, b) => {
+        const prioridadA = prioritarioPorGrupo.get(a) ? 0 : 1;
+        const prioridadB = prioritarioPorGrupo.get(b) ? 0 : 1;
+        return prioridadA !== prioridadB ? prioridadA - prioridadB : a - b;
+      });
     return new Map(rawIds.map((rawId, index) => [rawId, index + 1]));
-  }, [cartItems]);
+  }, [cartItems, products]);
 
   const groupedCartItems = useMemo(() => {
     const groups = new Map();
@@ -234,9 +253,12 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
         ungrouped.push(item);
       }
     });
+    // Se ordena por displayNumber (no por grupoId crudo) para que un plato prioritario
+    // (ej. Entrada) también aparezca visualmente primero en esta lista, coincidiendo con
+    // el número que se le asignó y con el orden en que va a salir en la comanda.
     const platos = Array.from(groups.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([grupoId, items]) => ({ grupoId, displayNumber: grupoDisplayMap.get(grupoId) || grupoId, items }));
+      .map(([grupoId, items]) => ({ grupoId, displayNumber: grupoDisplayMap.get(grupoId) || grupoId, items }))
+      .sort((a, b) => a.displayNumber - b.displayNumber);
     return { platos, ungrouped };
   }, [cartItems, grupoDisplayMap]);
 

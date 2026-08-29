@@ -137,6 +137,15 @@ class VGCategoriaProducto(VGAuditoria):
             "su propio 'plato' automáticamente, sin pasar por los botones 'Armar plato'/'Terminar'."
         ),
     )
+    prioridad_comanda = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si está activo, los platos de esta categoría siempre salen primero en la comanda —antes que "
+            "cualquier otro plato del pedido— y se resaltan con su propio encabezado 'PLATO N - CATEGORÍA', "
+            "sin importar el orden en que el mesero los agregó ni cuántas líneas tengan. Pensado para "
+            "entradas, que deben salir antes que el plato principal."
+        ),
+    )
 
     class Meta:
         db_table = "vg_categorias_productos"

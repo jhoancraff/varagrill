@@ -41,6 +41,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
             ip_impresora_secundaria: categoria.ip_impresora_secundaria || '',
             puerto_impresora_secundaria: String(categoria.puerto_impresora_secundaria || 9100),
             arma_plato_automatico: Boolean(categoria.arma_plato_automatico),
+            prioridad_comanda: Boolean(categoria.prioridad_comanda),
           };
         });
         setDrafts(initialDrafts);
@@ -136,6 +137,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
     ip_impresora_secundaria: '',
     puerto_impresora_secundaria: '9100',
     arma_plato_automatico: false,
+    prioridad_comanda: false,
   };
 
   const handleSave = async (categoria) => {
@@ -155,6 +157,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
           ip_impresora_secundaria: draft.ip_impresora_secundaria.trim(),
           puerto_impresora_secundaria: draft.puerto_impresora_secundaria,
           arma_plato_automatico: draft.arma_plato_automatico,
+          prioridad_comanda: draft.prioridad_comanda,
         }),
       });
       const data = await response.json();
@@ -199,8 +202,11 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
             impresora secundaria recibe además una copia reducida (solo cantidad/peso y nota, sin guarniciones ni
             adicionales) de la misma categoría — ej: Especialidad de la Casa imprimiendo el corte en cocina y,
             aparte, en la parrilla. "Arma plato automático" hace que, al mesero agregar un producto de esa
-            categoría, el plato se arme y cierre solo, sin usar los botones "Armar plato"/"Terminar". Los cambios
-            aplican al siguiente pedido que se registre.
+            categoría, el plato se arme y cierre solo, sin usar los botones "Armar plato"/"Terminar".
+            "Prioridad en comanda" hace que esos platos salgan siempre primero en la comanda —antes que
+            cualquier otro plato del pedido— con su propio encabezado "PLATO N - CATEGORÍA" bien grande, sin
+            importar el orden en que el mesero los agregó (pensado para entradas). Los cambios aplican al
+            siguiente pedido que se registre.
           </p>
         </div>
       </div>
@@ -222,6 +228,7 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
               <div style={tableHeadStyle}>IP secundaria</div>
               <div style={tableHeadStyle}>Puerto secundario</div>
               <div style={tableHeadStyle}>Arma plato automático</div>
+              <div style={tableHeadStyle}>Prioridad en comanda</div>
               <div style={tableHeadStyle}>Acciones</div>
 
               {categorias.map((categoria) => {
@@ -275,6 +282,16 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
                           type="checkbox"
                           checked={draft.arma_plato_automatico}
                           onChange={(event) => updateDraft(categoria.id, 'arma_plato_automatico', event.target.checked)}
+                        />
+                        <span>Sí</span>
+                      </label>
+                    </div>
+                    <div key={`prioridad-${categoria.id}`} style={{ ...tableCellStyle, alignItems: 'center' }}>
+                      <label style={autoPlatoCheckboxRowStyle}>
+                        <input
+                          type="checkbox"
+                          checked={draft.prioridad_comanda}
+                          onChange={(event) => updateDraft(categoria.id, 'prioridad_comanda', event.target.checked)}
                         />
                         <span>Sí</span>
                       </label>
@@ -439,12 +456,12 @@ const tableWrapStyle = {
 const tableStyle = {
   display: 'grid',
   gridTemplateColumns:
-    'minmax(150px, 0.8fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(130px, 0.6fr) minmax(260px, 1.2fr)',
+    'minmax(150px, 0.8fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(260px, 1.2fr)',
   alignItems: 'stretch',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   borderRadius: 18,
   overflow: 'hidden',
-  minWidth: 1320,
+  minWidth: 1450,
 };
 
 const tableHeadStyle = {

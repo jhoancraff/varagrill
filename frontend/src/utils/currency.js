@@ -5,6 +5,23 @@ const bsFormatter = new Intl.NumberFormat('es-VE', {
   maximumFractionDigits: 2,
 });
 
+/**
+ * Formatea un monto que YA está en bolívares (p. ej. la suma de varios
+ * registros, cada uno convertido con su propia tasa histórica) — a
+ * diferencia de formatBs, que convierte un monto en USD con una sola tasa.
+ */
+export function formatBsRaw(bsAmount) {
+  const value = Number(bsAmount);
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+  // Intl a veces pega el signo negativo justo al símbolo de moneda sin espacio
+  // (ej. "Bs.S-547.491,63"); formateamos siempre el valor absoluto y anteponemos
+  // el signo nosotros para que quede consistente ("-Bs.S 547.491,63").
+  const sign = value < 0 ? '-' : '';
+  return `${sign}${bsFormatter.format(Math.abs(value))}`;
+}
+
 export function formatBs(amountUsd, tasa) {
   const usdAmount = Number(amountUsd);
   const exchangeRate = Number(tasa);
@@ -13,12 +30,7 @@ export function formatBs(amountUsd, tasa) {
     return '';
   }
 
-  const bsValue = usdAmount * exchangeRate;
-  // Intl a veces pega el signo negativo justo al símbolo de moneda sin espacio
-  // (ej. "Bs.S-547.491,63"); formateamos siempre el valor absoluto y anteponemos
-  // el signo nosotros para que quede consistente ("-Bs.S 547.491,63").
-  const sign = bsValue < 0 ? '-' : '';
-  return `${sign}${bsFormatter.format(Math.abs(bsValue))}`;
+  return formatBsRaw(usdAmount * exchangeRate);
 }
 
 /**

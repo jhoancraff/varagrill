@@ -321,6 +321,7 @@ def _serialize_pago(pago):
         'metodo_pago_id': pago.metodo_pago_id,
         'referencia': pago.referencia,
         'fecha_pago': pago.fecha_pago.isoformat(),
+        'tasa_cambio_referencia': str(pago.tasa_cambio_referencia) if pago.tasa_cambio_referencia is not None else None,
         'creado_por': (pago.creado_por.get_full_name() or pago.creado_por.username) if pago.creado_por else '',
     }
 
@@ -746,12 +747,14 @@ def factura_abono_view(request, factura_id):
         referencia = str(data.get('referencia', '') or '').strip() \
             or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{factura.id}'
 
+        tasa_pago_actual = obtener_tasa_actual()
         pago = VGPago.objects.create(
             factura=factura,
             monto=monto,
             metodo_pago=metodo_pago,
             referencia=referencia,
             estado='completado',
+            tasa_cambio_referencia=tasa_pago_actual.tasa if tasa_pago_actual else None,
             creado_por=request.user,
         )
 

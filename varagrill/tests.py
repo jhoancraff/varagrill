@@ -2,16 +2,21 @@ import json
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 from unittest.mock import patch
 
 from varagrill.models import (
+    VGCategoriaGasto,
     VGCategoriaProducto,
+    VGCliente,
     VGCompra,
     VGCompraBorrador,
     VGDetalleCompra,
     VGDetalleCompraBorrador,
     VGDetallePedido,
     VGDetallePedidoAdicional,
+    VGFactura,
+    VGGasto,
     VGIngrediente,
     VGMetodoPago,
     VGMovimientoInventario,
@@ -21,6 +26,7 @@ from varagrill.models import (
     VGRecetaPreparacion,
     VGRecetaProducto,
     VGRol,
+    VGTasaCambio,
     VGUsuario,
 )
 from varagrill.api_views import _importar_ingredientes, _preview_ingrediente_row
@@ -1123,3 +1129,199 @@ class UnidadesMedidaTests(TestCase):
             'receta_producto': 0,
             'receta_preparacion': 0,
         })
+
+
+def _set_tasa_actual(tasa):
+    """
+    Simula "la tasa BCV actual del sistema" para un test: obtener_tasa_actual()
+    devuelve la VGTasaCambio con el fecha_actualizacion (auto_now) mas reciente,
+    y no la refresca contra la fuente externa mientras no este vencida (6h) — así
+    que crear/actualizar directamente la fila de hoy es suficiente para que la
+    vea como "la tasa actual" sin tener que mockear la llamada de red.
+    """
+    fila, _created = VGTasaCambio.objects.update_or_create(
+        fecha=timezone.localdate(), defaults={'tasa': Decimal(str(tasa)), 'fuente': 'BCV'},
+    )
+    return fila
+
+
+class TasaCambioAutoAssignTests(TestCase):
+    """
+    Persistencia automática de tasa: crear un VGGasto, VGCompra o VGPago sin
+    mandar tasa_cambio_referencia debe dejarlo con la tasa BCV actual del
+    sistema en ese momento (ver tasa_cambio_para_registro/obtener_tasa_actual),
+    nunca en NULL.
+    """
+
+    def setUp(self):
+        self.admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='tasa_admin', password='claveAdmin123', cedula='90000001',
+            email='tasa_admin@varagrill.test', id_role=self.admin_role,
+        )
+        self.client.force_login(self.admin)
+        self.metodo_pago = VGMetodoPago.objects.create(nombre='Efectivo test', moneda='USD', es_efectivo=True)
+        self.categoria_gasto = VGCategoriaGasto.objects.create(nombre='Servicios test')
+        self.tasa_actual = _set_tasa_actual('780.5000')
+
+    def test_gasto_creation_auto_assigns_current_rate(self):
+        response = self.client.post(
+            '/api/admin/gastos/',
+            data=json.dumps({
+                'categoria_id': self.categoria_gasto.id,
+                'descripcion': 'Factura de luz',
+                'monto': '50.00',
+                'fecha_gasto': timezone.localdate().isoformat(),
+                # tasa_cambio_referencia deliberadamente omitida.
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        gasto = VGGasto.objects.get(descripcion='Factura de luz')
+        self.assertEqual(gasto.tasa_cambio_referencia, self.tasa_actual.tasa)
+        self.assertEqual(response.json()['gasto']['tasa_cambio_referencia'], str(self.tasa_actual.tasa))
+
+    def test_compra_creation_auto_assigns_current_rate(self):
+        # El alta de un ingrediente NUEVO por /api/admin/catalogo/ crea de una vez
+        # un VGCompra (ver AdminCatalogApiTests) — no hace falta un flujo aparte.
+        response = self.client.post(
+            '/api/admin/catalogo/',
+            data=json.dumps({
+                'tipo': 'inventario',
+                'nombre': 'Cebolla test',
+                'ingrediente_id': '',
+                'cantidad': '10',
+                'unidad': 'kg',
+                'proveedor': 'Proveedor tasa test',
+                'stock_minimo': '1.0',
+                'precio_total': '20.00',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        compra = VGCompra.objects.get(proveedor_nombre='Proveedor tasa test')
+        self.assertEqual(compra.tasa_cambio_referencia, self.tasa_actual.tasa)
+
+    def test_pago_creation_auto_assigns_current_rate(self):
+        cliente = VGCliente.objects.create(nombre='Cliente tasa test')
+        factura = VGFactura.objects.create(
+            numero_factura=900001, numero_control=900001, cliente=cliente,
+            total=Decimal('100.00'), saldo_pendiente=Decimal('100.00'),
+        )
+
+        response = self.client.post(
+            f'/api/facturas/{factura.id}/abonos/',
+            data=json.dumps({'monto': '100.00', 'metodo_pago_id': self.metodo_pago.id}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        pago = factura.pagos.get()
+        self.assertEqual(pago.tasa_cambio_referencia, self.tasa_actual.tasa)
+
+
+class TasaCambioInmutabilidadFinancieraTests(TestCase):
+    """
+    Un registro ya creado no debe cambiar de valor en bolívares cuando la tasa
+    BCV vigente cambia después — tasa_cambio_referencia (y total_bs, derivado
+    de ella) quedan congelados a la tasa que estaba activa al momento de
+    crearlo.
+    """
+
+    def setUp(self):
+        self.admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='inmutable_admin', password='claveAdmin123', cedula='90000002',
+            email='inmutable_admin@varagrill.test', id_role=self.admin_role,
+        )
+        self.client.force_login(self.admin)
+        self.categoria_gasto = VGCategoriaGasto.objects.create(nombre='Alquiler test')
+
+    def test_gasto_conserva_su_tasa_original_tras_cambiar_la_tasa_actual(self):
+        tasa_x = _set_tasa_actual('750.0000')
+
+        response = self.client.post(
+            '/api/admin/gastos/',
+            data=json.dumps({
+                'categoria_id': self.categoria_gasto.id,
+                'descripcion': 'Alquiler de septiembre',
+                'monto': '200.00',
+                'fecha_gasto': timezone.localdate().isoformat(),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        gasto_id = response.json()['gasto']['id']
+
+        # La tasa "actual" del sistema sube después de crear el gasto.
+        tasa_y = _set_tasa_actual('900.0000')
+        self.assertNotEqual(tasa_x.tasa, tasa_y.tasa)
+
+        detail_response = self.client.get(f'/api/admin/gastos/{gasto_id}/')
+        self.assertEqual(detail_response.status_code, 200)
+        gasto_payload = detail_response.json()['gasto']
+
+        esperado_bs = (Decimal('200.00') * tasa_x.tasa).quantize(Decimal('0.01'))
+        self.assertEqual(gasto_payload['tasa_cambio_referencia'], str(tasa_x.tasa))
+        self.assertEqual(gasto_payload['total_bs'], str(esperado_bs))
+
+        # Y explícitamente NO el valor que daría recalcular con la tasa nueva.
+        bs_con_tasa_nueva = (Decimal('200.00') * tasa_y.tasa).quantize(Decimal('0.01'))
+        self.assertNotEqual(gasto_payload['total_bs'], str(bs_con_tasa_nueva))
+
+
+class EstadoResultadosHistoricoAcumuladoTests(TestCase):
+    """
+    El total en bolívares de un reporte que abarca varios registros con tasas
+    congeladas distintas debe ser la suma de cada uno convertido con SU PROPIA
+    tasa (registro por registro) — no la suma en USD del período multiplicada
+    por la tasa vigente al momento de pedir el reporte (ver
+    reporte_estado_resultados_view / _calcular_margen_periodo en
+    api_views.py/contabilidad_views.py).
+    """
+
+    def setUp(self):
+        self.admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='reporte_admin', password='claveAdmin123', cedula='90000003',
+            email='reporte_admin@varagrill.test', id_role=self.admin_role,
+        )
+        self.client.force_login(self.admin)
+        self.categoria_gasto = VGCategoriaGasto.objects.create(nombre='Nomina test')
+
+    def test_gastos_total_bs_es_la_suma_registro_por_registro_no_usd_por_tasa_actual(self):
+        hoy = timezone.localdate()
+
+        tasa_x = _set_tasa_actual('700.0000')
+        gasto_1 = VGGasto.objects.create(
+            categoria=self.categoria_gasto, descripcion='Nomina quincena 1',
+            monto=Decimal('300.00'), saldo_pendiente=Decimal('300.00'),
+            fecha_gasto=hoy, tasa_cambio_referencia=tasa_x.tasa,
+        )
+
+        tasa_y = _set_tasa_actual('950.0000')
+        gasto_2 = VGGasto.objects.create(
+            categoria=self.categoria_gasto, descripcion='Nomina quincena 2',
+            monto=Decimal('300.00'), saldo_pendiente=Decimal('300.00'),
+            fecha_gasto=hoy, tasa_cambio_referencia=tasa_y.tasa,
+        )
+
+        response = self.client.get(
+            f'/api/admin/reportes/estado-resultados/?desde={hoy.isoformat()}&hasta={hoy.isoformat()}',
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        esperado_bs = (
+            gasto_1.monto * tasa_x.tasa + gasto_2.monto * tasa_y.tasa
+        ).quantize(Decimal('0.01'))
+        self.assertEqual(payload['gastos_total_bs'], str(esperado_bs))
+
+        # El bug que se corrigió: sumar el USD del período y multiplicarlo por
+        # la tasa vigente AL CONSULTAR dá un número distinto — probamos que el
+        # endpoint ya NO devuelve ese valor.
+        usd_total = gasto_1.monto + gasto_2.monto
+        bs_con_tasa_actual_al_consultar = (usd_total * tasa_y.tasa).quantize(Decimal('0.01'))
+        self.assertNotEqual(payload['gastos_total_bs'], str(bs_con_tasa_actual_al_consultar))

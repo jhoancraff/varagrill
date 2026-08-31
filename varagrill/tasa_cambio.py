@@ -46,3 +46,19 @@ def obtener_tasa_actual(forzar_actualizacion=False):
         fecha=hoy, defaults={"tasa": tasa, "fuente": "BCV"},
     )
     return ultima
+
+
+def tasa_cambio_para_registro(valor_explicito=None):
+    """
+    Resuelve la tasa a congelar (tasa_cambio_referencia) en un nuevo registro
+    contable: respeta un valor explícito del cliente si viene y es válido,
+    o cae a la tasa BCV actual (ver obtener_tasa_actual). Devuelve None si
+    no hay ninguna tasa disponible en ningún lado.
+    """
+    if valor_explicito not in (None, ''):
+        try:
+            return Decimal(str(valor_explicito))
+        except InvalidOperation:
+            pass
+    tasa_actual = obtener_tasa_actual()
+    return tasa_actual.tasa if tasa_actual else None

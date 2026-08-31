@@ -27,7 +27,7 @@ Uso:
 """
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from varagrill.models import (
@@ -132,19 +132,44 @@ class Command(BaseCommand):
                 "'Tártara de la Casa') y el producto 'Tequeños la vara' quedaron creados/actualizados."
             ))
 
+    def _buscar_unico(self, queryset, nombre, tipo_label, detalle_extra=None):
+        """
+        Reemplaza a get_or_create(nombre=...) con un chequeo explícito de duplicados: si
+        ya existe MÁS DE UNO con ese nombre exacto (posible en una base de datos real que
+        no tuvo la disciplina de este script desde el principio -- fue justo lo que pasó
+        en producción con 'Tequeños la vara'), corta la ejecución con un mensaje claro en
+        vez de dejar que Django reviente con MultipleObjectsReturned a mitad de la carga.
+        Devuelve (instancia_o_None, cantidad_encontrada).
+        """
+        encontrados = list(queryset.filter(nombre=nombre))
+        if len(encontrados) > 1:
+            self.stdout.write(self.style.ERROR(f"\nHay {len(encontrados)} {tipo_label} llamados exactamente '{nombre}':"))
+            for obj in encontrados:
+                extra = f' {detalle_extra(obj)}' if detalle_extra else ''
+                self.stdout.write(f'  id={obj.id}{extra}')
+            raise CommandError(
+                f"No se puede seguir: hay {len(encontrados)} {tipo_label} duplicados llamados '{nombre}'. "
+                "Borrá o renombrá el que sobra a mano (revisando primero si alguno ya lo usa otra receta/pedido) "
+                "y volvé a correr el comando."
+            )
+        return (encontrados[0], 1) if encontrados else (None, 0)
+
     def _crear_ingredientes(self):
         self.stdout.write('Ingredientes:')
         for nombre, unidad, contenido_envase, peso_real, precio_compra in INGREDIENTES:
             costo_unitario = (precio_compra / peso_real).quantize(D('0.000001'))
-            ingrediente, creado = VGIngrediente.objects.get_or_create(
-                nombre=nombre,
-                defaults=dict(
-                    unidad_medida=unidad, stock_actual=0, stock_minimo=0,
+            ingrediente, encontrado = self._buscar_unico(
+                VGIngrediente.objects, nombre, 'ingredientes',
+                detalle_extra=lambda i: f"costo_unitario={i.costo_unitario} contenido_envase={i.contenido_envase} peso_real={i.peso_real}",
+            )
+            if not encontrado:
+                ingrediente = VGIngrediente.objects.create(
+                    nombre=nombre, unidad_medida=unidad, stock_actual=0, stock_minimo=0,
                     contenido_envase=contenido_envase, peso_real=peso_real,
                     precio_compra=precio_compra, costo_unitario=costo_unitario,
-                ),
-            )
-            if not creado:
+                )
+                self.stdout.write(f'  creado:      {nombre:35s} costo_unitario = {costo_unitario}')
+            else:
                 costo_anterior = ingrediente.costo_unitario
                 ingrediente.contenido_envase = contenido_envase
                 ingrediente.peso_real = peso_real
@@ -152,55 +177,69 @@ class Command(BaseCommand):
                 ingrediente.costo_unitario = costo_unitario
                 ingrediente.save(update_fields=['contenido_envase', 'peso_real', 'precio_compra', 'costo_unitario'])
                 self.stdout.write(f'  actualizado: {nombre:35s} costo_unitario {costo_anterior} -> {costo_unitario}')
-            else:
-                self.stdout.write(f'  creado:      {nombre:35s} costo_unitario = {costo_unitario}')
 
     def _crear_subreceta(self, nombre, rendimiento_cantidad, rendimiento_unidad, componentes, sub_preparaciones=None):
-        preparacion, creada = VGPreparacion.objects.get_or_create(
-            nombre=nombre,
-            defaults=dict(rendimiento_cantidad=rendimiento_cantidad, rendimiento_unidad=rendimiento_unidad, es_adicional=False),
+        preparacion, encontrada = self._buscar_unico(
+            VGPreparacion.objects, nombre, 'subrecetas (VGPreparacion)',
+            detalle_extra=lambda p: f"rinde={p.rendimiento_cantidad} {p.rendimiento_unidad} es_adicional={p.es_adicional}",
         )
-        if not creada:
+        if not encontrada:
+            preparacion = VGPreparacion.objects.create(
+                nombre=nombre, rendimiento_cantidad=rendimiento_cantidad,
+                rendimiento_unidad=rendimiento_unidad, es_adicional=False,
+            )
+        else:
             preparacion.rendimiento_cantidad = rendimiento_cantidad
             preparacion.rendimiento_unidad = rendimiento_unidad
             preparacion.save(update_fields=['rendimiento_cantidad', 'rendimiento_unidad'])
 
         VGRecetaPreparacion.objects.filter(preparacion=preparacion).delete()
         for nombre_ingrediente, cantidad in componentes:
-            VGRecetaPreparacion.objects.create(
-                preparacion=preparacion,
-                ingrediente=VGIngrediente.objects.get(nombre=nombre_ingrediente),
-                cantidad_requerida=D(cantidad),
-            )
+            ingrediente, encontrado = self._buscar_unico(VGIngrediente.objects, nombre_ingrediente, 'ingredientes')
+            if not encontrado:
+                raise CommandError(
+                    f"'{nombre}' necesita el ingrediente '{nombre_ingrediente}', pero no se encontró -- "
+                    "revisá que la sección de ingredientes se haya corrido antes (no debería pasar si corrés "
+                    "el comando completo, sin recortar)."
+                )
+            VGRecetaPreparacion.objects.create(preparacion=preparacion, ingrediente=ingrediente, cantidad_requerida=D(cantidad))
         for sub_preparacion, cantidad in (sub_preparaciones or []):
             VGRecetaPreparacion.objects.create(
                 preparacion=preparacion, sub_preparacion=sub_preparacion, cantidad_requerida=D(cantidad),
             )
 
         total_componentes = len(componentes) + len(sub_preparaciones or [])
-        self.stdout.write(f"{'creada' if creada else 'actualizada'}: {nombre} ({total_componentes} componentes, rinde {rendimiento_cantidad} {rendimiento_unidad})")
+        self.stdout.write(f"{'creada' if not encontrada else 'actualizada'}: {nombre} ({total_componentes} componentes, rinde {rendimiento_cantidad} {rendimiento_unidad})")
         return preparacion
 
     def _crear_producto(self, nombre_categoria, papelon_especiado, tartara):
-        categoria, _ = VGCategoriaProducto.objects.get_or_create(nombre=nombre_categoria)
-        producto, creado = VGProducto.objects.get_or_create(
-            nombre='Tequeños la vara',
-            defaults=dict(categoria=categoria, precio_venta=D('0.00'), disponible=False),
+        categoria, _ = self._buscar_unico(VGCategoriaProducto.objects, nombre_categoria, 'categorías')
+        if categoria is None:
+            categoria = VGCategoriaProducto.objects.create(nombre=nombre_categoria)
+
+        tequeno_ingrediente, encontrado = self._buscar_unico(VGIngrediente.objects, 'Tequeños con queso y tocineta', 'ingredientes')
+        if not encontrado:
+            raise CommandError("No se encontró el ingrediente 'Tequeños con queso y tocineta' -- no debería pasar si corrés el comando completo.")
+
+        producto, encontrado = self._buscar_unico(
+            VGProducto.objects, 'Tequeños la vara', 'productos',
+            detalle_extra=lambda p: f"categoria={p.categoria} precio_venta={p.precio_venta} disponible={p.disponible} creado={p.fecha_creacion}",
         )
+        if not encontrado:
+            producto = VGProducto.objects.create(
+                nombre='Tequeños la vara', categoria=categoria, precio_venta=D('0.00'), disponible=False,
+            )
+
         VGRecetaProducto.objects.filter(producto=producto).delete()
-        VGRecetaProducto.objects.create(
-            producto=producto,
-            ingrediente=VGIngrediente.objects.get(nombre='Tequeños con queso y tocineta'),
-            cantidad_requerida=D('6'),
-        )
+        VGRecetaProducto.objects.create(producto=producto, ingrediente=tequeno_ingrediente, cantidad_requerida=D('6'))
         VGRecetaProducto.objects.create(producto=producto, preparacion=papelon_especiado, cantidad_requerida=D('30'))
         VGRecetaProducto.objects.create(producto=producto, preparacion=tartara, cantidad_requerida=D('30'))
 
         self.stdout.write(
-            f"{'creado' if creado else 'actualizado'}: producto 'Tequeños la vara' (id={producto.id}, "
+            f"{'creado' if not encontrado else 'actualizado'}: producto 'Tequeños la vara' (id={producto.id}, "
             f"categoría='{categoria.nombre}', disponible={producto.disponible}, precio_venta={producto.precio_venta})"
         )
-        if creado:
+        if not encontrado:
             self.stdout.write(self.style.WARNING(
                 "  -> Se creó con disponible=False y precio_venta=0.00 a propósito (no había precio de venta "
                 "en el Excel). Ponle el precio real y márcalo disponible desde el panel cuando quieras venderlo."

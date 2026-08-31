@@ -1,4 +1,12 @@
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
+
 function ConfirmModal({ open, title, message, confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', onConfirm, onCancel, busy }) {
+  // Componente compartido por ~30 pantallas — wireando el Atrás móvil UNA vez
+  // acá alcanza a todas, sin tocar cada pantalla que lo usa. Mientras esté
+  // "busy" (guardando) no se cierra con Atrás, igual que el backdrop no cierra
+  // con click en ese estado.
+  useMobileBackHandler(open && !busy, onCancel);
+
   if (!open) {
     return null;
   }

@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .auth_helpers import _auth_response, _is_admin_user
 from .models import VGAbonoGasto, VGCategoriaGasto, VGGasto, VGMetodoPago
+from .tasa_cambio import tasa_cambio_para_registro
 
 
 def _serialize_categoria_gasto(categoria):
@@ -29,6 +30,7 @@ def _serialize_abono_gasto(abono):
         'metodo_pago_id': abono.metodo_pago_id,
         'referencia': abono.referencia,
         'fecha_pago': abono.fecha_pago.isoformat(),
+        'tasa_cambio_referencia': str(abono.tasa_cambio_referencia) if abono.tasa_cambio_referencia is not None else None,
         'creado_por': (abono.creado_por.get_full_name() or abono.creado_por.username) if abono.creado_por else '',
     }
 
@@ -47,6 +49,8 @@ def _serialize_gasto(gasto, incluir_detalle=False):
         'fecha_gasto': gasto.fecha_gasto.isoformat(),
         'fecha_creacion': gasto.fecha_creacion.isoformat(),
         'notas': gasto.notas,
+        'tasa_cambio_referencia': str(gasto.tasa_cambio_referencia) if gasto.tasa_cambio_referencia is not None else None,
+        'total_bs': str((gasto.monto * gasto.tasa_cambio_referencia).quantize(Decimal('0.01'))) if gasto.tasa_cambio_referencia is not None else None,
         'creado_por': (gasto.creado_por.get_full_name() or gasto.creado_por.username) if gasto.creado_por else '',
     }
     if incluir_detalle:
@@ -66,6 +70,7 @@ def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator):
     """
     abono = VGAbonoGasto.objects.create(
         gasto=gasto, monto=monto, metodo_pago=metodo_pago, referencia=referencia, creado_por=operator,
+        tasa_cambio_referencia=tasa_cambio_para_registro(),
     )
     gasto.saldo_pendiente = gasto.saldo_pendiente - monto
     gasto.estado_pago = 'pagado' if gasto.saldo_pendiente <= 0 else 'abonada_parcial'
@@ -216,6 +221,7 @@ def admin_gastos_view(request):
             estado_pago='pendiente',
             fecha_gasto=fecha_gasto,
             notas=str(data.get('notas', '') or '').strip(),
+            tasa_cambio_referencia=tasa_cambio_para_registro(data.get('tasa_cambio_referencia')),
             creado_por=request.user,
             actualizado_por=request.user,
         )

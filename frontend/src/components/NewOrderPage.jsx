@@ -3,6 +3,7 @@ import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
 import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import useToast from '../hooks/useToast';
 
@@ -1043,6 +1044,10 @@ function NewOrderPage({
 }
 
 function ProductDetailModal({ product, promotion, tasaCambio, onClose, onAdd }) {
+  // Solo se monta mientras hay un producto seleccionado (ver `detailProduct ? <ProductDetailModal.../> : null`
+  // más arriba) — su sola existencia en el árbol YA significa "abierto".
+  useMobileBackHandler(true, onClose);
+
   return (
     <div style={modalBackdropStyle} onClick={onClose}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
@@ -1106,6 +1111,9 @@ function ProductDetailModal({ product, promotion, tasaCambio, onClose, onAdd }) 
 }
 
 function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
+  // Mismo criterio que ProductDetailModal: solo se monta mientras hay un
+  // producto seleccionado por peso, así que montado == abierto.
+  useMobileBackHandler(true, onClose);
   const [gramos, setGramos] = useState(250);
   const precioPorKg = Number(product.precio_venta) || 0;
   const precioEstimado = precioPorKg * (gramos / 1000);

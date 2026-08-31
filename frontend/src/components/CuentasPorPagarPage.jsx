@@ -116,7 +116,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         return;
       }
       setFeedbackType('success');
-      setFeedback(`Abono de ${formatUsdBs(data.abono.monto, tasaCambio)} registrado. Saldo pendiente: ${formatUsdBs(data.compra.saldo_pendiente, tasaCambio)}.`);
+      setFeedback(`Abono de ${formatUsdBs(data.abono.monto, data.abono.tasa_cambio_referencia ?? tasaCambio)} registrado. Saldo pendiente: ${formatUsdBs(data.compra.saldo_pendiente, data.compra.tasa_cambio_referencia ?? tasaCambio)}.`);
       setCompraDetalle(data.compra);
       setUltimoAbonoId(data.abono.id);
       setMontoAbono('');
@@ -183,7 +183,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                   {compra.proveedor_nombre}
                   {compra.numero_factura_proveedor ? ` · Factura ${compra.numero_factura_proveedor}` : ''}
                 </div>
-                <div style={{ color: '#ffcf7d', fontWeight: 700 }}>Saldo: {formatUsdBs(compra.saldo_pendiente, tasaCambio)}</div>
+                <div style={{ color: '#ffcf7d', fontWeight: 700 }}>Saldo: {formatUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio)}</div>
               </button>
             ))}
           </div>
@@ -207,14 +207,14 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                   {compraDetalle.detalles.map((detalle) => (
                     <div key={detalle.id} style={lineaRowStyle}>
                       <span>{detalle.cantidad} {detalle.unidad_medida} — {detalle.ingrediente_nombre}</span>
-                      <span>{formatUsdBs(detalle.subtotal, tasaCambio)}</span>
+                      <span>{formatUsdBs(detalle.subtotal, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
                     </div>
                   ))}
                 </div>
 
                 <div style={detailTotalsStyle}>
-                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.total, tasaCambio)}</span>
-                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatUsdBs(compraDetalle.saldo_pendiente, tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
                 </div>
 
                 {compraDetalle.abonos.length > 0 ? (
@@ -224,7 +224,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                       <div key={abono.id} style={lineaRowStyle}>
                         <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {formatUsdBs(abono.monto, tasaCambio)}
+                          {formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio)}
                           {onVerComprobante ? (
                             <button type="button" onClick={() => onVerComprobante('compra', compraDetalle.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">
                               🖨

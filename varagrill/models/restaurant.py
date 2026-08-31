@@ -499,6 +499,7 @@ class VGCompra(VGAuditoria):
         help_text="Deuda viva con el proveedor por este lote (cuenta por pagar). Baja con cada VGAbonoCompra.",
     )
     estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     class Meta:
         db_table = "vg_compras"
@@ -585,6 +586,7 @@ class VGAbonoCompra(models.Model):
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     class Meta:
         db_table = "vg_abonos_compra"
@@ -891,6 +893,7 @@ class VGPago(models.Model):
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     class Meta:
         db_table = "vg_pagos"

@@ -411,6 +411,7 @@ class VGGasto(VGAuditoria):
         help_text="Fecha real del gasto/factura (puede ser distinta a cuando se registro en el sistema).",
     )
     notas = models.TextField(blank=True)
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     class Meta:
         db_table = "vg_gastos"
@@ -436,6 +437,7 @@ class VGAbonoGasto(models.Model):
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     class Meta:
         db_table = "vg_abonos_gasto"

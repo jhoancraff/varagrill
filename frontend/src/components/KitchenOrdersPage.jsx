@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
 
 const ACTIVE_FILTER = 'activos';
 const ALL_FILTER = 'todos';
@@ -427,6 +428,8 @@ function KitchenOrdersPage({
 }
 
 function OrderDetailModal({ order, onClose, onAddRoundToTable, onReprintComanda, isPrinting, tasaCambio }) {
+  // Solo se monta mientras hay un pedido seleccionado, así que montado == abierto.
+  useMobileBackHandler(true, onClose);
   const { platos, sueltos } = groupItemsByPlato(order.items);
   const showAddRound = Boolean(order.mesa_id && onAddRoundToTable);
   const showReprint = order.estado === 'en_preparacion' || order.estado === 'listo';

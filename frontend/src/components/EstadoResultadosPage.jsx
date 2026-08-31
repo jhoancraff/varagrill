@@ -134,21 +134,21 @@ function EstadoResultadosPage({ isMobile, onBack }) {
               <span style={lineLabelStyle}>Ventas totales</span>
               <span style={lineValueStyle}>
                 ${formatMonto(data.ventas_total)}
-                <BsAmount amountUsd={data.ventas_total} tasa={tasaCambio} />
+                <BsAmount amountUsd={data.ventas_total} bs={data.ventas_total_bs} tasa={tasaCambio} />
               </span>
             </div>
             <div style={lineRowStyle}>
               <span style={lineLabelStyle}>(−) Costo de ingredientes</span>
               <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
                 −${formatMonto(data.costo_ingredientes_total)}
-                <BsAmount amountUsd={data.costo_ingredientes_total} tasa={tasaCambio} />
+                <BsAmount amountUsd={data.costo_ingredientes_total} bs={data.costo_ingredientes_total_bs ?? undefined} tasa={tasaCambio} />
               </span>
             </div>
             <div style={subtotalRowStyle}>
               <span style={lineLabelStyle}>= Utilidad bruta</span>
               <span style={{ ...lineValueStyle, fontWeight: 800 }}>
                 ${formatMonto(data.utilidad_bruta)}
-                <BsAmount amountUsd={data.utilidad_bruta} tasa={tasaCambio} />
+                <BsAmount amountUsd={data.utilidad_bruta} bs={data.utilidad_bruta_bs ?? undefined} tasa={tasaCambio} />
               </span>
             </div>
 
@@ -156,7 +156,7 @@ function EstadoResultadosPage({ isMobile, onBack }) {
               <span style={lineLabelStyle}>(−) Gastos operativos</span>
               <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
                 −${formatMonto(data.gastos_total)}
-                <BsAmount amountUsd={data.gastos_total} tasa={tasaCambio} />
+                <BsAmount amountUsd={data.gastos_total} bs={data.gastos_total_bs} tasa={tasaCambio} />
               </span>
             </div>
 
@@ -174,7 +174,7 @@ function EstadoResultadosPage({ isMobile, onBack }) {
               <span style={{ ...lineLabelStyle, fontSize: 16, fontWeight: 800 }}>= Utilidad neta</span>
               <span style={{ fontSize: 22, fontWeight: 800, color: utilidadNetaPositiva ? '#8fffb0' : '#ff9d9d' }}>
                 ${formatMonto(data.utilidad_neta)} ({formatMonto(data.utilidad_neta_pct)}%)
-                <BsAmount amountUsd={data.utilidad_neta} tasa={tasaCambio} style={{ opacity: 0.85 }} />
+                <BsAmount amountUsd={data.utilidad_neta} bs={data.utilidad_neta_bs ?? undefined} tasa={tasaCambio} style={{ opacity: 0.85 }} />
               </span>
             </div>
           </div>

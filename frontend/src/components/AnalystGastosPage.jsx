@@ -1,13 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Toast from './Toast';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
-import { formatBs } from '../utils/currency';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import { formatBs, formatBsRaw } from '../utils/currency';
 
 function formatUsdBs(amount, tasa) {
   const usd = `$${Number(amount).toFixed(2)}`;
   const bs = formatBs(amount, tasa);
   return bs ? `${usd} (${bs})` : usd;
+}
+
+// A diferencia de formatUsdBs (una tasa para un monto), este toma un monto en USD
+// ya sumado (p. ej. el total del período que devuelve el backend) junto con el Bs.
+// ya acumulado registro por registro (ver bsTotalGeneral/bsTotalesPorCategoria) —
+// evita el drift de convertir la suma global en USD con la tasa en vivo.
+function formatUsdBsPrecomputed(usdAmount, bsAmount) {
+  const usd = `$${Number(usdAmount).toFixed(2)}`;
+  const bs = Number.isFinite(bsAmount) && bsAmount > 0 ? formatBsRaw(bsAmount) : '';
+  return bs ? `${usd} (${bs})` : usd;
+}
+
+// Bs. de un solo gasto/abono, priorizando su propia tasa congelada al momento de
+// registrarlo sobre la tasa en vivo — así reimprimir/reconsultar un registro viejo
+// no cambia su equivalente en bolívares con el paso del tiempo.
+function tasaDeRegistro(registro, tasaEnVivo) {
+  return registro?.tasa_cambio_referencia ?? tasaEnVivo;
 }
 
 function todayIso() {
@@ -46,6 +65,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const [fechaDesde, setFechaDesde] = useState(firstDayOfMonthIso());
   const [fechaHasta, setFechaHasta] = useState(todayIso());
@@ -119,6 +139,30 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
 
   const categoriasActivas = useMemo(() => categorias.filter((c) => c.activo), [categorias]);
 
+  // Bs. del período: cada gasto se convierte con SU PROPIA tasa (congelada al
+  // registrarlo, con fallback a la tasa en vivo si aún no tiene una), y luego se
+  // suman los bolívares ya convertidos — en vez de sumar los montos en USD y
+  // convertir esa suma con la tasa de hoy (lo que hacía que el total de un período
+  // cerrado cambiara con el tiempo aunque los gastos no cambiaran).
+  const bsTotalesPorCategoria = useMemo(() => {
+    const totales = new Map();
+    gastos.forEach((gasto) => {
+      const tasa = Number(tasaDeRegistro(gasto, tasaCambio));
+      if (!Number.isFinite(tasa) || tasa <= 0) return;
+      const bs = Number(gasto.monto) * tasa;
+      totales.set(gasto.categoria_id, (totales.get(gasto.categoria_id) || 0) + bs);
+    });
+    return totales;
+  }, [gastos, tasaCambio]);
+
+  const bsTotalGeneral = useMemo(() => (
+    gastos.reduce((suma, gasto) => {
+      const tasa = Number(tasaDeRegistro(gasto, tasaCambio));
+      if (!Number.isFinite(tasa) || tasa <= 0) return suma;
+      return suma + Number(gasto.monto) * tasa;
+    }, 0)
+  ), [gastos, tasaCambio]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.categoria_id) {
@@ -168,6 +212,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
           },
         } : undefined,
       );
+      markClean({ ...emptyForm, fecha_gasto: form.fecha_gasto });
       setForm({ ...emptyForm, fecha_gasto: form.fecha_gasto });
       loadGastos();
     } catch (error) {
@@ -282,7 +327,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
 
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={onBack} style={backButtonStyle}>
+      <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
         ← Volver a Contabilidad
       </button>
 
@@ -295,6 +340,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
 
       <section style={panelStyle}>
         <div style={sectionTitleStyle}>Registrar gasto</div>
@@ -411,12 +457,12 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {totalesPorCategoria.map((entry) => (
               <span key={entry.categoria_id} style={categoriaTotalChipStyle}>
-                {entry.categoria_nombre}: {formatUsdBs(entry.total, tasaCambio)}
+                {entry.categoria_nombre}: {formatUsdBsPrecomputed(entry.total, bsTotalesPorCategoria.get(entry.categoria_id) || 0)}
               </span>
             ))}
           </div>
         ) : null}
-        <div style={{ color: '#ffcf7d', fontWeight: 800 }}>Total del período: {formatUsdBs(totalGeneral, tasaCambio)}</div>
+        <div style={{ color: '#ffcf7d', fontWeight: 800 }}>Total del período: {formatUsdBsPrecomputed(totalGeneral, bsTotalGeneral)}</div>
 
         {loadingGastos ? <div style={emptyStyle}>Cargando gastos...</div> : null}
         {!loadingGastos && gastos.length === 0 ? <div style={emptyStyle}>No hay gastos para ese filtro.</div> : null}
@@ -442,9 +488,9 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
                       {gasto.proveedor_nombre ? <div style={{ fontSize: 11, color: '#a89999' }}>{gasto.proveedor_nombre}</div> : null}
                     </div>
                     <div key={`monto-${gasto.id}`} style={cellStyle}>
-                      {formatUsdBs(gasto.monto, tasaCambio)}
+                      {formatUsdBs(gasto.monto, tasaDeRegistro(gasto, tasaCambio))}
                       {gasto.estado_pago !== 'pagado' ? (
-                        <div style={{ fontSize: 11, color: '#ffcf7d' }}>Saldo: {formatUsdBs(gasto.saldo_pendiente, tasaCambio)}</div>
+                        <div style={{ fontSize: 11, color: '#ffcf7d' }}>Saldo: {formatUsdBs(gasto.saldo_pendiente, tasaDeRegistro(gasto, tasaCambio))}</div>
                       ) : null}
                     </div>
                     <div key={`estado-${gasto.id}`} style={cellStyle}>
@@ -484,7 +530,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
                           <div key={abono.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#e8dede' }}>
                             <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              {formatUsdBs(abono.monto, tasaCambio)}
+                              {formatUsdBs(abono.monto, tasaDeRegistro(abono, tasaCambio))}
                               {onVerComprobante ? (
                                 <button type="button" onClick={() => onVerComprobante('gasto', gasto.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">🖨</button>
                               ) : null}

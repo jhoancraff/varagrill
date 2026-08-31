@@ -104,11 +104,11 @@ function ComprobantePagoPage({ isMobile, onBack, tipo, documentoId, abonoId }) {
 
           <div style={voucherMontoStyle}>
             <div style={voucherLabelStyle}>Monto pagado</div>
-            <div style={{ fontSize: 26, fontWeight: 800 }}>{formatUsdBs(abono.monto, tasaCambio)}</div>
+            <div style={{ fontSize: 26, fontWeight: 800 }}>{formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio)}</div>
           </div>
 
           <div style={{ fontSize: 13, color: '#444' }}>
-            Saldo pendiente después de este pago: <strong>{formatUsdBs(saldoDespues, tasaCambio)}</strong>
+            Saldo pendiente después de este pago: <strong>{formatUsdBs(saldoDespues, abono.tasa_cambio_referencia ?? tasaCambio)}</strong>
           </div>
 
           <div style={{ fontSize: 12, color: '#666' }}>

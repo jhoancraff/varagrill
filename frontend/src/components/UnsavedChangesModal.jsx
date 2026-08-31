@@ -1,3 +1,11 @@
+// OJO: este modal NO usa useMobileBackHandler (a diferencia de ConfirmModal).
+// Cuando se abre por un intento de navegación real (Sidebar, "Volver", Atrás
+// físico), quien ya está manejando el historial en ese momento es
+// useViewHistory (ver dirtyGuardRegistry) — si este modal empujara TAMBIÉN su
+// propia entrada acá, quedarían dos capas de historial compitiendo por la
+// misma pulsación de Atrás. useViewHistory ya cubre el caso de Atrás físico
+// mientras el formulario sigue sucio (repone la entrada y vuelve a preguntar
+// en vez de dejar salir), así que no hace falta duplicarlo acá.
 function UnsavedChangesModal({ open, onConfirm, onCancel }) {
   if (!open) {
     return null;

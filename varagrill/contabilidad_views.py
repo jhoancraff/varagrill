@@ -12,8 +12,6 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from django.db.models import Sum
-
 from .api_views import _calcular_margen_periodo
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import VGCierreCaja, VGConsignacionCaja, VGGasto, VGMetodoPago
@@ -406,20 +404,51 @@ def reporte_estado_resultados_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
-    _platos, ventas_total, costo_ingredientes_total = _calcular_margen_periodo(desde, hasta)
+    _platos, ventas_total, costo_ingredientes_total, ventas_total_bs = _calcular_margen_periodo(desde, hasta)
     utilidad_bruta = ventas_total - costo_ingredientes_total
 
     gastos = VGGasto.objects.filter(fecha_gasto__gte=desde, fecha_gasto__lte=hasta).select_related('categoria')
-    gastos_total = gastos.aggregate(total=Sum('monto')).get('total') or Decimal('0')
 
+    # gastos_total_bs suma monto x SU PROPIA tasa_cambio_referencia por cada gasto
+    # (congelada al crearlo, ver gastos_views.py) — no el total en USD del período
+    # multiplicado por la tasa vigente al pedir el reporte. Así el mismo período
+    # muestra siempre el mismo total en bolívares sin importar cuándo se consulte.
+    gastos_total = Decimal('0')
+    gastos_total_bs = Decimal('0')
     totales_por_categoria = {}
     for gasto in gastos:
-        entry = totales_por_categoria.setdefault(gasto.categoria_id, {'categoria_nombre': gasto.categoria.nombre, 'total': Decimal('0')})
+        gastos_total += gasto.monto
+        entry = totales_por_categoria.setdefault(
+            gasto.categoria_id, {'categoria_nombre': gasto.categoria.nombre, 'total': Decimal('0'), 'total_bs': Decimal('0')},
+        )
         entry['total'] += gasto.monto
+        if gasto.tasa_cambio_referencia:
+            monto_bs = gasto.monto * gasto.tasa_cambio_referencia
+            gastos_total_bs += monto_bs
+            entry['total_bs'] += monto_bs
     gastos_por_categoria = sorted(
-        [{**entry, 'total': str(entry['total'].quantize(Decimal('0.01')))} for entry in totales_por_categoria.values()],
+        [
+            {
+                **entry,
+                'total': str(entry['total'].quantize(Decimal('0.01'))),
+                'total_bs': str(entry['total_bs'].quantize(Decimal('0.01'))),
+            }
+            for entry in totales_por_categoria.values()
+        ],
         key=lambda item: Decimal(item['total']), reverse=True,
     )
+
+    # costo_ingredientes_total NO tiene una tasa propia que congelar: es un costo
+    # unitario corriente (VGIngrediente.costo_unitario, promedio móvil por
+    # VGCompra), no una transacción individual — ver el docstring de
+    # _calcular_margen_periodo. Se convierte con la tasa vigente al CIERRE del
+    # período (no la de hoy), para que el mismo período reportado no cambie de
+    # valor en bolívares según cuándo se consulte, aunque no sea una suma
+    # registro-por-registro como ventas_total_bs/gastos_total_bs.
+    tasa_fin_periodo = tasa_para_fecha(hasta)
+    costo_ingredientes_total_bs = (costo_ingredientes_total * tasa_fin_periodo) if tasa_fin_periodo else None
+    utilidad_bruta_bs = (ventas_total_bs - costo_ingredientes_total_bs) if costo_ingredientes_total_bs is not None else None
+    utilidad_neta_bs = (utilidad_bruta_bs - gastos_total_bs) if utilidad_bruta_bs is not None else None
 
     utilidad_neta = utilidad_bruta - gastos_total
     utilidad_neta_pct = (utilidad_neta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
@@ -429,11 +458,16 @@ def reporte_estado_resultados_view(request):
         'desde': desde.isoformat(),
         'hasta': hasta.isoformat(),
         'ventas_total': str(ventas_total.quantize(Decimal('0.01'))),
+        'ventas_total_bs': str(ventas_total_bs.quantize(Decimal('0.01'))),
         'costo_ingredientes_total': str(costo_ingredientes_total.quantize(Decimal('0.01'))),
+        'costo_ingredientes_total_bs': str(costo_ingredientes_total_bs.quantize(Decimal('0.01'))) if costo_ingredientes_total_bs is not None else None,
         'utilidad_bruta': str(utilidad_bruta.quantize(Decimal('0.01'))),
+        'utilidad_bruta_bs': str(utilidad_bruta_bs.quantize(Decimal('0.01'))) if utilidad_bruta_bs is not None else None,
         'gastos_total': str(gastos_total.quantize(Decimal('0.01'))),
+        'gastos_total_bs': str(gastos_total_bs.quantize(Decimal('0.01'))),
         'gastos_por_categoria': gastos_por_categoria,
         'utilidad_neta': str(utilidad_neta.quantize(Decimal('0.01'))),
+        'utilidad_neta_bs': str(utilidad_neta_bs.quantize(Decimal('0.01'))) if utilidad_neta_bs is not None else None,
         'utilidad_neta_pct': str(utilidad_neta_pct.quantize(Decimal('0.01'))),
     })
 

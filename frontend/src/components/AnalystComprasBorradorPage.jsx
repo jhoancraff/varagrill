@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Toast from './Toast';
+import UnsavedChangesModal from './UnsavedChangesModal';
 import useToast from '../hooks/useToast';
+import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
 const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '' };
@@ -17,6 +19,12 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [discarding, setDiscarding] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [summary, setSummary] = useState(null);
+  // El borrador en sí ya queda guardado en el servidor apenas se agrega cada
+  // ingrediente (ver el docstring de arriba) — lo único que se perdería si el
+  // usuario sale sin darse cuenta es lo que esté a medio escribir: una fila
+  // de ingrediente sin confirmar (itemForm) o los datos del proveedor/factura
+  // antes de confirmar la carga completa (lote).
+  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ itemForm, lote });
 
   useEffect(() => {
     const loadAll = async () => {
@@ -87,6 +95,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       }
       setBorrador(data.borrador);
       setItemForm(emptyItemForm);
+      markClean({ itemForm: emptyItemForm, lote });
       if (!exactMatch) {
         setInventory((current) => [...current, { id: undefined, nombre: itemForm.nombre }]);
       }
@@ -160,6 +169,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       setSummary(data.compra);
       setBorrador({ id: null, detalles: [], total: '0' });
       setLote(emptyLote);
+      markClean({ itemForm, lote: emptyLote });
       showSuccess(data.message || 'Carga confirmada.');
     } catch (error) {
       showError(error.message || 'No se pudo confirmar la carga.');
@@ -172,7 +182,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
 
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={onBack} style={backButtonStyle}>
+      <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
         ← Volver
       </button>
 
@@ -186,6 +196,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
 
       {loading ? (
         <div style={emptyStyle}>Cargando...</div>

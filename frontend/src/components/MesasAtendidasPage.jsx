@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
 
 const ESTADO_LABELS = {
   pendiente: 'Pendiente',
@@ -400,6 +401,9 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
 }
 
 function PedidoDetalleModal({ pedido, loading, error, tasaCambio, onClose }) {
+  // Solo se monta mientras hay un pedido seleccionado, así que montado == abierto.
+  useMobileBackHandler(true, onClose);
+
   return (
     <div style={modalBackdropStyle} onClick={onClose}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>

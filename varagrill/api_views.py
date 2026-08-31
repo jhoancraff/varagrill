@@ -28,6 +28,7 @@ from .models import (
     VGDetallePedido,
     VGDetallePedidoAdicional,
     VGDetallePedidoOpcion,
+    VGFactura,
     VGGrupoOpcionProducto,
     VGImpresoraCaja,
     VGIngrediente,
@@ -66,8 +67,9 @@ from .ingredientes_excel import (
     parse_precio_total,
 )
 from .notifications import send_whatsapp_new_order_alert
+from .reportes import tasa_para_fecha
 from .serializers import MesaSerializer, ProductoSerializer
-from .tasa_cambio import obtener_tasa_actual
+from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
 logger = logging.getLogger(__name__)
 
@@ -610,6 +612,56 @@ def _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_ma
         VGDetallePedido.objects.bulk_update(detalles, ['costo_unitario_venta'])
 
 
+def _tasas_venta_por_pedido(pedido_ids):
+    """
+    Resuelve, para cada pedido en `pedido_ids`, la tasa de cambio a la que se
+    congeló su venta — para poder sumar ventas históricas en bolívares sin que
+    el total dependa de la tasa vigente en el momento en que alguien mira el
+    reporte (ver _calcular_margen_periodo). Prioridad:
+      1. El VGPago directo del pedido (flujo "mesero cobra directo") — su
+         propia tasa_cambio_referencia, congelada al cobrar.
+      2. Si el pedido quedó facturado (flujo de facturación), la
+         tasa_cambio_referencia de esa VGFactura, congelada al emitirla.
+      3. Si ninguno de los dos tiene tasa (dato viejo sin backfill, o pedido
+         marcado pagado sin pasar por ninguno de esos flujos), la última
+         VGTasaCambio conocida en o antes de la fecha del pedido — mismo
+         criterio que usa migrations.0031 para rellenar historicos.
+    Devuelve {pedido_id: Decimal|None} — None solo si tampoco hay ninguna
+    VGTasaCambio anterior a la fecha del pedido (instalación sin historial).
+    """
+    pedido_ids = set(pedido_ids)
+    if not pedido_ids:
+        return {}
+
+    tasa_por_pedido = {}
+    for pedido_id, tasa in (
+        VGPago.objects
+        .filter(pedido_id__in=pedido_ids, estado='completado', tasa_cambio_referencia__isnull=False)
+        .order_by('fecha_pago')
+        .values_list('pedido_id', 'tasa_cambio_referencia')
+    ):
+        tasa_por_pedido.setdefault(pedido_id, tasa)
+
+    faltantes = pedido_ids - tasa_por_pedido.keys()
+    if faltantes:
+        for factura_id, tasa, pedido_id in (
+            VGFactura.objects
+            .filter(pedidos__id__in=faltantes, tasa_cambio_referencia__isnull=False)
+            .order_by('fecha_emision')
+            .values_list('id', 'tasa_cambio_referencia', 'pedidos__id')
+        ):
+            tasa_por_pedido.setdefault(pedido_id, tasa)
+
+    faltantes = pedido_ids - tasa_por_pedido.keys()
+    if faltantes:
+        fechas_por_pedido = dict(VGPedido.objects.filter(id__in=faltantes).values_list('id', 'fecha_creacion'))
+        for pedido_id in faltantes:
+            fecha = fechas_por_pedido.get(pedido_id)
+            tasa_por_pedido[pedido_id] = tasa_para_fecha(fecha.date()) if fecha else None
+
+    return tasa_por_pedido
+
+
 def _calcular_margen_periodo(desde, hasta):
     """
     Ventas, costo de ingredientes y ganancia por producto vendido (pedidos
@@ -618,9 +670,22 @@ def _calcular_margen_periodo(desde, hasta):
     (contabilidad_views.py) pueda reusar el mismo calculo de "ventas totales"
     y "costo de ingredientes" sin duplicar la logica de costeo — ver el
     docstring de esa vista para el criterio de costo historico vs. estimado.
-    Devuelve (filas, total_ingreso, total_costo).
+
+    total_ingreso_bs suma, registro por registro, ingreso_del_detalle x
+    tasa_de_SU_pedido (ver _tasas_venta_por_pedido) — nunca ingreso_total (en
+    USD) x una tasa única del momento en que se pide el reporte, que es lo
+    que hacía que el mismo período mostrara un total en bolívares distinto
+    según cuándo se consultara. costo_ingredientes_total NO tiene un
+    equivalente per-record: el costeo de ingredientes es un costo unitario
+    corriente (VGIngrediente.costo_unitario, promedio móvil), no una
+    transacción con su propia tasa congelada, así que no hay de dónde sacar
+    "la tasa de esta porción de costo" — su versión en bolívares se calcula
+    aparte en reporte_estado_resultados_view con la tasa del cierre del
+    período, no aquí.
+
+    Devuelve (filas, total_ingreso, total_costo, total_ingreso_bs).
     """
-    detalles = (
+    detalles = list(
         VGDetallePedido.objects
         .filter(
             pedido__estado='pagado',
@@ -630,12 +695,18 @@ def _calcular_margen_periodo(desde, hasta):
         .select_related('producto__categoria')
     )
 
+    tasas_por_pedido = _tasas_venta_por_pedido({detalle.pedido_id for detalle in detalles})
+
     ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
     preparation_cost_map = _load_preparation_cost_map()
     unit_cost_cache = {}
 
+    total_ingreso_bs = Decimal('0')
     filas_por_producto = {}
     for detalle in detalles:
+        tasa_pedido = tasas_por_pedido.get(detalle.pedido_id)
+        if tasa_pedido:
+            total_ingreso_bs += detalle.subtotal * tasa_pedido
         producto = detalle.producto
         peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
         cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor
@@ -688,7 +759,7 @@ def _calcular_margen_periodo(desde, hasta):
 
     filas.sort(key=lambda item: Decimal(item['ingreso_total']), reverse=True)
 
-    return filas, total_ingreso, total_costo
+    return filas, total_ingreso, total_costo, total_ingreso_bs
 
 
 def reporte_margen_ganancia_view(request):
@@ -719,7 +790,7 @@ def reporte_margen_ganancia_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
-    filas, total_ingreso, total_costo = _calcular_margen_periodo(desde, hasta)
+    filas, total_ingreso, total_costo, _total_ingreso_bs = _calcular_margen_periodo(desde, hasta)
 
     total_ganancia = total_ingreso - total_costo
     total_ganancia_pct = (total_ganancia / total_ingreso * Decimal('100')) if total_ingreso > 0 else Decimal('0')
@@ -2069,6 +2140,7 @@ def admin_catalog_view(request):
                 fecha_factura=fecha_factura,
                 total=total_compra,
                 estado='recibido',
+                tasa_cambio_referencia=tasa_cambio_para_registro(),
                 creado_por=request.user,
                 actualizado_por=request.user,
             )
@@ -2385,6 +2457,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 numero_factura_proveedor=numero_factura_proveedor,
                 fecha_factura=fecha_factura,
                 estado='recibido',
+                tasa_cambio_referencia=tasa_cambio_para_registro(),
                 creado_por=operator,
                 actualizado_por=operator,
             )
@@ -2715,6 +2788,7 @@ def _serialize_abono_compra(abono):
         'metodo_pago_id': abono.metodo_pago_id,
         'referencia': abono.referencia,
         'fecha_pago': abono.fecha_pago.isoformat(),
+        'tasa_cambio_referencia': str(abono.tasa_cambio_referencia) if abono.tasa_cambio_referencia is not None else None,
         'creado_por': (abono.creado_por.get_full_name() or abono.creado_por.username) if abono.creado_por else '',
     }
 
@@ -2730,6 +2804,7 @@ def _serialize_compra(compra, incluir_detalle=False):
         'estado': compra.estado,
         'saldo_pendiente': str(compra.saldo_pendiente),
         'estado_pago': compra.estado_pago,
+        'tasa_cambio_referencia': str(compra.tasa_cambio_referencia) if compra.tasa_cambio_referencia is not None else None,
         'creado_por': (compra.creado_por.get_full_name() or compra.creado_por.username) if compra.creado_por else '',
         'cantidad_items': compra.detalles.count() if incluir_detalle else None,
     }
@@ -4758,6 +4833,7 @@ def pedidos_cobro_view(request):
         preparation_cost_map = _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
         unit_cost_cache = {}
 
+        tasa_cambio_pago = tasa_cambio_para_registro()
         total_cobrado = Decimal('0')
         for pedido in pedidos:
             VGPago.objects.create(
@@ -4766,6 +4842,7 @@ def pedidos_cobro_view(request):
                 metodo_pago=metodo_pago,
                 referencia=referencia,
                 estado='completado',
+                tasa_cambio_referencia=tasa_cambio_pago,
                 creado_por=request.user,
             )
             pedido.estado = 'pagado'

@@ -31,6 +31,7 @@ from .models import (
     VGMetodoPago,
     VGMovimientoInventario,
 )
+from .tasa_cambio import tasa_cambio_para_registro
 
 
 def _get_borrador_abierto():
@@ -212,6 +213,7 @@ def admin_compra_borrador_confirmar_view(request):
             proveedor_nombre=proveedor_nombre,
             numero_factura_proveedor=numero_factura_proveedor,
             estado='recibido',
+            tasa_cambio_referencia=tasa_cambio_para_registro(data.get('tasa_cambio_referencia')),
             creado_por=request.user,
             actualizado_por=request.user,
         )
@@ -316,6 +318,7 @@ def compra_abono_view(request, compra_id):
             monto=monto,
             metodo_pago=metodo_pago,
             referencia=referencia,
+            tasa_cambio_referencia=tasa_cambio_para_registro(),
             creado_por=request.user,
         )
 

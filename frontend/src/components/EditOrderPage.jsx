@@ -3,6 +3,7 @@ import BsAmount from './BsAmount';
 import UnsavedChangesModal from './UnsavedChangesModal';
 import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import useToast from '../hooks/useToast';
 import { formatBs } from '../utils/currency';
@@ -973,6 +974,9 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
 }
 
 function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
+  // Solo se monta mientras hay un producto por peso seleccionado, así que
+  // montado == abierto.
+  useMobileBackHandler(true, onClose);
   const [gramos, setGramos] = useState(250);
   const precioPorKg = Number(product.precio_venta) || 0;
   const precioEstimado = precioPorKg * (gramos / 1000);

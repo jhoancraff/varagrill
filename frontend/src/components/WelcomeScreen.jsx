@@ -52,6 +52,8 @@ import NewOrderPage from './NewOrderPage';
 import PromotionsPage from './PromotionsPage';
 import useKitchenSocket from '../hooks/useKitchenSocket';
 import useKitchenAlerts from './useKitchenAlerts';
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
+import useViewHistory from '../hooks/useViewHistory';
 
 const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad', 'contabilidad-cuadre-caja', 'cuentas-cobrar'];
 // Mismas 3 tarjetas que AdminPanelPage oculta (CARTAS_RESTRINGIDAS) — reservadas al
@@ -77,7 +79,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
   const [isSidebarOverlayMode, setIsSidebarOverlayMode] = useState(isCompactNavigationViewport);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [activeView, setActiveView] = useState('home');
+  // El botón/gesto físico de "Atrás" del celular sincronizado con la navegación
+  // interna de pantallas — ver useViewHistory. goToView = entrar a una
+  // subvista (empuja historial); goBackView = volver a la anterior (la misma
+  // acción que dispara el Atrás físico); replaceView = correcciones
+  // automáticas de permisos que no son navegación real del usuario.
+  const { activeView, goToView, goBackView, replaceView } = useViewHistory('home');
   const [mesas, setMesas] = useState([]);
   const [products, setProducts] = useState([]);
   const [adicionales, setAdicionales] = useState([]);
@@ -92,7 +99,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
   const handleNuevoPedido = () => {
     setNewOrderPreset(null);
-    setActiveView('orders');
+    goToView('orders');
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
     }
@@ -100,7 +107,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
   const handleAddRoundToTable = ({ mesaId, cliente }) => {
     setNewOrderPreset({ mesaId, cliente, token: Date.now() });
-    setActiveView('orders');
+    goToView('orders');
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
     }
@@ -108,12 +115,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
   const handleOrderCreated = (pedidoId) => {
     setKitchenFlashMessage(`Pedido #${pedidoId} registrado con éxito.`);
-    setActiveView('kitchen');
+    goToView('kitchen');
   };
 
   const handleOrderUpdated = (pedidoId) => {
     setKitchenFlashMessage(`Pedido #${pedidoId} actualizado con éxito.`);
-    setActiveView('kitchen');
+    goToView('kitchen');
   };
 
   useEffect(() => {
@@ -126,6 +133,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     window.addEventListener('keydown', handleEscapeClose);
     return () => window.removeEventListener('keydown', handleEscapeClose);
   }, []);
+
+  // El menú lateral solo cuenta como una "capa" de navegación cuando se muestra
+  // como drawer superpuesto (móvil/táctil) — en modo escritorio siempre está
+  // visible y no debe interceptar el Atrás.
+  useMobileBackHandler(isSidebarOpen && isSidebarOverlayMode, () => setIsSidebarOpen(false));
+  useMobileBackHandler(isUserMenuOpen, () => setIsUserMenuOpen(false));
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 768px)');
@@ -176,7 +189,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   }, [activeView, isSidebarOverlayMode]);
 
   const handleHomeClick = () => {
-    setActiveView('home');
+    goToView('home');
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
     }
@@ -184,7 +197,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   };
 
   const handleAnalystNavigation = (view) => {
-    setActiveView(view);
+    goToView(view);
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
     }
@@ -318,9 +331,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   }, []);
 
   useEffect(() => {
+    // Correcciones de permisos, no navegación real del usuario — replaceView
+    // en vez de goToView/goBackView para no apilar una entrada de historial
+    // que el Atrás físico tendría que atravesar sin ver ningún cambio.
     if (isCajera) {
       if (!CAJERA_ALLOWED_VIEWS.includes(activeView)) {
-        setActiveView('checkout');
+        replaceView('checkout');
       }
       return;
     }
@@ -330,24 +346,24 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     // cuando toca "Inicio") son sus mesas atendidas. Solo se redirige desde 'home': el
     // resto de sus vistas (Nuevo pedido, Pedidos, etc.) siguen libres.
     if (isMesero && activeView === 'home') {
-      setActiveView('mesas-atendidas');
+      replaceView('mesas-atendidas');
       return;
     }
 
     if (!isAdmin && (activeView.startsWith('admin') || activeView.startsWith('contabilidad'))) {
-      setActiveView('home');
+      replaceView('home');
       return;
     }
 
     if (!isAdmin && activeView === 'checkout') {
-      setActiveView('home');
+      replaceView('home');
       return;
     }
 
     if (!canSeeCartasRestringidas && RESTRICTED_ADMIN_VIEWS.includes(activeView)) {
-      setActiveView('admin');
+      replaceView('admin');
     }
-  }, [activeView, isAdmin, isCajera, isMesero, canSeeCartasRestringidas]);
+  }, [activeView, isAdmin, isCajera, isMesero, canSeeCartasRestringidas, replaceView]);
 
   const {
     alertPermission,
@@ -612,7 +628,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
-              setActiveView('kitchen');
+              goToView('kitchen');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
               }
@@ -640,7 +656,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
-              setActiveView('mesas-atendidas');
+              goToView('mesas-atendidas');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
               }
@@ -662,7 +678,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
-              setActiveView('checkout');
+              goToView('checkout');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
               }
@@ -685,7 +701,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
-              setActiveView('contabilidad-cuadre-caja');
+              goToView('contabilidad-cuadre-caja');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
               }
@@ -708,7 +724,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
-              setActiveView('admin');
+              goToView('admin');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
               }
@@ -729,7 +745,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
-              setActiveView('contabilidad');
+              goToView('contabilidad');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
               }
@@ -867,7 +883,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             }}>
               <button
                 type="button"
-                onClick={() => setActiveView('kitchen')}
+                onClick={() => goToView('kitchen')}
                 style={kitchenButtonStyle}
               >
                 <span aria-hidden="true" style={sidebarIconWrapStyle}>
@@ -886,7 +902,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 type="button"
                 onClick={() => {
                   setNewOrderPreset(null);
-                  setActiveView('orders');
+                  goToView('orders');
                 }}
                 style={newOrderButtonStyle}
               >
@@ -933,7 +949,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 <button
                   key={item.view}
                   type="button"
-                  onClick={() => setActiveView(item.view)}
+                  onClick={() => goToView(item.view)}
                   style={featureCardButtonStyle}
                 >
                   <div style={{ display: 'inline-grid', placeItems: 'center', width: 44, height: 44, borderRadius: 14, background: 'rgba(255, 88, 88, 0.12)', color: '#ff7d7d', marginBottom: 18 }}>
@@ -948,12 +964,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
         ) : activeView === 'promotions' ? (
           <PromotionsPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
           />
         ) : activeView === 'chef-recommendations' ? (
           <ChefRecommendationsPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
           />
         ) : activeView === 'orders' ? (
           <NewOrderPage
@@ -966,13 +982,13 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             waiterName={displayName}
             initialMesaId={newOrderPreset?.mesaId}
             initialCliente={newOrderPreset?.cliente}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
             onSubmitSuccess={handleOrderCreated}
           />
         ) : activeView === 'mesas-atendidas' ? (
           <MesasAtendidasPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
             onAddRoundToTable={handleAddRoundToTable}
             onNuevoPedido={handleNuevoPedido}
             mesasCatalogo={mesas}
@@ -985,32 +1001,32 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             adicionales={adicionales}
             loadingData={loadingData}
             orderId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('kitchen')}
+            onBack={goBackView}
             onSubmitSuccess={handleOrderUpdated}
           />
         ) : activeView === 'checkout' ? (
           <CheckoutPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
             lastKitchenEvent={lastKitchenEvent}
             waiterName={displayName}
           />
         ) : activeView === 'cuentas-cobrar' ? (
           <CuentasPorCobrarPage
             isMobile={isMobile}
-            onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+            onBack={goBackView}
           />
         ) : activeView === 'cuentas-pagar' ? (
           <CuentasPorPagarPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
-            onVerComprobante={(tipo, documentoId, abonoId) => setActiveView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
+            onBack={goBackView}
+            onVerComprobante={(tipo, documentoId, abonoId) => goToView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
           />
         ) : activeView === 'gastos-operativos' ? (
           <AnalystGastosPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
-            onVerComprobante={(tipo, documentoId, abonoId) => setActiveView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
+            onBack={goBackView}
+            onVerComprobante={(tipo, documentoId, abonoId) => goToView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
           />
         ) : activeView.startsWith('comprobante-pago:') ? (
           <ComprobantePagoPage
@@ -1018,91 +1034,91 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             tipo={activeView.split(':')[1]}
             documentoId={activeView.split(':')[2]}
             abonoId={Number(activeView.split(':')[3])}
-            onBack={() => setActiveView(activeView.split(':')[1] === 'gasto' ? 'gastos-operativos' : 'cuentas-pagar')}
+            onBack={goBackView}
           />
         ) : activeView === 'facturas-historial' ? (
           <HistorialFacturasPage
             isMobile={isMobile}
-            onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+            onBack={goBackView}
           />
         ) : activeView === 'margen-ganancia' ? (
           <AnalystMargenGananciaPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
+            onBack={goBackView}
           />
         ) : activeView === 'estado-resultados' ? (
           <EstadoResultadosPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-datos-fiscales' ? (
           <AnalystDatosFiscalesPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-compras' ? (
           <AnalystComprasPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin' ? (
           <AdminPanelPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
             onNavigate={handleAnalystNavigation}
             canSeeCartasRestringidas={canSeeCartasRestringidas}
           />
         ) : activeView === 'contabilidad' ? (
           <ContabilidadPanelPage
             isMobile={isMobile}
-            onBack={() => setActiveView(isCajera ? 'checkout' : 'home')}
+            onBack={goBackView}
             onNavigate={handleAnalystNavigation}
             onlyCardIds={isCajera ? ['contabilidad-cuadre-caja', 'cuentas-cobrar'] : null}
           />
         ) : activeView === 'contabilidad-cuadre-caja' ? (
           <ReporteCuadreCajaPage
             isMobile={isMobile}
-            onBack={() => setActiveView(isCajera ? 'checkout' : 'contabilidad')}
+            onBack={goBackView}
             backLabel={isCajera ? '← Volver a Cobro' : '← Volver a Contabilidad'}
           />
         ) : activeView === 'contabilidad-cuadre-caja-rango' ? (
           <ReporteCuadreCajaRangoPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
+            onBack={goBackView}
           />
         ) : activeView === 'contabilidad-disponibilidad-cuentas' ? (
           <ReporteDisponibilidadCuentasPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-users' ? (
           <AnalystUsersPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
-            onCreateNewUser={() => setActiveView('admin-users-new')}
-            onEditUser={(userId) => setActiveView(`admin-users-edit:${userId}`)}
+            onBack={goBackView}
+            onCreateNewUser={() => goToView('admin-users-new')}
+            onEditUser={(userId) => goToView(`admin-users-edit:${userId}`)}
           />
         ) : activeView.startsWith('admin-users-edit:') ? (
           <AnalystEditUserPage
             isMobile={isMobile}
             isAdmin={isAdmin}
             userId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-users')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-users-new' ? (
           <AnalystNewUserPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin-users')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-mesas' ? (
           <AnalystMesasPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
-            onCreateNewMesa={() => setActiveView('admin-mesas-new')}
-            onEditMesa={(mesaId) => setActiveView(`admin-mesas-edit:${mesaId}`)}
+            onBack={goBackView}
+            onCreateNewMesa={() => goToView('admin-mesas-new')}
+            onEditMesa={(mesaId) => goToView(`admin-mesas-edit:${mesaId}`)}
             onMesasChanged={reloadMesas}
           />
         ) : activeView.startsWith('admin-mesas-edit:') ? (
@@ -1110,23 +1126,23 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             isMobile={isMobile}
             isAdmin={isAdmin}
             mesaId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-mesas')}
+            onBack={goBackView}
             onMesasChanged={reloadMesas}
           />
         ) : activeView === 'admin-mesas-new' ? (
           <AnalystNewMesaPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin-mesas')}
+            onBack={goBackView}
             onMesasChanged={reloadMesas}
           />
         ) : activeView === 'admin-products' ? (
           <AnalystProductsPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
-            onCreateNewProduct={() => setActiveView('admin-products-new')}
-            onEditProduct={(productId) => setActiveView(`admin-products-edit:${productId}`)}
+            onBack={goBackView}
+            onCreateNewProduct={() => goToView('admin-products-new')}
+            onEditProduct={(productId) => goToView(`admin-products-edit:${productId}`)}
             onProductsChanged={reloadProducts}
           />
         ) : activeView.startsWith('admin-products-edit:') ? (
@@ -1134,160 +1150,160 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             isMobile={isMobile}
             isAdmin={isAdmin}
             productId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-products')}
+            onBack={goBackView}
             onProductsChanged={reloadProducts}
           />
         ) : activeView === 'admin-products-new' ? (
           <AnalystNewProductPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin-products')}
+            onBack={goBackView}
             onProductsChanged={reloadProducts}
           />
         ) : activeView === 'admin-ingredients' ? (
           <AnalystInventoryHubPage
             isMobile={isMobile}
-            onBack={() => setActiveView('contabilidad')}
-            onCreate={() => setActiveView('admin-ingredients-create')}
-            onViewInventory={() => setActiveView('admin-ingredients-inventory')}
+            onBack={goBackView}
+            onCreate={() => goToView('admin-ingredients-create')}
+            onViewInventory={() => goToView('admin-ingredients-inventory')}
           />
         ) : activeView === 'admin-ingredients-create' ? (
           <AnalystIngredientsCreateReportPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients')}
-            onManualCreate={() => setActiveView('admin-ingredients-new')}
-            onBulkCreate={() => setActiveView('admin-ingredients-bulk-create')}
+            onBack={goBackView}
+            onManualCreate={() => goToView('admin-ingredients-new')}
+            onBulkCreate={() => goToView('admin-ingredients-bulk-create')}
           />
         ) : activeView === 'admin-ingredients-inventory' ? (
           <AnalystIngredientsReportPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients')}
-            onEdit={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
-            onImport={() => setActiveView('admin-ingredients-import')}
-            onCargaPorLote={() => setActiveView('admin-ingredients-compras-borrador')}
+            onBack={goBackView}
+            onEdit={(ingredientId) => goToView(`admin-ingredients-edit:${ingredientId}`)}
+            onImport={() => goToView('admin-ingredients-import')}
+            onCargaPorLote={() => goToView('admin-ingredients-compras-borrador')}
           />
         ) : activeView === 'admin-ingredients-compras-borrador' ? (
           <AnalystComprasBorradorPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients-inventory')}
+            onBack={goBackView}
           />
         ) : activeView.startsWith('admin-ingredients-edit:') ? (
           <AnalystEditIngredientPage
             isMobile={isMobile}
             ingredientId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-ingredients-inventory')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-ingredients-new' ? (
           <AnalystNewIngredientPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients-create')}
-            onEditExisting={(ingredientId) => setActiveView(`admin-ingredients-edit:${ingredientId}`)}
+            onBack={goBackView}
+            onEditExisting={(ingredientId) => goToView(`admin-ingredients-edit:${ingredientId}`)}
           />
         ) : activeView === 'admin-ingredients-bulk-create' ? (
           <AnalystIngredientsBulkCreatePage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients-create')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-ingredients-import' ? (
           <AnalystIngredientsImportPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-ingredients-inventory')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-preparations' ? (
           <AnalystPreparationsReportPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin')}
-            onCreateNew={() => setActiveView('admin-preparations-new')}
-            onEdit={(preparationId) => setActiveView(`admin-preparations-edit:${preparationId}`)}
+            onBack={goBackView}
+            onCreateNew={() => goToView('admin-preparations-new')}
+            onEdit={(preparationId) => goToView(`admin-preparations-edit:${preparationId}`)}
           />
         ) : activeView.startsWith('admin-preparations-edit:') ? (
           <AnalystEditPreparationPage
             isMobile={isMobile}
             preparationId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-preparations')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-preparations-new' ? (
           <AnalystNewPreparationPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin-preparations')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-recipes' ? (
           <AnalystRecipesPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
-            onCreateNewRecipe={() => setActiveView('admin-recipes-new')}
-            onEditRecipe={(recipeId) => setActiveView(`admin-recipes-edit:${recipeId}`)}
+            onBack={goBackView}
+            onCreateNewRecipe={() => goToView('admin-recipes-new')}
+            onEditRecipe={(recipeId) => goToView(`admin-recipes-edit:${recipeId}`)}
           />
         ) : activeView.startsWith('admin-recipes-edit:') ? (
           <AnalystEditRecipePage
             isMobile={isMobile}
             isAdmin={isAdmin}
             recipeId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-recipes')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-recipes-new' ? (
           <AnalystNewRecipePage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin-recipes')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-promotions' ? (
           <AnalystPromotionsPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
-            onSelectProduct={(productId) => setActiveView(`admin-promotions-new:${productId}`)}
-            onSelectBulk={(productIds) => setActiveView(`admin-promotions-bulk:${productIds.join(',')}`)}
+            onBack={goBackView}
+            onSelectProduct={(productId) => goToView(`admin-promotions-new:${productId}`)}
+            onSelectBulk={(productIds) => goToView(`admin-promotions-bulk:${productIds.join(',')}`)}
           />
         ) : activeView.startsWith('admin-promotions-new:') ? (
           <AnalystNewPromotionPage
             isMobile={isMobile}
             isAdmin={isAdmin}
             productId={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-promotions')}
+            onBack={goBackView}
           />
         ) : activeView.startsWith('admin-promotions-bulk:') ? (
           <AnalystBulkPromotionPage
             isMobile={isMobile}
             isAdmin={isAdmin}
             productIds={activeView.split(':')[1] || ''}
-            onBack={() => setActiveView('admin-promotions')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-chef-recommendations' ? (
           <AnalystChefRecommendationsPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
-            onCreateNew={() => setActiveView('admin-chef-recommendations-new')}
+            onBack={goBackView}
+            onCreateNew={() => goToView('admin-chef-recommendations-new')}
           />
         ) : activeView === 'admin-chef-recommendations-new' ? (
           <AnalystNewChefRecommendationPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin-chef-recommendations')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-printers' ? (
           <AnalystPrintersPage
             isMobile={isMobile}
             isAdmin={isAdmin}
-            onBack={() => setActiveView('admin')}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-payment-methods' ? (
           <AnalystPaymentMethodsPage
             isMobile={isMobile}
-            onBack={() => setActiveView('admin')}
+            onBack={goBackView}
           />
         ) : (
           <KitchenOrdersPage
             isMobile={isMobile}
-            onBack={() => setActiveView('home')}
+            onBack={goBackView}
             isSocketConnected={isKitchenSocketConnected}
             alertPermission={alertPermission}
             alertsEnabled={alertsEnabled}
             onRequestPermission={requestAlertPermission}
             lastKitchenEvent={lastKitchenEvent}
-            onEditOrder={(orderId) => setActiveView(`orders-edit:${orderId}`)}
+            onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
             onAddRoundToTable={handleAddRoundToTable}
             flashMessage={kitchenFlashMessage}
             onClearFlashMessage={() => setKitchenFlashMessage('')}

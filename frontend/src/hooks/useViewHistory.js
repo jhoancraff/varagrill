@@ -66,6 +66,20 @@ export default function useViewHistory(rootView) {
   const activeViewAtEventRef = useRef(activeView);
   activeViewAtEventRef.current = activeView;
 
+  useEffect(() => {
+    // La primera entrada del historial (la que ya existía cuando esta pestaña
+    // cargó, antes de que goToView empujara nada) nunca pasa por pushState —
+    // así que llega sin `__appView`. Sin esto, el PRIMER Atrás después de UNA
+    // sola navegación cae justo en esa entrada sin etiqueta: el handler de
+    // popstate la trata como "fuera de la app" (ver el `if (!targetView)`
+    // más abajo) y no hace nada, dejando la pantalla congelada — recién el
+    // Atrás siguiente sale de Chrome de una, sin haber mostrado nunca Home en
+    // el medio. replaceState (no pushState: no debe sumar profundidad) deja
+    // esa entrada marcada como la raíz desde el arranque.
+    window.history.replaceState({ __appView: rootView }, '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const goToView = useCallback((view) => {
     runWithActiveGuard(() => {
       stackRef.current.push(view);

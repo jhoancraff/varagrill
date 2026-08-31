@@ -300,7 +300,7 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
               {components.length === 0 ? <div style={emptyStyle}>Sin componentes</div> : components.map((item) => (
                 <div key={item.uid} style={componentRowStyle}>
                   <div>
-                    {item.nombre} ({item.tipo}) - {item.cantidad} {item.unidad || ''} · ${Number(item.costoUnitario || 0).toFixed(2)}/{item.unidad || 'u'}
+                    {item.nombre} ({item.tipo}) - {item.cantidad} {item.unidad || ''} · ${Number(item.costoUnitario || 0).toFixed(4)}/{item.unidad || 'u'}
                     {' '}· = ${(Number(item.costoUnitario || 0) * Number(item.cantidad || 0)).toFixed(2)}
                   </div>
                   <button type="button" onClick={() => setComponents((current) => current.filter((entry) => entry.uid !== item.uid))} style={dangerButtonStyle}>Quitar</button>
@@ -315,7 +315,7 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
               </div>
               <div>
                 <div style={costLabelStyle}>Costo por {form.rendimiento_unidad || 'unidad'}</div>
-                <div style={costValueStyle}>${estimatedUnitCost.toFixed(2)}</div>
+                <div style={costValueStyle}>${estimatedUnitCost.toFixed(4)}</div>
               </div>
               {form.es_adicional ? (
                 <div>

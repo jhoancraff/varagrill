@@ -134,7 +134,7 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
                   </div>
                   <div key={`cost-${item.id}`} style={cellStyle}>
                     <div style={{ color: '#fff', fontWeight: 700 }}>${item.costo_total || '0.00'} total</div>
-                    <div style={{ color: '#7dffa0', fontSize: 13 }}>${item.costo_unitario_calculado || '0.00'} / {item.rendimiento_unidad || 'unidad'}</div>
+                    <div style={{ color: '#7dffa0', fontSize: 13 }}>${Number(item.costo_unitario_calculado || 0).toFixed(4)} / {item.rendimiento_unidad || 'unidad'}</div>
                     {item.es_adicional ? (
                       <div style={addonBadgeStyle}>
                         Adicional · margen {item.margen_ganancia || '0'}% · vende ${item.precio_venta_calculado || '0.00'}

@@ -1571,7 +1571,13 @@ def admin_catalog_view(request):
                 'componentes': components,
                 'componentes_total': len(components),
                 'costo_total': str(costs['costo_total'].quantize(Decimal('0.01'))),
-                'costo_unitario_calculado': str(costo_unitario.quantize(Decimal('0.01'))),
+                # 6 decimales (igual que VGIngrediente.costo_unitario), no 2: una subreceta con
+                # rendimiento grande (ej. 900g) puede costar centavos por gramo — redondear a 2
+                # decimales acá lo deja en $0.00 y cualquier cantidad de esa subreceta usada en
+                # otra receta se calcula como gratis. El total en dólares sí se redondea a 2 para
+                # mostrar, pero la TASA por unidad necesita más precisión porque después se
+                # multiplica por cantidades potencialmente grandes.
+                'costo_unitario_calculado': str(costo_unitario.quantize(Decimal('0.000001'))),
                 'precio_venta_calculado': (
                     str(_compute_addon_sale_price(costo_unitario, preparation['margen_ganancia']))
                     if preparation['es_adicional'] else None
@@ -3564,9 +3570,10 @@ def admin_products_view(request):
             {
                 'id': preparation['id'],
                 'nombre': preparation['nombre'],
+                # 6 decimales, no 2 — ver comentario equivalente más arriba (mismo motivo).
                 'costo_unitario_calculado': str(
                     preparation_cost_map.get(preparation['id'], {'costo_unitario': Decimal('0')})['costo_unitario']
-                    .quantize(Decimal('0.01'))
+                    .quantize(Decimal('0.000001'))
                 ),
             }
             for preparation in VGPreparacion.objects.order_by('nombre').values('id', 'nombre')
@@ -3825,7 +3832,8 @@ def admin_recipes_view(request):
         preparations = []
         for preparation in VGPreparacion.objects.order_by('nombre').values('id', 'nombre', 'rendimiento_unidad', 'rendimiento_cantidad'):
             costs = preparation_cost_map.get(preparation['id'], {'costo_unitario': Decimal('0')})
-            preparations.append({**preparation, 'costo_unitario_calculado': str(costs['costo_unitario'].quantize(Decimal('0.01')))})
+            # 6 decimales, no 2 — ver comentario equivalente en admin_catalogo_view (mismo motivo).
+            preparations.append({**preparation, 'costo_unitario_calculado': str(costs['costo_unitario'].quantize(Decimal('0.000001')))})
 
         recipe_payloads = []
         for recipe in recipes:

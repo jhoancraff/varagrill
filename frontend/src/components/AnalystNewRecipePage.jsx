@@ -442,7 +442,8 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
                       <div>
                         <div style={componentTitleStyle}>{item.nombre}</div>
                         <div style={componentMetaStyle}>
-                          {item.tipo === 'ingrediente' ? 'Ingrediente' : 'Subreceta'} · {item.cantidad} {item.unidad} · ${Number(item.costoUnitario || 0).toFixed(2)}/u
+                          {item.tipo === 'ingrediente' ? 'Ingrediente' : 'Subreceta'} · {item.cantidad} {item.unidad} · ${Number(item.costoUnitario || 0).toFixed(2)}/{item.unidad || 'u'}
+                          {' '}· = ${(Number(item.costoUnitario || 0) * Number(item.cantidad || 0)).toFixed(2)}
                         </div>
                       </div>
                       <button type="button" onClick={() => handleRemoveComponent(item.uid)} style={dangerButtonStyle}>

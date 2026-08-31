@@ -21,6 +21,15 @@ const resolveCostoUnitario = (type, referenceId, inventoryList, preparationsList
   return match ? Number(match.costo_unitario_calculado || 0) : 0;
 };
 
+const resolveUnidad = (type, referenceId, inventoryList, preparationsList) => {
+  if (type === 'ingrediente') {
+    const match = inventoryList.find((item) => String(item.id) === String(referenceId));
+    return match?.unidad_medida;
+  }
+  const match = preparationsList.find((item) => String(item.id) === String(referenceId));
+  return match?.rendimiento_unidad;
+};
+
 function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
   const ingredientPickerRef = useRef(null);
   const preparationPickerRef = useRef(null);
@@ -86,6 +95,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
           nombre: item.nombre,
           cantidad: item.cantidad,
           costoUnitario: resolveCostoUnitario(item.tipo, item.referencia_id, data.inventory || [], data.recipes || []),
+          unidad: resolveUnidad(item.tipo, item.referencia_id, data.inventory || [], data.recipes || []),
         }));
         setForm(loadedForm);
         setComponents(loadedComponents);
@@ -147,6 +157,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
     }
 
     const costoUnitario = isIngredient ? (selected.costo_unitario || 0) : (selected.costo_unitario_calculado || 0);
+    const unidad = isIngredient ? selected.unidad_medida : selected.rendimiento_unidad;
 
     setComponents((current) => ([
       ...current,
@@ -157,6 +168,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
         nombre: selected.nombre,
         cantidad: draft.cantidad,
         costoUnitario,
+        unidad,
       },
     ]));
     setDraft((current) => ({ ...current, ingredientSearch: '', ingredientId: '', preparationSearch: '', preparationId: '', cantidad: '' }));
@@ -282,7 +294,10 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
             <div style={{ display: 'grid', gap: 8 }}>
               {components.length === 0 ? <div style={emptyStyle}>Sin componentes</div> : components.map((item) => (
                 <div key={item.uid} style={componentRowStyle}>
-                  <div>{item.nombre} ({item.tipo}) - {item.cantidad} · ${Number(item.costoUnitario || 0).toFixed(2)}/u</div>
+                  <div>
+                    {item.nombre} ({item.tipo}) - {item.cantidad} {item.unidad || ''} · ${Number(item.costoUnitario || 0).toFixed(2)}/{item.unidad || 'u'}
+                    {' '}· = ${(Number(item.costoUnitario || 0) * Number(item.cantidad || 0)).toFixed(2)}
+                  </div>
                   <button type="button" onClick={() => setComponents((current) => current.filter((entry) => entry.uid !== item.uid))} style={dangerButtonStyle}>Quitar</button>
                 </div>
               ))}

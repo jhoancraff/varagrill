@@ -12,6 +12,9 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
   const [saving, setSaving] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
 
   const loadProducts = async () => {
     setLoading(true);
@@ -86,9 +89,61 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
   }
 
   const availableCount = products.filter((product) => Boolean(product.disponible)).length;
-  const pageCount = Math.max(1, Math.ceil(products.length / PAGE_SIZE));
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredProducts = products.filter((product) => {
+    if (categoryFilter && String(product.categoria_id ?? '') !== categoryFilter) {
+      return false;
+    }
+    if (statusFilter === 'disponible' && !product.disponible) {
+      return false;
+    }
+    if (statusFilter === 'no-disponible' && product.disponible) {
+      return false;
+    }
+    if (!normalizedSearch) {
+      return true;
+    }
+    const haystack = [
+      product.nombre,
+      product.descripcion,
+      product.categoria_nombre,
+      product.receta_vinculada_nombre,
+      product.subreceta_vinculada_nombre,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(normalizedSearch);
+  });
+
+  const pageCount = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
-  const pagedProducts = products.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+  const pagedProducts = filteredProducts.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+
+  const handleSearchChange = (value) => {
+    setSearchTerm(value);
+    setPage(0);
+  };
+
+  const handleCategoryFilterChange = (value) => {
+    setCategoryFilter(value);
+    setPage(0);
+  };
+
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value);
+    setPage(0);
+  };
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setCategoryFilter('');
+    setStatusFilter('');
+    setPage(0);
+  };
+
+  const hasActiveFilters = Boolean(searchTerm || categoryFilter || statusFilter);
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -134,10 +189,51 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
           <div style={reportHintStyle}>Consulta precio, categoría, disponibilidad e imagen principal.</div>
         </div>
 
+        {!loading && products.length > 0 ? (
+          <div style={filtersRowStyle(isMobile)}>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(event) => handleSearchChange(event.target.value)}
+              placeholder="Buscar por nombre, descripción o categoría..."
+              style={searchInputStyle}
+            />
+            <select
+              value={categoryFilter}
+              onChange={(event) => handleCategoryFilterChange(event.target.value)}
+              style={filterSelectStyle}
+            >
+              <option value="">Todas las categorías</option>
+              {categories.map((category) => (
+                <option key={`cat-${category.id}`} value={String(category.id)}>
+                  {category.nombre}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(event) => handleStatusFilterChange(event.target.value)}
+              style={filterSelectStyle}
+            >
+              <option value="">Todos los estados</option>
+              <option value="disponible">Disponibles</option>
+              <option value="no-disponible">No disponibles</option>
+            </select>
+            {hasActiveFilters ? (
+              <button type="button" onClick={clearFilters} style={secondaryButtonStyle}>
+                Limpiar filtros
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {loading ? <div style={emptyStateStyle}>Cargando productos...</div> : null}
         {!loading && products.length === 0 ? <div style={emptyStateStyle}>No hay productos registrados.</div> : null}
+        {!loading && products.length > 0 && filteredProducts.length === 0 ? (
+          <div style={emptyStateStyle}>Ningún producto coincide con los filtros aplicados.</div>
+        ) : null}
 
-        {!loading && products.length > 0 ? (
+        {!loading && filteredProducts.length > 0 ? (
           <div style={tableWrapStyle}>
             <div style={tableStyle}>
               <div style={tableHeadStyle}>Producto</div>
@@ -183,7 +279,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
         <Pagination
           page={currentPage}
           pageCount={pageCount}
-          totalCount={products.length}
+          totalCount={filteredProducts.length}
           pageSize={PAGE_SIZE}
           isMobile={isMobile}
           onPrev={() => setPage((current) => Math.max(0, current - 1))}
@@ -307,6 +403,35 @@ const reportHeaderStyle = (isMobile) => ({
 const reportHintStyle = {
   color: '#d2c4c4',
   fontSize: 13,
+};
+
+const filtersRowStyle = (isMobile) => ({
+  display: 'flex',
+  flexDirection: isMobile ? 'column' : 'row',
+  gap: 10,
+  flexWrap: 'wrap',
+});
+
+const searchInputStyle = {
+  flex: '1 1 260px',
+  padding: '10px 14px',
+  borderRadius: 12,
+  border: '1px solid rgba(255, 255, 255, 0.14)',
+  background: 'rgba(255, 255, 255, 0.04)',
+  color: '#fff',
+  fontSize: 14,
+  outline: 'none',
+};
+
+const filterSelectStyle = {
+  flex: '0 1 220px',
+  padding: '10px 14px',
+  borderRadius: 12,
+  border: '1px solid rgba(255, 255, 255, 0.14)',
+  background: 'rgba(20, 10, 10, 0.9)',
+  color: '#fff',
+  fontSize: 14,
+  outline: 'none',
 };
 
 const tableWrapStyle = {

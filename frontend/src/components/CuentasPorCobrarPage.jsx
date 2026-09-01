@@ -234,7 +234,7 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
                       type="number"
                       min="0.01"
                       step="0.01"
-                      placeholder="Monto del abono"
+                      placeholder={facturaDetalle.moneda === 'VES' ? 'Monto del abono (Bs)' : 'Monto del abono ($)'}
                       value={montoAbono}
                       onChange={(event) => setMontoAbono(event.target.value)}
                       style={inputStyle}

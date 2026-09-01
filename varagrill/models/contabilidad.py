@@ -359,6 +359,51 @@ class VGOrdenCobro(VGAuditoria):
 
 
 # ---------------------------------------------------------------------------
+# Nota de entrega — recibo de venta sin efecto fiscal
+# ---------------------------------------------------------------------------
+class VGNotaEntrega(VGAuditoria):
+    """
+    Recibo de venta SIN efecto fiscal: lo que hoy se emite en el mostrador en
+    vez de una factura mientras el SENIAT termina de homologar el sistema.
+    A diferencia de VGFactura, no tiene numero_factura/numero_control — no
+    consume VGCorrelativoFiscal, su "numero" es simplemente su id interno
+    (ver codigo) — y nace siempre ya pagada de una vez: no existe el
+    concepto de abono/saldo pendiente para una nota de entrega, se cobra
+    completa al emitirla (ver pedidos_cobro_view en api_views.py).
+
+    No duplica el detalle de cada pedido (platos, acompañantes, adicionales,
+    notas, mesa) en líneas propias: guarda solo la relación a los VGPedido
+    de origen, y el ticket — tanto el original como cualquier reimpresión —
+    se reconstruye leyendo ese detalle en vivo desde ellos (ver
+    imprimir_nota_entrega_caja en impresion_lpd.py), igual que ya hacía el
+    recibo de caja de siempre.
+    """
+    cliente = models.ForeignKey(
+        "varagrill.VGCliente", on_delete=models.PROTECT, null=True, blank=True, related_name="notas_entrega",
+    )
+    pedidos = models.ManyToManyField("varagrill.VGPedido", related_name="notas_entrega")
+    metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="notas_entrega")
+    fecha_emision = models.DateTimeField(auto_now_add=True)
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS, default="USD")
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    referencia = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        db_table = "vg_notas_entrega"
+        verbose_name = "Nota de entrega"
+        verbose_name_plural = "Notas de entrega"
+        ordering = ["-fecha_emision"]
+
+    @property
+    def codigo(self):
+        return f"{self.id:08d}"
+
+    def __str__(self):
+        return f"Nota de entrega {self.codigo}"
+
+
+# ---------------------------------------------------------------------------
 # Gastos operativos (alquiler, servicios, nomina, mantenimiento...)
 # ---------------------------------------------------------------------------
 class VGCategoriaGasto(VGAuditoria):

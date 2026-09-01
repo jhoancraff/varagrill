@@ -126,7 +126,7 @@ def _render_recibo_item(detalle):
     return bytes(out)
 
 
-def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
+def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
     metodo_label = metodo_pago.nombre
     moneda = metodo_pago.moneda
@@ -137,7 +137,11 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
     out += ESC_POS_WCP1252
     out += ALIGN_CENTER
     out += _text('VARAGRILL') + FEED
-    out += _text('RECIBO DE CAJA') + FEED
+    out += BOLD_ON
+    out += _text(titulo) + FEED
+    out += BOLD_OFF
+    if codigo:
+        out += _text(f'Nº {codigo}') + FEED
     out += ALIGN_LEFT
     out += _text('-' * LINE_WIDTH) + FEED
     out += _text(f'Referencia: {referencia}') + FEED
@@ -191,43 +195,52 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa):
     return bytes(out)
 
 
-def imprimir_recibo_caja(pedidos, metodo_pago, referencia, total):
+def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
     """
-    Imprime el recibo combinado de caja para los `pedidos` cobrados en una misma
-    operación. `metodo_pago` es el objeto VGMetodoPago (no el nombre): su
-    `.moneda` decide si el recibo se imprime solo en dólares o solo en
-    bolívares (nunca ambos), igual que las facturas/pre-facturas. Si la
-    impresora de caja no está configurada o está apagada, no hace nada
-    (silencioso) — llamar siempre envuelto en try/except desde el caller,
-    igual que imprimir_comandas_pedido, para que un fallo de impresión no
-    eche para atrás el cobro ya registrado.
+    Imprime (o reimprime) el ticket de una VGNotaEntrega — el recibo de venta
+    sin efecto fiscal que hoy reemplaza a la factura mientras el SENIAT
+    termina de homologar el sistema (ver VGNotaEntrega). No hay lineas
+    propias guardadas: el detalle (platos, acompañantes, adicionales, notas,
+    mesa) se relee en vivo desde los VGPedido relacionados, igual que hacia
+    el recibo de caja de siempre — así una reimpresión días o solo minutos
+    despues sale identica al ticket original.
+
+    Devuelve (exito: bool, motivo: str|None), igual que imprimir_factura_caja:
+    quien llama desde el cobro normal puede ignorar el resultado (no debe
+    tumbar un cobro ya registrado por un problema de impresora), pero
+    notas_entrega_reimprimir_view SI necesita saber si el reenvio realmente
+    llego a la cola.
     """
     config = VGImpresoraCaja.obtener_config()
     if config is None or not config.activo:
-        return
+        return False, 'No hay una impresora de caja activa configurada.'
     if not config.ip or not config.cola:
-        logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite el recibo.')
-        return
+        logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la nota de entrega.')
+        return False, 'La impresora de caja no tiene IP o cola configurada.'
 
-    # Se usa la tasa ya cacheada (sin forzar una consulta a la fuente externa) para
-    # no demorar la impresión del recibo durante el cobro; si nunca se cacheó
-    # ninguna y el método de pago es en bolívares, _monto_texto cae a dólares
-    # en vez de imprimir un monto sin sentido.
-    tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
-    tasa = tasa_actual.tasa if tasa_actual else None
+    pedidos = list(
+        nota.pedidos.select_related('mesa')
+        .prefetch_related('detalles__producto', 'detalles__opciones', 'detalles__adicionales__preparacion')
+        .all()
+    )
 
+    titulo = 'NOTA DE ENTREGA' + (' (REIMPRESION)' if es_reimpresion else '')
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
-        ticket = _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa)
-        logger.info('Enviando recibo de caja %s a %s (%s bytes)', referencia, destino, len(ticket))
+        ticket = _build_recibo_bytes(
+            pedidos, nota.metodo_pago, nota.referencia, nota.total, nota.tasa_cambio_referencia,
+            titulo=titulo, codigo=nota.codigo,
+        )
+        logger.info('Enviando nota de entrega %s a %s (%s bytes)', nota.codigo, destino, len(ticket))
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,
-            job_id=pedidos[0].id if pedidos else 1,
-            nombre_trabajo=f'Recibo {referencia}',
+            job_id=nota.id, nombre_trabajo=f'Nota {nota.codigo}',
         )
-        logger.info('Recibo de caja %s enviado a %s', referencia, destino)
-    except Exception:
-        logger.exception('No se pudo imprimir el recibo de caja %s hacia %s', referencia, destino)
+        logger.info('Nota de entrega %s enviada a %s', nota.codigo, destino)
+        return True, None
+    except Exception as exc:
+        logger.exception('No se pudo imprimir la nota de entrega %s hacia %s', nota.codigo, destino)
+        return False, f'No se pudo enviar el trabajo de impresion: {exc}'
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +255,10 @@ def _render_documento_linea(linea, moneda, tasa):
     return bytes(out)
 
 
-def _build_documento_venta_bytes(titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, moneda, tasa, datos_fiscales, extra_lineas=None):
+def _build_documento_venta_bytes(
+    titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, moneda, tasa, datos_fiscales,
+    extra_lineas=None, mostrar_iva=True,
+):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
 
     out = bytearray()
@@ -279,8 +295,9 @@ def _build_documento_venta_bytes(titulo, subtitulo, cliente, lineas, subtotal, t
         out += _render_documento_linea(linea, moneda, tasa)
 
     out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Subtotal: {_monto_texto(subtotal, moneda, tasa)}') + FEED
-    out += _text(f'IVA: {_monto_texto(total_iva, moneda, tasa)}') + FEED
+    if mostrar_iva:
+        out += _text(f'Subtotal: {_monto_texto(subtotal, moneda, tasa)}') + FEED
+        out += _text(f'IVA: {_monto_texto(total_iva, moneda, tasa)}') + FEED
     out += BOLD_ON
     out += _text(f'TOTAL: {_monto_texto(total, moneda, tasa)}') + FEED
     out += BOLD_OFF
@@ -325,7 +342,7 @@ def imprimir_prefactura_caja(prefactura):
         ticket = _build_documento_venta_bytes(
             'CUENTA (no es factura fiscal)', codigo, prefactura.cliente,
             list(prefactura.lineas.all()), prefactura.subtotal, prefactura.total_iva, prefactura.total,
-            prefactura.moneda, tasa, datos_fiscales,
+            prefactura.moneda, tasa, datos_fiscales, mostrar_iva=False,
         )
         logger.info('Enviando pre-factura %s a %s (%s bytes)', codigo, destino, len(ticket))
         enviar_trabajo_lpd(
@@ -337,24 +354,32 @@ def imprimir_prefactura_caja(prefactura):
         logger.exception('No se pudo imprimir la pre-factura %s hacia %s', codigo, destino)
 
 
-def imprimir_factura_caja(factura):
+def imprimir_factura_caja(factura, es_reimpresion=False):
     """
     Imprime la factura fiscal (con su numero de control) en la impresora de
     caja. Usa la tasa de cambio guardada como referencia al momento de
     emitir la factura (no la tasa actual), para que el monto en bolivares
-    impreso coincida con el que quedo registrado. Silencioso ante fallos,
-    igual que imprimir_recibo_caja.
+    impreso coincida con el que quedo registrado.
+
+    Devuelve (exito: bool, motivo: str|None) en vez de propagar la excepcion
+    — quien llama desde la emision normal puede seguir ignorando el
+    resultado (silencioso ante fallos, para no tumbar una factura ya
+    generada por un problema de impresora), pero factura_reimprimir_view SI
+    necesita saber si el reenvio realmente llego a la cola, para avisarle al
+    cajero en vez de que crea que se imprimio y no sea asi.
     """
     config = VGImpresoraCaja.obtener_config()
     if config is None or not config.activo:
-        return
+        return False, 'No hay una impresora de caja activa configurada.'
     if not config.ip or not config.cola:
         logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la factura.')
-        return
+        return False, 'La impresora de caja no tiene IP o cola configurada.'
 
     datos_fiscales = VGDatosFiscalesEmisor.objects.first()
     codigo = f'{factura.numero_factura:08d}'
     extra_lineas = []
+    if es_reimpresion:
+        extra_lineas.append('*** REIMPRESION ***')
     if factura.saldo_pendiente > 0:
         saldo_texto = _monto_texto(factura.saldo_pendiente, factura.moneda, factura.tasa_cambio_referencia)
         extra_lineas.append(f'Saldo pendiente: {saldo_texto}')
@@ -372,5 +397,7 @@ def imprimir_factura_caja(factura):
             job_id=factura.id, nombre_trabajo=f'Factura {codigo}',
         )
         logger.info('Factura %s enviada a %s', codigo, destino)
-    except Exception:
+        return True, None
+    except Exception as exc:
         logger.exception('No se pudo imprimir la factura %s hacia %s', codigo, destino)
+        return False, f'No se pudo enviar el trabajo de impresion: {exc}'

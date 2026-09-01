@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import ConfirmModal from './ConfirmModal';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
+import FacturasHistorialPage from './FacturasHistorialPage';
+import NotasEntregaHistorialPage from './NotasEntregaHistorialPage';
 import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
@@ -9,7 +11,14 @@ import { formatMontoDocumento } from '../utils/currency';
 
 const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
 
-function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
+// El SENIAT aun esta homologando el sistema para facturacion fiscal (2026-09) —
+// mientras tanto solo se puede cobrar con nota de entrega (sin efecto fiscal).
+// Cuando el SENIAT apruebe, cambiar esto a `true` para reactivar pre-factura y
+// factura directa; el resto del flujo de esos dos documentos sigue intacto,
+// solo queda oculto detras de esta bandera.
+const FACTURACION_HABILITADA = false;
+
+function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos = false }) {
   const tasaCambio = useExchangeRate();
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +48,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [expandedOrderIds, setExpandedOrderIds] = useState(() => new Set());
   const [cuentasRefreshToken, setCuentasRefreshToken] = useState(0);
+  const [notasRefreshToken, setNotasRefreshToken] = useState(0);
   const [pendingConfirm, setPendingConfirm] = useState(null);
 
   const toggleExpanded = (pedidoId) => {
@@ -154,6 +164,32 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     });
   };
 
+  // Cancelar un pedido individual desde caja (antes de cobrarlo) — solo visible para
+  // quien puede hacerlo (ver canCancelarPedidos, resuelto en WelcomeScreen a partir
+  // del rol). El backend vuelve a validar el permiso igual, esto es solo la UI.
+  const handleCancelarPedido = async (pedido) => {
+    setBusyGroup(`cancel-${pedido.id}`);
+    try {
+      const response = await fetch(`/api/pedidos/${pedido.id}/estado/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({ estado: 'cancelado' }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        showError(data.message || 'No se pudo cancelar el pedido.');
+        return;
+      }
+      showSuccess(`Pedido #${pedido.id} cancelado.`);
+      await fetchPedidos();
+    } catch (requestError) {
+      showError('Error de red al cancelar el pedido.');
+    } finally {
+      setBusyGroup('');
+    }
+  };
+
   // --- Documento 1: Nota de entrega (cobro directo e inmediato, sin IVA ni numeracion fiscal) ---
   const handleNotaEntrega = async (group) => {
     const selectedIds = Array.from(selectedByGroup[group.key] || []);
@@ -185,9 +221,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       }
 
       showSuccess(
-        `Nota de entrega registrada: ${formatMontoDocumento(data.factura.total, data.factura.moneda, tasaCambio)} `
-        + `(${data.factura.pedidos.length} pedido(s)). Referencia ${data.factura.referencia}.`,
+        `Nota de entrega ${data.nota_entrega.codigo} registrada: `
+        + `${formatMontoDocumento(data.nota_entrega.total, data.nota_entrega.moneda, tasaCambio)} `
+        + `(${data.nota_entrega.pedidos.length} pedido(s)).`,
       );
+      setNotasRefreshToken((current) => current + 1);
       clearGroupState(group.key);
       await fetchPedidos();
     } catch (requestError) {
@@ -331,6 +369,15 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
     }
     const { action, group } = pending;
 
+    if (action === 'cancelar-pedido') {
+      const { pedido } = pending;
+      return {
+        title: 'Cancelar pedido',
+        message: `Vas a cancelar el pedido #${pedido.id} (${pedido.cliente || 'sin cliente'}, $${pedido.total}). Esta acción no se puede deshacer. ¿Confirmas?`,
+        confirmLabel: 'Sí, cancelar pedido',
+      };
+    }
+
     if (action === 'prefactura') {
       const prefactura = prefacturaByGroup[group.key];
       const totalLabel = prefactura
@@ -369,18 +416,26 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
   };
 
   const confirmContent = buildConfirmContent(pendingConfirm);
+  // Misma llave que usan busyGroup/setBusyGroup para marcar "ocupado" según la
+  // acción pendiente: por grupo (group.key) para nota/pre-factura/factura, o por
+  // pedido individual (cancel-<id>) para cancelar-pedido — ver handleCancelarPedido.
+  const pendingConfirmBusyKey = pendingConfirm
+    ? (pendingConfirm.group ? pendingConfirm.group.key : `cancel-${pendingConfirm.pedido.id}`)
+    : null;
 
   const handleConfirmPendingAction = async () => {
     if (!pendingConfirm) {
       return;
     }
-    const { action, group } = pendingConfirm;
+    const { action, group, pedido } = pendingConfirm;
     if (action === 'nota') {
       await handleNotaEntrega(group);
     } else if (action === 'factura') {
       await handleFacturaDirecta(group);
     } else if (action === 'prefactura') {
       await handleConfirmarFacturaDesdePrefactura(group);
+    } else if (action === 'cancelar-pedido') {
+      await handleCancelarPedido(pedido);
     }
     setPendingConfirm(null);
   };
@@ -455,6 +510,16 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                           <button type="button" onClick={() => toggleExpanded(pedido.id)} style={detailToggleStyle}>
                             {isExpanded ? 'Ocultar' : 'Detalle'}
                           </button>
+                          {canCancelarPedidos ? (
+                            <button
+                              type="button"
+                              onClick={() => setPendingConfirm({ action: 'cancelar-pedido', pedido })}
+                              style={cancelOrderToggleStyle}
+                              disabled={busyGroup === `cancel-${pedido.id}`}
+                            >
+                              Cancelar
+                            </button>
+                          ) : null}
                         </div>
 
                         {isExpanded ? (
@@ -510,7 +575,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                   <div style={footerSectionStyle}>
                     <div style={clienteFormStyle}>
                       <input
-                        placeholder="Cliente (opcional, solo para pre-factura/factura)"
+                        placeholder="Cliente (opcional)"
                         value={cliente.nombre}
                         onChange={(event) => updateCliente(group.key, 'nombre', event.target.value)}
                         style={inputStyle}
@@ -536,7 +601,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       />
                     </div>
                     <p style={clienteHintStyle}>
-                      El tipo y número de documento son obligatorios para generar pre-factura o factura fiscal (no aplica a la nota de entrega).
+                      {FACTURACION_HABILITADA
+                        ? 'El tipo y número de documento son obligatorios para generar factura fiscal (no aplica a la pre-factura ni a la nota de entrega).'
+                        : 'Opcional: solo para que el nombre del cliente aparezca en la pre-factura que se le entrega.'}
                     </p>
 
                     <div style={groupFooterStyle(isMobile)}>
@@ -567,26 +634,25 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (!validateClienteDocumento(group)) return;
-                          handleGenerarPrefactura(group);
-                        }}
+                        onClick={() => handleGenerarPrefactura(group)}
                         style={secondaryButtonStyle}
                         disabled={selectedSet.size === 0 || isBusy}
                       >
                         {isBusy ? 'Generando...' : 'Pre-factura (vista previa)'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!validateClienteDocumento(group)) return;
-                          setPendingConfirm({ action: 'factura', group });
-                        }}
-                        style={primaryButtonStyle}
-                        disabled={selectedSet.size === 0 || isBusy}
-                      >
-                        {isBusy ? 'Emitiendo...' : 'Factura directa'}
-                      </button>
+                      {FACTURACION_HABILITADA ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!validateClienteDocumento(group)) return;
+                            setPendingConfirm({ action: 'factura', group });
+                          }}
+                          style={primaryButtonStyle}
+                          disabled={selectedSet.size === 0 || isBusy}
+                        >
+                          {isBusy ? 'Emitiendo...' : 'Factura directa'}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -606,8 +672,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       ))}
                     </div>
                     <div style={detailTotalsStyle}>
-                      <span>Subtotal: {formatMontoDocumento(prefactura.subtotal, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
-                      <span>IVA: {formatMontoDocumento(prefactura.total_iva, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
                       <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(prefactura.total, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -621,12 +685,22 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setPendingConfirm({ action: 'prefactura', group })}
-                        style={primaryButtonStyle}
-                        disabled={isBusy}
+                        onClick={() => setPendingConfirm({ action: 'nota', group })}
+                        style={checkoutButtonStyle}
+                        disabled={selectedSet.size === 0 || isBusy}
                       >
-                        {isBusy ? 'Emitiendo...' : 'Confirmar y emitir factura'}
+                        {isBusy ? 'Procesando...' : 'Nota de entrega'}
                       </button>
+                      {FACTURACION_HABILITADA ? (
+                        <button
+                          type="button"
+                          onClick={() => setPendingConfirm({ action: 'prefactura', group })}
+                          style={primaryButtonStyle}
+                          disabled={isBusy}
+                        >
+                          {isBusy ? 'Emitiendo...' : 'Confirmar y emitir factura'}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 )}
@@ -637,7 +711,15 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
       ) : null}
 
       <div style={cuentasPorCobrarWrapStyle}>
+        <NotasEntregaHistorialPage isMobile={isMobile} embedded refreshToken={notasRefreshToken} />
+      </div>
+
+      <div style={cuentasPorCobrarWrapStyle}>
         <CuentasPorCobrarPage isMobile={isMobile} embedded refreshToken={cuentasRefreshToken} />
+      </div>
+
+      <div style={cuentasPorCobrarWrapStyle}>
+        <FacturasHistorialPage isMobile={isMobile} embedded />
       </div>
 
       <ConfirmModal
@@ -645,7 +727,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent }) {
         title={confirmContent.title}
         message={confirmContent.message}
         confirmLabel={confirmContent.confirmLabel}
-        busy={pendingConfirm ? busyGroup === pendingConfirm.group.key : false}
+        busy={pendingConfirm ? busyGroup === pendingConfirmBusyKey : false}
         onCancel={() => setPendingConfirm(null)}
         onConfirm={handleConfirmPendingAction}
       />
@@ -860,6 +942,18 @@ const detailToggleStyle = {
   padding: '5px 12px',
   background: 'rgba(255, 255, 255, 0.05)',
   color: '#fff',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  flexShrink: 0,
+};
+
+const cancelOrderToggleStyle = {
+  border: '1px solid rgba(255, 102, 102, 0.45)',
+  borderRadius: 999,
+  padding: '5px 12px',
+  background: 'rgba(255, 73, 73, 0.1)',
+  color: '#ffb3b3',
   fontSize: 12,
   fontWeight: 700,
   cursor: 'pointer',

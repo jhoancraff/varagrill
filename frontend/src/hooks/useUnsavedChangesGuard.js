@@ -55,6 +55,15 @@ export default function useUnsavedChangesGuard(state, { enabled = true } = {}) {
   const markClean = useCallback((nextState) => {
     baselineRef.current = JSON.stringify(nextState !== undefined ? nextState : state);
     setIsDirty(false);
+    // Borrado síncrono del guardián, igual que en confirmLeave: si quien llama
+    // markClean() navega en la MISMA función justo después (ej. handleSubmit
+    // llamando a onSubmitSuccess tras un guardado exitoso), esa navegación
+    // pasa por runWithActiveGuard() antes de que este setIsDirty(false) llegue
+    // a confirmarse y su efecto alcance a des-registrar el guardián — sin este
+    // borrado inmediato, runWithActiveGuard todavía ve el guardián viejo
+    // (isDirty=true de la última vez que corrió su efecto) y abre el modal de
+    // "cambios sin guardar" sobre una acción que en realidad ya se guardó.
+    forceClearActiveGuard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -66,6 +66,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const isCajera = (role || '').trim().toLowerCase() === 'cajera';
   const isContador = (role || '').trim().toLowerCase() === 'contador';
   const isMesero = (role || '').trim().toLowerCase() === 'mesero';
+  const isAnalista = (role || '').trim().toLowerCase() === 'analista';
+  // Quién puede cancelar un pedido desde caja (ver CheckoutPage): administrador,
+  // cajera, contador o analista — nunca mesero/cocinero. isAdmin ya cubre
+  // administrador+contador (ver _is_admin_user en el backend).
+  const canCancelarPedidosDesdeCaja = isAdmin || isCajera || isAnalista;
   // El Contador ya pasa isAdmin (el backend lo trata como admin), pero algunas tarjetas
   // sensibles del Panel Analista (impresoras, datos fiscales, historial de compras)
   // quedan reservadas al dueño real del negocio (isOwner) o al Contador — nunca a un
@@ -1012,6 +1017,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onBack={goBackView}
             lastKitchenEvent={lastKitchenEvent}
             waiterName={displayName}
+            canCancelarPedidos={canCancelarPedidosDesdeCaja}
           />
         ) : activeView === 'cuentas-cobrar' ? (
           <CuentasPorCobrarPage

@@ -359,6 +359,16 @@ class VGGrupoOpcionProducto(models.Model):
         null=True, blank=True,
         help_text="Solo aplica a grupos dinámicos: tope de cuántas opciones puede elegir el mesero, sin importar cuántas haya disponibles en la categoría. Vacío = sin tope.",
     )
+    gramos_base_racion = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text=(
+            "Gramos del plato principal que equivalen a 1 ración completa del acompañante elegido "
+            "(ej: 250 = 1 ración de guarnición por cada 250g de carne pedidos). Solo tiene efecto en "
+            "productos vendidos por peso; si el peso no cae en un múltiplo exacto, se redondea a la "
+            "ración más cercana (mínimo 1 ración). Vacío = el acompañante se descuenta a la par del "
+            "peso del plato, sin lógica de raciones."
+        ),
+    )
     orden = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
@@ -650,6 +660,10 @@ class VGPedido(VGAuditoria):
     cliente = models.ForeignKey(VGCliente, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos")
     tipo_pedido = models.CharField(max_length=10, choices=TIPOS, default="local")
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+    fecha_inicio_preparacion = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Momento en que el pedido pasó a 'en_preparacion' (manual o al volver desde 'listo'). Base para el avance automático a 'listo' pasados los minutos configurados — ver _avanzar_pedidos_en_preparacion_vencidos en api_views.py.",
+    )
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     impuesto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     descuento = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -750,6 +764,11 @@ class VGDetallePedidoOpcion(models.Model):
     """
     detalle_pedido = models.ForeignKey(VGDetallePedido, on_delete=models.CASCADE, related_name="opciones")
     grupo_nombre = models.CharField(max_length=100)
+    grupo = models.ForeignKey(
+        VGGrupoOpcionProducto, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="detalles_elegidos",
+        help_text="Referencia viva al grupo (además del snapshot grupo_nombre) para poder leer su configuración vigente, ej. gramos_base_racion, al momento de descontar inventario.",
+    )
     preparacion = models.ForeignKey(
         VGPreparacion, on_delete=models.PROTECT, null=True, blank=True, related_name="usado_en_pedidos_opcion",
     )

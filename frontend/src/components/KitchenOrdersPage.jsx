@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import ConfirmModal from './ConfirmModal';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 
@@ -186,10 +187,18 @@ function KitchenOrdersPage({
     }
   };
 
-  const handleCancelOrder = (orderId) => {
-    if (!window.confirm('¿Cancelar este pedido? Quedará registrado como cancelado en el historial, no se borra.')) {
+  const [pendingCancelOrder, setPendingCancelOrder] = useState(null);
+
+  const handleCancelOrder = (order) => {
+    setPendingCancelOrder(order);
+  };
+
+  const confirmCancelOrder = () => {
+    if (!pendingCancelOrder) {
       return;
     }
+    const orderId = pendingCancelOrder.id;
+    setPendingCancelOrder(null);
     handleUpdateOrderState(orderId, 'cancelado');
   };
 
@@ -371,7 +380,7 @@ function KitchenOrdersPage({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleCancelOrder(order.id)}
+                            onClick={() => handleCancelOrder(order)}
                             style={cancelButtonStyle(isMobile)}
                             disabled={Boolean(updatingMap[order.id])}
                           >
@@ -423,6 +432,20 @@ function KitchenOrdersPage({
           tasaCambio={tasaCambio}
         />
       ) : null}
+
+      <ConfirmModal
+        open={Boolean(pendingCancelOrder)}
+        title="Cancelar pedido"
+        message={
+          pendingCancelOrder
+            ? `Vas a cancelar el pedido #${pendingCancelOrder.id}${pendingCancelOrder.cliente ? ` (${pendingCancelOrder.cliente})` : ''}. Quedará registrado como cancelado en el historial, no se borra. ¿Confirmas?`
+            : ''
+        }
+        confirmLabel="Sí, cancelar pedido"
+        busy={pendingCancelOrder ? Boolean(updatingMap[pendingCancelOrder.id]) : false}
+        onCancel={() => setPendingCancelOrder(null)}
+        onConfirm={confirmCancelOrder}
+      />
     </section>
   );
 }

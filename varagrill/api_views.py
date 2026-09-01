@@ -3,7 +3,7 @@ import json
 import mimetypes
 import logging
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -36,6 +36,7 @@ from .models import (
     VGMesa,
     VGMetodoPago,
     VGMovimientoInventario,
+    VGNotaEntrega,
     VGOpcionProducto,
     VGPedido,
     VGPago,
@@ -52,12 +53,13 @@ from .auth_helpers import (
     _auth_response,
     _get_role_name,
     _is_admin_user,
+    _is_analista_user,
     _is_cajera_user,
     _is_mesero_user,
     _is_owner_or_contador_user,
     _is_owner_user,
 )
-from .impresion_lpd import imprimir_recibo_caja
+from .impresion_lpd import imprimir_nota_entrega_caja
 from .impresion_termica import imprimir_comandas_pedido
 from .ingredientes_excel import (
     InvalidExcelError,
@@ -528,6 +530,28 @@ def _add_preparation_needs(prep_id, quantity_needed, components_by_preparation, 
     resolving.discard(prep_id)
 
 
+def _resolver_multiplicador_acompanante(opcion, detalle, cantidad_platos):
+    """
+    Cuánto multiplicar la receta propia del acompañante elegido (`opcion`, ej. "Yuca al vapor"
+    o "Arepas") para saber qué descontar de inventario. Si su grupo define gramos_base_racion,
+    el acompañante se sirve en RACIONES completas según el peso del plato principal (ej: 250g
+    de carne = 1 ración), redondeando a la ración más cercana con un mínimo de 1 — así un corte
+    de 490g (casi 2 raciones) no se queda corto solo porque le faltaron 10g para el siguiente
+    umbral, ni un corte de 1000g se queda en una sola ración de acompañante. Sin
+    gramos_base_racion configurado, cae al comportamiento de siempre: escalar a la par del
+    peso/cantidad del plato principal.
+    """
+    gramos_base = opcion.grupo.gramos_base_racion if opcion.grupo_id else None
+    if not gramos_base or not detalle.peso_gramos:
+        return cantidad_platos
+
+    raciones_exactas = detalle.peso_gramos / Decimal(gramos_base)
+    raciones = raciones_exactas.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    if raciones < 1:
+        raciones = Decimal('1')
+    return Decimal(detalle.cantidad) * raciones
+
+
 def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation):
     """
     Cuánto de cada VGIngrediente hay que descontar del inventario al cobrar `pedido`: recorre
@@ -557,12 +581,13 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
             )
 
         for opcion in detalle.opciones.all():
+            multiplicador = _resolver_multiplicador_acompanante(opcion, detalle, cantidad_platos)
             if opcion.producto_id:
                 # Acompañante de un grupo dinámico (ej. "Yuca al vapor" elegida de
-                # Guarniciones): descuenta según SU PROPIA receta, escalado igual que la
-                # línea principal (cantidad x peso_factor del corte que acompaña).
+                # Guarniciones): descuenta según SU PROPIA receta, escalada por raciones
+                # (ver _resolver_multiplicador_acompanante) si el grupo las define.
                 for component in _product_recipe_components(opcion.producto):
-                    amount = component['cantidad'] * cantidad_platos
+                    amount = component['cantidad'] * multiplicador
                     if component['tipo'] == 'ingrediente':
                         needs[component['referencia_id']] = needs.get(component['referencia_id'], Decimal('0')) + amount
                     else:
@@ -572,7 +597,7 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
                         )
                 continue
             _add_preparation_needs(
-                opcion.preparacion_id, cantidad_platos,
+                opcion.preparacion_id, multiplicador,
                 components_by_preparation, yields_by_preparation, needs, set(),
             )
 
@@ -945,7 +970,7 @@ def _resolve_opciones_linea(product, grupos, opciones_seleccionadas, dynamic_pro
                     f'de "{grupo.nombre}" para "{product.nombre}".'
                 )
             for producto_elegido in elegidas:
-                resueltas.append({'grupo_nombre': grupo.nombre, 'producto': producto_elegido})
+                resueltas.append({'grupo_nombre': grupo.nombre, 'grupo': grupo, 'producto': producto_elegido})
             continue
 
         if grupo.obligatorio and not elegidas:
@@ -953,7 +978,7 @@ def _resolve_opciones_linea(product, grupos, opciones_seleccionadas, dynamic_pro
         if not grupo.seleccion_multiple and len(elegidas) > 1:
             return None, f'Solo puedes elegir una opción de "{grupo.nombre}" para "{product.nombre}".'
         for opcion in elegidas:
-            resueltas.append({'grupo_nombre': grupo.nombre, 'opcion': opcion})
+            resueltas.append({'grupo_nombre': grupo.nombre, 'grupo': grupo, 'opcion': opcion})
 
     return resueltas, None
 
@@ -1175,6 +1200,7 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
                 # opciones", sin mencionar recargo.
                 built_opciones.append({
                     'grupo_nombre': resuelta['grupo_nombre'],
+                    'grupo': resuelta['grupo'],
                     'producto': resuelta['producto'],
                     'preparacion': None,
                     'precio_unitario': Decimal('0.00'),
@@ -1185,6 +1211,7 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
             line_subtotal += precio_opcion_total
             built_opciones.append({
                 'grupo_nombre': resuelta['grupo_nombre'],
+                'grupo': resuelta['grupo'],
                 'preparacion': opcion.preparacion,
                 'producto': None,
                 'precio_unitario': precio_opcion_total,
@@ -1364,6 +1391,7 @@ def pedido_create_view(request):
                 VGDetallePedidoOpcion.objects.create(
                     detalle_pedido=detalle,
                     grupo_nombre=opcion['grupo_nombre'],
+                    grupo=opcion['grupo'],
                     preparacion=opcion['preparacion'],
                     producto=opcion['producto'],
                     precio_unitario=opcion['precio_unitario'],
@@ -1405,7 +1433,7 @@ def pedido_detail_view(request, pedido_id):
         pedido = (
             VGPedido.objects
             .select_related('mesa', 'cliente')
-            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo')
             .get(pk=pedido_id)
         )
     except VGPedido.DoesNotExist:
@@ -1491,6 +1519,7 @@ def pedido_update_view(request, pedido_id):
                 VGDetallePedidoOpcion.objects.create(
                     detalle_pedido=detalle,
                     grupo_nombre=opcion['grupo_nombre'],
+                    grupo=opcion['grupo'],
                     preparacion=opcion['preparacion'],
                     producto=opcion['producto'],
                     precio_unitario=opcion['precio_unitario'],
@@ -1502,7 +1531,7 @@ def pedido_update_view(request, pedido_id):
         pedido.actualizado_por = request.user
         pedido.save()
 
-    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto').get(pk=pedido.id)
+    pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo').get(pk=pedido.id)
     _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
 
     return _auth_response({
@@ -3402,6 +3431,7 @@ def _serialize_product(product):
                 'categoria_opciones_id': grupo.categoria_opciones_id,
                 'categoria_opciones_nombre': grupo.categoria_opciones.nombre if grupo.categoria_opciones_id else '',
                 'maximo_selecciones': grupo.maximo_selecciones,
+                'gramos_base_racion': grupo.gramos_base_racion,
                 'opciones': [
                     {
                         'id': opcion.id,
@@ -3467,6 +3497,8 @@ def _parse_grupos_opciones(raw_grupos):
       selecciones hasta maximo_selecciones (seleccion_multiple se fuerza a True) — ver el
       acuerdo con el usuario: "el cliente a veces no va a querer el acompañante".
 
+    Ambos tipos aceptan "gramos_base_racion": int|null — ver VGGrupoOpcionProducto.gramos_base_racion.
+
     Devuelve (grupos_parseados, error_message); cada grupo curado trae sus opciones ya
     resueltas a objetos VGPreparacion, listas para crear en bulk.
     """
@@ -3482,6 +3514,16 @@ def _parse_grupos_opciones(raw_grupos):
         nombre = str(grupo.get('nombre', '') or '').strip()
         if not nombre:
             return None, f'El grupo de opciones #{grupo_index} necesita un nombre.'
+
+        gramos_base_racion = None
+        gramos_base_racion_raw = grupo.get('gramos_base_racion')
+        if gramos_base_racion_raw not in [None, '']:
+            try:
+                gramos_base_racion = int(gramos_base_racion_raw)
+            except (TypeError, ValueError):
+                return None, f'Los gramos por ración del grupo "{nombre}" no son válidos.'
+            if gramos_base_racion <= 0:
+                return None, f'Los gramos por ración del grupo "{nombre}" deben ser mayores a cero.'
 
         categoria_opciones_id = grupo.get('categoria_opciones_id')
         if categoria_opciones_id not in [None, '']:
@@ -3507,6 +3549,7 @@ def _parse_grupos_opciones(raw_grupos):
                 'seleccion_multiple': True,
                 'categoria_opciones_id': categoria_opciones_id,
                 'maximo_selecciones': maximo_selecciones,
+                'gramos_base_racion': gramos_base_racion,
                 'opciones': [],
             })
             continue
@@ -3540,6 +3583,7 @@ def _parse_grupos_opciones(raw_grupos):
             'seleccion_multiple': seleccion_multiple,
             'categoria_opciones_id': None,
             'maximo_selecciones': None,
+            'gramos_base_racion': gramos_base_racion,
             'opciones': parsed_opciones,
         })
 
@@ -3851,6 +3895,7 @@ def admin_products_view(request):
                 seleccion_multiple=grupo_data['seleccion_multiple'],
                 categoria_opciones_id=grupo_data['categoria_opciones_id'],
                 maximo_selecciones=grupo_data['maximo_selecciones'],
+                gramos_base_racion=grupo_data['gramos_base_racion'],
                 orden=orden,
             )
             if grupo_data['opciones']:
@@ -4511,12 +4556,54 @@ def admin_chef_recommendations_view(request):
     }, status=201)
 
 
+MINUTOS_AUTO_AVANCE_PREPARACION = 10
+
+
+def _avanzar_pedidos_en_preparacion_vencidos(actor_user):
+    """
+    Pasa a 'listo' cualquier pedido que lleve más de MINUTOS_AUTO_AVANCE_PREPARACION
+    minutos en 'en_preparacion' — para que el mesero (o la cocina) no tenga que estar
+    pendiente de marcarlo a mano, pedido por pedido.
+
+    Se dispara desde kitchen_orders_view (GET) en vez de un cron/Celery aparte: el
+    tablero de cocina ya hace polling cada 12s mientras está visible (ver
+    KitchenOrdersPage.jsx), así que cualquier pedido vencido se detecta y avanza
+    dentro de ese mismo margen, sin necesitar infraestructura de tareas en segundo
+    plano nueva para este proyecto. select_for_update(skip_locked=True) evita que dos
+    pantallas de cocina abiertas a la vez (dos tablets, por ejemplo) procesen el mismo
+    pedido dos veces — a la segunda simplemente no le toca ninguna fila.
+
+    `actor_user` queda registrado como autor del cambio en las notificaciones (quien
+    tenía el tablero de cocina abierto en ese momento) — no existe un "usuario
+    sistema" en la app, y esto es solo informativo, no afecta permisos.
+    """
+    limite = timezone.now() - timedelta(minutes=MINUTOS_AUTO_AVANCE_PREPARACION)
+    with transaction.atomic():
+        vencidos = list(
+            VGPedido.objects.select_for_update(skip_locked=True)
+            .filter(estado='en_preparacion', fecha_inicio_preparacion__lte=limite)
+        )
+        for pedido in vencidos:
+            pedido.estado = 'listo'
+            pedido.actualizado_por = actor_user
+            pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+            pedido.detalles.filter(estado__in=['pendiente', 'en_preparacion']).update(estado='listo')
+
+    for pedido in vencidos:
+        _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, actor_user, previous_estado='en_preparacion')
+        _notify_usuario_event('PEDIDO_LISTO', pedido, actor_user)
+
+    return vencidos
+
+
 def kitchen_orders_view(request):
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
     if not request.user.is_authenticated:
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para ver pedidos.'}, status=401)
+
+    _avanzar_pedidos_en_preparacion_vencidos(request.user)
 
     status_filter = str(request.GET.get('estado', 'activos')).strip().lower()
     limit_raw = request.GET.get('limit', 60)
@@ -4566,7 +4653,7 @@ def kitchen_orders_view(request):
         .prefetch_related(
             'detalles__producto',
             'detalles__adicionales__preparacion',
-            'detalles__opciones__preparacion', 'detalles__opciones__producto',
+            'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo',
             'detalles__producto__receta_vinculada__receta__ingrediente',
             'detalles__producto__receta_vinculada__receta__preparacion',
             'detalles__producto__subreceta_vinculada__componentes__ingrediente',
@@ -4772,7 +4859,7 @@ def kitchen_order_status_update_view(request, pedido_id):
         'pendiente': {'en_preparacion', 'cancelado'},
         'en_preparacion': {'listo', 'cancelado'},
         'listo': {'entregado', 'en_preparacion'},
-        'entregado': set(),
+        'entregado': {'cancelado'},
         'pagado': set(),
         'cancelado': set(),
     }
@@ -4790,10 +4877,29 @@ def kitchen_order_status_update_view(request, pedido_id):
                 status=400,
             )
 
+        # Cancelar desde 'entregado' (el pedido ya llegó a la mesa) es la cancelación
+        # "desde caja" — solo antes de cobrar, nunca después: 'pagado' no admite
+        # ninguna transición (ver `transitions` arriba), así que un pedido ya
+        # facturado/cobrado no se puede tocar por acá. Reservada a quien maneja caja,
+        # no a cualquier mesero — ver acuerdo con el usuario, 2026-09.
+        if pedido.estado == 'entregado' and next_state == 'cancelado':
+            if not (_is_admin_user(request.user) or _is_cajera_user(request.user) or _is_analista_user(request.user)):
+                return _auth_response({
+                    'ok': False,
+                    'message': 'No tienes permiso para cancelar un pedido desde caja.',
+                }, status=403)
+
         previous_estado = pedido.estado
         pedido.estado = next_state
         pedido.actualizado_por = request.user
-        pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+        update_fields = ['estado', 'actualizado_por', 'fecha_actualizacion']
+        if next_state == 'en_preparacion':
+            # Arranca (o reinicia, si viene de "Volver a preparar" desde 'listo')
+            # el cronómetro del avance automático — ver
+            # _avanzar_pedidos_en_preparacion_vencidos.
+            pedido.fecha_inicio_preparacion = timezone.now()
+            update_fields.append('fecha_inicio_preparacion')
+        pedido.save(update_fields=update_fields)
 
         if next_state == 'en_preparacion':
             pedido.detalles.filter(estado='pendiente').update(estado='en_preparacion')
@@ -4858,7 +4964,7 @@ def pedidos_cobro_view(request):
         pedidos = (
             VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
             .select_related('mesa', 'cliente', 'usuario')
-            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto')
+            .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo')
             .order_by('mesa__numero', 'fecha_creacion')
         )
         return _auth_response({
@@ -4933,7 +5039,7 @@ def pedidos_cobro_view(request):
                 'detalles__producto__subreceta_vinculada__componentes__ingrediente',
                 'detalles__producto__subreceta_vinculada__componentes__sub_preparacion',
                 'detalles__adicionales__preparacion',
-                'detalles__opciones__preparacion', 'detalles__opciones__producto',
+                'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo',
             )
         )
         found_ids = {pedido.id for pedido in pedidos}
@@ -4999,15 +5105,33 @@ def pedidos_cobro_view(request):
                         creado_por=request.user,
                     )
 
+        # El cobro directo (mesero o cajera) siempre genera una nota de entrega —
+        # el recibo de venta sin efecto fiscal que hoy reemplaza a la factura
+        # mientras el SENIAT termina de homologar el sistema (ver VGNotaEntrega).
+        # A diferencia de una factura, nace ya pagada de una vez: no hay
+        # concepto de abono/saldo pendiente aca.
+        nota_entrega = VGNotaEntrega.objects.create(
+            metodo_pago=metodo_pago,
+            total=total_cobrado,
+            moneda=metodo_pago.moneda,
+            tasa_cambio_referencia=tasa_cambio_pago,
+            referencia=referencia,
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+        nota_entrega.pedidos.set(pedidos)
+
     try:
-        imprimir_recibo_caja(pedidos, metodo_pago, referencia, total_cobrado)
+        imprimir_nota_entrega_caja(nota_entrega)
     except Exception:
-        logger.exception('Fallo al imprimir el recibo de caja para el cobro %s', referencia)
+        logger.exception('Fallo al imprimir la nota de entrega %s', nota_entrega.codigo)
 
     return _auth_response({
         'ok': True,
         'message': f'Se cobraron {len(pedidos)} pedido(s) correctamente.',
-        'factura': {
+        'nota_entrega': {
+            'id': nota_entrega.id,
+            'codigo': nota_entrega.codigo,
             'referencia': referencia,
             'total': str(total_cobrado),
             'moneda': metodo_pago.moneda,

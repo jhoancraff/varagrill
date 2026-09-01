@@ -38,6 +38,7 @@ class ProductoSerializer(serializers.ModelSerializer):
                 'seleccion_multiple': grupo.seleccion_multiple,
                 'categoria_opciones_id': grupo.categoria_opciones_id,
                 'maximo_selecciones': grupo.maximo_selecciones,
+                'gramos_base_racion': grupo.gramos_base_racion,
                 'opciones': [
                     {
                         'id': opcion.id,

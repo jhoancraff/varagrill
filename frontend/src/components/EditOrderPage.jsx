@@ -955,6 +955,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
         <OpcionesProductoModal
           product={opcionesPickerFor}
           products={products}
+          pesoGramos={pendingPeso}
           onClose={() => {
             setOpcionesPickerFor(null);
             setPendingPeso(null);
@@ -1022,7 +1023,15 @@ function PesoPickerModal({ product, tasaCambio, onClose, onConfirm }) {
   );
 }
 
-function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
+function calcularRaciones(pesoGramos, gramosBaseRacion) {
+  if (!gramosBaseRacion || !pesoGramos) {
+    return null;
+  }
+  const raciones = Math.round(Number(pesoGramos) / Number(gramosBaseRacion));
+  return Math.max(1, raciones);
+}
+
+function OpcionesProductoModal({ product, products, pesoGramos, onClose, onConfirm }) {
   const grupos = Array.isArray(product.grupos_opciones) ? product.grupos_opciones : [];
   const [seleccion, setSeleccion] = useState({});
   const [error, setError] = useState('');
@@ -1145,6 +1154,7 @@ function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
             const pool = esDinamico ? (poolPorGrupo[grupo.id] || []) : [];
             const max = grupo.maximo_selecciones;
             const alcanzoMax = esDinamico && max && elegidas.length >= max;
+            const raciones = calcularRaciones(pesoGramos, grupo.gramos_base_racion);
             return (
               <label key={grupo.id} style={fieldWrapStyle}>
                 <span style={labelStyle}>
@@ -1153,6 +1163,11 @@ function OpcionesProductoModal({ product, products, onClose, onConfirm }) {
                     ? ` (opcional${max ? ` — hasta ${max}` : ''}, elegidas ${elegidas.length}${max ? `/${max}` : ''})`
                     : (grupo.obligatorio ? ' *' : ' (opcional)') + (grupo.seleccion_multiple ? ' — puedes elegir varias' : '')}
                 </span>
+                {raciones !== null ? (
+                  <div style={{ color: '#ffcf7d', fontSize: 12, fontWeight: 700 }}>
+                    Con {pesoGramos}g corresponden {raciones} {raciones === 1 ? 'ración' : 'raciones'} de cada opción elegida.
+                  </div>
+                ) : null}
                 {esDinamico && pool.length === 0 ? (
                   <div style={{ color: '#c8bbbb', fontSize: 13 }}>No hay opciones disponibles en este momento.</div>
                 ) : null}

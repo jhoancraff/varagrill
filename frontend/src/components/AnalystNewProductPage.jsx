@@ -44,6 +44,7 @@ function crearGrupoOpcionVacio() {
     seleccion_multiple: false,
     categoriaOpcionesId: '',
     maximoSelecciones: '',
+    gramosBaseRacion: '',
     opciones: [],
   };
 }
@@ -322,10 +323,12 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
           nombre: grupo.nombre,
           categoria_opciones_id: grupo.categoriaOpcionesId,
           maximo_selecciones: grupo.maximoSelecciones || null,
+          gramos_base_racion: grupo.gramosBaseRacion || null,
         } : {
           nombre: grupo.nombre,
           obligatorio: grupo.obligatorio,
           seleccion_multiple: grupo.seleccion_multiple,
+          gramos_base_racion: grupo.gramosBaseRacion || null,
           opciones: grupo.opciones.map((opcion) => ({
             preparacion_id: opcion.preparacion_id,
             precio_adicional: opcion.precio_adicional || '0',
@@ -671,6 +674,24 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
                         Quitar grupo
                       </button>
                     </div>
+
+                    <div style={composerRowStyle(isMobile)}>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="Gramos del plato por cada ración (opcional)"
+                        value={grupo.gramosBaseRacion}
+                        onChange={(event) => handleUpdateGrupoOpcion(grupo.uid, 'gramosBaseRacion', event.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <p style={linkHintStyle}>
+                      Solo para platos vendidos por peso: cuántos gramos del plato equivalen a 1 ración completa del
+                      acompañante (ej. 250 = 1 ración cada 250g de carne). Si el peso pedido no cae exacto, se
+                      redondea a la ración más cercana (mínimo 1). Déjalo vacío para que el acompañante se descuente
+                      a la par del peso del plato, sin raciones.
+                    </p>
 
                     {esDinamico ? (
                       <>

@@ -330,16 +330,17 @@ def _build_ticket_bytes(pedido, categorias, items):
     out += _text(encabezado) + FEED
     out += ALIGN_LEFT
     out += _text('=' * LINE_WIDTH) + FEED
-    # Pedido y mesa en negrita y doble alto: son el primer dato que ubica el cocinero
-    # al recibir la comanda.
+    # Cliente, mesa y mesero en negrita y doble alto: son el primer dato que
+    # ubica al cocinero/bartender al recibir la comanda (a quién/qué mesa va,
+    # quién lo tomó) — con prioridad en las 3 estaciones (cocina, parrilla,
+    # bar), antes que cualquier otro dato.
     out += BOLD_ON + DOUBLE_HEIGHT
     out += _text(f'Pedido #{pedido.id}') + FEED
+    out += _text(f'Cliente: {pedido.cliente.nombre if pedido.cliente else "Consumidor Final"}') + FEED
     out += _text(mesa_label) + FEED
+    out += _text(f'Mesero: {pedido.usuario.username}') + FEED
     out += NORMAL_SIZE + BOLD_OFF
     out += _text(_tipo_pedido_label(pedido.tipo_pedido)) + FEED
-    out += _text(f'Mesero: {pedido.usuario.username}') + FEED
-    if pedido.cliente:
-        out += _text(f'Cliente: {pedido.cliente.nombre}') + FEED
     out += _text(hora) + FEED
     out += _text('=' * LINE_WIDTH) + FEED
 
@@ -417,9 +418,14 @@ def _build_ticket_secundario_bytes(pedido, categoria, detalles):
     out += _text(categoria.nombre.upper()) + FEED
     out += ALIGN_LEFT
     out += _text('=' * LINE_WIDTH) + FEED
+    # Mismo criterio de prioridad que el ticket completo (ver _build_ticket_bytes):
+    # cliente, mesa y mesero primero, en negrita y doble alto — esta impresora
+    # secundaria (típicamente la parrilla) antes solo traía pedido y mesa.
     out += BOLD_ON + DOUBLE_HEIGHT
     out += _text(f'Pedido #{pedido.id}') + FEED
+    out += _text(f'Cliente: {pedido.cliente.nombre if pedido.cliente else "Consumidor Final"}') + FEED
     out += _text(mesa_label) + FEED
+    out += _text(f'Mesero: {pedido.usuario.username}') + FEED
     out += NORMAL_SIZE + BOLD_OFF
     out += _text(_tipo_pedido_label(pedido.tipo_pedido)) + FEED
     out += _text(hora) + FEED

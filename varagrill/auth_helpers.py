@@ -35,6 +35,12 @@ def _is_contador_user(user):
     return _get_role_name(user).lower() == 'contador'
 
 
+def _is_analista_user(user):
+    if not getattr(user, 'is_authenticated', False):
+        return False
+    return _get_role_name(user).lower() == 'analista'
+
+
 def _is_owner_user(user):
     """
     Nivel superior de acceso real (el dueño del negocio), separado a propósito del rol

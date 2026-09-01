@@ -13,6 +13,7 @@ const emptyForm = {
   categoria_id: '',
   precio_venta: '',
   costo_estimado: '',
+  margen_ganancia_pct: '',
   tiempo_preparacion_min: '0',
   disponible: true,
   venta_por_peso: false,
@@ -54,6 +55,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
   const [recetas, setRecetas] = useState([]);
   const [subrecetas, setSubrecetas] = useState([]);
   const [ingredients, setIngredients] = useState([]);
+  const [configCosteo, setConfigCosteo] = useState({ rendimiento_receta_pct: '0', margen_ganancia_defecto_pct: '50' });
   const [form, setForm] = useState(emptyForm);
   const [ingredientDraft, setIngredientDraft] = useState(emptyIngredientDraft);
   const [ingredientes, setIngredientes] = useState([]);
@@ -105,6 +107,9 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
         setRecetas(Array.isArray(data.recetas) ? data.recetas : []);
         setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
         setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
+        if (data.configuracion_costeo) {
+          setConfigCosteo(data.configuracion_costeo);
+        }
       } catch (error) {
         showError(error.message || 'No se pudieron cargar las categorías.');
       } finally {
@@ -121,6 +126,37 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
 
   const selectedVinculo = form.vinculo_id
     ? (form.vinculo_tipo === 'receta' ? recetas : subrecetas).find((item) => String(item.id) === String(form.vinculo_id))
+    : null;
+
+  // Costo con el % de rendimiento global ya aplicado. Si hay receta/subreceta vinculada, el
+  // backend ya lo aplicó (solo para recetas, nunca subrecetas — ver _compute_product_recipe_cost).
+  // Si el producto lleva ingredientes propios directos, ESO es su receta: se suma el % acá mismo,
+  // en el cliente, porque todavía no existe en el servidor (se está armando en este formulario).
+  const costoConRendimiento = useMemo(() => {
+    if (selectedVinculo) {
+      return Number(selectedVinculo.costo_unitario_calculado || 0);
+    }
+    if (ingredientes.length === 0) {
+      return null;
+    }
+    const rendimientoPct = Number(configCosteo.rendimiento_receta_pct || 0);
+    const costoBruto = ingredientes.reduce((total, item) => {
+      const ingrediente = ingredients.find((candidate) => String(candidate.id) === String(item.referencia_id));
+      if (!ingrediente) return total;
+      const cantidadEnUnidadBase = item.unidad !== item.unidadBase
+        ? convertirCantidad(Number(item.cantidad || 0), item.unidad, item.unidadBase)
+        : Number(item.cantidad || 0);
+      return total + cantidadEnUnidadBase * Number(ingrediente.costo_unitario || 0);
+    }, 0);
+    return costoBruto * (1 + rendimientoPct / 100);
+  }, [selectedVinculo, ingredientes, ingredients, configCosteo]);
+
+  const margenEfectivoPct = form.margen_ganancia_pct !== ''
+    ? Number(form.margen_ganancia_pct || 0)
+    : Number(configCosteo.margen_ganancia_defecto_pct || 0);
+
+  const precioSugerido = costoConRendimiento !== null
+    ? costoConRendimiento * (1 + margenEfectivoPct / 100)
     : null;
 
   const filteredIngredients = useMemo(() => {
@@ -269,6 +305,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       formData.append('categoria_id', form.categoria_id);
       formData.append('precio_venta', form.precio_venta || '0');
       formData.append('costo_estimado', form.costo_estimado);
+      formData.append('margen_ganancia_pct', form.margen_ganancia_pct);
       formData.append('tiempo_preparacion_min', form.tiempo_preparacion_min || '0');
       formData.append('disponible', form.disponible ? 'true' : 'false');
       formData.append('venta_por_peso', form.venta_por_peso ? 'true' : 'false');
@@ -389,6 +426,19 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
                 <input type="number" min="0" step="0.01" value={form.costo_estimado} onChange={(event) => handleChange('costo_estimado', event.target.value)} style={inputStyle} />
               </label>
               <label style={fieldStyle}>
+                <span style={labelStyle}>Margen de ganancia (%)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.margen_ganancia_pct}
+                  onChange={(event) => handleChange('margen_ganancia_pct', event.target.value)}
+                  placeholder={`Por defecto: ${configCosteo.margen_ganancia_defecto_pct}%`}
+                  style={inputStyle}
+                />
+                <span style={ventaPorPesoHintStyle}>Vacío usa el margen por defecto de la configuración de costeo.</span>
+              </label>
+              <label style={fieldStyle}>
                 <span style={labelStyle}>Tiempo de preparación (min)</span>
                 <input type="number" min="0" step="1" value={form.tiempo_preparacion_min} onChange={(event) => handleChange('tiempo_preparacion_min', event.target.value)} style={inputStyle} />
               </label>
@@ -401,6 +451,29 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
                 <span>Se vende por peso (precio por kilogramo)</span>
               </label>
             </div>
+
+            {costoConRendimiento !== null ? (
+              <div style={costReferenceBoxStyle}>
+                <div>
+                  <div style={costReferenceLabelStyle}>Costo con rendimiento: ${costoConRendimiento.toFixed(4)}</div>
+                  <div style={costReferenceValueStyle}>Precio sugerido: ${precioSugerido.toFixed(2)}</div>
+                  <p style={costReferenceHintStyle}>
+                    Costo de la receta ya con el % de rendimiento global sumado, más el margen de ganancia
+                    ({margenEfectivoPct.toFixed(2)}%{form.margen_ganancia_pct === '' ? ', por defecto' : ', propio de este producto'}).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleChange('costo_estimado', costoConRendimiento.toFixed(4));
+                    handleChange('precio_venta', precioSugerido.toFixed(2));
+                  }}
+                  style={useCostButtonStyle}
+                >
+                  Usar estos valores
+                </button>
+              </div>
+            ) : null}
 
             <div style={linkCardStyle}>
               <div style={labelStyle}>Vincular con Receta o Subreceta (opcional)</div>

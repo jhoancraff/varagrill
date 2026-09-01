@@ -97,6 +97,12 @@ const ResultsIcon = () => (
   </svg>
 );
 
+const MovementIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 12h6l2-4 4 8 2-4h4" />
+  </svg>
+);
+
 const reportSections = [
   {
     id: 'contabilidad-cuadre-caja',
@@ -152,6 +158,12 @@ const reportSections = [
     title: 'Margen de ganancia por plato',
     description: 'Cuánto entró, cuánto costó y cuánto se ganó por cada plato vendido, en el rango de fechas que elijas.',
     icon: MarginIcon,
+  },
+  {
+    id: 'movimiento-productos',
+    title: 'Movimiento de productos',
+    description: 'Cuántas unidades o kilos de cada plato se vendieron por día, mes o rango de fechas — filtra por producto o categoría.',
+    icon: MovementIcon,
   },
   {
     id: 'admin-ingredients',

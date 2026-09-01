@@ -45,6 +45,8 @@ import HistorialFacturasPage from './HistorialFacturasPage';
 import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
 import AnalystComprasPage from './AnalystComprasPage';
 import AnalystMargenGananciaPage from './AnalystMargenGananciaPage';
+import AnalystMovimientoProductosPage from './AnalystMovimientoProductosPage';
+import AnalystConfiguracionCosteoPage from './AnalystConfiguracionCosteoPage';
 import EditOrderPage from './EditOrderPage';
 import KitchenOrdersPage from './KitchenOrdersPage';
 import MesasAtendidasPage from './MesasAtendidasPage';
@@ -1043,6 +1045,16 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           />
         ) : activeView === 'margen-ganancia' ? (
           <AnalystMargenGananciaPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'movimiento-productos' ? (
+          <AnalystMovimientoProductosPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'admin-configuracion-costeo' ? (
+          <AnalystConfiguracionCosteoPage
             isMobile={isMobile}
             onBack={goBackView}
           />

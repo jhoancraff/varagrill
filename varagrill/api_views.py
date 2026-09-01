@@ -24,6 +24,7 @@ from .models import (
     VGCategoriaProducto,
     VGCliente,
     VGCompra,
+    VGConfiguracionCosteo,
     VGDetalleCompra,
     VGDetallePedido,
     VGDetallePedidoAdicional,
@@ -364,6 +365,26 @@ def _compute_addon_sale_price(costo_unitario, margen_ganancia):
     return precio.quantize(Decimal('0.01'))
 
 
+def _aplicar_rendimiento_receta(costo, config=None):
+    """
+    Suma el porcentaje de rendimiento global (VGConfiguracionCosteo.rendimiento_receta_pct)
+    a un costo de RECETA ya calculado — nunca a un costo de subreceta, ver el docstring
+    del modelo. `config` es opcional para evitar N+1 queries cuando se llama en un loop
+    (ver admin_products_view/admin_recipes_view, que lo cargan una sola vez).
+    """
+    config = config or VGConfiguracionCosteo.obtener_config()
+    pct = config.rendimiento_receta_pct or Decimal('0')
+    return costo * (Decimal('1') + pct / Decimal('100'))
+
+
+def _resolver_margen_ganancia_producto(product, config=None):
+    """Margen de ganancia efectivo de un producto: el propio si lo definio, si no el defecto global."""
+    if product.margen_ganancia_pct is not None:
+        return product.margen_ganancia_pct
+    config = config or VGConfiguracionCosteo.obtener_config()
+    return config.margen_ganancia_defecto_pct or Decimal('0')
+
+
 def _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation):
     """
     Costea cada VGPreparacion sumando (cantidad_requerida x costo) de sus ingredientes y
@@ -558,8 +579,14 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
     return needs
 
 
-def _compute_product_recipe_cost(product, preparation_cost_map):
-    """Costea un VGProducto (receta) sumando (cantidad_requerida x costo) de sus ingredientes y subrecetas."""
+def _compute_product_recipe_cost(product, preparation_cost_map, config=None):
+    """
+    Costea un VGProducto (receta) sumando (cantidad_requerida x costo) de sus
+    ingredientes y subrecetas, y le suma el % de rendimiento global — esta
+    función solo se usa para costear RECETAS (VGProducto de categoría
+    'Recetas' o el `receta` propio de cualquier producto), nunca subrecetas,
+    así que el buffer siempre aplica aquí (ver _aplicar_rendimiento_receta).
+    """
     total = Decimal('0')
     for component in product.receta.all():
         if component.ingrediente_id:
@@ -568,16 +595,22 @@ def _compute_product_recipe_cost(product, preparation_cost_map):
         elif component.preparacion_id:
             costs = preparation_cost_map.get(component.preparacion_id, {'costo_unitario': Decimal('0')})
             total += component.cantidad_requerida * costs['costo_unitario']
-    return total
+    return _aplicar_rendimiento_receta(total, config)
 
 
-def _compute_product_unit_cost(product, ingredient_costs, preparation_cost_map):
+def _compute_product_unit_cost(product, ingredient_costs, preparation_cost_map, config=None):
     """
     Costea 1 unidad vendible de `product` (o 1 kg si es venta_por_peso, mismo
     criterio que _compute_pedido_ingredient_needs) usando _product_recipe_components
     — a diferencia de _compute_product_recipe_cost, sí resuelve productos vinculados
     a una receta/subreceta (receta_vinculada/subreceta_vinculada), cuya tabla propia
     `receta` está vacía.
+
+    El % de rendimiento global se suma SIEMPRE QUE el costo represente una
+    receta (`receta_vinculada` o la tabla `receta` propia del producto) — pero
+    NO cuando el producto está vinculado directamente a una subreceta
+    (`subreceta_vinculada`), porque ahí el costo es el de la subreceta en sí,
+    no el de una receta de plato. Ver el docstring de VGConfiguracionCosteo.
     """
     total = Decimal('0')
     for component in _product_recipe_components(product):
@@ -586,7 +619,9 @@ def _compute_product_unit_cost(product, ingredient_costs, preparation_cost_map):
         else:
             costs = preparation_cost_map.get(component['referencia_id'], {'costo_unitario': Decimal('0')})
             total += component['cantidad'] * costs['costo_unitario']
-    return total
+    if product.subreceta_vinculada_id:
+        return total
+    return _aplicar_rendimiento_receta(total, config)
 
 
 def _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_map, unit_cost_cache=None):
@@ -699,6 +734,7 @@ def _calcular_margen_periodo(desde, hasta):
 
     ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
     preparation_cost_map = _load_preparation_cost_map()
+    config_costeo = VGConfiguracionCosteo.obtener_config()
     unit_cost_cache = {}
 
     total_ingreso_bs = Decimal('0')
@@ -716,7 +752,9 @@ def _calcular_margen_periodo(desde, hasta):
             es_estimado = False
         else:
             if producto.id not in unit_cost_cache:
-                unit_cost_cache[producto.id] = _compute_product_unit_cost(producto, ingredient_costs, preparation_cost_map)
+                unit_cost_cache[producto.id] = _compute_product_unit_cost(
+                    producto, ingredient_costs, preparation_cost_map, config_costeo,
+                )
             costo_unitario = unit_cost_cache[producto.id]
             es_estimado = True
 
@@ -3345,6 +3383,7 @@ def _serialize_product(product):
         'categoria_nombre': product.categoria.nombre if product.categoria else '',
         'precio_venta': str(product.precio_venta),
         'costo_estimado': str(product.costo_estimado) if product.costo_estimado is not None else '',
+        'margen_ganancia_pct': str(product.margen_ganancia_pct) if product.margen_ganancia_pct is not None else '',
         'disponible': product.disponible,
         'venta_por_peso': product.venta_por_peso,
         'tiempo_preparacion_min': product.tiempo_preparacion_min,
@@ -3549,6 +3588,7 @@ def admin_products_view(request):
             .order_by('nombre')
         )
         preparation_cost_map = _load_preparation_cost_map()
+        config_costeo = VGConfiguracionCosteo.obtener_config()
         ingredients = list(
             VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
         )
@@ -3557,7 +3597,7 @@ def admin_products_view(request):
                 'id': receta.id,
                 'nombre': receta.nombre,
                 'costo_unitario_calculado': str(
-                    _compute_product_recipe_cost(receta, preparation_cost_map).quantize(Decimal('0.01'))
+                    _compute_product_recipe_cost(receta, preparation_cost_map, config_costeo).quantize(Decimal('0.01'))
                 ),
             }
             for receta in (
@@ -3585,6 +3625,10 @@ def admin_products_view(request):
             'recetas': recetas,
             'subrecetas': subrecetas,
             'ingredients': ingredients,
+            'configuracion_costeo': {
+                'rendimiento_receta_pct': str(config_costeo.rendimiento_receta_pct),
+                'margen_ganancia_defecto_pct': str(config_costeo.margen_ganancia_defecto_pct),
+            },
         })
 
     is_multipart = bool(request.content_type) and request.content_type.startswith('multipart/form-data')
@@ -3648,6 +3692,16 @@ def admin_products_view(request):
                 raise InvalidOperation
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'El costo estimado no es válido.'}, status=400)
+
+    margen_ganancia_raw = data.get('margen_ganancia_pct')
+    margen_ganancia_pct = None
+    if margen_ganancia_raw not in [None, '']:
+        try:
+            margen_ganancia_pct = Decimal(str(margen_ganancia_raw))
+            if margen_ganancia_pct < 0:
+                raise InvalidOperation
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El margen de ganancia no es válido.'}, status=400)
 
     try:
         tiempo_preparacion = int(tiempo_preparacion_raw)
@@ -3749,6 +3803,7 @@ def admin_products_view(request):
                 categoria=categoria,
                 precio_venta=precio_venta,
                 costo_estimado=costo_estimado,
+                margen_ganancia_pct=margen_ganancia_pct,
                 imagen_url=imagen_url,
                 disponible=disponible,
                 venta_por_peso=venta_por_peso,
@@ -3765,6 +3820,7 @@ def admin_products_view(request):
             product.categoria = categoria
             product.precio_venta = precio_venta
             product.costo_estimado = costo_estimado
+            product.margen_ganancia_pct = margen_ganancia_pct
             product.imagen_url = imagen_url
             product.disponible = disponible
             product.venta_por_peso = venta_por_peso
@@ -3829,6 +3885,7 @@ def admin_recipes_view(request):
             VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
         )
         preparation_cost_map = _load_preparation_cost_map()
+        config_costeo = VGConfiguracionCosteo.obtener_config()
         preparations = []
         for preparation in VGPreparacion.objects.order_by('nombre').values('id', 'nombre', 'rendimiento_unidad', 'rendimiento_cantidad'):
             costs = preparation_cost_map.get(preparation['id'], {'costo_unitario': Decimal('0')})
@@ -3838,7 +3895,9 @@ def admin_recipes_view(request):
         recipe_payloads = []
         for recipe in recipes:
             payload = _serialize_recipe_product(recipe)
-            payload['costo_calculado'] = str(_compute_product_recipe_cost(recipe, preparation_cost_map).quantize(Decimal('0.01')))
+            payload['costo_calculado'] = str(
+                _compute_product_recipe_cost(recipe, preparation_cost_map, config_costeo).quantize(Decimal('0.01')),
+            )
             recipe_payloads.append(payload)
 
         return _auth_response({
@@ -3846,6 +3905,10 @@ def admin_recipes_view(request):
             'recipes': recipe_payloads,
             'ingredients': inventory,
             'preparations': preparations,
+            'configuracion_costeo': {
+                'rendimiento_receta_pct': str(config_costeo.rendimiento_receta_pct),
+                'margen_ganancia_defecto_pct': str(config_costeo.margen_ganancia_defecto_pct),
+            },
         })
 
     try:
@@ -3944,6 +4007,61 @@ def admin_recipes_view(request):
         'message': message,
         'recipe': _serialize_recipe_product(recipe),
     }, status=status_code)
+
+
+@csrf_exempt
+def admin_configuracion_costeo_view(request):
+    """
+    Configuración global de costeo (fila única, ver VGConfiguracionCosteo.obtener_config):
+    el % de rendimiento que se suma al costo de toda receta de producto, y el % de
+    margen de ganancia que se sugiere por defecto para productos nuevos que no
+    definen el suyo propio (VGProducto.margen_ganancia_pct).
+    """
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    config = VGConfiguracionCosteo.obtener_config()
+
+    if request.method == 'GET':
+        return _auth_response({
+            'ok': True,
+            'rendimiento_receta_pct': str(config.rendimiento_receta_pct),
+            'margen_ganancia_defecto_pct': str(config.margen_ganancia_defecto_pct),
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    try:
+        rendimiento_receta_pct = Decimal(str(data.get('rendimiento_receta_pct', '0')))
+        if rendimiento_receta_pct < 0:
+            raise InvalidOperation
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El porcentaje de rendimiento no es válido.'}, status=400)
+
+    try:
+        margen_ganancia_defecto_pct = Decimal(str(data.get('margen_ganancia_defecto_pct', '0')))
+        if margen_ganancia_defecto_pct < 0:
+            raise InvalidOperation
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El porcentaje de margen por defecto no es válido.'}, status=400)
+
+    config.rendimiento_receta_pct = rendimiento_receta_pct
+    config.margen_ganancia_defecto_pct = margen_ganancia_defecto_pct
+    config.actualizado_por = request.user
+    config.save()
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Configuración de costeo actualizada correctamente.',
+        'rendimiento_receta_pct': str(config.rendimiento_receta_pct),
+        'margen_ganancia_defecto_pct': str(config.margen_ganancia_defecto_pct),
+    })
 
 
 def _parse_promotion_discount_fields(data):

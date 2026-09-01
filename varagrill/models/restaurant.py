@@ -172,6 +172,10 @@ class VGProducto(VGAuditoria):
     categoria = models.ForeignKey(VGCategoriaProducto, on_delete=models.PROTECT, related_name="productos")
     precio_venta = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     costo_estimado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    margen_ganancia_pct = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Porcentaje de ganancia propio de este producto sobre su costo de receta (ej: 40.00 = 40%). Vacío usa el margen por defecto de VGConfiguracionCosteo.",
+    )
     imagen_url = models.URLField(blank=True)
     disponible = models.BooleanField(default=True)
     tiempo_preparacion_min = models.PositiveSmallIntegerField(default=0)
@@ -952,3 +956,45 @@ class VGImpresoraCaja(VGAuditoria):
     @classmethod
     def obtener_config(cls):
         return cls.objects.first()
+
+
+class VGConfiguracionCosteo(VGAuditoria):
+    """
+    Configuración global de costeo de recetas: fila única (singleton, mismo
+    criterio que VGImpresoraCaja.obtener_config()), no una por receta.
+
+    rendimiento_receta_pct es un porcentaje que se le suma al costo bruto
+    (suma de ingredientes/subrecetas) de CADA receta de producto (VGRecetaProducto
+    — NO de cada subreceta/VGPreparacion, ver _compute_product_recipe_cost y
+    _compute_product_unit_cost) para compensar mermas de cocina (ej. una carne
+    que pierde peso al cocinarse): costo_con_rendimiento = costo_bruto x
+    (1 + rendimiento_receta_pct/100).
+
+    margen_ganancia_defecto_pct es el porcentaje de ganancia que se sugiere por
+    defecto al crear un producto nuevo (precio sugerido = costo_con_rendimiento
+    x (1 + margen/100)) cuando ese producto no define su propio
+    VGProducto.margen_ganancia_pct.
+    """
+    rendimiento_receta_pct = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('0'),
+        help_text="Porcentaje que se suma al costo de CADA receta de producto para compensar mermas de cocina. No aplica a subrecetas.",
+    )
+    margen_ganancia_defecto_pct = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('50'),
+        help_text="Porcentaje de ganancia sugerido por defecto para productos nuevos que no definen su propio margen.",
+    )
+
+    class Meta:
+        db_table = "vg_configuracion_costeo"
+        verbose_name = "Configuración de costeo"
+        verbose_name_plural = "Configuración de costeo"
+
+    def __str__(self):
+        return f"Rendimiento {self.rendimiento_receta_pct}% / Margen defecto {self.margen_ganancia_defecto_pct}%"
+
+    @classmethod
+    def obtener_config(cls):
+        config = cls.objects.first()
+        if config is None:
+            config = cls.objects.create()
+        return config

@@ -14,7 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import _calcular_margen_periodo
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
-from .models import VGCierreCaja, VGConsignacionCaja, VGGasto, VGMetodoPago
+from .models import VGCierreCaja, VGConsignacionCaja, VGDetallePedido, VGGasto, VGMetodoPago
 from .reportes import (
     desglose_caja_por_moneda,
     disponibilidad_por_cuenta,
@@ -472,3 +472,119 @@ def reporte_estado_resultados_view(request):
     })
 
     return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+
+
+def reporte_movimiento_productos_view(request):
+    """
+    Cuantas unidades (o kg, para productos por peso) de cada producto se
+    vendieron en un rango de fechas, agrupado por producto y por categoria.
+    A diferencia de reporte_margen_ganancia_view, no calcula costo ni
+    ganancia — solo el volumen de movimiento, para responder "cuanto se
+    movio cada plato" sin entrar en plata. Solo incluye pedidos pagados
+    (mismo criterio de "venta real" que el resto de los reportes de
+    contabilidad) y solo productos con al menos una venta en el rango: los
+    que no tuvieron movimiento simplemente no aparecen en la lista.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    try:
+        desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate()
+        hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+
+    detalles = (
+        VGDetallePedido.objects
+        .filter(
+            pedido__estado='pagado',
+            pedido__fecha_creacion__date__gte=desde,
+            pedido__fecha_creacion__date__lte=hasta,
+        )
+        .select_related('producto__categoria')
+    )
+
+    filas_por_producto = {}
+    for detalle in detalles:
+        producto = detalle.producto
+        peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
+        cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor
+
+        fila = filas_por_producto.setdefault(producto.id, {
+            'producto_id': producto.id,
+            'nombre': producto.nombre,
+            'categoria_id': producto.categoria_id,
+            'categoria': producto.categoria.nombre if producto.categoria_id else 'Sin categoria',
+            'venta_por_peso': producto.venta_por_peso,
+            'cantidad_vendida': Decimal('0'),
+            'pedidos': set(),
+        })
+        fila['cantidad_vendida'] += cantidad_equivalente
+        fila['pedidos'].add(detalle.pedido_id)
+
+    productos = []
+    total_unidades = Decimal('0')
+    total_kg = Decimal('0')
+    categorias_totales = {}
+    for fila in filas_por_producto.values():
+        if fila['venta_por_peso']:
+            total_kg += fila['cantidad_vendida']
+        else:
+            total_unidades += fila['cantidad_vendida']
+
+        productos.append({
+            'producto_id': fila['producto_id'],
+            'nombre': fila['nombre'],
+            'categoria_id': fila['categoria_id'],
+            'categoria': fila['categoria'],
+            'unidad': 'kg' if fila['venta_por_peso'] else 'unidad',
+            'cantidad_vendida': str(fila['cantidad_vendida'].quantize(Decimal('0.01'))),
+            'num_ventas': len(fila['pedidos']),
+        })
+
+        entry = categorias_totales.setdefault(fila['categoria_id'], {
+            'categoria_id': fila['categoria_id'],
+            'categoria': fila['categoria'],
+            'cantidad_unidades': Decimal('0'),
+            'cantidad_kg': Decimal('0'),
+            'productos_distintos': 0,
+        })
+        if fila['venta_por_peso']:
+            entry['cantidad_kg'] += fila['cantidad_vendida']
+        else:
+            entry['cantidad_unidades'] += fila['cantidad_vendida']
+        entry['productos_distintos'] += 1
+
+    productos.sort(key=lambda item: Decimal(item['cantidad_vendida']), reverse=True)
+
+    categorias = sorted(
+        [
+            {
+                'categoria_id': entry['categoria_id'],
+                'categoria': entry['categoria'],
+                'cantidad_unidades': str(entry['cantidad_unidades'].quantize(Decimal('0.01'))),
+                'cantidad_kg': str(entry['cantidad_kg'].quantize(Decimal('0.01'))),
+                'productos_distintos': entry['productos_distintos'],
+            }
+            for entry in categorias_totales.values()
+        ],
+        key=lambda item: (Decimal(item['cantidad_unidades']) + Decimal(item['cantidad_kg'])), reverse=True,
+    )
+
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        'productos': productos,
+        'categorias': categorias,
+        'total_productos_distintos': len(productos),
+        'total_unidades_vendidas': str(total_unidades.quantize(Decimal('0.01'))),
+        'total_kg_vendidos': str(total_kg.quantize(Decimal('0.01'))),
+    })

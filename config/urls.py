@@ -34,6 +34,7 @@ from varagrill.api_views import (
     admin_categorias_view,
     admin_chef_recommendations_view,
     admin_compras_view,
+    admin_configuracion_costeo_view,
     admin_impresora_caja_view,
     admin_ingredientes_bulk_create_view,
     admin_ingredientes_import_view,
@@ -74,6 +75,7 @@ from varagrill.contabilidad_views import (
     reporte_cuadre_caja_view,
     reporte_disponibilidad_cuentas_view,
     reporte_estado_resultados_view,
+    reporte_movimiento_productos_view,
 )
 from varagrill.gastos_views import (
     admin_categorias_gasto_view,
@@ -135,6 +137,7 @@ urlpatterns = [
     path('api/admin/categorias/', admin_categorias_view, name='admin-categorias'),
     path('api/admin/impresora-caja/', admin_impresora_caja_view, name='admin-impresora-caja'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),
+    path('api/admin/configuracion-costeo/', admin_configuracion_costeo_view, name='admin-configuracion-costeo'),
     path('api/admin/promociones/', admin_promotions_view, name='admin-promotions'),
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
     path('api/admin/reportes/cuadre-caja/', reporte_cuadre_caja_view, name='admin-reporte-cuadre-caja'),
@@ -142,6 +145,7 @@ urlpatterns = [
     path('api/admin/reportes/disponibilidad-cuentas/', reporte_disponibilidad_cuentas_view, name='admin-reporte-disponibilidad-cuentas'),
     path('api/admin/reportes/margen-ganancia/', reporte_margen_ganancia_view, name='admin-reporte-margen-ganancia'),
     path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),
+    path('api/admin/reportes/movimiento-productos/', reporte_movimiento_productos_view, name='admin-reporte-movimiento-productos'),
     path('api/admin/metodos-pago/', admin_metodos_pago_view, name='admin-metodos-pago'),
     path('api/metodos-pago/', metodos_pago_activos_view, name='metodos-pago-activos'),
     path('api/promociones/', promociones_activas_view, name='promociones-activas'),

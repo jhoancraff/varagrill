@@ -98,6 +98,13 @@ const PurchasesIcon = () => (
   </svg>
 );
 
+const CosteoConfigIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+  </svg>
+);
+
 const analystSections = [
   {
     id: 'admin-users',
@@ -128,6 +135,12 @@ const analystSections = [
     title: 'Gestión de Recetas',
     description: 'Redirige a la página en blanco destinada a la construcción de recetas.',
     icon: RecipesIcon,
+  },
+  {
+    id: 'admin-configuracion-costeo',
+    title: 'Configuración de costeo',
+    description: '% de rendimiento por costo (aplica a todas las recetas) y % de margen de ganancia por defecto de los productos.',
+    icon: CosteoConfigIcon,
   },
   {
     id: 'admin-promotions',

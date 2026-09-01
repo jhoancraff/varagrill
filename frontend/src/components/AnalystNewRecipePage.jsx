@@ -22,6 +22,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
   const preparationPickerRef = useRef(null);
   const [ingredients, setIngredients] = useState([]);
   const [preparations, setPreparations] = useState([]);
+  const [configCosteo, setConfigCosteo] = useState({ rendimiento_receta_pct: '0', margen_ganancia_defecto_pct: '50' });
   const [form, setForm] = useState(emptyForm);
   const [draft, setDraft] = useState(emptyDraft);
   const [components, setComponents] = useState([]);
@@ -70,6 +71,9 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
         }
         setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
         setPreparations(Array.isArray(data.preparations) ? data.preparations : []);
+        if (data.configuracion_costeo) {
+          setConfigCosteo(data.configuracion_costeo);
+        }
       } catch (error) {
         showError(error.message || 'No se pudieron cargar los datos para recetas.');
       } finally {
@@ -100,6 +104,9 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
     () => components.reduce((total, item) => total + Number(item.costoUnitario || 0) * Number(item.cantidad || 0), 0),
     [components],
   );
+
+  const rendimientoPct = Number(configCosteo.rendimiento_receta_pct || 0);
+  const estimatedTotalCostConRendimiento = estimatedTotalCost * (1 + rendimientoPct / 100);
 
   const handleFormChange = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -456,9 +463,22 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
             </section>
 
             <div style={costSummaryStyle}>
-              <div style={costLabelStyle}>Costo total estimado de la receta</div>
+              <div style={costLabelStyle}>Costo neto de la receta (suma de sus artículos)</div>
               <div style={costValueStyle}>${estimatedTotalCost.toFixed(2)}</div>
             </div>
+
+            {components.length > 0 ? (
+              <div style={costSummaryConRendimientoStyle}>
+                <div>
+                  <div style={costLabelStyle}>Costo con rendimiento aplicado</div>
+                  <div style={costRendimientoHintStyle}>
+                    Se le suma el {rendimientoPct.toFixed(2)}% de rendimiento configurado en el Panel Analista
+                    ("Configuración de costeo") a los ${estimatedTotalCost.toFixed(2)} netos de arriba.
+                  </div>
+                </div>
+                <div style={costValueStyle}>${estimatedTotalCostConRendimiento.toFixed(2)}</div>
+              </div>
+            ) : null}
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button type="submit" style={primaryButtonStyle} disabled={saving}>
@@ -694,6 +714,26 @@ const costValueStyle = {
   color: '#7dffa0',
   fontSize: 22,
   fontWeight: 800,
+};
+
+const costSummaryConRendimientoStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  flexWrap: 'wrap',
+  padding: '14px 16px',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 200, 120, 0.3)',
+  background: 'rgba(255, 190, 120, 0.08)',
+};
+
+const costRendimientoHintStyle = {
+  marginTop: 4,
+  color: '#e6cbb0',
+  fontSize: 12,
+  maxWidth: 460,
+  lineHeight: 1.5,
 };
 
 const noticeStyle = {

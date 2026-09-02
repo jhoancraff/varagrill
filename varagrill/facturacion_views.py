@@ -932,18 +932,25 @@ def cuentas_por_cobrar_view(request):
 # Se generan desde pedidos_cobro_view (api_views.py) al cobrar directo; aca
 # solo viven la consulta del historial y la reimpresion.
 # ---------------------------------------------------------------------------
-def _serialize_nota_entrega(nota):
-    return {
+def _serialize_nota_entrega(nota, incluir_detalle=True):
+    data = {
         'id': nota.id,
         'codigo': nota.codigo,
         'fecha_emision': nota.fecha_emision.isoformat(),
         'total': str(nota.total),
+        'saldo_pendiente': str(nota.saldo_pendiente),
+        'estado': nota.estado,
         'moneda': nota.moneda,
         'tasa_cambio_referencia': str(nota.tasa_cambio_referencia) if nota.tasa_cambio_referencia is not None else None,
         'metodo_pago': nota.metodo_pago.nombre,
         'referencia': nota.referencia,
         'pedidos': [pedido.id for pedido in nota.pedidos.all()],
     }
+    if incluir_detalle:
+        data['pagos'] = [
+            _serialize_pago(pago) for pago in nota.pagos.filter(estado='completado').order_by('fecha_pago')
+        ]
+    return data
 
 
 def notas_entrega_view(request):
@@ -975,8 +982,118 @@ def notas_entrega_view(request):
 
     return _auth_response({
         'ok': True,
-        'notas_entrega': [_serialize_nota_entrega(nota) for nota in notas[:200]],
+        'notas_entrega': [_serialize_nota_entrega(nota, incluir_detalle=False) for nota in notas[:200]],
     })
+
+
+def nota_entrega_detail_view(request, nota_id):
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver esta nota de entrega.'}, status=401)
+
+    try:
+        nota = (
+            VGNotaEntrega.objects.select_related('metodo_pago')
+            .prefetch_related('pedidos', 'pagos__metodo_pago', 'pagos__creado_por')
+            .get(pk=nota_id)
+        )
+    except VGNotaEntrega.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
+
+    return _auth_response({'ok': True, 'nota_entrega': _serialize_nota_entrega(nota)})
+
+
+@csrf_exempt
+def nota_entrega_abono_view(request, nota_id):
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para registrar cobros.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    try:
+        monto_input = Decimal(str(data.get('monto', '')))
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+    if monto_input <= 0:
+        return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+
+    try:
+        metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
+    except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
+
+    with transaction.atomic():
+        try:
+            nota = VGNotaEntrega.objects.select_for_update().get(pk=nota_id)
+        except VGNotaEntrega.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
+
+        if nota.estado == 'pagada':
+            return _auth_response({'ok': False, 'message': 'Esta nota de entrega ya no admite cobros.'}, status=409)
+
+        # Mismo criterio que factura_abono_view: monto_input llega en la
+        # moneda de la nota (lo que ve el cajero en pantalla), VGPago.monto y
+        # saldo_pendiente se guardan siempre en USD, y la conversion usa la
+        # tasa CONGELADA de la nota (la que se le mostro al cajero al
+        # emitirla), no la tasa de hoy.
+        if nota.moneda == 'VES':
+            tasa_conversion = nota.tasa_cambio_referencia
+            if not tasa_conversion:
+                tasa_actual_obj = obtener_tasa_actual()
+                tasa_conversion = tasa_actual_obj.tasa if tasa_actual_obj else None
+            if not tasa_conversion or tasa_conversion <= 0:
+                return _auth_response({
+                    'ok': False,
+                    'message': 'No hay tasa de cambio disponible para convertir el monto a dolares.',
+                }, status=400)
+            monto = (monto_input / tasa_conversion).quantize(Decimal('0.01'))
+        else:
+            tasa_conversion = None
+            monto = monto_input.quantize(Decimal('0.01'))
+
+        if monto > nota.saldo_pendiente:
+            saldo_en_moneda_nota = (
+                nota.saldo_pendiente * tasa_conversion if tasa_conversion else nota.saldo_pendiente
+            )
+            unidad = 'Bs' if nota.moneda == 'VES' else '$'
+            return _auth_response({
+                'ok': False,
+                'message': f'El monto excede el saldo pendiente ({unidad} {saldo_en_moneda_nota:.2f}).',
+            }, status=400)
+
+        referencia = str(data.get('referencia', '') or '').strip() \
+            or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{nota.id}'
+
+        tasa_pago_actual = obtener_tasa_actual()
+        pago = VGPago.objects.create(
+            nota_entrega=nota,
+            monto=monto,
+            metodo_pago=metodo_pago,
+            referencia=referencia,
+            estado='completado',
+            tasa_cambio_referencia=tasa_pago_actual.tasa if tasa_pago_actual else None,
+            creado_por=request.user,
+        )
+
+        nota.saldo_pendiente = nota.saldo_pendiente - monto
+        nota.estado = 'pagada' if nota.saldo_pendiente <= 0 else 'abonada_parcial'
+        nota.actualizado_por = request.user
+        nota.save(update_fields=['saldo_pendiente', 'estado', 'actualizado_por', 'fecha_actualizacion'])
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Abono registrado correctamente.',
+        'nota_entrega': _serialize_nota_entrega(nota),
+        'pago': _serialize_pago(pago),
+    }, status=201)
 
 
 @csrf_exempt

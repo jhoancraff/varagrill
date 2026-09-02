@@ -678,14 +678,19 @@ def _tasas_venta_por_pedido(pedido_ids):
     congeló su venta — para poder sumar ventas históricas en bolívares sin que
     el total dependa de la tasa vigente en el momento en que alguien mira el
     reporte (ver _calcular_margen_periodo). Prioridad:
-      1. El VGPago directo del pedido (flujo "mesero cobra directo") — su
+      1. El VGPago directo del pedido (flujo "mesero cobra directo", ya no se
+         genera para pedidos nuevos pero se conserva para el histórico) — su
          propia tasa_cambio_referencia, congelada al cobrar.
-      2. Si el pedido quedó facturado (flujo de facturación), la
-         tasa_cambio_referencia de esa VGFactura, congelada al emitirla.
-      3. Si ninguno de los dos tiene tasa (dato viejo sin backfill, o pedido
-         marcado pagado sin pasar por ninguno de esos flujos), la última
-         VGTasaCambio conocida en o antes de la fecha del pedido — mismo
-         criterio que usa migrations.0031 para rellenar historicos.
+      2. Si el pedido quedó facturado, la tasa_cambio_referencia de esa
+         VGFactura, congelada al emitirla.
+      3. Si el pedido se cobró con nota de entrega, la tasa_cambio_referencia
+         de esa VGNotaEntrega, congelada al emitirla — mismo criterio que la
+         factura: la tasa de LA VENTA es la de emisión, no la de los abonos
+         que se cobren después.
+      4. Si ninguno de los anteriores tiene tasa (dato viejo sin backfill, o
+         pedido marcado pagado sin pasar por ninguno de esos flujos), la
+         última VGTasaCambio conocida en o antes de la fecha del pedido —
+         mismo criterio que usa migrations.0031 para rellenar historicos.
     Devuelve {pedido_id: Decimal|None} — None solo si tampoco hay ninguna
     VGTasaCambio anterior a la fecha del pedido (instalación sin historial).
     """
@@ -706,6 +711,16 @@ def _tasas_venta_por_pedido(pedido_ids):
     if faltantes:
         for factura_id, tasa, pedido_id in (
             VGFactura.objects
+            .filter(pedidos__id__in=faltantes, tasa_cambio_referencia__isnull=False)
+            .order_by('fecha_emision')
+            .values_list('id', 'tasa_cambio_referencia', 'pedidos__id')
+        ):
+            tasa_por_pedido.setdefault(pedido_id, tasa)
+
+    faltantes = pedido_ids - tasa_por_pedido.keys()
+    if faltantes:
+        for nota_id, tasa, pedido_id in (
+            VGNotaEntrega.objects
             .filter(pedidos__id__in=faltantes, tasa_cambio_referencia__isnull=False)
             .order_by('fecha_emision')
             .values_list('id', 'tasa_cambio_referencia', 'pedidos__id')
@@ -5112,15 +5127,10 @@ def pedidos_cobro_view(request):
         tasa_cambio_pago = tasa_cambio_para_registro()
         total_cobrado = Decimal('0')
         for pedido in pedidos:
-            VGPago.objects.create(
-                pedido=pedido,
-                monto=pedido.total,
-                metodo_pago=metodo_pago,
-                referencia=referencia,
-                estado='completado',
-                tasa_cambio_referencia=tasa_cambio_pago,
-                creado_por=request.user,
-            )
+            # El dinero de la nota de entrega se cobra aparte, en uno o varios
+            # abonos (ver nota_entrega_abono_view) — acá solo se cierra el
+            # pedido (inventario descontado, cocina cerrada), igual que ya
+            # hacía _emitir_factura para una factura con saldo pendiente.
             pedido.estado = 'pagado'
             pedido.actualizado_por = request.user
             pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
@@ -5152,11 +5162,14 @@ def pedidos_cobro_view(request):
         # El cobro directo (mesero o cajera) siempre genera una nota de entrega —
         # el recibo de venta sin efecto fiscal que hoy reemplaza a la factura
         # mientras el SENIAT termina de homologar el sistema (ver VGNotaEntrega).
-        # A diferencia de una factura, nace ya pagada de una vez: no hay
-        # concepto de abono/saldo pendiente aca.
+        # Igual que una factura, nace con saldo pendiente por el total: el
+        # dinero se registra aparte como uno o varios abonos
+        # (nota_entrega_abono_view), no en el momento de la emisión.
         nota_entrega = VGNotaEntrega.objects.create(
             metodo_pago=metodo_pago,
             total=total_cobrado,
+            saldo_pendiente=total_cobrado,
+            estado='pendiente_pago',
             moneda=metodo_pago.moneda,
             tasa_cambio_referencia=tasa_cambio_pago,
             referencia=referencia,
@@ -5178,6 +5191,8 @@ def pedidos_cobro_view(request):
             'codigo': nota_entrega.codigo,
             'referencia': referencia,
             'total': str(total_cobrado),
+            'saldo_pendiente': str(nota_entrega.saldo_pendiente),
+            'estado': nota_entrega.estado,
             'moneda': metodo_pago.moneda,
             'pedidos': [pedido.id for pedido in pedidos],
         },

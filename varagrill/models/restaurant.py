@@ -893,12 +893,14 @@ class VGTasaCambio(models.Model):
 
 class VGPago(models.Model):
     """
-    Un pago siempre está ligado a un VGPedido (cobro directo del mesero,
-    flujo de hoy) O a una VGFactura (abono de cuentas por cobrar, flujo de
-    caja/contabilidad) — nunca a ninguno de los dos, nunca a ambos. Así el
-    mismo modelo sirve de abono para el módulo de facturación sin duplicar
-    lógica, y el cuadre de caja diario (varagrill/reportes.py) sigue
-    sumando por fecha/método sin importar el origen del pago.
+    Un pago está ligado a UNO de estos tres orígenes — nunca a más de uno:
+    un VGPedido (cobro directo antiguo, ya no se genera para pedidos nuevos
+    pero se conserva para el histórico), una VGFactura (abono de cuentas por
+    cobrar) o una VGNotaEntrega (abono de una nota de entrega — mismo
+    mecanismo de abonos que una factura, ver nota_entrega_abono_view). Así
+    el mismo modelo sirve de abono para los tres flujos sin duplicar lógica,
+    y el cuadre de caja diario (varagrill/reportes.py) sigue sumando por
+    fecha/método sin importar el origen del pago.
     """
     ESTADOS = [
         ("completado", "Completado"),
@@ -909,6 +911,9 @@ class VGPago(models.Model):
     )
     factura = models.ForeignKey(
         "varagrill.VGFactura", on_delete=models.PROTECT, null=True, blank=True, related_name="pagos",
+    )
+    nota_entrega = models.ForeignKey(
+        "varagrill.VGNotaEntrega", on_delete=models.PROTECT, null=True, blank=True, related_name="pagos",
     )
     monto = models.DecimalField(max_digits=10, decimal_places=2)
     metodo_pago = models.ForeignKey(
@@ -926,8 +931,12 @@ class VGPago(models.Model):
         db_table = "vg_pagos"
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(pedido__isnull=False) | models.Q(factura__isnull=False),
-                name="pago_tiene_pedido_o_factura",
+                condition=(
+                    models.Q(pedido__isnull=False)
+                    | models.Q(factura__isnull=False)
+                    | models.Q(nota_entrega__isnull=False)
+                ),
+                name="pago_tiene_pedido_o_factura_o_nota",
             ),
         ]
 

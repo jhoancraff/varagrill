@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Borra TODOS los datos operativos/transaccionales (pedidos, facturas, compras,
-gastos, pagos, cierres de caja, movimientos de inventario, promociones,
-recomendaciones del chef, historial de tasa de cambio...) y reinicia sus
-contadores de ID a 1, dejando intactos el catálogo y la configuración del
-negocio: usuarios, roles, ingredientes, recetas/subrecetas, productos,
-clientes, categorías (de producto y de gasto), grupos de opciones de
-producto, mesas, métodos de pago, datos fiscales del emisor y la
-configuración de la impresora de caja.
+Borra TODOS los datos operativos/transaccionales (pedidos, notas de entrega,
+facturas, compras, gastos, pagos, cierres de caja, movimientos de
+inventario, promociones, recomendaciones del chef, historial de tasa de
+cambio...) y reinicia sus contadores de ID a 1, dejando intactos el
+catálogo y la configuración del negocio: usuarios, roles, ingredientes,
+recetas/subrecetas, productos, clientes, categorías (de producto y de
+gasto), grupos de opciones de producto, mesas, métodos de pago, datos
+fiscales del emisor y la configuración de la impresora de caja.
 
 Deliberadamente NO se llama "reset_facturas" ni reemplaza a ese comando: el
 alcance acá es mucho más amplio (toda la operación, no solo facturación), y
@@ -21,22 +21,30 @@ Qué se conserva (no se toca en absoluto):
   VGCategoriaGasto, VGGrupoOpcionProducto, VGOpcionProducto, VGMesa,
   VGMetodoPago, VGDatosFiscalesEmisor, VGImpresoraCaja.
 
+Los movimientos de inventario se borran por completo (entradas, salidas y
+ajustes) pero el stock_actual y el resto de cada VGIngrediente NO se tocan
+— el movimiento es solo el historial/auditoría de cómo se llegó a ese
+stock, no la fuente de verdad del stock en sí.
+
 Qué se borra (y su ID vuelve a arrancar en 1):
   VGPago, VGAbonoGasto, VGAbonoCompra, VGDetallePedidoOpcion,
-  VGDetallePedidoAdicional, VGDetallePedido, VGPedido, VGFacturaLinea,
-  VGOrdenCobro, VGFactura, VGPreFacturaLinea, VGPreFactura, VGGasto,
-  VGDetalleCompra, VGCompra, VGDetalleCompraBorrador, VGCompraBorrador,
-  VGMovimientoInventario, VGConsignacionCaja, VGCierreCaja, VGPromocion,
-  VGRecomendacionChef, VGTasaCambio.
+  VGDetallePedidoAdicional, VGDetallePedido, VGPedido, VGNotaEntrega,
+  VGFacturaLinea, VGOrdenCobro, VGFactura, VGPreFacturaLinea, VGPreFactura,
+  VGGasto, VGDetalleCompra, VGCompra, VGDetalleCompraBorrador,
+  VGCompraBorrador, VGMovimientoInventario, VGConsignacionCaja,
+  VGCierreCaja, VGPromocion, VGRecomendacionChef, VGTasaCambio.
 
 Además reinicia a 0 los tres correlativos fiscales (VGCorrelativoFiscal:
 FACTURA, CONTROL, PREFACTURA) — esa tabla no se borra, solo se resetea el
-contador, igual que hace reset_facturas.
+contador, igual que hace reset_facturas. VGNotaEntrega no tiene correlativo
+fiscal propio (su "código" es directamente su id), así que reiniciar su ID
+a 1 ya deja la numeración de notas de entrega en cero — no hace falta nada
+extra para eso.
 
 Orden de borrado (importa: algunas de estas tablas se PROTEGEN entre sí —
-VGAbonoGasto.gasto, VGAbonoCompra.compra y VGPago.pedido/factura usan
-on_delete=PROTECT — así que hay que quitar primero lo que protege antes de
-poder borrar lo protegido). Todas las demás relaciones dentro del alcance
+VGAbonoGasto.gasto, VGAbonoCompra.compra y VGPago.pedido/factura/nota_entrega
+usan on_delete=PROTECT — así que hay que quitar primero lo que protege antes
+de poder borrar lo protegido). Todas las demás relaciones dentro del alcance
 son CASCADE (se arrastran solas) o apuntan a algo que SE CONSERVA (nunca se
 borra ese lado, así que no hay riesgo de tocar catálogo por accidente).
 
@@ -61,6 +69,7 @@ from varagrill.models import (
     VGFactura,
     VGGasto,
     VGMovimientoInventario,
+    VGNotaEntrega,
     VGPago,
     VGPedido,
     VGPreFactura,
@@ -70,15 +79,17 @@ from varagrill.models import (
 )
 
 # Orden de borrado: primero lo que PROTEGE a algo más abajo en la lista
-# (VGPago protege a VGPedido y a VGFactura; VGAbonoGasto protege a VGGasto;
-# VGAbonoCompra protege a VGCompra). El resto de las tablas hijas (detalles,
-# líneas, orden de cobro...) son CASCADE desde el modelo que aparece acá, así
-# que no hace falta listarlas aparte — se arrastran solas al borrar su padre.
+# (VGPago protege a VGPedido, VGFactura y VGNotaEntrega; VGAbonoGasto
+# protege a VGGasto; VGAbonoCompra protege a VGCompra). El resto de las
+# tablas hijas (detalles, líneas, orden de cobro...) son CASCADE desde el
+# modelo que aparece acá, así que no hace falta listarlas aparte — se
+# arrastran solas al borrar su padre.
 MODELOS_A_BORRAR_EN_ORDEN = [
     VGPago,
     VGAbonoGasto,
     VGAbonoCompra,
     VGPedido,
+    VGNotaEntrega,
     VGFactura,
     VGPreFactura,
     VGGasto,

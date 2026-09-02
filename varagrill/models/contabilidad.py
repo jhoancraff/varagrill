@@ -367,9 +367,15 @@ class VGNotaEntrega(VGAuditoria):
     vez de una factura mientras el SENIAT termina de homologar el sistema.
     A diferencia de VGFactura, no tiene numero_factura/numero_control — no
     consume VGCorrelativoFiscal, su "numero" es simplemente su id interno
-    (ver codigo) — y nace siempre ya pagada de una vez: no existe el
-    concepto de abono/saldo pendiente para una nota de entrega, se cobra
-    completa al emitirla (ver pedidos_cobro_view en api_views.py).
+    (ver codigo).
+
+    Igual que una VGFactura, nace con saldo_pendiente = total y estado
+    'pendiente_pago': el pedido ya queda 'pagado' (inventario descontado,
+    cocina cerrada) al emitirla, pero el DINERO se cobra aparte, en uno o
+    varios abonos (ver nota_entrega_abono_view en facturacion_views.py) —
+    metodo_pago acá es solo el método declarado al emitir (define en qué
+    moneda se imprime/muestra la nota), no implica que ya se cobró; cada
+    abono registra su propio VGPago con su propio método.
 
     No duplica el detalle de cada pedido (platos, acompañantes, adicionales,
     notas, mesa) en líneas propias: guarda solo la relación a los VGPedido
@@ -378,6 +384,11 @@ class VGNotaEntrega(VGAuditoria):
     imprimir_nota_entrega_caja en impresion_lpd.py), igual que ya hacía el
     recibo de caja de siempre.
     """
+    ESTADOS = [
+        ("pendiente_pago", "Pendiente de pago"),
+        ("abonada_parcial", "Abonada parcialmente"),
+        ("pagada", "Pagada"),
+    ]
     cliente = models.ForeignKey(
         "varagrill.VGCliente", on_delete=models.PROTECT, null=True, blank=True, related_name="notas_entrega",
     )
@@ -385,6 +396,8 @@ class VGNotaEntrega(VGAuditoria):
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="notas_entrega")
     fecha_emision = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    saldo_pendiente = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente_pago")
     moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS, default="USD")
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     referencia = models.CharField(max_length=100, blank=True)

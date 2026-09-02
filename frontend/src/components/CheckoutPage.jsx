@@ -190,6 +190,24 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }
   };
 
+  // Valida antes de abrir el modal de confirmación (no dentro de handleNotaEntrega,
+  // que ya corre DESPUÉS de que el usuario confirmó) — así "0 pedidos seleccionados"
+  // o "sin método de pago" avisan de una con un toast arriba a la derecha, en vez de
+  // abrir un "vas a cobrar 0 pedido(s) por $0.00" sin sentido o fallar en silencio.
+  const handleClickNotaEntrega = (group) => {
+    const selectedSet = selectedByGroup[group.key] || new Set();
+    if (selectedSet.size === 0) {
+      showError(`Selecciona al menos un pedido de ${group.label} para registrar la nota de entrega.`);
+      return;
+    }
+    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
+    if (!metodoPagoId) {
+      showError('No hay métodos de pago activos configurados.');
+      return;
+    }
+    setPendingConfirm({ action: 'nota', group });
+  };
+
   // --- Documento 1: Nota de entrega (cobro directo e inmediato, sin IVA ni numeracion fiscal) ---
   const handleNotaEntrega = async (group) => {
     const selectedIds = Array.from(selectedByGroup[group.key] || []);
@@ -223,7 +241,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       showSuccess(
         `Nota de entrega ${data.nota_entrega.codigo} registrada: `
         + `${formatMontoDocumento(data.nota_entrega.total, data.nota_entrega.moneda, tasaCambio)} `
-        + `(${data.nota_entrega.pedidos.length} pedido(s)).`,
+        + `(${data.nota_entrega.pedidos.length} pedido(s)). Pendiente de cobro — `
+        + `abona desde el reporte de notas de entrega.`,
       );
       setNotasRefreshToken((current) => current + 1);
       clearGroupState(group.key);
@@ -628,9 +647,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     <div style={docButtonsRowStyle(isMobile)}>
                       <button
                         type="button"
-                        onClick={() => setPendingConfirm({ action: 'nota', group })}
+                        onClick={() => handleClickNotaEntrega(group)}
                         style={checkoutButtonStyle}
-                        disabled={selectedSet.size === 0 || isBusy}
+                        disabled={isBusy}
                       >
                         {isBusy ? 'Procesando...' : 'Nota de entrega'}
                       </button>
@@ -687,9 +706,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </button>
                       <button
                         type="button"
-                        onClick={() => setPendingConfirm({ action: 'nota', group })}
+                        onClick={() => handleClickNotaEntrega(group)}
                         style={checkoutButtonStyle}
-                        disabled={selectedSet.size === 0 || isBusy}
+                        disabled={isBusy}
                       >
                         {isBusy ? 'Procesando...' : 'Nota de entrega'}
                       </button>

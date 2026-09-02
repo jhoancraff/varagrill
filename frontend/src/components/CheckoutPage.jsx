@@ -394,7 +394,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     const selectedTotal = group.pedidos
       .filter((pedido) => selectedSet.has(pedido.id))
       .reduce((sum, pedido) => sum + Number(pedido.total), 0);
-    const totalLabel = `$${selectedTotal.toFixed(2)}`;
+    const metodoSeleccionadoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
+    const metodoSeleccionado = metodosPago.find((metodo) => metodo.id === metodoSeleccionadoId);
+    const totalLabel = formatMontoDocumento(selectedTotal, metodoSeleccionado ? metodoSeleccionado.moneda : 'USD', tasaCambio);
 
     if (action === 'nota') {
       return {

@@ -110,19 +110,19 @@ def _monto_texto(valor_usd, moneda, tasa):
     return f'${valor_usd:.2f}'
 
 
-def _render_recibo_item(detalle):
+def _render_recibo_item(detalle, moneda, tasa):
     out = bytearray()
     out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
     if detalle.notas:
         out += _text(f'  - {detalle.notas}') + FEED
-    out += _text(f'  ${detalle.subtotal:.2f}') + FEED
+    out += _text(f'  {_monto_texto(detalle.subtotal, moneda, tasa)}') + FEED
     for opcion in detalle.opciones.all():
         if opcion.precio_unitario:
-            out += _text(f'  » {opcion.grupo_nombre}: {opcion.nombre}  ${opcion.subtotal:.2f}') + FEED
+            out += _text(f'  » {opcion.grupo_nombre}: {opcion.nombre}  {_monto_texto(opcion.subtotal, moneda, tasa)}') + FEED
         else:
             out += _text(f'  » {opcion.grupo_nombre}: {opcion.nombre}') + FEED
     for adicional in detalle.adicionales.all():
-        out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}  ${adicional.subtotal:.2f}') + FEED
+        out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}  {_monto_texto(adicional.subtotal, moneda, tasa)}') + FEED
     return bytes(out)
 
 
@@ -166,9 +166,9 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa, titulo='R
             out += _text(f'PLATO {numero_plato}') + FEED
             out += BOLD_OFF
             for detalle in items:
-                out += _render_recibo_item(detalle)
+                out += _render_recibo_item(detalle, moneda, tasa)
         for detalle in sueltos:
-            out += _render_recibo_item(detalle)
+            out += _render_recibo_item(detalle, moneda, tasa)
         subtotal_total += pedido.subtotal
         impuesto_total += pedido.impuesto
         descuento_total += pedido.descuento

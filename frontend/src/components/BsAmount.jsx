@@ -13,7 +13,7 @@ export default function BsAmount({ amountUsd, tasa, bs, prefix = '· ', style })
     return null;
   }
   return (
-    <span style={{ fontSize: '0.72em', opacity: 0.72, fontWeight: 500, marginLeft: 6, ...style }}>
+    <span style={{ color: '#fff', fontSize: '0.72em', opacity: 0.72, fontWeight: 500, marginLeft: 6, ...style }}>
       {prefix}{formatted}
     </span>
   );

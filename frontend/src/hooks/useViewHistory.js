@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { runWithActiveGuard, hasActiveGuard } from './dirtyGuardRegistry';
+import { consumeSuppressedPopState } from './popStateSuppression';
 
 /**
  * Reemplaza un simple `useState(vistaInicial)` para el router interno de
@@ -137,6 +138,14 @@ export default function useViewHistory(rootView) {
     const handlePopState = (event) => {
       if (suppressNextPopStateRef.current) {
         suppressNextPopStateRef.current = false;
+        return;
+      }
+      if (consumeSuppressedPopState()) {
+        // Este popstate lo disparó una capa (useMobileBackHandler) consumiendo
+        // su propia entrada de historial al cerrarse — no es un Atrás real del
+        // usuario intentando salir de esta vista, así que no corresponde ni
+        // resincronizar la pila ni consultar el guardián de cambios sin
+        // guardar. Ver popStateSuppression.js.
         return;
       }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { suppressNextPopState } from './popStateSuppression';
 
 /**
  * Sincroniza una capa de UI (modal, drawer, panel lateral) con el historial del
@@ -51,6 +52,12 @@ export default function useMobileBackHandler(isOpen, onClose) {
       if (pushedRef.current && !closingFromPopStateRef.current) {
         // La capa se cerró por otro medio (no por Atrás) — consumimos la
         // entrada que empujamos para que el historial no quede desalineado.
+        // suppressNextPopState() avisa a useViewHistory que el popstate que
+        // esto está a punto de disparar es interno de esta capa, no un Atrás
+        // real del usuario — sin esto, useViewHistory lo confunde con un
+        // intento de salir de la pantalla activa y dispara su propio
+        // guardián de cambios sin guardar por solo cerrar este modal.
+        suppressNextPopState();
         window.history.back();
       }
       pushedRef.current = false;

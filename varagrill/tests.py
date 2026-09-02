@@ -974,6 +974,69 @@ class PedidoCobroInventoryDeductionTests(TestCase):
         # 100g de "queso extra" a partir de un lote 1:1 -> 100g de queso descontados.
         self.assertEqual(queso.stock_actual, Decimal('1900.00'))
 
+    def test_cobro_deducts_chistorra_chorizo_adicionales_por_unidad_and_salsa(self):
+        chistorra = VGIngrediente.objects.create(
+            nombre='Chistorra', unidad_medida='unidad', stock_actual='10', costo_unitario='0.70',
+        )
+        chorizo = VGIngrediente.objects.create(
+            nombre='Chorizo', unidad_medida='unidad', stock_actual='12', costo_unitario='0.90',
+        )
+        tomate = VGIngrediente.objects.create(
+            nombre='Tomate', unidad_medida='g', stock_actual='4000', costo_unitario='0.02',
+        )
+
+        adicional_chistorra = VGPreparacion.objects.create(
+            nombre='Chistorra extra', rendimiento_cantidad='1.000', rendimiento_unidad='unidad', es_adicional=True,
+        )
+        VGRecetaPreparacion.objects.create(
+            preparacion=adicional_chistorra, ingrediente=chistorra, cantidad_requerida='1.000',
+        )
+
+        adicional_chorizo = VGPreparacion.objects.create(
+            nombre='Chorizo extra', rendimiento_cantidad='1.000', rendimiento_unidad='unidad', es_adicional=True,
+        )
+        VGRecetaPreparacion.objects.create(
+            preparacion=adicional_chorizo, ingrediente=chorizo, cantidad_requerida='1.000',
+        )
+
+        salsa = VGPreparacion.objects.create(
+            nombre='Salsa de la casa', rendimiento_cantidad='1000.000', rendimiento_unidad='g',
+        )
+        VGRecetaPreparacion.objects.create(
+            preparacion=salsa, ingrediente=tomate, cantidad_requerida='300.000',
+        )
+
+        plato = VGProducto.objects.create(
+            nombre='Plato con salsa', categoria=self.category, precio_venta='12.00', disponible=True,
+        )
+        VGRecetaProducto.objects.create(producto=plato, preparacion=salsa, cantidad_requerida='200.000')
+
+        pedido = VGPedido.objects.create(
+            usuario=self.user, tipo_pedido='local', estado='entregado', subtotal='12.00', total='12.00',
+        )
+        detalle = VGDetallePedido.objects.create(
+            pedido=pedido, producto=plato, cantidad=1, precio_unitario='12.00', estado='entregado',
+        )
+        VGDetallePedidoAdicional.objects.create(
+            detalle_pedido=detalle, preparacion=adicional_chistorra, cantidad=2, precio_unitario='1.40',
+        )
+        VGDetallePedidoAdicional.objects.create(
+            detalle_pedido=detalle, preparacion=adicional_chorizo, cantidad=3, precio_unitario='2.40',
+        )
+
+        response = self._cobrar([pedido.id])
+
+        self.assertEqual(response.status_code, 201)
+
+        chistorra.refresh_from_db()
+        chorizo.refresh_from_db()
+        tomate.refresh_from_db()
+
+        # 2 chistorra extra => 2 unidades; 3 chorizo extra => 3 unidades; la salsa usa 20% del lote de tomate.
+        self.assertEqual(chistorra.stock_actual, Decimal('8.00'))
+        self.assertEqual(chorizo.stock_actual, Decimal('9.00'))
+        self.assertEqual(tomate.stock_actual, Decimal('3940.00'))
+
 
 class UnidadesMedidaTests(TestCase):
     """

@@ -4557,6 +4557,7 @@ def admin_chef_recommendations_view(request):
 
 
 MINUTOS_AUTO_AVANCE_PREPARACION = 10
+MINUTOS_AUTO_AVANCE_LISTO = 10
 
 
 def _avanzar_pedidos_en_preparacion_vencidos(actor_user):
@@ -4585,13 +4586,50 @@ def _avanzar_pedidos_en_preparacion_vencidos(actor_user):
         )
         for pedido in vencidos:
             pedido.estado = 'listo'
+            pedido.fecha_listo = timezone.now()
             pedido.actualizado_por = actor_user
-            pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+            pedido.save(update_fields=['estado', 'fecha_listo', 'actualizado_por', 'fecha_actualizacion'])
             pedido.detalles.filter(estado__in=['pendiente', 'en_preparacion']).update(estado='listo')
 
     for pedido in vencidos:
         _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, actor_user, previous_estado='en_preparacion')
         _notify_usuario_event('PEDIDO_LISTO', pedido, actor_user)
+
+    return vencidos
+
+
+def _avanzar_pedidos_listos_vencidos(actor_user):
+    """
+    Pasa a 'entregado' cualquier pedido que lleve más de MINUTOS_AUTO_AVANCE_LISTO
+    minutos en 'listo' — continúa la misma cadena de avance automático que
+    _avanzar_pedidos_en_preparacion_vencidos, para que un pedido llegue solo hasta
+    Cobro (BILLABLE_ORDER_STATES incluye 'entregado') sin que nadie tenga que
+    presionar "Entregado" a mano.
+
+    OJO: 'entregado' representa que el mesero ya lo llevó físicamente a la mesa —
+    automatizar este paso es una decisión explícita del negocio (ver acuerdo con el
+    usuario, 2026-09) de que ese tiempo de espera es suficiente para asumirlo
+    entregado, no una confirmación real de que el plato ya llegó.
+
+    Misma mecánica que la función hermana: se dispara desde el polling de
+    kitchen_orders_view, select_for_update(skip_locked=True) evita procesar el mismo
+    pedido dos veces desde dos tableros abiertos a la vez, y `actor_user` es solo
+    informativo para las notificaciones.
+    """
+    limite = timezone.now() - timedelta(minutes=MINUTOS_AUTO_AVANCE_LISTO)
+    with transaction.atomic():
+        vencidos = list(
+            VGPedido.objects.select_for_update(skip_locked=True)
+            .filter(estado='listo', fecha_listo__lte=limite)
+        )
+        for pedido in vencidos:
+            pedido.estado = 'entregado'
+            pedido.actualizado_por = actor_user
+            pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+            pedido.detalles.filter(estado='listo').update(estado='entregado')
+
+    for pedido in vencidos:
+        _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, actor_user, previous_estado='listo')
 
     return vencidos
 
@@ -4604,6 +4642,7 @@ def kitchen_orders_view(request):
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para ver pedidos.'}, status=401)
 
     _avanzar_pedidos_en_preparacion_vencidos(request.user)
+    _avanzar_pedidos_listos_vencidos(request.user)
 
     status_filter = str(request.GET.get('estado', 'activos')).strip().lower()
     limit_raw = request.GET.get('limit', 60)
@@ -4899,6 +4938,11 @@ def kitchen_order_status_update_view(request, pedido_id):
             # _avanzar_pedidos_en_preparacion_vencidos.
             pedido.fecha_inicio_preparacion = timezone.now()
             update_fields.append('fecha_inicio_preparacion')
+        elif next_state == 'listo':
+            # Arranca el cronómetro del avance automático a 'entregado' — ver
+            # _avanzar_pedidos_listos_vencidos.
+            pedido.fecha_listo = timezone.now()
+            update_fields.append('fecha_listo')
         pedido.save(update_fields=update_fields)
 
         if next_state == 'en_preparacion':

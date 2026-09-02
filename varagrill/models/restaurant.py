@@ -664,6 +664,10 @@ class VGPedido(VGAuditoria):
         null=True, blank=True,
         help_text="Momento en que el pedido pasó a 'en_preparacion' (manual o al volver desde 'listo'). Base para el avance automático a 'listo' pasados los minutos configurados — ver _avanzar_pedidos_en_preparacion_vencidos en api_views.py.",
     )
+    fecha_listo = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Momento en que el pedido pasó a 'listo' (manual o automático). Base para el avance automático a 'entregado' pasados los minutos configurados — ver _avanzar_pedidos_listos_vencidos en api_views.py.",
+    )
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     impuesto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     descuento = models.DecimalField(max_digits=10, decimal_places=2, default=0)

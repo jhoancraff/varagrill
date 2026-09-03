@@ -523,6 +523,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                 <input
                   type="number"
                   min="0"
+                  max="9999.99"
                   step="0.01"
                   value={form.margen_ganancia_pct}
                   onChange={(event) => handleChange('margen_ganancia_pct', event.target.value)}

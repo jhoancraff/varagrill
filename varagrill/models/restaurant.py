@@ -726,9 +726,11 @@ class VGDetallePedido(models.Model):
 class VGDetallePedidoAdicional(models.Model):
     """
     Un adicional (VGPreparacion con es_adicional=True) que el mesero agregó a una
-    línea de pedido, ej. "100g de salsa rosada extra" sobre un plato. El precio_unitario
-    se guarda como snapshot del precio de venta calculado al momento del pedido, para
-    que un cambio posterior de costo/margen no altere pedidos ya facturados.
+    línea de pedido, ej. "2 porciones de queso extra" sobre un plato — cantidad cuenta
+    lotes/porciones del adicional, no gramos (ver _compute_addon_sale_price, que precia
+    el lote completo de la receta, no por gramo). El precio_unitario se guarda como
+    snapshot del precio de venta calculado al momento del pedido, para que un cambio
+    posterior de costo/margen no altere pedidos ya facturados.
     """
     detalle_pedido = models.ForeignKey(VGDetallePedido, on_delete=models.CASCADE, related_name="adicionales")
     preparacion = models.ForeignKey(VGPreparacion, on_delete=models.PROTECT, related_name="usado_en_pedidos")

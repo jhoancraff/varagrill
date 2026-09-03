@@ -735,13 +735,16 @@ function NewOrderPage({
           gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))',
           gap: 12,
         }}>
+          {/* Mesa/Cliente: sin `required` a propósito — handleSubmit ya valida ambos con un
+              mensaje propio (showError/Toast). El `required` nativo del navegador intercepta
+              el submit ANTES de que ese handler llegue a correr, así que el aviso propio nunca
+              se ve y solo queda un tooltip nativo fácil de pasar por alto. */}
           <label style={fieldWrapStyle}>
             <span style={labelStyle}>Mesa</span>
             <select
               value={orderHeader.mesaId}
               onChange={(event) => setOrderHeader((current) => ({ ...current, mesaId: event.target.value }))}
               style={inputStyle(isCompact)}
-              required={orderHeader.tipoPedido === 'local'}
             >
               <option value="">Seleccionar mesa</option>
               {mesas.map((mesa) => (
@@ -773,7 +776,6 @@ function NewOrderPage({
               value={orderHeader.cliente}
               onChange={(event) => setOrderHeader((current) => ({ ...current, cliente: event.target.value }))}
               style={inputStyle(isCompact)}
-              required
             />
           </label>
 

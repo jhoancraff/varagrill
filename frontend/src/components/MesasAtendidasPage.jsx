@@ -16,9 +16,10 @@ function estadoLabel(estado) {
   return ESTADO_LABELS[estado] || estado;
 }
 
-function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, mesasCatalogo = [] }) {
+function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, mesasCatalogo = [], canGestionarItems = false }) {
   const tasaCambio = useExchangeRate();
   const [mesas, setMesas] = useState([]);
+  const [todasLasMesas, setTodasLasMesas] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -32,6 +33,8 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
   const [detailPedido, setDetailPedido] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [removingItemId, setRemovingItemId] = useState(null);
+  const [removeItemError, setRemoveItemError] = useState('');
 
   const fetchMesas = useCallback(async (controller) => {
     try {
@@ -49,6 +52,7 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
       }
 
       setMesas(Array.isArray(data.mesas) ? data.mesas : []);
+      setTodasLasMesas(Boolean(data.todas_las_mesas));
       setLastUpdate(new Date());
       setError('');
     } catch (requestError) {
@@ -163,6 +167,37 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
     setDetailPedidoId(null);
     setDetailPedido(null);
     setDetailError('');
+    setRemoveItemError('');
+  };
+
+  // Quitar un item mal elegido (ver canGestionarItems, reservado a cajera/admin/
+  // contador) — recarga el detalle Y la lista de mesas, porque el total de la mesa
+  // (y de la cuenta seleccionada, si el pedido estaba marcado) cambió. Usa su propio
+  // error (removeItemError) en vez de detailError: ese último, si está seteado,
+  // reemplaza TODO el contenido del modal por el mensaje (ver el render de abajo) —
+  // perfecto para "no se pudo cargar el pedido", pero borraría los items a la vista
+  // justo cuando el usuario más los necesita ver para saber qué falló.
+  const handleEliminarItem = async (pedidoId, detalleId) => {
+    setRemovingItemId(detalleId);
+    setRemoveItemError('');
+    try {
+      const response = await fetch(`/api/pedidos/${pedidoId}/items/${detalleId}/eliminar/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setRemoveItemError(data.message || 'No se pudo quitar el item.');
+        return;
+      }
+      setDetailPedido(data.pedido);
+      await fetchMesas();
+    } catch (requestError) {
+      setRemoveItemError('Error de red al quitar el item.');
+    } finally {
+      setRemovingItemId(null);
+    }
   };
 
   const togglePedidoSelection = (pedidoId) => {
@@ -246,6 +281,7 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
                 </div>
                 <div style={{ color: '#d2c3c3', fontSize: 12, marginTop: 4 }}>
                   {pedido.cliente || 'Sin cliente'} · {estadoLabel(pedido.estado)}
+                  {todasLasMesas && pedido.mesero ? ` · ${pedido.mesero}` : ''}
                 </div>
               </button>
             </div>
@@ -329,6 +365,10 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
             error={detailError}
             tasaCambio={tasaCambio}
             onClose={closePedidoDetail}
+            canGestionarItems={canGestionarItems}
+            removingItemId={removingItemId}
+            removeItemError={removeItemError}
+            onEliminarItem={(detalleId) => handleEliminarItem(detailPedidoId, detalleId)}
           />
         ) : null}
       </section>
@@ -339,9 +379,13 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
     <section style={containerStyle(isMobile)}>
       <div style={headerWrapStyle}>
         <div>
-          <div style={eyebrowStyle}>Mis mesas</div>
+          <div style={eyebrowStyle}>{todasLasMesas ? 'Todas las mesas' : 'Mis mesas'}</div>
           <h2 style={titleStyle(isMobile)}>Mesas atendidas hoy</h2>
-          <p style={subtitleStyle}>Solo tus mesas — abiertas y cerradas de hoy.</p>
+          <p style={subtitleStyle}>
+            {todasLasMesas
+              ? 'Mesas con pedidos todavía abiertos hoy, de todos los meseros — en cuanto caja cobra el último pedido de una mesa, desaparece de aquí.'
+              : 'Tus mesas con pedidos todavía abiertos hoy — en cuanto caja cobra el último pedido de una mesa, desaparece de aquí.'}
+          </p>
         </div>
         <div style={headerActionsStyle(isMobile)}>
           {onNuevoPedido ? (
@@ -372,37 +416,57 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
 
       {!loading && !error && mesas.length > 0 ? (
         <div style={mesasGridStyle(isMobile)}>
-          {mesas.map((mesa) => (
-            <button
-              key={mesa.mesa_id}
-              type="button"
-              onClick={() => handleOpenMesa(mesa.mesa_id)}
-              style={mesaCardStyle(mesa.estado)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                <div style={{ color: '#fff', fontWeight: 800, fontSize: 18 }}>Mesa {mesa.mesa_numero}</div>
-                <span style={stateBadgeStyle(mesa.estado)}>
-                  {mesa.estado === 'abierta' ? 'Abierta' : 'Cerrada'}
-                </span>
-              </div>
-              <div style={{ color: '#d2c3c3', fontSize: 13, marginTop: 6 }}>
-                {mesa.pedidos.length} {mesa.pedidos.length === 1 ? 'pedido' : 'pedidos'}
-              </div>
-              <div style={{ color: '#fff', fontWeight: 700, fontSize: 16, marginTop: 8 }}>
-                ${Number(mesa.total || 0).toFixed(2)}
-                <BsAmount amountUsd={mesa.total} tasa={tasaCambio} />
-              </div>
-            </button>
-          ))}
+          {mesas.map((mesa) => {
+            // Normalmente un solo mesero por mesa, pero puede haber más de uno si
+            // cajera/admin le agregó una ronda a la mesa de un mesero (ver el
+            // permiso de mesas_atendidas_view/pedido_create_view) — se listan todos.
+            const meseros = [...new Set(mesa.pedidos.map((pedido) => pedido.mesero).filter(Boolean))];
+            return (
+              <button
+                key={mesa.mesa_id}
+                type="button"
+                onClick={() => handleOpenMesa(mesa.mesa_id)}
+                style={mesaCardStyle(mesa.estado)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ color: '#fff', fontWeight: 800, fontSize: 18 }}>Mesa {mesa.mesa_numero}</div>
+                  <span style={stateBadgeStyle(mesa.estado)}>
+                    {mesa.estado === 'abierta' ? 'Abierta' : 'Cerrada'}
+                  </span>
+                </div>
+                {todasLasMesas && meseros.length > 0 ? (
+                  <div style={mesaMeseroTagStyle}>{meseros.join(' y ')}</div>
+                ) : null}
+                <div style={{ color: '#d2c3c3', fontSize: 13, marginTop: 6 }}>
+                  {mesa.pedidos.length} {mesa.pedidos.length === 1 ? 'pedido' : 'pedidos'}
+                </div>
+                <div style={{ color: '#fff', fontWeight: 700, fontSize: 16, marginTop: 8 }}>
+                  ${Number(mesa.total || 0).toFixed(2)}
+                  <BsAmount amountUsd={mesa.total} tasa={tasaCambio} />
+                </div>
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </section>
   );
 }
 
-function PedidoDetalleModal({ pedido, loading, error, tasaCambio, onClose }) {
+function PedidoDetalleModal({ pedido, loading, error, tasaCambio, onClose, canGestionarItems = false, removingItemId = null, removeItemError = '', onEliminarItem }) {
   // Solo se monta mientras hay un pedido seleccionado, así que montado == abierto.
   useMobileBackHandler(true, onClose);
+
+  const items = pedido ? (pedido.items || []) : [];
+  // Nunca dejar el pedido en cero items desde acá (para eso está cancelar el pedido
+  // completo) ni tocar uno ya cobrado/cancelado — mismas reglas que valida el backend
+  // (pedido_detalle_eliminar_view), repetidas acá solo para no mostrar un botón que
+  // el servidor va a rechazar.
+  const puedeEliminarItems = canGestionarItems
+    && pedido
+    && pedido.estado !== 'pagado'
+    && pedido.estado !== 'cancelado'
+    && items.length > 1;
 
   return (
     <div style={modalBackdropStyle} onClick={onClose}>
@@ -432,8 +496,10 @@ function PedidoDetalleModal({ pedido, loading, error, tasaCambio, onClose }) {
                   <div style={modalSubtitleStyle}>Teléfono: {pedido.cliente_telefono}</div>
                 ) : null}
 
+                {removeItemError ? <div style={errorStyle}>{removeItemError}</div> : null}
+
                 <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-                  {(pedido.items || []).map((item) => (
+                  {items.map((item) => (
                     <div key={item.id} style={itemRowStyle}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                         <span style={{ color: '#fff', fontWeight: 600 }}>
@@ -454,6 +520,16 @@ function PedidoDetalleModal({ pedido, loading, error, tasaCambio, onClose }) {
                           {opcion.grupo_nombre}: {opcion.nombre}
                         </div>
                       ))}
+                      {puedeEliminarItems ? (
+                        <button
+                          type="button"
+                          onClick={() => onEliminarItem(item.id)}
+                          style={removeItemButtonStyle}
+                          disabled={removingItemId === item.id}
+                        >
+                          {removingItemId === item.id ? 'Quitando...' : 'Quitar item'}
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -602,6 +678,13 @@ const mesaCardStyle = (estado) => {
     cursor: 'pointer',
     display: 'block',
   };
+};
+
+const mesaMeseroTagStyle = {
+  color: '#ffcf85',
+  fontSize: 12,
+  fontWeight: 700,
+  marginTop: 4,
 };
 
 const stateBadgeStyle = (estado) => ({
@@ -836,6 +919,19 @@ const itemAddonStyle = {
   color: '#ffcf85',
   fontSize: 12,
   fontWeight: 700,
+};
+
+const removeItemButtonStyle = {
+  justifySelf: 'start',
+  marginTop: 2,
+  border: '1px solid rgba(255, 102, 102, 0.45)',
+  borderRadius: 999,
+  padding: '4px 10px',
+  background: 'rgba(255, 73, 73, 0.1)',
+  color: '#ffb3b3',
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: 'pointer',
 };
 
 const orderNoteStyle = {

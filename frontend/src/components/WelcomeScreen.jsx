@@ -57,7 +57,11 @@ import useKitchenAlerts from './useKitchenAlerts';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import useViewHistory from '../hooks/useViewHistory';
 
-const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad', 'contabilidad-cuadre-caja', 'cuentas-cobrar'];
+// 'mesas-atendidas' y 'orders': la cajera entra ahí a ver TODAS las mesas abiertas
+// (no solo las suyas, ver mesas_atendidas_view) y a registrarle una ronda a un
+// mesero desbordado que le pide ayuda — "Agregar ronda a esta mesa" navega a
+// 'orders' con la mesa/cliente precargados (ver handleAddRoundToTable).
+const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad', 'contabilidad-cuadre-caja', 'cuentas-cobrar', 'mesas-atendidas', 'orders'];
 // Mismas 3 tarjetas que AdminPanelPage oculta (CARTAS_RESTRINGIDAS) — reservadas al
 // dueño real del negocio o al Contador, nunca a un Administrador de rol común.
 const RESTRICTED_ADMIN_VIEWS = ['admin-printers', 'admin-datos-fiscales', 'admin-compras'];
@@ -659,27 +663,28 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           </button>
         ) : null}
 
-        {!isCajera ? (
-          <button
-            type="button"
-            onClick={() => {
-              goToView('mesas-atendidas');
-              if (isSidebarOverlayMode) {
-                setIsSidebarOpen(false);
-              }
-            }}
-            style={sidebarButtonStyle(activeView === 'mesas-atendidas')}
-          >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <path d="M3 10h18" />
-                <path d="M9 10v10" />
-              </svg>
-            </span>
-            <span style={{ flex: 1, textAlign: 'left' }}>Mesas atendidas</span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            goToView('mesas-atendidas');
+            if (isSidebarOverlayMode) {
+              setIsSidebarOpen(false);
+            }
+          }}
+          style={sidebarButtonStyle(activeView === 'mesas-atendidas')}
+        >
+          <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path d="M3 10h18" />
+              <path d="M9 10v10" />
+            </svg>
+          </span>
+          {/* Para cajera/admin/contador esta pantalla muestra TODAS las mesas abiertas,
+              no solo las propias (ver mesas_atendidas_view) — por eso ya no se oculta
+              con `!isCajera` como el resto de los accesos de mesero. */}
+          <span style={{ flex: 1, textAlign: 'left' }}>Mesas atendidas</span>
+        </button>
 
         {(isCajera || isAdmin) ? (
           <button
@@ -999,6 +1004,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onAddRoundToTable={handleAddRoundToTable}
             onNuevoPedido={handleNuevoPedido}
             mesasCatalogo={mesas}
+            canGestionarItems={isAdmin || isCajera}
           />
         ) : activeView.startsWith('orders-edit:') ? (
           <EditOrderPage

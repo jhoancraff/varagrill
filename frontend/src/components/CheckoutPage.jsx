@@ -50,6 +50,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const [cuentasRefreshToken, setCuentasRefreshToken] = useState(0);
   const [notasRefreshToken, setNotasRefreshToken] = useState(0);
   const [pendingConfirm, setPendingConfirm] = useState(null);
+  const [mesaQuery, setMesaQuery] = useState('');
+  const [selectedGroupKey, setSelectedGroupKey] = useState('');
 
   const toggleExpanded = (pedidoId) => {
     setExpandedOrderIds((current) => {
@@ -116,6 +118,57 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     });
     return Array.from(map.values());
   }, [pedidos]);
+
+  // Mesas primero y ordenadas por numero, delivery/para-llevar al final — asi la
+  // cajera encuentra las mesas donde suele mirar primero.
+  const sortedGroups = [...groups].sort((a, b) => {
+    const mesaA = a.pedidos[0] ? a.pedidos[0].mesa : null;
+    const mesaB = b.pedidos[0] ? b.pedidos[0].mesa : null;
+    if (mesaA != null && mesaB != null) return mesaA - mesaB;
+    if (mesaA != null) return -1;
+    if (mesaB != null) return 1;
+    return a.label.localeCompare(b.label);
+  });
+
+  const mesaQueryTerm = mesaQuery.trim().toLowerCase();
+  const filteredGroups = mesaQueryTerm
+    ? sortedGroups.filter((group) => (
+      group.label.toLowerCase().includes(mesaQueryTerm)
+      || group.pedidos.some((pedido) => (pedido.cliente || '').toLowerCase().includes(mesaQueryTerm))
+    ))
+    : sortedGroups;
+
+  const selectedGroup = groups.find((group) => group.key === selectedGroupKey) || null;
+  const selectedSet = selectedGroup ? (selectedByGroup[selectedGroup.key] || new Set()) : new Set();
+  const selectedTotal = selectedGroup
+    ? selectedGroup.pedidos.filter((pedido) => selectedSet.has(pedido.id)).reduce((sum, pedido) => sum + Number(pedido.total), 0)
+    : 0;
+  const selectedGroupFullTotal = selectedGroup
+    ? selectedGroup.pedidos.reduce((sum, pedido) => sum + Number(pedido.total), 0)
+    : 0;
+  const cliente = selectedGroup ? (clienteByGroup[selectedGroup.key] || emptyCliente) : emptyCliente;
+  const prefactura = selectedGroup ? prefacturaByGroup[selectedGroup.key] : null;
+  const isBusy = selectedGroup ? busyGroup === selectedGroup.key : false;
+
+  // Si se cobraron (o cancelaron) todos los pedidos de la mesa seleccionada, el
+  // grupo desaparece de `groups` en el proximo refresh — se limpia la seleccion
+  // para que la cajera vuelva sola al buscador en vez de quedar viendo una
+  // tarjeta vacia.
+  useEffect(() => {
+    if (selectedGroupKey && !groups.some((group) => group.key === selectedGroupKey)) {
+      setSelectedGroupKey('');
+    }
+  }, [groups, selectedGroupKey]);
+
+  const handleSelectGroup = (group) => {
+    setSelectedGroupKey(group.key);
+    setMesaQuery('');
+  };
+
+  const handleClearSelection = () => {
+    setSelectedGroupKey('');
+    setMesaQuery('');
+  };
 
   const toggleSelection = (groupKey, pedidoId) => {
     setSelectedByGroup((current) => {
@@ -468,8 +521,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           <div style={eyebrowStyle}>Cobro</div>
           <h2 style={titleStyle(isMobile)}>Pedidos listos para cobrar</h2>
           <p style={subtitleStyle}>
-            Agrupados por mesa. Por cada grupo elige el documento que convenga: una nota de entrega rápida,
-            una pre-factura para que el cliente revise la cuenta, o la factura fiscal directa.
+            Busca la mesa para ver su cuenta. Por cada mesa elige el documento que convenga: una nota de
+            entrega rápida, una pre-factura para que el cliente revise la cuenta, o la factura fiscal directa.
           </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
@@ -487,25 +540,58 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       ) : null}
 
       {!loading && !error && groups.length > 0 ? (
-        <div style={groupsGridStyle(isMobile)}>
-          {groups.map((group) => {
-            const selectedSet = selectedByGroup[group.key] || new Set();
-            const selectedTotal = group.pedidos
-              .filter((pedido) => selectedSet.has(pedido.id))
-              .reduce((sum, pedido) => sum + Number(pedido.total), 0);
-            const cliente = clienteByGroup[group.key] || emptyCliente;
-            const prefactura = prefacturaByGroup[group.key];
-            const isBusy = busyGroup === group.key;
+        <div style={cobroPickerWrapStyle}>
+          <div style={mesaSearchBoxStyle}>
+            <input
+              type="text"
+              value={mesaQuery}
+              onChange={(event) => setMesaQuery(event.target.value)}
+              placeholder="Buscar mesa por número o por cliente..."
+              style={mesaSearchInputStyle}
+            />
 
-            return (
-              <article key={group.key} style={groupCardStyle}>
+            {!selectedGroup || mesaQueryTerm ? (
+              <div style={mesaOptionsListStyle}>
+                {filteredGroups.length === 0 ? (
+                  <div style={mesaOptionEmptyStyle}>No se encontraron mesas con ese criterio.</div>
+                ) : (
+                  filteredGroups.map((group) => {
+                    const groupTotal = group.pedidos.reduce((sum, pedido) => sum + Number(pedido.total), 0);
+                    const isCurrent = selectedGroup && selectedGroup.key === group.key;
+                    return (
+                      <button
+                        key={group.key}
+                        type="button"
+                        onClick={() => handleSelectGroup(group)}
+                        style={isCurrent ? mesaOptionRowActiveStyle : mesaOptionRowStyle}
+                      >
+                        <span style={{ fontWeight: 700, color: '#fff' }}>{group.label}</span>
+                        <span style={mesaOptionMetaStyle}>{group.pedidos.length} pedido(s) · ${groupTotal.toFixed(2)}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <button type="button" onClick={handleClearSelection} style={selectedMesaChipStyle}>
+                <span style={{ fontWeight: 700, color: '#fff' }}>{selectedGroup.label}</span>
+                <span style={mesaOptionMetaStyle}>
+                  {selectedGroup.pedidos.length} pedido(s) · ${selectedGroupFullTotal.toFixed(2)}
+                </span>
+                <span style={selectedMesaChipClearStyle}>Cambiar ✕</span>
+              </button>
+            )}
+          </div>
+
+          {selectedGroup ? (
+            <article style={groupCardStyle}>
                 <div style={groupHeaderStyle}>
-                  <div style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>{group.label}</div>
-                  <span style={groupCountStyle}>{group.pedidos.length} pedido(s)</span>
+                  <div style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>{selectedGroup.label}</div>
+                  <span style={groupCountStyle}>{selectedGroup.pedidos.length} pedido(s)</span>
                 </div>
 
                 <div style={ordersScrollStyle}>
-                  {group.pedidos.map((pedido) => {
+                  {selectedGroup.pedidos.map((pedido) => {
                     const isExpanded = expandedOrderIds.has(pedido.id);
                     const items = Array.isArray(pedido.items) ? pedido.items : [];
                     const itemsWithNotes = items.filter((item) => item.notas);
@@ -513,34 +599,40 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     return (
                       <div key={pedido.id} style={orderCardStyle}>
                         <div style={orderRowStyle}>
-                          <input
-                            type="checkbox"
-                            checked={selectedSet.has(pedido.id)}
-                            onChange={() => toggleSelection(group.key, pedido.id)}
-                          />
-                          <span style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ color: '#fff', fontWeight: 600 }}>Pedido #{pedido.id}</span>
-                            <span style={{ color: '#d2c4c4', fontSize: 12, marginLeft: 8 }}>
+                          <div style={orderRowTopStyle}>
+                            <label style={orderCheckboxLabelStyle}>
+                              <input
+                                type="checkbox"
+                                checked={selectedSet.has(pedido.id)}
+                                onChange={() => toggleSelection(selectedGroup.key, pedido.id)}
+                              />
+                              <span style={orderTitleStyle}>Pedido #{pedido.id}</span>
+                            </label>
+                            <span style={orderPriceStyle}>
+                              ${pedido.total}
+                              <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
+                            </span>
+                          </div>
+                          <div style={orderRowBottomStyle}>
+                            <span style={orderMetaStyle}>
                               {pedido.cliente || 'Sin cliente'} · {pedido.mesero} · {formatOrderTime(pedido.creado_en)}
                             </span>
-                          </span>
-                          <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
-                            ${pedido.total}
-                            <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
-                          </span>
-                          <button type="button" onClick={() => toggleExpanded(pedido.id)} style={detailToggleStyle}>
-                            {isExpanded ? 'Ocultar' : 'Detalle'}
-                          </button>
-                          {canCancelarPedidos ? (
-                            <button
-                              type="button"
-                              onClick={() => setPendingConfirm({ action: 'cancelar-pedido', pedido })}
-                              style={cancelOrderToggleStyle}
-                              disabled={busyGroup === `cancel-${pedido.id}`}
-                            >
-                              Cancelar
-                            </button>
-                          ) : null}
+                            <span style={orderActionsStyle}>
+                              <button type="button" onClick={() => toggleExpanded(pedido.id)} style={detailToggleStyle}>
+                                {isExpanded ? 'Ocultar' : 'Detalle'}
+                              </button>
+                              {canCancelarPedidos ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingConfirm({ action: 'cancelar-pedido', pedido })}
+                                  style={cancelOrderToggleStyle}
+                                  disabled={busyGroup === `cancel-${pedido.id}`}
+                                >
+                                  Cancelar
+                                </button>
+                              ) : null}
+                            </span>
+                          </div>
                         </div>
 
                         {isExpanded ? (
@@ -598,12 +690,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       <input
                         placeholder="Cliente (opcional)"
                         value={cliente.nombre}
-                        onChange={(event) => updateCliente(group.key, 'nombre', event.target.value)}
+                        onChange={(event) => updateCliente(selectedGroup.key, 'nombre', event.target.value)}
                         style={inputStyle}
                       />
                       <select
                         value={cliente.tipo_documento}
-                        onChange={(event) => updateCliente(group.key, 'tipo_documento', event.target.value)}
+                        onChange={(event) => updateCliente(selectedGroup.key, 'tipo_documento', event.target.value)}
                         style={selectStyle}
                         className="admin-dark-select"
                       >
@@ -617,7 +709,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       <input
                         placeholder="Número de documento"
                         value={cliente.numero_documento}
-                        onChange={(event) => updateCliente(group.key, 'numero_documento', event.target.value)}
+                        onChange={(event) => updateCliente(selectedGroup.key, 'numero_documento', event.target.value)}
                         style={inputStyle}
                       />
                     </div>
@@ -633,8 +725,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                         <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
                       </div>
                       <select
-                        value={metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id) || ''}
-                        onChange={(event) => setMetodoByGroup((current) => ({ ...current, [group.key]: Number(event.target.value) }))}
+                        value={metodoByGroup[selectedGroup.key] || (metodosPago[0] && metodosPago[0].id) || ''}
+                        onChange={(event) => setMetodoByGroup((current) => ({ ...current, [selectedGroup.key]: Number(event.target.value) }))}
                         style={selectStyle}
                         className="admin-dark-select"
                       >
@@ -647,7 +739,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     <div style={docButtonsRowStyle(isMobile)}>
                       <button
                         type="button"
-                        onClick={() => handleClickNotaEntrega(group)}
+                        onClick={() => handleClickNotaEntrega(selectedGroup)}
                         style={checkoutButtonStyle}
                         disabled={isBusy}
                       >
@@ -655,7 +747,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleGenerarPrefactura(group)}
+                        onClick={() => handleGenerarPrefactura(selectedGroup)}
                         style={secondaryButtonStyle}
                         disabled={selectedSet.size === 0 || isBusy}
                       >
@@ -665,8 +757,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                         <button
                           type="button"
                           onClick={() => {
-                            if (!validateClienteDocumento(group)) return;
-                            setPendingConfirm({ action: 'factura', group });
+                            if (!validateClienteDocumento(selectedGroup)) return;
+                            setPendingConfirm({ action: 'factura', group: selectedGroup });
                           }}
                           style={primaryButtonStyle}
                           disabled={selectedSet.size === 0 || isBusy}
@@ -698,7 +790,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
                         type="button"
-                        onClick={() => handleDescartarPrefactura(group.key)}
+                        onClick={() => handleDescartarPrefactura(selectedGroup.key)}
                         style={secondaryButtonStyle}
                         disabled={isBusy}
                       >
@@ -706,7 +798,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleClickNotaEntrega(group)}
+                        onClick={() => handleClickNotaEntrega(selectedGroup)}
                         style={checkoutButtonStyle}
                         disabled={isBusy}
                       >
@@ -715,7 +807,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       {FACTURACION_HABILITADA ? (
                         <button
                           type="button"
-                          onClick={() => setPendingConfirm({ action: 'prefactura', group })}
+                          onClick={() => setPendingConfirm({ action: 'prefactura', group: selectedGroup })}
                           style={primaryButtonStyle}
                           disabled={isBusy}
                         >
@@ -725,9 +817,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     </div>
                   </div>
                 )}
-              </article>
-            );
-          })}
+            </article>
+          ) : null}
         </div>
       ) : null}
 
@@ -884,18 +975,92 @@ const errorStyle = {
   color: '#ffd8d8',
 };
 
-const groupsGridStyle = (isMobile) => ({
+const cobroPickerWrapStyle = {
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(360px, 1fr))',
-  // Sin esto, CSS Grid estira cada tarjeta a la altura de la más alta de su
-  // fila (comportamiento por defecto de `align-items: stretch`) — con mesas
-  // de tamaños muy distintos (18 pedidos vs 2), la mesa chica queda con un
-  // hueco enorme y sus pedidos/botones repartidos de forma rara. `start`
-  // deja que cada tarjeta mida su propia altura según su contenido (ver
-  // groupCardStyle), sin que la de al lado la afecte.
-  alignItems: 'start',
   gap: 14,
-});
+  maxWidth: 640,
+};
+
+const mesaSearchBoxStyle = {
+  display: 'grid',
+  gap: 8,
+};
+
+const mesaSearchInputStyle = {
+  width: '100%',
+  boxSizing: 'border-box',
+  borderRadius: 14,
+  border: '1px solid rgba(255, 255, 255, 0.16)',
+  background: '#161010',
+  padding: '12px 14px',
+  color: '#fff4f4',
+  fontSize: 15,
+};
+
+const mesaOptionsListStyle = {
+  display: 'grid',
+  gap: 6,
+  maxHeight: 360,
+  overflowY: 'auto',
+};
+
+const mesaOptionRowStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 10,
+  width: '100%',
+  textAlign: 'left',
+  border: '1px solid rgba(255, 255, 255, 0.1)',
+  borderRadius: 14,
+  padding: '12px 14px',
+  background: 'rgba(255, 255, 255, 0.03)',
+  color: '#fff',
+  cursor: 'pointer',
+};
+
+const mesaOptionRowActiveStyle = {
+  ...mesaOptionRowStyle,
+  border: '1px solid rgba(52, 211, 153, 0.5)',
+  background: 'rgba(52, 211, 153, 0.08)',
+};
+
+const mesaOptionMetaStyle = {
+  color: '#ffcf7d',
+  fontSize: 13,
+  fontWeight: 700,
+  flexShrink: 0,
+};
+
+const mesaOptionEmptyStyle = {
+  padding: 14,
+  borderRadius: 14,
+  border: '1px dashed rgba(255, 255, 255, 0.14)',
+  color: '#c8bbbb',
+  textAlign: 'center',
+  fontSize: 13,
+};
+
+const selectedMesaChipStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 10,
+  width: '100%',
+  textAlign: 'left',
+  border: '1px solid rgba(255, 255, 255, 0.16)',
+  borderRadius: 14,
+  padding: '12px 14px',
+  background: 'rgba(255, 255, 255, 0.05)',
+  cursor: 'pointer',
+};
+
+const selectedMesaChipClearStyle = {
+  color: '#ffb0b0',
+  fontSize: 12,
+  fontWeight: 700,
+  flexShrink: 0,
+};
 
 const groupCardStyle = {
   display: 'flex',
@@ -916,11 +1081,9 @@ const groupHeaderStyle = {
   flexShrink: 0,
 };
 
-// Cada tarjeta mide lo que necesita su propio contenido — sin alto fijo ni
+// La tarjeta mide lo que necesita su propio contenido — sin alto fijo ni
 // scroll interno, así el botón de cobro queda siempre justo debajo del
 // último pedido de esa mesa (nunca escondido detrás de un scroll interno).
-// `align-items: start` en groupsGridStyle evita que una mesa con pocos
-// pedidos se estire para igualar a la más alta de su fila.
 const ordersScrollStyle = {
   display: 'flex',
   flexDirection: 'column',
@@ -952,9 +1115,62 @@ const orderCardStyle = {
 
 const orderRowStyle = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 10,
+  flexDirection: 'column',
+  gap: 6,
   padding: '10px 12px',
+};
+
+// Fila superior (checkbox + numero de pedido + precio) y fila inferior (meta +
+// acciones) van cada una en su propio flex — así el precio y los botones nunca
+// quedan flotando en el medio de un bloque de texto envuelto en varias líneas
+// (pasaba cuando cliente/mesero/hora no cabían junto al resto en una sola fila
+// sin wrap: el checkbox y el precio se centraban verticalmente contra ese texto
+// envuelto en vez de quedar alineados con su primera línea).
+const orderRowTopStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 10,
+};
+
+const orderCheckboxLabelStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  minWidth: 0,
+  cursor: 'pointer',
+};
+
+const orderTitleStyle = {
+  color: '#fff',
+  fontWeight: 600,
+};
+
+const orderPriceStyle = {
+  color: '#ffcf7d',
+  fontWeight: 700,
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
+};
+
+const orderRowBottomStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  flexWrap: 'wrap',
+  gap: 8,
+};
+
+const orderMetaStyle = {
+  color: '#d2c4c4',
+  fontSize: 12,
+  minWidth: 0,
+};
+
+const orderActionsStyle = {
+  display: 'flex',
+  gap: 6,
+  flexShrink: 0,
 };
 
 const detailToggleStyle = {

@@ -134,7 +134,9 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
 
   const rendimientoCantidad = Number(form.rendimiento_cantidad || 0);
   const estimatedUnitCost = rendimientoCantidad > 0 ? estimatedTotalCost / rendimientoCantidad : 0;
-  const estimatedSalePrice = estimatedUnitCost * (1 + Number(form.margen_ganancia || 0) / 100);
+  // El margen del adicional se aplica sobre el costo del LOTE completo (estimatedTotalCost),
+  // no sobre el costo por gramo — la cantidad que agrega el mesero en el pedido cuenta lotes.
+  const estimatedSalePrice = estimatedTotalCost * (1 + Number(form.margen_ganancia || 0) / 100);
 
   const handleAdd = (type) => {
     const isIngredient = type === 'ingrediente';
@@ -257,6 +259,7 @@ function AnalystEditPreparationPage({ isMobile, preparationId, onBack }) {
                   <input
                     type="number"
                     min="0"
+                    max="9999.99"
                     step="0.01"
                     value={form.margen_ganancia}
                     onChange={(e) => setForm((c) => ({ ...c, margen_ganancia: e.target.value }))}

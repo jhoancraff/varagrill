@@ -360,10 +360,16 @@ def _compute_discounted_price(precio_original, promotion):
     return precio_final if precio_final > 0 else Decimal('0')
 
 
-def _compute_addon_sale_price(costo_unitario, margen_ganancia):
-    """Precio de venta de un adicional: costo_unitario + margen_ganancia% de ganancia sobre ese costo."""
+def _compute_addon_sale_price(costo_total, margen_ganancia):
+    """
+    Precio de venta de UN LOTE completo de un adicional: costo_total del lote (todo lo que
+    rinde su receta, ver VGPreparacion.rendimiento_cantidad) + margen_ganancia% de ganancia
+    sobre ese costo — nunca sobre el costo por gramo/ml/unidad. La cantidad que el mesero
+    agrega en el pedido (VGDetallePedidoAdicional.cantidad) cuenta lotes, no gramos, así que
+    mezclar un precio por gramo con esa cantidad daba precios absurdamente bajos.
+    """
     margen = margen_ganancia if margen_ganancia is not None else Decimal('0')
-    precio = costo_unitario * (Decimal('1') + margen / Decimal('100'))
+    precio = costo_total * (Decimal('1') + margen / Decimal('100'))
     return precio.quantize(Decimal('0.01'))
 
 
@@ -917,12 +923,12 @@ def adicionales_disponibles_view(request):
     preparation_cost_map = _load_preparation_cost_map()
     adicionales = []
     for preparation in VGPreparacion.objects.filter(es_adicional=True).order_by('nombre'):
-        costo_unitario = preparation_cost_map.get(preparation.id, {'costo_unitario': Decimal('0')})['costo_unitario']
+        costo_total = preparation_cost_map.get(preparation.id, {'costo_total': Decimal('0')})['costo_total']
         adicionales.append({
             'id': preparation.id,
             'nombre': preparation.nombre,
             'unidad': preparation.rendimiento_unidad,
-            'precio': str(_compute_addon_sale_price(costo_unitario, preparation.margen_ganancia)),
+            'precio': str(_compute_addon_sale_price(costo_total, preparation.margen_ganancia)),
         })
 
     return _auth_response({'ok': True, 'adicionales': adicionales})
@@ -1197,8 +1203,8 @@ def _build_order_lines(parsed_lines, products_map, preparaciones_map):
         built_addons = []
         for addon in line['adicionales']:
             preparation = preparaciones_map[addon['preparacion_id']]
-            costo_unitario = preparation_cost_map.get(preparation.id, {'costo_unitario': Decimal('0')})['costo_unitario']
-            addon_price = _compute_addon_sale_price(costo_unitario, preparation.margen_ganancia)
+            costo_total = preparation_cost_map.get(preparation.id, {'costo_total': Decimal('0')})['costo_total']
+            addon_price = _compute_addon_sale_price(costo_total, preparation.margen_ganancia)
             line_subtotal += addon_price * addon['cantidad']
             built_addons.append({
                 'preparacion': preparation,
@@ -1350,6 +1356,26 @@ def pedido_create_view(request):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
+    # Cajera/admin/contador quedan exentos de este bloqueo: son justo quienes entran
+    # a la mesa de un mesero desbordado (ver mesas_atendidas_view) para registrarle
+    # una ronda cuando pide ayuda — bloquearlos igual que a otro mesero cualquiera
+    # rompería ese flujo. Sigue aplicando normal entre dos meseros.
+    if parsed['mesa'] is not None and not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
+        otro_mesero_pedido = (
+            VGPedido.objects
+            .filter(mesa=parsed['mesa'], estado__in=MESA_ABIERTA_ORDER_STATES)
+            .exclude(usuario=request.user)
+            .select_related('usuario')
+            .order_by('fecha_creacion')
+            .first()
+        )
+        if otro_mesero_pedido:
+            mesero_nombre = otro_mesero_pedido.usuario.get_full_name() or otro_mesero_pedido.usuario.username
+            return _auth_response({
+                'ok': False,
+                'message': f'La Mesa {parsed["mesa"].numero} ya la está atendiendo {mesero_nombre}.',
+            }, status=409)
+
     cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
     if not cliente_nombre:
         return _auth_response({'ok': False, 'message': 'El nombre del cliente es obligatorio.'}, status=400)
@@ -1495,6 +1521,26 @@ def pedido_update_view(request, pedido_id):
                 status=409,
             )
 
+        # Misma excepción que pedido_create_view: cajera/admin/contador pueden mover el
+        # pedido de un mesero a una mesa que otro mesero ya tiene abierta, sin el
+        # bloqueo — ver ahí el porqué.
+        if parsed['mesa'] is not None and not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
+            otro_mesero_pedido = (
+                VGPedido.objects
+                .filter(mesa=parsed['mesa'], estado__in=MESA_ABIERTA_ORDER_STATES)
+                .exclude(pk=pedido.pk)
+                .exclude(usuario=pedido.usuario)
+                .select_related('usuario')
+                .order_by('fecha_creacion')
+                .first()
+            )
+            if otro_mesero_pedido:
+                mesero_nombre = otro_mesero_pedido.usuario.get_full_name() or otro_mesero_pedido.usuario.username
+                return _auth_response({
+                    'ok': False,
+                    'message': f'La Mesa {parsed["mesa"].numero} ya la está atendiendo {mesero_nombre}.',
+                }, status=409)
+
         built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         # Mismo criterio que pedido_create_view: si el pedido editado queda compuesto
         # solo por categorías "no_requiere_cocina", pasa a 'entregado' de una vez.
@@ -1552,6 +1598,85 @@ def pedido_update_view(request, pedido_id):
     return _auth_response({
         'ok': True,
         'message': 'Pedido actualizado correctamente.',
+        'pedido': _serialize_order_detail(pedido),
+    })
+
+
+@csrf_exempt
+def pedido_detalle_eliminar_view(request, pedido_id, detalle_id):
+    """
+    Quita UN item de un pedido ya en curso — para cuando el mesero eligió mal un plato
+    y ya es tarde para que él mismo lo reordene desde cero (pedido_update_view exige
+    'pendiente'; esto no). Reservado a cajera/admin/contador — el mismo criterio que la
+    excepción de mesa en pedido_create_view: son quienes atienden la mesa desde caja,
+    no el mesero dueño del pedido.
+    """
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    if not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para quitar items de un pedido.'}, status=401)
+
+    with transaction.atomic():
+        try:
+            pedido = VGPedido.objects.select_for_update().get(pk=pedido_id)
+        except VGPedido.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+        if pedido.estado not in MESA_ABIERTA_ORDER_STATES:
+            return _auth_response(
+                {'ok': False, 'message': 'Solo se pueden quitar items de un pedido todavía abierto (ni pagado ni cancelado).'},
+                status=409,
+            )
+
+        try:
+            detalle = pedido.detalles.select_related('producto').get(pk=detalle_id)
+        except VGDetallePedido.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'Ese item no pertenece a este pedido.'}, status=404)
+
+        if pedido.detalles.count() <= 1:
+            return _auth_response(
+                {'ok': False, 'message': 'No puedes quitar el único item del pedido — cancela el pedido completo en su lugar.'},
+                status=409,
+            )
+
+        producto_nombre = detalle.producto.nombre
+        detalle.delete()
+
+        # Mismo total que serializa cada item (ver VGDetallePedido.subtotal): precio
+        # base del item + sus adicionales + sus opciones — nunca hace falta recalcular
+        # precios desde cero, solo sumar lo que queda.
+        subtotal = sum(
+            (
+                d.subtotal
+                + sum((a.subtotal for a in d.adicionales.all()), Decimal('0'))
+                + sum((o.subtotal for o in d.opciones.all()), Decimal('0'))
+            )
+            for d in pedido.detalles.all()
+        )
+        total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento
+        pedido.subtotal = subtotal.quantize(Decimal('0.01'))
+        pedido.total = total.quantize(Decimal('0.01'))
+        pedido.actualizado_por = request.user
+        pedido.save(update_fields=['subtotal', 'total', 'actualizado_por', 'fecha_actualizacion'])
+
+    pedido = (
+        VGPedido.objects
+        .select_related('mesa', 'cliente')
+        .prefetch_related(
+            'detalles__producto', 'detalles__adicionales__preparacion',
+            'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo',
+        )
+        .get(pk=pedido.id)
+    )
+    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
+
+    return _auth_response({
+        'ok': True,
+        'message': f'Se quitó "{producto_nombre}" del pedido #{pedido.id}.',
         'pedido': _serialize_order_detail(pedido),
     })
 
@@ -1661,7 +1786,7 @@ def admin_catalog_view(request):
                 # multiplica por cantidades potencialmente grandes.
                 'costo_unitario_calculado': str(costo_unitario.quantize(Decimal('0.000001'))),
                 'precio_venta_calculado': (
-                    str(_compute_addon_sale_price(costo_unitario, preparation['margen_ganancia']))
+                    str(_compute_addon_sale_price(costs['costo_total'], preparation['margen_ganancia']))
                     if preparation['es_adicional'] else None
                 ),
             })
@@ -2008,6 +2133,8 @@ def admin_catalog_view(request):
                 return _auth_response({'ok': False, 'message': 'El margen de ganancia es inválido.'}, status=400)
             if margen_ganancia < 0:
                 return _auth_response({'ok': False, 'message': 'El margen de ganancia no puede ser negativo.'}, status=400)
+            if margen_ganancia > Decimal('9999.99'):
+                return _auth_response({'ok': False, 'message': 'El margen de ganancia no puede ser mayor a 9999.99%.'}, status=400)
 
         if VGPreparacion.objects.filter(nombre__iexact=nombre).exists():
             return _auth_response({'ok': False, 'message': 'Ya existe una subreceta con ese nombre.'}, status=400)
@@ -2090,6 +2217,8 @@ def admin_catalog_view(request):
                 return _auth_response({'ok': False, 'message': 'El margen de ganancia es inválido.'}, status=400)
             if margen_ganancia < 0:
                 return _auth_response({'ok': False, 'message': 'El margen de ganancia no puede ser negativo.'}, status=400)
+            if margen_ganancia > Decimal('9999.99'):
+                return _auth_response({'ok': False, 'message': 'El margen de ganancia no puede ser mayor a 9999.99%.'}, status=400)
 
         if VGPreparacion.objects.filter(nombre__iexact=nombre).exclude(pk=preparation.pk).exists():
             return _auth_response({'ok': False, 'message': 'Ya existe otra subreceta con ese nombre.'}, status=400)
@@ -3757,10 +3886,10 @@ def admin_products_view(request):
     if margen_ganancia_raw not in [None, '']:
         try:
             margen_ganancia_pct = Decimal(str(margen_ganancia_raw))
-            if margen_ganancia_pct < 0:
+            if margen_ganancia_pct < 0 or margen_ganancia_pct > Decimal('9999.99'):
                 raise InvalidOperation
         except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El margen de ganancia no es válido.'}, status=400)
+            return _auth_response({'ok': False, 'message': 'El margen de ganancia debe estar entre 0 y 9999.99.'}, status=400)
 
     try:
         tiempo_preparacion = int(tiempo_preparacion_raw)
@@ -4772,10 +4901,29 @@ def mesas_atendidas_view(request):
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para ver tus mesas atendidas.'}, status=401)
 
     hoy = timezone.localdate()
+    # Cajera/admin/contador ven las mesas de TODOS los meseros (no solo las propias) —
+    # así pueden entrar a la mesa de un mesero desbordado y registrarle una ronda desde
+    # ahí (ver el mismo criterio en pedido_create_view/pedido_update_view, que además
+    # los exime del bloqueo de "esta mesa ya la atiende otro mesero"). Un mesero, en
+    # cambio, solo ve las suyas — ese filtro por `usuario` es lo que le da privacidad
+    # frente a las mesas de sus compañeros.
+    ver_todas_las_mesas = _is_cajera_user(request.user) or _is_admin_user(request.user)
+
+    # Solo pedidos todavía abiertos (ni pagados ni cancelados): en cuanto caja cobra
+    # el último pedido abierto de una mesa, esa mesa deja de aparecer acá para el
+    # mesero. Si más tarde llega gente nueva a esa misma mesa y se le crea un pedido,
+    # arranca una entrada nueva y limpia — sin arrastrar ni sumar la ronda ya cobrada
+    # de antes (eso era lo que confundía al mesero: veía el total viejo sumado al de
+    # la mesa recién ocupada).
+    pedidos_qs = VGPedido.objects.filter(
+        mesa__isnull=False, fecha_creacion__date=hoy,
+        estado__in=MESA_ABIERTA_ORDER_STATES,
+    )
+    if not ver_todas_las_mesas:
+        pedidos_qs = pedidos_qs.filter(usuario=request.user)
     pedidos = (
-        VGPedido.objects
-        .filter(usuario=request.user, mesa__isnull=False, fecha_creacion__date=hoy)
-        .select_related('mesa', 'cliente')
+        pedidos_qs
+        .select_related('mesa', 'cliente', 'usuario')
         .order_by('mesa__numero', 'fecha_creacion')
     )
 
@@ -4791,12 +4939,15 @@ def mesas_atendidas_view(request):
     mesas_payload = []
     for entry in mesas_por_id.values():
         pedidos_mesa = entry['pedidos']
-        esta_abierta = any(p.estado in MESA_ABIERTA_ORDER_STATES for p in pedidos_mesa)
-        total = sum((p.total for p in pedidos_mesa if p.estado != 'cancelado'), Decimal('0.00'))
+        # Toda mesa que llega hasta acá tiene al menos un pedido abierto (por el
+        # filtro de arriba), así que siempre es 'abierta' — ya no existe el caso
+        # 'cerrada' que antes se calculaba mezclando pedidos ya cobrados con los
+        # nuevos de una mesa reutilizada.
+        total = sum((p.total for p in pedidos_mesa), Decimal('0.00'))
         mesas_payload.append({
             'mesa_id': entry['mesa_id'],
             'mesa_numero': entry['mesa_numero'],
-            'estado': 'abierta' if esta_abierta else 'cerrada',
+            'estado': 'abierta',
             'total': str(total),
             'pedidos': [
                 {
@@ -4805,6 +4956,7 @@ def mesas_atendidas_view(request):
                     'estado': p.estado,
                     'total': str(p.total),
                     'creado_en': p.fecha_creacion.isoformat(),
+                    'mesero': p.usuario.get_full_name() or p.usuario.username,
                 }
                 for p in pedidos_mesa
             ],
@@ -4816,6 +4968,7 @@ def mesas_atendidas_view(request):
         'ok': True,
         'server_time': timezone.now().isoformat(),
         'mesas': mesas_payload,
+        'todas_las_mesas': ver_todas_las_mesas,
     })
 
 

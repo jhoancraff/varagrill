@@ -1356,19 +1356,13 @@ def pedido_create_view(request):
     if error:
         return _auth_response({'ok': False, 'message': error}, status=400)
 
-    # Cajera/admin/contador quedan exentos de este bloqueo: son justo quienes entran
-    # a la mesa de un mesero desbordado (ver mesas_atendidas_view) para registrarle
-    # una ronda cuando pide ayuda — bloquearlos igual que a otro mesero cualquiera
-    # rompería ese flujo. Sigue aplicando normal entre dos meseros.
+    # Cajera/admin/contador nunca quedan bloqueados por esta regla: son justo
+    # quienes entran a la mesa de un mesero desbordado (ver mesas_atendidas_view)
+    # para registrarle una ronda cuando pide ayuda. Y sus propios pedidos de
+    # ayuda tampoco cuentan como "mesa ocupada" para el mesero dueño — ver
+    # _otro_mesero_en_mesa.
     if parsed['mesa'] is not None and not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
-        otro_mesero_pedido = (
-            VGPedido.objects
-            .filter(mesa=parsed['mesa'], estado__in=MESA_ABIERTA_ORDER_STATES)
-            .exclude(usuario=request.user)
-            .select_related('usuario')
-            .order_by('fecha_creacion')
-            .first()
-        )
+        otro_mesero_pedido = _otro_mesero_en_mesa(parsed['mesa'], request.user)
         if otro_mesero_pedido:
             mesero_nombre = otro_mesero_pedido.usuario.get_full_name() or otro_mesero_pedido.usuario.username
             return _auth_response({
@@ -1521,19 +1515,11 @@ def pedido_update_view(request, pedido_id):
                 status=409,
             )
 
-        # Misma excepción que pedido_create_view: cajera/admin/contador pueden mover el
-        # pedido de un mesero a una mesa que otro mesero ya tiene abierta, sin el
-        # bloqueo — ver ahí el porqué.
+        # Misma regla que pedido_create_view (ver _otro_mesero_en_mesa): cajera/
+        # admin/contador nunca quedan bloqueados, y sus pedidos de ayuda no
+        # cuentan como "mesa ocupada" para el mesero dueño del pedido.
         if parsed['mesa'] is not None and not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
-            otro_mesero_pedido = (
-                VGPedido.objects
-                .filter(mesa=parsed['mesa'], estado__in=MESA_ABIERTA_ORDER_STATES)
-                .exclude(pk=pedido.pk)
-                .exclude(usuario=pedido.usuario)
-                .select_related('usuario')
-                .order_by('fecha_creacion')
-                .first()
-            )
+            otro_mesero_pedido = _otro_mesero_en_mesa(parsed['mesa'], pedido.usuario, excluir_pedido_pk=pedido.pk)
             if otro_mesero_pedido:
                 mesero_nombre = otro_mesero_pedido.usuario.get_full_name() or otro_mesero_pedido.usuario.username
                 return _auth_response({
@@ -2575,6 +2561,11 @@ def _preview_ingrediente_row(row):
     Clasifica una fila ya parseada del Excel (ver ingredientes_excel.parse_ingredientes_workbook)
     contra el inventario actual, sin tocar la base de datos — es lo que ve el analista en la
     pantalla de "mapeo"/revisión antes de confirmar la importación.
+
+    Para un ingrediente EXISTENTE, "Cantidad" es lo que esta carga SUMA al stock actual (una
+    entrega/recuento recibido), no el valor final — si el ingrediente tiene -5 y la fila trae
+    10, el stock queda en 5, no en 10. `stock_nuevo` en el resultado es justamente ese preview
+    (stock_actual + cantidad) para que el analista lo vea antes de confirmar.
     """
     nombre = row['nombre']
     unidad_normalizada = normalize_unidad(row['unidad'])
@@ -2610,7 +2601,9 @@ def _preview_ingrediente_row(row):
         resultado['accion'] = 'error'
         resultado['mensaje'] = error_trio
     elif ingrediente is not None:
-        cambia_stock = cantidad != 0 and cantidad != ingrediente.stock_actual
+        cambia_stock = cantidad != 0
+        if cambia_stock:
+            resultado['stock_nuevo'] = str(ingrediente.stock_actual + cantidad)
         if cambia_stock or trio:
             resultado['accion'] = 'actualizar'
             partes = []
@@ -2619,12 +2612,12 @@ def _preview_ingrediente_row(row):
             if trio:
                 partes.append('el peso neto, el peso real y el precio de compra')
             resultado['mensaje'] = 'Va a actualizar ' + ' y '.join(partes) + '.'
-        elif cantidad == 0:
+        else:
+            # cambia_stock y trio son ambos False acá, y cambia_stock=False solo
+            # pasa con cantidad==0 (ver arriba) — la única forma de llegar hasta
+            # acá es una fila sin cantidad y sin trío, nada que hacer.
             resultado['accion'] = 'ignorado'
             resultado['mensaje'] = 'Cantidad vacía o en 0: no se toca este ingrediente.'
-        else:
-            resultado['accion'] = 'sin_cambios'
-            resultado['mensaje'] = 'El stock ya coincide, no hay nada que actualizar.'
     elif cantidad == 0:
         resultado['accion'] = 'ignorado'
         resultado['mensaje'] = 'Cantidad vacía o en 0: no se toca este ingrediente.'
@@ -2644,23 +2637,31 @@ def _preview_ingrediente_row(row):
 def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_proveedor='', fecha_factura=None):
     """
     Aplica la carga de ingredientes ya revisada/editada por el analista (ver
-    _preview_ingrediente_row): por cada fila, si el ingrediente existe se actualiza su
-    stock_actual y se registra un movimiento de 'ajuste' con el delta; si no existe se
-    crea con ese stock inicial y se registra un movimiento de 'entrada'. Cantidad vacía o
-    en 0 se ignora para ingredientes NUEVOS — mismo criterio que sync_inventario_pesaje
-    (management command). Para un ingrediente EXISTENTE, en cambio, una fila puede traer
-    solo peso neto/peso real/precio de compra (ver _parse_trio_envase_peso_precio) sin
-    tocar el stock — sirve para refrescar el costeo sin hacer un reconteo físico.
+    _preview_ingrediente_row): por cada fila, si el ingrediente existe se SUMA "cantidad"
+    a su stock_actual (nunca lo reemplaza) y se registra un movimiento de 'ajuste' con esa
+    cantidad como delta; si no existe se crea con ese stock inicial y se registra un
+    movimiento de 'entrada'. Cantidad vacía o en 0 se ignora para ingredientes NUEVOS —
+    mismo criterio que sync_inventario_pesaje (management command). Para un ingrediente
+    EXISTENTE, en cambio, una fila puede traer solo peso neto/peso real/precio de compra
+    (ver _parse_trio_envase_peso_precio) sin tocar el stock — sirve para refrescar el
+    costeo sin hacer un reconteo físico.
 
-    La parte de "cantidad" (sincronizar el stock al valor de la planilla) se comporta
-    exactamente igual que antes para reconteos puros — no se toca ese comportamiento.
-    Cuando una fila resulta en un aumento de stock (ingrediente nuevo, o existente cuyo
-    delta es positivo), esa porción SÍ se registra como una compra real — un único
-    VGCompra (el "lote") para todo el archivo, con un VGDetalleCompra por cada fila que
-    aumentó stock. El costeo de esa línea prioriza el trío nuevo
-    (costo_unitario = precio_compra/peso_real) sobre el criterio viejo de precio_total/
-    delta ajustado por el envase ya guardado (_costo_unitario_por_compra) si una fila
-    trajera los dos. Si ninguna fila aumenta stock, no se crea ningún VGCompra.
+    "Cantidad" es siempre lo que esta carga SUMA (una entrega recibida), nunca el valor
+    final del stock — si el ingrediente tiene -5 y la fila trae 10, el stock queda en 5,
+    no en 10 (antes esto se trataba como un reconteo — "poné el stock en 10" — que
+    inflaba el resultado cada vez que el stock de partida no era 0; ver la queja del
+    negocio que motivó el cambio). El delta que se registra en VGMovimientoInventario y en
+    la compra generada es literalmente "cantidad" de la fila.
+
+    Cuando una fila resulta en un aumento de stock (ingrediente nuevo, o cantidad positiva
+    en uno existente), esa porción SÍ se registra como una compra real — un único VGCompra
+    (el "lote") para todo el archivo, con un VGDetalleCompra por cada fila que aumentó
+    stock. El costeo de esa línea prioriza el trío nuevo (costo_unitario = precio_compra/
+    peso_real) sobre el criterio viejo de precio_total/delta ajustado por el envase ya
+    guardado (_costo_unitario_por_compra) si una fila trajera los dos. Si ninguna fila
+    aumenta stock, no se crea ningún VGCompra. Una cantidad NEGATIVA en un ingrediente
+    existente resta del stock (ej. una merma) y se registra como 'ajuste', nunca como
+    compra.
     """
     creados, actualizados, ignorados = 0, 0, 0
     errores = []
@@ -2705,16 +2706,15 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
 
             if ingrediente is not None:
                 stock_anterior = ingrediente.stock_actual
-                cambia_stock = cantidad != 0 and cantidad != stock_anterior
+                cambia_stock = cantidad != 0
                 if not cambia_stock and not trio:
-                    if cantidad == 0:
-                        ignorados += 1
-                    # cantidad dada pero igual al stock actual, y sin trío: nada que
-                    # hacer en esta fila — no se cuenta ni como ignorada ni actualizada,
-                    # igual que el comportamiento de siempre.
+                    ignorados += 1
+                    # cantidad vacía/0 y sin trío: nada que hacer en esta fila.
                     continue
 
-                delta = (cantidad - stock_anterior) if cambia_stock else Decimal('0')
+                # "cantidad" es lo que esta fila SUMA al stock (una entrega/ajuste),
+                # nunca el valor final — ver el docstring de esta función.
+                delta = cantidad if cambia_stock else Decimal('0')
                 update_fields = ['actualizado_por', 'fecha_actualizacion']
 
                 if trio:
@@ -2728,7 +2728,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                     update_fields.append('costo_unitario')
 
                 if cambia_stock:
-                    ingrediente.stock_actual = cantidad
+                    ingrediente.stock_actual = stock_anterior + cantidad
                     update_fields.append('stock_actual')
 
                 ingrediente.actualizado_por = operator
@@ -2750,7 +2750,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                         ingrediente=ingrediente,
                         tipo_movimiento='entrada' if movimiento_compra else 'ajuste',
                         cantidad=delta,
-                        motivo=f'Carga por Excel: {stock_anterior} -> {cantidad} {ingrediente.unidad_medida}',
+                        motivo=f'Carga por Excel: {stock_anterior} + {cantidad} -> {ingrediente.stock_actual} {ingrediente.unidad_medida}',
                         compra=movimiento_compra,
                         creado_por=operator,
                     )
@@ -4893,6 +4893,34 @@ def kitchen_orders_view(request):
 MESA_ABIERTA_ORDER_STATES = {'pendiente', 'en_preparacion', 'listo', 'entregado'}
 
 
+def _otro_mesero_en_mesa(mesa, excluir_usuario, excluir_pedido_pk=None):
+    """
+    Primer pedido todavía abierto en `mesa` que pertenezca a un MESERO real
+    distinto de `excluir_usuario` — usado para bloquear "esta mesa ya la
+    atiende otro mesero" en pedido_create_view/pedido_update_view.
+
+    Ignora a propósito los pedidos de cajera/admin/contador: esos son ayudas
+    puntuales (ver mesas_atendidas_view y la excepción de esas vistas), no un
+    reclamo de la mesa — si no se ignoraran, el mesero dueño de la mesa
+    quedaría bloqueado de seguir pidiendo en ELLA MISMA apenas cajera le
+    registrara una ronda de ayuda, que es exactamente lo contrario de lo que
+    se buscaba con esa excepción.
+    """
+    candidatos = (
+        VGPedido.objects
+        .filter(mesa=mesa, estado__in=MESA_ABIERTA_ORDER_STATES)
+        .exclude(usuario=excluir_usuario)
+        .select_related('usuario', 'usuario__id_role')
+        .order_by('fecha_creacion')
+    )
+    if excluir_pedido_pk is not None:
+        candidatos = candidatos.exclude(pk=excluir_pedido_pk)
+    for candidato in candidatos:
+        if not (_is_cajera_user(candidato.usuario) or _is_admin_user(candidato.usuario)):
+            return candidato
+    return None
+
+
 def mesas_atendidas_view(request):
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -4970,6 +4998,44 @@ def mesas_atendidas_view(request):
         'mesas': mesas_payload,
         'todas_las_mesas': ver_todas_las_mesas,
     })
+
+
+def mesas_ocupadas_view(request):
+    """
+    Mesas con un pedido todavía abierto de OTRO MESERO (nunca las propias, nunca
+    las de cajera/admin/contador ayudando — ver _otro_mesero_en_mesa) hoy, para
+    que el selector de mesa en Nuevo pedido las muestre deshabilitadas antes de
+    que el mesero pierda tiempo eligiendo una que pedido_create_view le va a
+    rechazar de todas formas.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    hoy = timezone.localdate()
+    pedidos = (
+        VGPedido.objects
+        .filter(mesa__isnull=False, fecha_creacion__date=hoy, estado__in=MESA_ABIERTA_ORDER_STATES)
+        .exclude(usuario=request.user)
+        .select_related('mesa', 'usuario', 'usuario__id_role')
+        .order_by('fecha_creacion')
+    )
+
+    ocupadas_por_id = {}
+    for pedido in pedidos:
+        if pedido.mesa_id in ocupadas_por_id:
+            continue
+        if _is_cajera_user(pedido.usuario) or _is_admin_user(pedido.usuario):
+            continue
+        ocupadas_por_id[pedido.mesa_id] = {
+            'mesa_id': pedido.mesa_id,
+            'mesa_numero': pedido.mesa.numero,
+            'mesero': pedido.usuario.get_full_name() or pedido.usuario.username,
+        }
+
+    return _auth_response({'ok': True, 'mesas_ocupadas': list(ocupadas_por_id.values())})
 
 
 @csrf_exempt

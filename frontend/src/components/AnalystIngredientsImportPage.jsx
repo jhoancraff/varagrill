@@ -203,12 +203,14 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         </div>
         <p style={hintStyle}>
           La plantilla trae las columnas Ingrediente, Unidad (g, ml o unidad) y Cantidad. Puedes usar tus
-          propios encabezados siempre que incluyan una columna "Ingrediente". Si además agregas "Peso neto",
-          "Peso real" y "Precio de compra" (las tres juntas), el costo unitario de esa fila se calcula solo
-          (precio de compra ÷ peso real) — para un ingrediente que ya existe, esas tres columnas pueden venir
-          solas, sin tocar la Cantidad, para actualizar el costeo sin hacer un reconteo. Si en cambio solo
-          agregas "Precio total" (lo pagado por el aumento de esta carga), el sistema usa el criterio anterior
-          — pero si una fila trae las dos cosas, gana el peso neto/peso real/precio de compra.
+          propios encabezados siempre que incluyan una columna "Ingrediente". Para un ingrediente que ya existe,
+          "Cantidad" se <strong>suma</strong> al stock actual (es lo que recibiste, no el total final) — si tiene
+          -5 y cargas 10, queda en 5, no en 10; una cantidad negativa resta (por ejemplo una merma). Si además
+          agregas "Peso neto", "Peso real" y "Precio de compra" (las tres juntas), el costo unitario de esa fila
+          se calcula solo (precio de compra ÷ peso real) — esas tres columnas pueden venir solas, sin tocar la
+          Cantidad, para actualizar el costeo sin sumar stock. Si en cambio solo agregas "Precio total" (lo
+          pagado por el aumento de esta carga), el sistema usa el criterio anterior — pero si una fila trae las
+          dos cosas, gana el peso neto/peso real/precio de compra.
         </p>
       </section>
 
@@ -266,7 +268,15 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                     <div key={`qty-${row.fila}`} style={cellStyle}>
                       <input
                         value={row.cantidad || ''}
-                        onChange={(event) => updateRow(row.fila, { cantidad: event.target.value })}
+                        onChange={(event) => {
+                          const cantidad = event.target.value;
+                          const cantidadNum = Number(cantidad.replace(',', '.'));
+                          const stockActualNum = row.ingrediente_id ? Number(row.stock_actual) : null;
+                          const stockNuevo = stockActualNum !== null && Number.isFinite(cantidadNum) && cantidad.trim() !== ''
+                            ? String(stockActualNum + cantidadNum)
+                            : '';
+                          updateRow(row.fila, { cantidad, stock_nuevo: stockNuevo });
+                        }}
                         style={editInputStyle}
                       />
                     </div>
@@ -307,6 +317,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                     </div>
                     <div key={`detail-${row.fila}`} style={{ ...cellStyle, fontSize: 12, color: '#c8bbbb' }}>
                       {row.ingrediente_id ? <div>Stock actual: {row.stock_actual} {row.unidad_actual}</div> : null}
+                      {row.stock_nuevo ? <div style={{ color: '#8fffb0', fontWeight: 700 }}>Nuevo stock: {row.stock_nuevo} {row.unidad_actual}</div> : null}
                       {row.precio_compra_actual ? (
                         <div>Ya tiene: envase {row.contenido_envase_actual}, real {row.peso_real_actual}, precio {row.precio_compra_actual}</div>
                       ) : null}

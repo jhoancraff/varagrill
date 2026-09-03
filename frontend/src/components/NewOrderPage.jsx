@@ -29,6 +29,7 @@ function NewOrderPage({
   initialMesaId,
   initialCliente,
   onSubmitSuccess,
+  checkMesasOcupadas = false,
 }) {
   const tasaCambio = useExchangeRate();
   const isAddingRound = Boolean(initialMesaId);
@@ -59,6 +60,38 @@ function NewOrderPage({
   const [grupoActual, setGrupoActual] = useState(null);
   const [nextGrupoId, setNextGrupoId] = useState(1);
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ cartItems, orderHeader });
+  const [mesasOcupadasPorId, setMesasOcupadasPorId] = useState({});
+
+  // Solo el mesero necesita esto: cajera/admin pueden entrar a cualquier mesa
+  // para ayudar (ver la excepcion de pedido_create_view), asi que para ellos
+  // no tiene sentido deshabilitar nada acá. Se pide una sola vez al entrar —
+  // si la ocupacion cambia mientras el mesero sigue en esta pantalla, el
+  // backend igual la vuelve a validar al registrar (ver _otro_mesero_en_mesa).
+  useEffect(() => {
+    if (!checkMesasOcupadas) {
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/mesas/ocupadas/', { credentials: 'include', cache: 'no-store' })
+      .then((response) => response.json().catch(() => ({})))
+      .then((data) => {
+        if (cancelled || !data.ok) {
+          return;
+        }
+        const porId = {};
+        (data.mesas_ocupadas || []).forEach((mesa) => {
+          porId[mesa.mesa_id] = mesa;
+        });
+        setMesasOcupadasPorId(porId);
+      })
+      .catch(() => {
+        // Sin esta lista el selector simplemente no deshabilita nada — el
+        // backend sigue protegiendo la mesa igual al registrar.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkMesasOcupadas]);
 
   useEffect(() => {
     let cancelled = false;
@@ -747,11 +780,16 @@ function NewOrderPage({
               style={inputStyle(isCompact)}
             >
               <option value="">Seleccionar mesa</option>
-              {mesas.map((mesa) => (
-                <option key={mesa.id} value={mesa.id}>
-                  Mesa {mesa.numero} - {mesa.estado}
-                </option>
-              ))}
+              {mesas.map((mesa) => {
+                const ocupada = mesasOcupadasPorId[mesa.id];
+                return (
+                  <option key={mesa.id} value={mesa.id} disabled={Boolean(ocupada)}>
+                    {ocupada
+                      ? `Mesa ${mesa.numero} — Ocupada (${ocupada.mesero})`
+                      : `Mesa ${mesa.numero} - ${mesa.estado}`}
+                  </option>
+                );
+              })}
             </select>
           </label>
 

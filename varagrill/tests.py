@@ -583,6 +583,39 @@ class ImportarIngredientesExcelTests(TestCase):
         self.assertIsNone(ingredient.peso_real)
         self.assertEqual(ingredient.stock_actual, Decimal('500'))
 
+    def test_importar_ingrediente_existente_suma_cantidad_al_stock(self):
+        # -5 + 10 = 5, no 10: "cantidad" es lo que la carga suma, nunca el valor final.
+        ingredient = VGIngrediente.objects.create(
+            nombre='Cerveza', unidad_medida='unidad', stock_actual='-5', costo_unitario='1.00',
+        )
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Cerveza', 'unidad': 'unidad', 'cantidad': '10'}],
+            self.admin,
+        )
+        self.assertEqual(resumen['errores'], [])
+        self.assertEqual(resumen['actualizados'], 1)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.stock_actual, Decimal('5'))
+        movimiento = VGMovimientoInventario.objects.filter(ingrediente=ingredient).latest('fecha_movimiento')
+        self.assertEqual(movimiento.cantidad, Decimal('10'))
+        self.assertEqual(movimiento.tipo_movimiento, 'entrada')
+
+    def test_importar_ingrediente_existente_cantidad_negativa_resta_del_stock(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Ron', unidad_medida='unidad', stock_actual='10', costo_unitario='1.00',
+        )
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Ron', 'unidad': 'unidad', 'cantidad': '-3'}],
+            self.admin,
+        )
+        self.assertEqual(resumen['errores'], [])
+        self.assertEqual(resumen['actualizados'], 1)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.stock_actual, Decimal('7'))
+        movimiento = VGMovimientoInventario.objects.filter(ingrediente=ingredient).latest('fecha_movimiento')
+        self.assertEqual(movimiento.cantidad, Decimal('-3'))
+        self.assertEqual(movimiento.tipo_movimiento, 'ajuste')
+
 
 class AdminUsersApiTests(TestCase):
     def setUp(self):

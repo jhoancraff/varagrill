@@ -996,6 +996,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             initialCliente={newOrderPreset?.cliente}
             onBack={goBackView}
             onSubmitSuccess={handleOrderCreated}
+            checkMesasOcupadas={isMesero}
           />
         ) : activeView === 'mesas-atendidas' ? (
           <MesasAtendidasPage

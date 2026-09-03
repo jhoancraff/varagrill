@@ -71,6 +71,7 @@ from varagrill.compras_views import (
 )
 from varagrill.contabilidad_views import (
     admin_metodos_pago_view,
+    ingresos_extra_view,
     metodos_pago_activos_view,
     reporte_cuadre_caja_rango_view,
     reporte_cuadre_caja_view,
@@ -154,6 +155,7 @@ urlpatterns = [
     path('api/admin/reportes/movimiento-productos/', reporte_movimiento_productos_view, name='admin-reporte-movimiento-productos'),
     path('api/admin/metodos-pago/', admin_metodos_pago_view, name='admin-metodos-pago'),
     path('api/metodos-pago/', metodos_pago_activos_view, name='metodos-pago-activos'),
+    path('api/contabilidad/ingresos-extra/', ingresos_extra_view, name='ingresos-extra'),
     path('api/promociones/', promociones_activas_view, name='promociones-activas'),
     path('api/recomendaciones-chef/', recomendaciones_chef_activas_view, name='recomendaciones-chef-activas'),
     path('api/tasa-cambio/', tasa_cambio_view, name='tasa-cambio'),

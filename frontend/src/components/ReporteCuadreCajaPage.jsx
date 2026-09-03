@@ -221,6 +221,11 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                       ) : (
                         <>${formatMonto(metodo.total)}</>
                       )}
+                      {Number(metodo.ingresos_extra) > 0 ? (
+                        <div style={secondaryAmountStyle}>
+                          incluye ${formatMonto(metodo.ingresos_extra)} en propinas/extra
+                        </div>
+                      ) : null}
                     </div>
                   </Fragment>
                 ))}
@@ -282,6 +287,37 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
           </section>
 
           <section style={panelStyle}>
+            <div style={sectionTitleStyle}>Propinas y pagos extra del dia</div>
+            {(data.ingresos_extra_dia || []).length === 0 ? (
+              <div style={emptyStyle}>Aun no se registro ninguna propina ni pago extra este dia.</div>
+            ) : (
+              <div style={tableWrapStyle}>
+                <div style={ingresoExtraTableStyle}>
+                  <div style={headStyle}>Tipo</div>
+                  <div style={headStyle}>Monto</div>
+                  <div style={headStyle}>Cuenta</div>
+                  <div style={headStyle}>Registrado por</div>
+                  <div style={headStyle}>Hora</div>
+                  <div style={headStyle}>Descripcion</div>
+                  {data.ingresos_extra_dia.map((item) => (
+                    <Fragment key={item.id}>
+                      <div style={cellStyle}>{item.tipo_label}</div>
+                      <div style={cellStyle}>${formatMonto(item.monto)}</div>
+                      <div style={cellStyle}>{item.metodo_pago_nombre}</div>
+                      <div style={cellStyle}>{item.registrado_por || '—'}</div>
+                      <div style={cellStyle}>{new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}</div>
+                      <div style={cellStyle}>{item.descripcion || '—'}</div>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ fontWeight: 700, color: '#fff' }}>
+              Total propinas/extra: ${formatMonto(data.total_ingresos_extra_dia)}
+            </div>
+          </section>
+
+          <section style={panelStyle}>
             <div style={sectionTitleStyle}>Cierre del dia</div>
             {Number(data.gastos_efectivo_dia) > 0 ? (
               <div style={{ color: '#ff9d9d', fontSize: 13 }}>
@@ -290,7 +326,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
             ) : null}
             {cierre ? (
               <div style={{ display: 'grid', gap: 8, color: '#f2e6e6' }}>
-                <div>Efectivo esperado (ventas − gastos en efectivo): <strong>${formatMonto(cierre.efectivo_esperado)}</strong></div>
+                <div>Efectivo esperado (ventas + propinas/extra − gastos, todo en efectivo): <strong>${formatMonto(cierre.efectivo_esperado)}</strong></div>
                 <div>Total consignado: <strong>${formatMonto(cierre.total_consignado)}</strong></div>
                 <div>Efectivo contado al cerrar: <strong>${formatMonto(cierre.efectivo_contado_final)}</strong></div>
                 <div style={{ color: Number(cierre.diferencia) === 0 ? '#8fffb0' : '#ff9d9d', fontWeight: 800 }}>
@@ -304,7 +340,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
             ) : (
               <form onSubmit={handleCerrarCaja} className="no-print" style={{ display: 'grid', gap: 12, maxWidth: 420 }}>
                 <div style={{ color: '#c8bbbb', fontSize: 13 }}>
-                  Efectivo esperado (ventas − gastos en efectivo): <strong style={{ color: '#fff' }}>${formatMonto(data.efectivo_esperado_preview)}</strong>
+                  Efectivo esperado (ventas + propinas/extra − gastos, todo en efectivo): <strong style={{ color: '#fff' }}>${formatMonto(data.efectivo_esperado_preview)}</strong>
                 </div>
                 <label style={{ display: 'grid', gap: 6, color: '#f2e6e6' }}>
                   Efectivo contado fisicamente
@@ -350,6 +386,7 @@ const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borde
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const consignacionTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.8fr) minmax(160px,1fr) minmax(100px,0.6fr) minmax(180px,1.2fr)', minWidth: 700, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const ingresoExtraTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(100px,0.7fr) minmax(90px,0.6fr) minmax(140px,0.9fr) minmax(140px,0.9fr) minmax(90px,0.6fr) minmax(160px,1.2fr)', minWidth: 820, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };

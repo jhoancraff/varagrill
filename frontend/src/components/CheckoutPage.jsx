@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import ConfirmModal from './ConfirmModal';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
+import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import FacturasHistorialPage from './FacturasHistorialPage';
 import NotasEntregaHistorialPage from './NotasEntregaHistorialPage';
 import Toast from './Toast';
@@ -44,6 +45,72 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
 
     loadMetodosPago();
   }, []);
+
+  // Propinas y "pagos extra" (ver handleRegistrarIngresoExtra): dinero que la
+  // cajera recibe junto con el cobro de la nota de entrega pero que no es parte
+  // de la venta, así que se registra aparte en su propia cuenta.
+  const [ingresoModalTipo, setIngresoModalTipo] = useState(null);
+  const [ingresosExtra, setIngresosExtra] = useState([]);
+  const [ingresosExtraLoading, setIngresosExtraLoading] = useState(true);
+  const [ingresoSubmitting, setIngresoSubmitting] = useState(false);
+
+  const fetchIngresosExtra = useCallback(async () => {
+    try {
+      const response = await fetch('/api/contabilidad/ingresos-extra/', { credentials: 'include', cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) {
+        setIngresosExtra(Array.isArray(data.ingresos) ? data.ingresos : []);
+      }
+    } catch (requestError) {
+      // La lista simplemente queda como estaba si falla; no bloquea el resto de Cobro.
+    } finally {
+      setIngresosExtraLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchIngresosExtra();
+  }, [fetchIngresosExtra]);
+
+  const handleRegistrarIngresoExtra = async ({ monto, descripcion, metodoPagoId }) => {
+    const montoNumber = Number(monto);
+    if (!montoNumber || montoNumber <= 0) {
+      showError('Ingresa un monto válido.');
+      return;
+    }
+    if (!metodoPagoId) {
+      showError('Selecciona la cuenta donde se abonará el dinero.');
+      return;
+    }
+
+    setIngresoSubmitting(true);
+    try {
+      const response = await fetch('/api/contabilidad/ingresos-extra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({
+          tipo: ingresoModalTipo,
+          monto: montoNumber,
+          descripcion,
+          metodo_pago_id: Number(metodoPagoId),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        showError(data.message || 'No se pudo registrar.');
+        return;
+      }
+      showSuccess(data.message || 'Registrado correctamente.');
+      setIngresoModalTipo(null);
+      await fetchIngresosExtra();
+    } catch (requestError) {
+      showError('Error de red al registrar.');
+    } finally {
+      setIngresoSubmitting(false);
+    }
+  };
+
   const [busyGroup, setBusyGroup] = useState('');
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [expandedOrderIds, setExpandedOrderIds] = useState(() => new Set());
@@ -827,6 +894,47 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       </div>
 
       <div style={cuentasPorCobrarWrapStyle}>
+        <div style={ingresoExtraButtonsRowStyle(isMobile)}>
+          <button type="button" onClick={() => setIngresoModalTipo('propina')} style={propinaButtonStyle}>
+            + Registrar propina
+          </button>
+          <button type="button" onClick={() => setIngresoModalTipo('pago_extra')} style={pagoExtraButtonStyle}>
+            + Pago extra
+          </button>
+        </div>
+        <p style={ingresoExtraHintStyle}>
+          Para cuando el cliente paga todo junto (la nota de entrega más la propina, o de más porque redondeó):
+          cobra la nota solo por el total de los platos y registra la propina o el excedente acá, en la cuenta
+          donde de verdad quedó ese dinero.
+        </p>
+
+        <div style={ingresoExtraHistoryTitleStyle}>Propinas y pagos extra registrados</div>
+        {ingresosExtraLoading ? (
+          <div style={emptyStateStyle}>Cargando...</div>
+        ) : ingresosExtra.length === 0 ? (
+          <div style={emptyStateStyle}>Todavía no se ha registrado ninguna propina ni pago extra.</div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {ingresosExtra.map((ingreso) => (
+              <div key={ingreso.id} style={ingresoHistoryRowStyle}>
+                <span style={ingreso.tipo === 'propina' ? propinaTagStyle : pagoExtraTagStyle}>
+                  {ingreso.tipo_label}
+                </span>
+                <span style={{ color: '#fff', fontWeight: 700 }}>${Number(ingreso.monto).toFixed(2)}</span>
+                <span style={{ color: '#d2c4c4', fontSize: 12 }}>{ingreso.metodo_pago_nombre}</span>
+                {ingreso.descripcion ? (
+                  <span style={{ color: '#d2c4c4', fontSize: 12 }}>{ingreso.descripcion}</span>
+                ) : null}
+                <span style={{ color: '#a89999', fontSize: 11, marginLeft: 'auto' }}>
+                  {ingreso.registrado_por} · {formatFechaHora(ingreso.fecha_creacion)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={cuentasPorCobrarWrapStyle}>
         <CuentasPorCobrarPage isMobile={isMobile} embedded refreshToken={cuentasRefreshToken} />
       </div>
 
@@ -843,8 +951,108 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         onCancel={() => setPendingConfirm(null)}
         onConfirm={handleConfirmPendingAction}
       />
+
+      {ingresoModalTipo ? (
+        <IngresoExtraModal
+          tipo={ingresoModalTipo}
+          metodosPago={metodosPago}
+          submitting={ingresoSubmitting}
+          onClose={() => setIngresoModalTipo(null)}
+          onSubmit={handleRegistrarIngresoExtra}
+        />
+      ) : null}
     </section>
   );
+}
+
+function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit }) {
+  // Solo se monta mientras hay un tipo elegido, así que montado == abierto.
+  useMobileBackHandler(true, onClose);
+  const [monto, setMonto] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [metodoPagoId, setMetodoPagoId] = useState('');
+
+  const esPropina = tipo === 'propina';
+
+  return (
+    <div style={ingresoModalBackdropStyle} onClick={submitting ? undefined : onClose}>
+      <div style={ingresoModalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar" disabled={submitting}>
+          ×
+        </button>
+        <div style={ingresoModalTitleStyle}>
+          {esPropina ? 'Registrar propina' : 'Registrar pago extra'}
+        </div>
+        <p style={ingresoModalDescStyle}>
+          {esPropina
+            ? 'La propina que el cliente pagó junto con la nota de entrega, para los meseros.'
+            : 'El excedente que el cliente pagó de más (redondeó el total) y no pidió de vuelta.'}
+        </p>
+
+        <label style={ingresoFieldLabelStyle}>
+          Monto ($)
+          <input
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={monto}
+            onChange={(event) => setMonto(event.target.value)}
+            style={ingresoInputStyle}
+            placeholder="0.00"
+            autoFocus
+          />
+        </label>
+
+        <label style={ingresoFieldLabelStyle}>
+          Descripción (opcional)
+          <input
+            type="text"
+            value={descripcion}
+            onChange={(event) => setDescripcion(event.target.value)}
+            style={ingresoInputStyle}
+            placeholder={esPropina ? 'Ej: Propina Mesa 4' : 'Ej: Redondeo Mesa 4'}
+          />
+        </label>
+
+        <label style={ingresoFieldLabelStyle}>
+          Cuenta donde se abonará
+          <select
+            value={metodoPagoId}
+            onChange={(event) => setMetodoPagoId(event.target.value)}
+            style={ingresoInputStyle}
+            className="admin-dark-select"
+          >
+            <option value="">Selecciona una cuenta...</option>
+            {metodosPago.map((metodo) => (
+              <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+            ))}
+          </select>
+        </label>
+
+        <div style={ingresoModalFooterStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle} disabled={submitting}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit({ monto, descripcion, metodoPagoId })}
+            style={esPropina ? propinaButtonStyle : pagoExtraButtonStyle}
+            disabled={submitting}
+          >
+            {submitting ? 'Registrando...' : 'Registrar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatFechaHora(fechaIso) {
+  const date = new Date(fechaIso);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return date.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function getCookie(name) {
@@ -1363,6 +1571,168 @@ const cuentasPorCobrarWrapStyle = {
   marginTop: 8,
   paddingTop: 20,
   borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+};
+
+const ingresoExtraButtonsRowStyle = (isMobile) => ({
+  display: 'flex',
+  gap: 10,
+  flexWrap: 'wrap',
+  flexDirection: isMobile ? 'column' : 'row',
+});
+
+// Violeta para propina y verde azulado para pago extra — colores que no usa
+// ningún otro botón de Cobro (verde = nota de entrega, rojo = factura, ámbar =
+// cambiar mesa en Mesas atendidas) para que se distingan a simple vista.
+const propinaButtonStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'linear-gradient(90deg, #6d28d9 0%, #a78bfa 100%)',
+  color: '#fff',
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+const pagoExtraButtonStyle = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '10px 16px',
+  background: 'linear-gradient(90deg, #0d9488 0%, #2dd4bf 100%)',
+  color: '#04201c',
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+const ingresoExtraHintStyle = {
+  margin: '10px 0 0',
+  color: '#a89999',
+  fontSize: 12,
+  lineHeight: 1.5,
+  maxWidth: 640,
+};
+
+const ingresoExtraHistoryTitleStyle = {
+  marginTop: 18,
+  color: '#ffb0b0',
+  fontSize: 12,
+  fontWeight: 800,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+};
+
+const ingresoHistoryRowStyle = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: 10,
+  borderRadius: 12,
+  border: '1px solid rgba(255, 255, 255, 0.1)',
+  background: 'rgba(255, 255, 255, 0.03)',
+  padding: '10px 12px',
+};
+
+const propinaTagStyle = {
+  borderRadius: 999,
+  padding: '3px 10px',
+  fontSize: 11,
+  fontWeight: 800,
+  textTransform: 'uppercase',
+  color: '#d9c8ff',
+  background: 'rgba(139, 92, 246, 0.18)',
+  border: '1px solid rgba(167, 139, 250, 0.4)',
+};
+
+const pagoExtraTagStyle = {
+  borderRadius: 999,
+  padding: '3px 10px',
+  fontSize: 11,
+  fontWeight: 800,
+  textTransform: 'uppercase',
+  color: '#b6fff0',
+  background: 'rgba(13, 148, 136, 0.18)',
+  border: '1px solid rgba(45, 212, 191, 0.4)',
+};
+
+const ingresoModalBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 1000,
+  background: 'rgba(0, 0, 0, 0.6)',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 16,
+};
+
+const ingresoModalCardStyle = {
+  position: 'relative',
+  width: '100%',
+  maxWidth: 420,
+  borderRadius: 20,
+  border: '1px solid rgba(255, 145, 145, 0.3)',
+  background: 'linear-gradient(180deg, rgba(28, 12, 12, 0.98) 0%, rgba(10, 8, 8, 0.99) 100%)',
+  padding: '22px 22px 18px',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, 0.45)',
+  display: 'grid',
+  gap: 12,
+};
+
+const modalCloseButtonStyle = {
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  border: 'none',
+  background: 'rgba(0,0,0,0.55)',
+  color: '#fff',
+  fontSize: 20,
+  lineHeight: 1,
+  cursor: 'pointer',
+  display: 'grid',
+  placeItems: 'center',
+};
+
+const ingresoModalTitleStyle = {
+  color: '#fff',
+  fontSize: 19,
+  fontWeight: 800,
+  paddingRight: 30,
+};
+
+const ingresoModalDescStyle = {
+  margin: 0,
+  color: '#d2c3c3',
+  lineHeight: 1.5,
+  fontSize: 13,
+};
+
+const ingresoFieldLabelStyle = {
+  display: 'grid',
+  gap: 6,
+  color: '#e8dede',
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const ingresoInputStyle = {
+  width: '100%',
+  boxSizing: 'border-box',
+  borderRadius: 12,
+  border: '1px solid rgba(255, 255, 255, 0.14)',
+  background: '#161010',
+  padding: '10px 12px',
+  color: '#fff4f4',
+  fontSize: 14,
+  fontWeight: 400,
+};
+
+const ingresoModalFooterStyle = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: 10,
+  marginTop: 6,
+  flexWrap: 'wrap',
 };
 
 export default CheckoutPage;

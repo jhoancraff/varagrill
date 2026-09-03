@@ -49,6 +49,39 @@ class VGMetodoPago(VGAuditoria):
         return self.nombre
 
 
+class VGIngresoExtra(VGAuditoria):
+    """
+    Dinero que la cajera recibe junto con el cobro de una nota de entrega pero que
+    NO es parte de la venta — dos casos: la propina para los meseros, o el
+    "vuelto" que el cliente redondeó de más y no pidió de vuelta. El cliente suele
+    pagar todo en un solo movimiento (nota de entrega + esto), así que se registra
+    aparte para no mezclarlo con el total de la nota/factura, en la cuenta
+    (metodo_pago) donde de verdad quedó ese dinero — normalmente una cuenta de
+    banco propia para esto, que el analista agrega como un método de pago más
+    (ver VGMetodoPago) igual que cualquier otra cuenta.
+
+    Se suma a los ingresos de su metodo_pago en disponibilidad_por_cuenta (ver
+    reportes.py), como cualquier otro dinero que entra por esa cuenta.
+    """
+    TIPOS = [
+        ("propina", "Propina"),
+        ("pago_extra", "Pago extra"),
+    ]
+    tipo = models.CharField(max_length=20, choices=TIPOS)
+    monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    descripcion = models.CharField(max_length=255, blank=True)
+    metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="ingresos_extra")
+
+    class Meta:
+        db_table = "vg_ingresos_extra"
+        verbose_name = "Ingreso extra"
+        verbose_name_plural = "Ingresos extra"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} ${self.monto} — {self.metodo_pago}"
+
+
 # ---------------------------------------------------------------------------
 # Cuadre de caja diario
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import _calcular_margen_periodo
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
-from .models import VGCierreCaja, VGConsignacionCaja, VGDetallePedido, VGGasto, VGMetodoPago
+from .models import VGCierreCaja, VGConsignacionCaja, VGDetallePedido, VGGasto, VGIngresoExtra, VGMetodoPago
 from .reportes import (
     desglose_caja_por_moneda,
     disponibilidad_por_cuenta,
@@ -47,6 +47,77 @@ def metodos_pago_activos_view(request):
 
     metodos = VGMetodoPago.objects.filter(activo=True).order_by('nombre')
     return _auth_response({'ok': True, 'metodos_pago': [_serialize_metodo_pago(metodo) for metodo in metodos]})
+
+
+def _serialize_ingreso_extra(ingreso):
+    return {
+        'id': ingreso.id,
+        'tipo': ingreso.tipo,
+        'tipo_label': ingreso.get_tipo_display(),
+        'monto': str(ingreso.monto),
+        'descripcion': ingreso.descripcion,
+        'metodo_pago_id': ingreso.metodo_pago_id,
+        'metodo_pago_nombre': ingreso.metodo_pago.nombre,
+        'registrado_por': ingreso.creado_por.get_full_name() or ingreso.creado_por.username if ingreso.creado_por else '',
+        'fecha_creacion': ingreso.fecha_creacion.isoformat(),
+    }
+
+
+@csrf_exempt
+def ingresos_extra_view(request):
+    """
+    Propinas y "pagos extra" (el redondeo que el cliente no pidio de vuelta) que
+    la cajera cobra junto con la nota de entrega pero que no son parte de la
+    venta — ver VGIngresoExtra. Reservado a cajera/admin/contador, igual que el
+    resto de Cobro.
+    """
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para registrar esto.'}, status=401)
+
+    if request.method == 'GET':
+        ingresos = (
+            VGIngresoExtra.objects
+            .select_related('metodo_pago', 'creado_por')
+            .order_by('-fecha_creacion')[:100]
+        )
+        return _auth_response({'ok': True, 'ingresos': [_serialize_ingreso_extra(ingreso) for ingreso in ingresos]})
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    tipo = str(data.get('tipo', '')).strip().lower()
+    if tipo not in {clave for clave, _ in VGIngresoExtra.TIPOS}:
+        return _auth_response({'ok': False, 'message': 'Tipo invalido.'}, status=400)
+
+    try:
+        monto = Decimal(str(data.get('monto', '')))
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+    if monto <= 0:
+        return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+
+    try:
+        metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
+    except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'Selecciona una cuenta valida.'}, status=400)
+
+    ingreso = VGIngresoExtra.objects.create(
+        tipo=tipo,
+        monto=monto,
+        descripcion=str(data.get('descripcion', '') or '').strip(),
+        metodo_pago=metodo_pago,
+        creado_por=request.user,
+    )
+    return _auth_response({
+        'ok': True,
+        'message': f'{ingreso.get_tipo_display()} registrada correctamente.',
+        'ingreso': _serialize_ingreso_extra(ingreso),
+    }, status=201)
 
 
 @csrf_exempt
@@ -156,9 +227,10 @@ def _serialize_cierre_caja(cierre):
 @csrf_exempt
 def reporte_cuadre_caja_view(request):
     """
-    Cuadre de caja diario: totales cobrados por metodo de pago (VGPago),
-    consignaciones parciales del turno y el cierre final del dia (unico por
-    fecha, lo hace la ultima persona del turno).
+    Cuadre de caja diario: totales cobrados por metodo de pago (VGPago, mas
+    propinas/pagos extra de VGIngresoExtra sumadas ahi mismo — ver
+    totales_pagos_por_metodo), consignaciones parciales del turno y el cierre
+    final del dia (unico por fecha, lo hace la ultima persona del turno).
     """
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -173,6 +245,12 @@ def reporte_cuadre_caja_view(request):
 
         totales = totales_pagos_por_metodo(fecha)
         consignaciones = VGConsignacionCaja.objects.filter(fecha=fecha).select_related('creado_por')
+        ingresos_extra_dia = (
+            VGIngresoExtra.objects
+            .filter(fecha_creacion__date=fecha)
+            .select_related('metodo_pago', 'creado_por')
+            .order_by('-fecha_creacion')
+        )
         cierre = VGCierreCaja.objects.filter(fecha=fecha).select_related('creado_por').first()
         tasa = tasa_para_fecha(fecha)
 
@@ -183,6 +261,8 @@ def reporte_cuadre_caja_view(request):
             'totales_por_metodo': [
                 {
                     **item,
+                    'ventas': str(item['ventas']),
+                    'ingresos_extra': str(item['ingresos_extra']),
                     'total': str(item['total']),
                     'total_bs': str(item['total_bs']) if item['total_bs'] is not None else None,
                 }
@@ -192,6 +272,8 @@ def reporte_cuadre_caja_view(request):
             'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
             'total_consignado': str(total_consignado(fecha)),
+            'ingresos_extra_dia': [_serialize_ingreso_extra(item) for item in ingresos_extra_dia],
+            'total_ingresos_extra_dia': str(sum((item.monto for item in ingresos_extra_dia), Decimal('0'))),
             'gastos_efectivo_dia': str(gastos_efectivo_dia(fecha)),
             'efectivo_esperado_preview': str(efectivo_esperado_dia(fecha)),
             'cierre': _serialize_cierre_caja(cierre),

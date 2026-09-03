@@ -112,6 +112,9 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                   </div>
                   <div style={cuentaDetalleStyle}>
                     <span>+${formatMonto(cuenta.ingresos_acumulados)} cobrado</span>
+                    {Number(cuenta.ingresos_extra_acumulados) > 0 ? (
+                      <span>+${formatMonto(cuenta.ingresos_extra_acumulados)} propinas/extra</span>
+                    ) : null}
                     <span>−${formatMonto(cuenta.gastos_acumulados)} gastos</span>
                     <span>−${formatMonto(cuenta.compras_acumuladas)} proveedores</span>
                     {Number(cuenta.consignado_acumulado) > 0 ? (
@@ -129,6 +132,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
               <div style={tableStyle}>
                 <div style={headStyle}>Cuenta</div>
                 <div style={headStyle}>Cobrado</div>
+                <div style={headStyle}>Propinas/extra</div>
                 <div style={headStyle}>Gastos</div>
                 <div style={headStyle}>Proveedores</div>
                 <div style={headStyle}>Consignado</div>
@@ -137,6 +141,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                   <Fragment key={cuenta.id}>
                     <div style={cellStyle}>{cuenta.nombre}{cuenta.es_efectivo ? ' (efectivo)' : ''}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.ingresos_acumulados)}</div>
+                    <div style={cellStyle}>${formatMonto(cuenta.ingresos_extra_acumulados)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.gastos_acumulados)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.compras_acumuladas)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.consignado_acumulado)}</div>
@@ -146,6 +151,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                   </Fragment>
                 ))}
                 <div style={{ ...cellStyle, fontWeight: 800 }}>Total disponible</div>
+                <div style={cellStyle} />
                 <div style={cellStyle} />
                 <div style={cellStyle} />
                 <div style={cellStyle} />
@@ -186,7 +192,7 @@ const cuentaDetalleStyle = { display: 'flex', flexDirection: 'column', gap: 2, c
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 13, marginLeft: 6, fontWeight: 600 };
 
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(110px,0.8fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(110px,0.7fr) minmax(140px,0.9fr)', minWidth: 820, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(110px,0.8fr) minmax(120px,0.8fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(110px,0.7fr) minmax(140px,0.9fr)', minWidth: 940, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 

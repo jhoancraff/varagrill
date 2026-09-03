@@ -13,6 +13,7 @@ from .models import (
     VGAbonoGasto,
     VGCierreCaja,
     VGConsignacionCaja,
+    VGIngresoExtra,
     VGMetodoPago,
     VGPago,
     VGTasaCambio,
@@ -27,51 +28,110 @@ def tasa_para_fecha(fecha):
 
 def totales_pagos_por_metodo(fecha):
     """
-    Lista de {id, nombre, es_efectivo, moneda, total, total_bs} por cada
-    metodo de pago activo, con lo cobrado (VGPago completados) en `fecha`.
-    Un metodo desactivado que igual tuvo pagos ese dia se incluye tambien,
-    para no ocultar historico.
+    Lista de {id, nombre, es_efectivo, moneda, ventas, ingresos_extra, total,
+    total_bs} por cada metodo de pago activo, con lo cobrado (VGPago
+    completados) en `fecha`. Un metodo desactivado que igual tuvo movimiento
+    ese dia se incluye tambien, para no ocultar historico.
 
-    `total` siempre esta en USD (asi se guarda VGPago.monto). Para un metodo
-    en bolivares (moneda='VES'), `total_bs` trae ese mismo monto convertido
-    con la tasa BCV vigente en `fecha` — None si no hay ninguna tasa
-    registrada para esa fecha o antes.
+    `total` = `ventas` + `ingresos_extra`: las propinas y "pagos extra"
+    (VGIngresoExtra) de ese metodo ese dia se suman al total de la cuenta
+    igual que una venta — es la misma plata que entro por ahi, solo que no
+    vino de un VGPago. `ventas` e `ingresos_extra` quedan aparte para poder
+    mostrar el detalle (ver reporte_cuadre_caja_view). Todo siempre en USD
+    (asi se guardan los montos).
+
+    Para un metodo en bolivares (moneda='VES'), `total_bs` NO es `total *
+    tasa_de_fecha` — cada VGPago se convierte con la tasa CONGELADA del
+    documento que esta saldando (nota_entrega.tasa_cambio_referencia o
+    factura.tasa_cambio_referencia, la misma que uso nota_entrega_abono_view/
+    factura_abono_view para calcular cuantos dolares representaba lo que el
+    cliente pago en bolivares), no con la tasa vigente en `fecha`. Si una
+    nota se emitio ayer con el BCV de ayer y se cobra hoy con el BCV ya
+    actualizado, `total_bs` trae el mismo monto en bolivares que de verdad
+    se le cobro al cliente — no uno recalculado con la tasa de hoy, que no
+    coincidiria con lo que el cajero realmente recibio y contaria mal el
+    cuadre. Los ingresos extra si usan la tasa de `fecha` sin problema: por
+    diseño siempre se registran el mismo dia que aparecen aca (ver
+    VGIngresoExtra), asi que no hay tasa vieja de la que arrastrar un
+    desfase. `total_bs` es None solo si algun pago en bolivares de ese
+    metodo ese dia no tiene ninguna tasa resoluble (ni la del documento, ni
+    la propia del pago, ni la de `fecha` como ultimo recurso).
     """
+    tasa_fecha = tasa_para_fecha(fecha)
+
     metodos_por_id = {
         metodo.id: {
             'id': metodo.id,
             'nombre': metodo.nombre,
             'es_efectivo': metodo.es_efectivo,
             'moneda': metodo.moneda,
-            'total': Decimal('0'),
+            'ventas': Decimal('0'),
+            'ingresos_extra': Decimal('0'),
+            'ventas_bs': Decimal('0'),
+            '_bs_incompleto': False,
         }
         for metodo in VGMetodoPago.objects.filter(activo=True)
     }
 
-    filas = (
-        VGPago.objects
-        .filter(fecha_pago__date=fecha, estado='completado')
-        .values('metodo_pago_id', 'metodo_pago__nombre', 'metodo_pago__es_efectivo', 'metodo_pago__moneda')
-        .annotate(total=Sum('monto'))
-    )
-    for fila in filas:
-        metodo_id = fila['metodo_pago_id']
+    def _metodo_entry(metodo_id, nombre, es_efectivo, moneda):
         if metodo_id not in metodos_por_id:
             metodos_por_id[metodo_id] = {
                 'id': metodo_id,
-                'nombre': fila['metodo_pago__nombre'],
-                'es_efectivo': fila['metodo_pago__es_efectivo'],
-                'moneda': fila['metodo_pago__moneda'],
-                'total': Decimal('0'),
+                'nombre': nombre,
+                'es_efectivo': es_efectivo,
+                'moneda': moneda,
+                'ventas': Decimal('0'),
+                'ingresos_extra': Decimal('0'),
+                'ventas_bs': Decimal('0'),
+                '_bs_incompleto': False,
             }
-        metodos_por_id[metodo_id]['total'] = fila['total'] or Decimal('0')
+        return metodos_por_id[metodo_id]
 
-    tasa = tasa_para_fecha(fecha)
+    pagos = (
+        VGPago.objects
+        .filter(fecha_pago__date=fecha, estado='completado')
+        .select_related('metodo_pago', 'nota_entrega', 'factura')
+    )
+    for pago in pagos:
+        metodo = pago.metodo_pago
+        entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda)
+        entry['ventas'] += pago.monto
+        if metodo.moneda == 'VES':
+            tasa_pago = (
+                (pago.nota_entrega.tasa_cambio_referencia if pago.nota_entrega_id else None)
+                or (pago.factura.tasa_cambio_referencia if pago.factura_id else None)
+                or pago.tasa_cambio_referencia
+                or tasa_fecha
+            )
+            if tasa_pago:
+                entry['ventas_bs'] += (pago.monto * tasa_pago).quantize(Decimal('0.01'))
+            else:
+                entry['_bs_incompleto'] = True
+
+    filas_extra = (
+        VGIngresoExtra.objects
+        .filter(fecha_creacion__date=fecha)
+        .values('metodo_pago_id', 'metodo_pago__nombre', 'metodo_pago__es_efectivo', 'metodo_pago__moneda')
+        .annotate(total=Sum('monto'))
+    )
+    for fila in filas_extra:
+        entry = _metodo_entry(
+            fila['metodo_pago_id'], fila['metodo_pago__nombre'],
+            fila['metodo_pago__es_efectivo'], fila['metodo_pago__moneda'],
+        )
+        monto_extra = fila['total'] or Decimal('0')
+        entry['ingresos_extra'] = monto_extra
+        if fila['metodo_pago__moneda'] == 'VES':
+            if tasa_fecha:
+                entry['ventas_bs'] += (monto_extra * tasa_fecha).quantize(Decimal('0.01'))
+            else:
+                entry['_bs_incompleto'] = True
+
     for metodo in metodos_por_id.values():
-        if metodo['moneda'] == 'VES' and tasa:
-            metodo['total_bs'] = (metodo['total'] * tasa).quantize(Decimal('0.01'))
-        else:
-            metodo['total_bs'] = None
+        metodo['total'] = metodo['ventas'] + metodo['ingresos_extra']
+        metodo['total_bs'] = metodo['ventas_bs'] if (metodo['moneda'] == 'VES' and not metodo['_bs_incompleto']) else None
+        del metodo['ventas_bs']
+        del metodo['_bs_incompleto']
 
     return sorted(metodos_por_id.values(), key=lambda item: item['nombre'])
 
@@ -87,9 +147,10 @@ def desglose_caja_por_moneda(fecha):
     (nota de entrega/pre-factura/factura) por su metodo de pago.
 
     Los baldes en bolivares llevan total_usd (el monto tal cual se guarda en
-    VGPago) y total_bs (convertido con la tasa BCV de `fecha`, None si algun
-    metodo de ese balde no tiene tasa disponible ese dia). Los baldes en
-    dolares no necesitan conversion.
+    VGPago) y total_bs (la suma de cada pago ya convertido con SU tasa
+    congelada — ver totales_pagos_por_metodo — no con la de `fecha`; None si
+    algun metodo de ese balde no tiene ninguna tasa resoluble ese dia). Los
+    baldes en dolares no necesitan conversion.
     """
     buckets = {
         'bs_fisico': {'total_usd': Decimal('0'), 'total_bs': Decimal('0'), '_falta_tasa': False},
@@ -131,8 +192,10 @@ def gastos_efectivo_dia(fecha):
 def efectivo_esperado_dia(fecha):
     """
     Efectivo fisico que deberia haber en caja al final de `fecha`: lo cobrado en efectivo
-    (VGPago) menos lo pagado en efectivo por gastos operativos (VGAbonoGasto) — si un gasto
-    sale de la caja física y no se descuenta aquí, el cierre marcaría un faltante fantasma.
+    (VGPago) mas las propinas/pagos extra (VGIngresoExtra) cobrados en efectivo, menos lo
+    pagado en efectivo por gastos operativos (VGAbonoGasto) — si una propina en efectivo no
+    se suma aqui (o un gasto no se resta), el cierre marcaria una diferencia fantasma con lo
+    que en verdad hay contado en la caja fisica.
     """
     ingresos = (
         VGPago.objects
@@ -140,7 +203,13 @@ def efectivo_esperado_dia(fecha):
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
-    return ingresos - gastos_efectivo_dia(fecha)
+    ingresos_extra = (
+        VGIngresoExtra.objects
+        .filter(fecha_creacion__date=fecha, metodo_pago__es_efectivo=True)
+        .aggregate(total=Sum('monto'))
+        .get('total')
+    ) or Decimal('0')
+    return ingresos + ingresos_extra - gastos_efectivo_dia(fecha)
 
 
 def total_consignado(fecha):
@@ -281,6 +350,10 @@ def disponibilidad_por_cuenta(fecha):
     total consignado se resta completo del primer metodo marcado como
     efectivo que exista — si algun dia hubiera mas de uno, habria que sumar
     aqui un criterio para repartirlo.
+
+    Tambien suma las propinas y "pagos extra" (VGIngresoExtra) cobrados con ese
+    metodo — no pasan por VGPago (no son parte de ninguna venta) pero son
+    dinero real que entro por esa cuenta igual.
     """
     metodos = list(VGMetodoPago.objects.all().order_by('nombre'))
 
@@ -290,6 +363,9 @@ def disponibilidad_por_cuenta(fecha):
 
     ingresos_por_metodo = _totales_por_metodo(
         VGPago.objects.filter(fecha_pago__date__lte=fecha, estado='completado')
+    )
+    ingresos_extra_por_metodo = _totales_por_metodo(
+        VGIngresoExtra.objects.filter(fecha_creacion__date__lte=fecha)
     )
     gastos_por_metodo = _totales_por_metodo(
         VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha)
@@ -309,6 +385,7 @@ def disponibilidad_por_cuenta(fecha):
     resultado = []
     for metodo in metodos:
         ingresos = ingresos_por_metodo.get(metodo.id) or Decimal('0')
+        ingresos_extra = ingresos_extra_por_metodo.get(metodo.id) or Decimal('0')
         gastos = gastos_por_metodo.get(metodo.id) or Decimal('0')
         compras = compras_por_metodo.get(metodo.id) or Decimal('0')
         consignado = consignado_acumulado if metodo.id == primer_efectivo_id else Decimal('0')
@@ -319,9 +396,10 @@ def disponibilidad_por_cuenta(fecha):
             'es_efectivo': metodo.es_efectivo,
             'activo': metodo.activo,
             'ingresos_acumulados': ingresos,
+            'ingresos_extra_acumulados': ingresos_extra,
             'gastos_acumulados': gastos,
             'compras_acumuladas': compras,
             'consignado_acumulado': consignado,
-            'saldo_disponible': ingresos - gastos - compras - consignado,
+            'saldo_disponible': ingresos + ingresos_extra - gastos - compras - consignado,
         })
     return resultado

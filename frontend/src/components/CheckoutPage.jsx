@@ -920,7 +920,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                 <span style={ingreso.tipo === 'propina' ? propinaTagStyle : pagoExtraTagStyle}>
                   {ingreso.tipo_label}
                 </span>
-                <span style={{ color: '#fff', fontWeight: 700 }}>${Number(ingreso.monto).toFixed(2)}</span>
+                <span style={{ color: '#fff', fontWeight: 700 }}>
+                  {formatMontoDocumento(ingreso.monto, ingreso.moneda, ingreso.tasa_cambio_referencia || tasaCambio)}
+                </span>
                 <span style={{ color: '#d2c4c4', fontSize: 12 }}>{ingreso.metodo_pago_nombre}</span>
                 {ingreso.descripcion ? (
                   <span style={{ color: '#d2c4c4', fontSize: 12 }}>{ingreso.descripcion}</span>
@@ -973,6 +975,13 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
   const [metodoPagoId, setMetodoPagoId] = useState('');
 
   const esPropina = tipo === 'propina';
+  const metodoSeleccionado = metodosPago.find((metodo) => String(metodo.id) === String(metodoPagoId));
+  // El monto se escribe siempre en la moneda de la cuenta elegida (igual que un
+  // abono de nota de entrega/factura) — si es una cuenta en bolívares, acá se
+  // cuentan bolívares, no dólares; el backend convierte a USD con la tasa del
+  // momento (ver ingresos_extra_view). Antes de elegir cuenta no se puede saber
+  // cuál es, así que por defecto se asume $ hasta que se seleccione una.
+  const esBs = metodoSeleccionado?.moneda === 'VES';
 
   return (
     <div style={ingresoModalBackdropStyle} onClick={submitting ? undefined : onClose}>
@@ -990,7 +999,24 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
         </p>
 
         <label style={ingresoFieldLabelStyle}>
-          Monto ($)
+          Cuenta donde se abonará
+          <select
+            value={metodoPagoId}
+            onChange={(event) => setMetodoPagoId(event.target.value)}
+            style={ingresoInputStyle}
+            className="admin-dark-select"
+          >
+            <option value="">Selecciona una cuenta...</option>
+            {metodosPago.map((metodo) => (
+              <option key={metodo.id} value={metodo.id}>
+                {metodo.nombre} ({metodo.moneda === 'VES' ? 'Bs' : '$'})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={ingresoFieldLabelStyle}>
+          Monto ({esBs ? 'Bs' : '$'})
           <input
             type="number"
             min="0.01"
@@ -999,7 +1025,6 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
             onChange={(event) => setMonto(event.target.value)}
             style={ingresoInputStyle}
             placeholder="0.00"
-            autoFocus
           />
         </label>
 
@@ -1012,21 +1037,6 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
             style={ingresoInputStyle}
             placeholder={esPropina ? 'Ej: Propina Mesa 4' : 'Ej: Redondeo Mesa 4'}
           />
-        </label>
-
-        <label style={ingresoFieldLabelStyle}>
-          Cuenta donde se abonará
-          <select
-            value={metodoPagoId}
-            onChange={(event) => setMetodoPagoId(event.target.value)}
-            style={ingresoInputStyle}
-            className="admin-dark-select"
-          >
-            <option value="">Selecciona una cuenta...</option>
-            {metodosPago.map((metodo) => (
-              <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-            ))}
-          </select>
         </label>
 
         <div style={ingresoModalFooterStyle}>

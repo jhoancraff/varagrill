@@ -302,7 +302,16 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                   {data.ingresos_extra_dia.map((item) => (
                     <Fragment key={item.id}>
                       <div style={cellStyle}>{item.tipo_label}</div>
-                      <div style={cellStyle}>${formatMonto(item.monto)}</div>
+                      <div style={cellStyle}>
+                        {item.moneda === 'VES' ? (
+                          <>
+                            Bs. {formatMonto(Number(item.monto) * Number(item.tasa_cambio_referencia || data.tasa_bcv || 0))}
+                            <span style={secondaryAmountStyle}> (${formatMonto(item.monto)})</span>
+                          </>
+                        ) : (
+                          <>${formatMonto(item.monto)}</>
+                        )}
+                      </div>
                       <div style={cellStyle}>{item.metodo_pago_nombre}</div>
                       <div style={cellStyle}>{item.registrado_por || '—'}</div>
                       <div style={cellStyle}>{new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}</div>

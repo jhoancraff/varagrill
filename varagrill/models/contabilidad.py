@@ -62,6 +62,14 @@ class VGIngresoExtra(VGAuditoria):
 
     Se suma a los ingresos de su metodo_pago en disponibilidad_por_cuenta (ver
     reportes.py), como cualquier otro dinero que entra por esa cuenta.
+
+    Igual que una nota de entrega o factura: si la cuenta elegida es en
+    bolivares, lo que la cajera cuenta y escribe es el monto en bolivares
+    (no dolares) — `monto` se guarda siempre convertido a USD, y
+    `tasa_cambio_referencia` congela la tasa BCV usada para esa conversion,
+    para que el monto en bolivares que se muestre despues (en Cobro o en el
+    cuadre de caja) sea siempre el mismo que se contó, sin importar que el
+    BCV cambie después. Ver ingresos_extra_view.
     """
     TIPOS = [
         ("propina", "Propina"),
@@ -69,6 +77,7 @@ class VGIngresoExtra(VGAuditoria):
     ]
     tipo = models.CharField(max_length=20, choices=TIPOS)
     monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     descripcion = models.CharField(max_length=255, blank=True)
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="ingresos_extra")
 

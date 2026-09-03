@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .api_views import _calcular_margen_periodo
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import VGCierreCaja, VGConsignacionCaja, VGDetallePedido, VGGasto, VGIngresoExtra, VGMetodoPago
+from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
     desglose_caja_por_moneda,
     disponibilidad_por_cuenta,
@@ -55,6 +56,8 @@ def _serialize_ingreso_extra(ingreso):
         'tipo': ingreso.tipo,
         'tipo_label': ingreso.get_tipo_display(),
         'monto': str(ingreso.monto),
+        'moneda': ingreso.metodo_pago.moneda,
+        'tasa_cambio_referencia': str(ingreso.tasa_cambio_referencia) if ingreso.tasa_cambio_referencia is not None else None,
         'descripcion': ingreso.descripcion,
         'metodo_pago_id': ingreso.metodo_pago_id,
         'metodo_pago_nombre': ingreso.metodo_pago.nombre,
@@ -95,10 +98,10 @@ def ingresos_extra_view(request):
         return _auth_response({'ok': False, 'message': 'Tipo invalido.'}, status=400)
 
     try:
-        monto = Decimal(str(data.get('monto', '')))
+        monto_input = Decimal(str(data.get('monto', '')))
     except InvalidOperation:
         return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
-    if monto <= 0:
+    if monto_input <= 0:
         return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
 
     try:
@@ -106,9 +109,28 @@ def ingresos_extra_view(request):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'Selecciona una cuenta valida.'}, status=400)
 
+    # Igual que nota_entrega_abono_view/factura_abono_view: monto_input llega en
+    # la moneda de la cuenta elegida (lo que la cajera cuenta y escribe), pero
+    # VGIngresoExtra.monto se guarda siempre en USD. Si la cuenta es en
+    # bolivares, se congela la tasa BCV de este momento — de lo contrario un
+    # monto en bolivares se guardaria tal cual como si fueran dolares, inflando
+    # el registro (1.000 Bs pasarian a contarse como $1.000).
+    if metodo_pago.moneda == 'VES':
+        tasa_conversion = tasa_cambio_para_registro()
+        if not tasa_conversion or tasa_conversion <= 0:
+            return _auth_response({
+                'ok': False,
+                'message': 'No hay tasa de cambio disponible para convertir el monto a dolares.',
+            }, status=400)
+        monto = (monto_input / tasa_conversion).quantize(Decimal('0.01'))
+    else:
+        tasa_conversion = None
+        monto = monto_input.quantize(Decimal('0.01'))
+
     ingreso = VGIngresoExtra.objects.create(
         tipo=tipo,
         monto=monto,
+        tasa_cambio_referencia=tasa_conversion,
         descripcion=str(data.get('descripcion', '') or '').strip(),
         metodo_pago=metodo_pago,
         creado_por=request.user,

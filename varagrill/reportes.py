@@ -108,22 +108,20 @@ def totales_pagos_por_metodo(fecha):
             else:
                 entry['_bs_incompleto'] = True
 
-    filas_extra = (
-        VGIngresoExtra.objects
-        .filter(fecha_creacion__date=fecha)
-        .values('metodo_pago_id', 'metodo_pago__nombre', 'metodo_pago__es_efectivo', 'metodo_pago__moneda')
-        .annotate(total=Sum('monto'))
-    )
-    for fila in filas_extra:
-        entry = _metodo_entry(
-            fila['metodo_pago_id'], fila['metodo_pago__nombre'],
-            fila['metodo_pago__es_efectivo'], fila['metodo_pago__moneda'],
-        )
-        monto_extra = fila['total'] or Decimal('0')
-        entry['ingresos_extra'] = monto_extra
-        if fila['metodo_pago__moneda'] == 'VES':
-            if tasa_fecha:
-                entry['ventas_bs'] += (monto_extra * tasa_fecha).quantize(Decimal('0.01'))
+    ingresos_extra_dia = VGIngresoExtra.objects.filter(fecha_creacion__date=fecha).select_related('metodo_pago')
+    for ingreso in ingresos_extra_dia:
+        metodo = ingreso.metodo_pago
+        entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda)
+        entry['ingresos_extra'] += ingreso.monto
+        if metodo.moneda == 'VES':
+            # Igual que con los VGPago de arriba: cada ingreso extra congela su
+            # propia tasa al registrarse (ver ingresos_extra_view) — se usa esa,
+            # no la de `fecha`, para que el monto en bolivares coincida con lo
+            # que la cajera de verdad contó, incluso si el BCV se refrescó otra
+            # vez mas tarde ese mismo dia.
+            tasa_ingreso = ingreso.tasa_cambio_referencia or tasa_fecha
+            if tasa_ingreso:
+                entry['ventas_bs'] += (ingreso.monto * tasa_ingreso).quantize(Decimal('0.01'))
             else:
                 entry['_bs_incompleto'] = True
 

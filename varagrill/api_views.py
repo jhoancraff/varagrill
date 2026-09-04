@@ -5303,6 +5303,12 @@ def pedidos_cobro_view(request):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # A esta altura la nota de entrega todavia no tiene un cobro real: metodo_pago
+    # es solo el metodo declarado al emitirla (define en que moneda se imprime),
+    # el dinero se registra aparte en uno o varios abonos — ver
+    # nota_entrega_abono_view, donde el numero de referencia del pago SI es
+    # obligatorio para metodos que no son efectivo. Acá no se le pide nada al
+    # usuario; solo se genera un valor de relleno para no dejar el campo vacío.
     referencia = f'COBRO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{pedido_ids[0]}'
 
     with transaction.atomic():

@@ -14,7 +14,16 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import _calcular_margen_periodo
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
-from .models import VGCierreCaja, VGConsignacionCaja, VGDetallePedido, VGGasto, VGIngresoExtra, VGMetodoPago
+from .models import (
+    VGCierreCaja,
+    VGConsignacionCaja,
+    VGCorreccionMetodoPago,
+    VGDetallePedido,
+    VGGasto,
+    VGIngresoExtra,
+    VGMetodoPago,
+    VGPago,
+)
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
     desglose_caja_por_moneda,
@@ -81,10 +90,14 @@ def ingresos_extra_view(request):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para registrar esto.'}, status=401)
 
     if request.method == 'GET':
+        # Solo las de HOY: esta lista vive en Cobro, donde la cajera registra y
+        # revisa las propinas/pagos extra de su turno actual — el historial
+        # completo por fecha ya se ve en el cuadre de caja (diario o por rango).
         ingresos = (
             VGIngresoExtra.objects
+            .filter(fecha_creacion__date=timezone.localdate())
             .select_related('metodo_pago', 'creado_por')
-            .order_by('-fecha_creacion')[:100]
+            .order_by('-fecha_creacion')
         )
         return _auth_response({'ok': True, 'ingresos': [_serialize_ingreso_extra(ingreso) for ingreso in ingresos]})
 
@@ -246,6 +259,61 @@ def _serialize_cierre_caja(cierre):
     }
 
 
+def _serialize_pago_dia(pago):
+    if pago.nota_entrega_id:
+        origen = f'Nota {pago.nota_entrega.codigo}'
+    elif pago.factura_id:
+        origen = f'Factura Nº {pago.factura.numero_factura}' if pago.factura.numero_factura else f'Factura #{pago.factura_id}'
+    elif pago.pedido_id:
+        origen = f'Pedido #{pago.pedido_id}'
+    else:
+        origen = '—'
+    return {
+        'id': pago.id,
+        'monto': str(pago.monto),
+        'metodo_pago_id': pago.metodo_pago_id,
+        'metodo_pago_nombre': pago.metodo_pago.nombre,
+        'moneda': pago.metodo_pago.moneda,
+        'origen': origen,
+        'referencia': pago.referencia,
+        'registrado_por': (pago.creado_por.get_full_name() or pago.creado_por.username) if pago.creado_por else '',
+        'fecha_pago': pago.fecha_pago.isoformat(),
+    }
+
+
+def _serialize_correccion_metodo(correccion):
+    return {
+        'motivo': correccion.motivo,
+        'metodo_anterior': correccion.metodo_anterior.nombre,
+        'metodo_nuevo': correccion.metodo_nuevo.nombre,
+        'corregido_por': (correccion.creado_por.get_full_name() or correccion.creado_por.username) if correccion.creado_por else '',
+        'fecha_creacion': correccion.fecha_creacion.isoformat(),
+    }
+
+
+def _ultimas_correcciones_por_registro(tipo, registro_ids):
+    """
+    Ultima VGCorreccionMetodoPago de cada registro (tipo, id) — para mostrar el
+    motivo del ultimo cambio de cuenta junto al pago/ingreso extra en el cuadre
+    de caja (ver reporte_cuadre_caja_view).
+    """
+    if not registro_ids:
+        return {}
+    correcciones = (
+        VGCorreccionMetodoPago.objects
+        .filter(tipo=tipo, registro_id__in=registro_ids)
+        .select_related('metodo_anterior', 'metodo_nuevo', 'creado_por')
+        .order_by('registro_id', '-fecha_creacion')
+    )
+    resultado = {}
+    for correccion in correcciones:
+        # order_by ya deja la mas reciente primero dentro de cada registro_id —
+        # la primera que se ve por id es la ultima corregida.
+        if correccion.registro_id not in resultado:
+            resultado[correccion.registro_id] = _serialize_correccion_metodo(correccion)
+    return resultado
+
+
 @csrf_exempt
 def reporte_cuadre_caja_view(request):
     """
@@ -253,6 +321,12 @@ def reporte_cuadre_caja_view(request):
     propinas/pagos extra de VGIngresoExtra sumadas ahi mismo — ver
     totales_pagos_por_metodo), consignaciones parciales del turno y el cierre
     final del dia (unico por fecha, lo hace la ultima persona del turno).
+
+    Tambien permite corregir la cuenta (metodo_pago) de un pago o un ingreso
+    extra de ese dia — ver la accion 'cambiar_metodo_pago' — para cuando la
+    cajera se equivoca de cuenta al cobrar y el dinero necesita "moverse" a la
+    cuenta correcta para que el cuadre coincida con lo que de verdad hay en el
+    banco.
     """
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -273,8 +347,17 @@ def reporte_cuadre_caja_view(request):
             .select_related('metodo_pago', 'creado_por')
             .order_by('-fecha_creacion')
         )
+        pagos_dia = (
+            VGPago.objects
+            .filter(fecha_pago__date=fecha, estado='completado')
+            .select_related('metodo_pago', 'nota_entrega', 'factura', 'creado_por')
+            .order_by('-fecha_pago')
+        )
         cierre = VGCierreCaja.objects.filter(fecha=fecha).select_related('creado_por').first()
         tasa = tasa_para_fecha(fecha)
+
+        correcciones_pago = _ultimas_correcciones_por_registro('pago', [item.id for item in pagos_dia])
+        correcciones_ingreso = _ultimas_correcciones_por_registro('ingreso_extra', [item.id for item in ingresos_extra_dia])
 
         return _auth_response({
             'ok': True,
@@ -294,8 +377,16 @@ def reporte_cuadre_caja_view(request):
             'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
             'total_consignado': str(total_consignado(fecha)),
-            'ingresos_extra_dia': [_serialize_ingreso_extra(item) for item in ingresos_extra_dia],
+            'ingresos_extra_dia': [
+                {**_serialize_ingreso_extra(item), 'ultima_correccion': correcciones_ingreso.get(item.id)}
+                for item in ingresos_extra_dia
+            ],
             'total_ingresos_extra_dia': str(sum((item.monto for item in ingresos_extra_dia), Decimal('0'))),
+            'pagos_dia': [
+                {**_serialize_pago_dia(item), 'ultima_correccion': correcciones_pago.get(item.id)}
+                for item in pagos_dia
+            ],
+            'metodos_pago': [_serialize_metodo_pago(metodo) for metodo in VGMetodoPago.objects.filter(activo=True).order_by('nombre')],
             'gastos_efectivo_dia': str(gastos_efectivo_dia(fecha)),
             'efectivo_esperado_preview': str(efectivo_esperado_dia(fecha)),
             'cierre': _serialize_cierre_caja(cierre),
@@ -310,6 +401,84 @@ def reporte_cuadre_caja_view(request):
     fecha = _parse_fecha_reporte(data.get('fecha'))
     if fecha is None:
         return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+    if action == 'cambiar_metodo_pago':
+        tipo = str(data.get('tipo', '')).strip().lower()
+        if tipo not in ('pago', 'ingreso_extra'):
+            return _auth_response({'ok': False, 'message': 'Tipo invalido.'}, status=400)
+
+        # Obligatorio a propósito — ver el docstring de VGCorreccionMetodoPago:
+        # es lo que deja un rastro auditable de POR QUÉ se movió cada plata
+        # entre cuentas, no solo que se movió.
+        motivo = str(data.get('motivo', '') or '').strip()
+        if not motivo:
+            return _auth_response({'ok': False, 'message': 'El motivo del cambio es obligatorio.'}, status=400)
+
+        try:
+            registro_id = int(data.get('id'))
+        except (TypeError, ValueError):
+            return _auth_response({'ok': False, 'message': 'Registro invalido.'}, status=400)
+
+        try:
+            metodo_nuevo = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
+        except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'Selecciona una cuenta valida.'}, status=400)
+
+        if tipo == 'pago':
+            try:
+                pago = VGPago.objects.select_related('metodo_pago').get(
+                    pk=registro_id, fecha_pago__date=fecha, estado='completado',
+                )
+            except VGPago.DoesNotExist:
+                return _auth_response({'ok': False, 'message': 'El pago no existe en esta fecha.'}, status=404)
+
+            metodo_anterior = pago.metodo_pago
+            if metodo_nuevo.id == pago.metodo_pago_id:
+                return _auth_response({'ok': False, 'message': 'Ya está en esa cuenta.'}, status=400)
+
+            pago.metodo_pago = metodo_nuevo
+            pago.save(update_fields=['metodo_pago'])
+            VGCorreccionMetodoPago.objects.create(
+                tipo='pago', registro_id=pago.id, metodo_anterior=metodo_anterior, metodo_nuevo=metodo_nuevo,
+                motivo=motivo, creado_por=request.user, actualizado_por=request.user,
+            )
+            return _auth_response({
+                'ok': True,
+                'message': f'Se movió el pago de {metodo_anterior.nombre} a {metodo_nuevo.nombre}.',
+            })
+
+        # tipo == 'ingreso_extra'
+        try:
+            ingreso = VGIngresoExtra.objects.select_related('metodo_pago').get(
+                pk=registro_id, fecha_creacion__date=fecha,
+            )
+        except VGIngresoExtra.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El registro no existe en esta fecha.'}, status=404)
+
+        metodo_anterior = ingreso.metodo_pago
+        if metodo_nuevo.id == ingreso.metodo_pago_id:
+            return _auth_response({'ok': False, 'message': 'Ya está en esa cuenta.'}, status=400)
+
+        ingreso.metodo_pago = metodo_nuevo
+        update_fields = ['metodo_pago']
+        # Si pasa a ser una cuenta en bolivares y el registro no tenia tasa
+        # congelada (porque se cargo en una cuenta en dolares, sin necesitar
+        # ninguna), se congela la de ahora — sin esto, el monto en bolivares
+        # que se muestre despues no tendria con que convertirse.
+        if metodo_nuevo.moneda == 'VES' and not ingreso.tasa_cambio_referencia:
+            tasa_nueva = tasa_cambio_para_registro()
+            if tasa_nueva:
+                ingreso.tasa_cambio_referencia = tasa_nueva
+                update_fields.append('tasa_cambio_referencia')
+        ingreso.save(update_fields=update_fields)
+        VGCorreccionMetodoPago.objects.create(
+            tipo='ingreso_extra', registro_id=ingreso.id, metodo_anterior=metodo_anterior, metodo_nuevo=metodo_nuevo,
+            motivo=motivo, creado_por=request.user, actualizado_por=request.user,
+        )
+        return _auth_response({
+            'ok': True,
+            'message': f'Se movió de {metodo_anterior.nombre} a {metodo_nuevo.nombre}.',
+        })
 
     if action == 'agregar_consignacion':
         try:
@@ -400,10 +569,19 @@ def reporte_cuadre_caja_rango_view(request):
 
     resumen = resumen_cuadre_caja_rango(desde, hasta)
 
+    ingresos_extra_rango = (
+        VGIngresoExtra.objects
+        .filter(fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta)
+        .select_related('metodo_pago', 'creado_por')
+        .order_by('-fecha_creacion')
+    )
+
     return _auth_response({
         'ok': True,
         'desde': desde.isoformat(),
         'hasta': hasta.isoformat(),
+        'ingresos_extra_rango': [_serialize_ingreso_extra(item) for item in ingresos_extra_rango],
+        'total_ingresos_extra_rango': str(sum((item.monto for item in ingresos_extra_rango), Decimal('0'))),
         'dias': [
             {
                 'fecha': dia['fecha'].isoformat(),

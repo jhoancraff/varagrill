@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
+import NotasEntregaHistorialPage from './NotasEntregaHistorialPage';
 import { formatMontoDocumento } from '../utils/currency';
 
 function getCookie(name) {
@@ -13,6 +14,11 @@ function getCookie(name) {
 
 function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken }) {
   const tasaCambio = useExchangeRate();
+  // El selector de tipo de reporte solo tiene sentido en la pantalla completa
+  // (Contabilidad): cuando esta embebida en Cobro, la cajera ya tiene su propia
+  // sección de Notas de entrega justo arriba de esta (ver CheckoutPage), así
+  // que ahí esta pantalla se queda mostrando solo facturas, como siempre.
+  const [tipoReporte, setTipoReporte] = useState('facturas');
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -140,7 +146,9 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
             <div style={eyebrowStyle}>Contabilidad</div>
             <h2 style={titleStyle(isMobile)}>Cuentas por cobrar</h2>
             <p style={subtitleStyle}>
-              Facturas emitidas con saldo pendiente. Selecciona una para registrar los abonos hasta saldarla.
+              {tipoReporte === 'facturas'
+                ? 'Facturas emitidas con saldo pendiente. Selecciona una para registrar los abonos hasta saldarla.'
+                : 'Notas de entrega emitidas, pendientes o pagadas. Selecciona una para registrar sus abonos o reimprimirla.'}
             </p>
           </div>
           <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
@@ -151,15 +159,34 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
         <div style={embeddedHeaderStyle}>Cuentas por cobrar</div>
       )}
 
-      {feedback ? <div style={feedbackStyle(feedbackType)}>{feedback}</div> : null}
-
-      {loading ? <div style={emptyStateStyle}>Cargando cuentas por cobrar...</div> : null}
-      {!loading && error ? <div style={errorStyle}>{error}</div> : null}
-      {!loading && !error && ordenes.length === 0 ? (
-        <div style={emptyStateStyle}>No hay deudas pendientes por cobrar en este momento.</div>
+      {!embedded ? (
+        <label style={dateFieldStyle}>
+          <span style={dateLabelStyle}>Reporte</span>
+          <select
+            value={tipoReporte}
+            onChange={(event) => setTipoReporte(event.target.value)}
+            style={selectStyle}
+            className="admin-dark-select"
+          >
+            <option value="facturas">Facturas</option>
+            <option value="notas_entrega">Notas de entrega</option>
+          </select>
+        </label>
       ) : null}
 
-      {!loading && !error && ordenes.length > 0 ? (
+      {!embedded && tipoReporte === 'notas_entrega' ? (
+        <NotasEntregaHistorialPage isMobile={isMobile} embedded />
+      ) : (
+        <>
+          {feedback ? <div style={feedbackStyle(feedbackType)}>{feedback}</div> : null}
+
+          {loading ? <div style={emptyStateStyle}>Cargando cuentas por cobrar...</div> : null}
+          {!loading && error ? <div style={errorStyle}>{error}</div> : null}
+          {!loading && !error && ordenes.length === 0 ? (
+            <div style={emptyStateStyle}>No hay deudas pendientes por cobrar en este momento.</div>
+          ) : null}
+
+          {!loading && !error && ordenes.length > 0 ? (
         <div style={layoutStyle(isMobile)}>
           <div style={listStyle}>
             {ordenes.map((orden) => (
@@ -262,6 +289,8 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
           </div>
         </div>
       ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -444,6 +473,20 @@ const selectStyle = {
   appearance: 'auto',
   colorScheme: 'dark',
   cursor: 'pointer',
+};
+
+const dateFieldStyle = {
+  display: 'grid',
+  gap: 4,
+  width: 220,
+};
+
+const dateLabelStyle = {
+  color: '#d2c4c4',
+  fontSize: 12,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
 };
 
 const primaryButtonStyle = {

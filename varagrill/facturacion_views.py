@@ -745,6 +745,15 @@ def factura_abono_view(request, factura_id):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # Igual que en pedidos_cobro_view/nota_entrega_abono_view: obligatorio para
+    # cualquier metodo que no sea efectivo.
+    referencia_usuario = str(data.get('referencia', '') or '').strip()
+    if not referencia_usuario and not metodo_pago.es_efectivo:
+        return _auth_response({
+            'ok': False,
+            'message': f'Indica el número de referencia del pago por {metodo_pago.nombre}.',
+        }, status=400)
+
     with transaction.atomic():
         try:
             factura = VGFactura.objects.select_for_update().select_related('cliente').get(pk=factura_id)
@@ -788,8 +797,7 @@ def factura_abono_view(request, factura_id):
                 'message': f'El monto excede el saldo pendiente ({unidad} {saldo_en_moneda_factura:.2f}).',
             }, status=400)
 
-        referencia = str(data.get('referencia', '') or '').strip() \
-            or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{factura.id}'
+        referencia = referencia_usuario or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{factura.id}'
 
         tasa_pago_actual = obtener_tasa_actual()
         pago = VGPago.objects.create(
@@ -1030,6 +1038,15 @@ def nota_entrega_abono_view(request, nota_id):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # Igual que en pedidos_cobro_view: obligatorio para cualquier metodo que no
+    # sea efectivo, para poder cruzarlo despues contra el estado de cuenta.
+    referencia_usuario = str(data.get('referencia', '') or '').strip()
+    if not referencia_usuario and not metodo_pago.es_efectivo:
+        return _auth_response({
+            'ok': False,
+            'message': f'Indica el número de referencia del pago por {metodo_pago.nombre}.',
+        }, status=400)
+
     with transaction.atomic():
         try:
             nota = VGNotaEntrega.objects.select_for_update().get(pk=nota_id)
@@ -1069,8 +1086,7 @@ def nota_entrega_abono_view(request, nota_id):
                 'message': f'El monto excede el saldo pendiente ({unidad} {saldo_en_moneda_nota:.2f}).',
             }, status=400)
 
-        referencia = str(data.get('referencia', '') or '').strip() \
-            or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{nota.id}'
+        referencia = referencia_usuario or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{nota.id}'
 
         tasa_pago_actual = obtener_tasa_actual()
         pago = VGPago.objects.create(

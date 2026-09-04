@@ -540,7 +540,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     if (action === 'nota') {
       return {
         title: 'Registrar nota de entrega',
-        message: `Vas a cobrar ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel} con una nota de entrega (sin factura fiscal). ¿Confirmas?`,
+        message: `Vas a cobrar ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel} con una nota de entrega (sin factura fiscal). `
+          + 'El número de referencia del pago se registra luego, al abonarla desde el reporte de notas de entrega. ¿Confirmas?',
         confirmLabel: 'Sí, registrar',
       };
     }

@@ -207,6 +207,46 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack }) {
           </section>
 
           <section style={panelStyle}>
+            <div style={sectionTitleStyle}>Propinas y pagos extra del rango</div>
+            {(data.ingresos_extra_rango || []).length === 0 ? (
+              <div style={emptyStyle}>No se registró ninguna propina ni pago extra en este rango.</div>
+            ) : (
+              <div style={tableWrapStyle}>
+                <div style={ingresoExtraTableStyle}>
+                  <div style={headStyle}>Fecha</div>
+                  <div style={headStyle}>Tipo</div>
+                  <div style={headStyle}>Monto</div>
+                  <div style={headStyle}>Cuenta</div>
+                  <div style={headStyle}>Registrado por</div>
+                  <div style={headStyle}>Descripción</div>
+                  {data.ingresos_extra_rango.map((item) => (
+                    <Fragment key={item.id}>
+                      <div style={cellStyle}>{new Date(item.fecha_creacion).toLocaleDateString('es-VE')}</div>
+                      <div style={cellStyle}>{item.tipo_label}</div>
+                      <div style={cellStyle}>
+                        {item.moneda === 'VES' ? (
+                          <>
+                            Bs. {formatMonto(Number(item.monto) * Number(item.tasa_cambio_referencia || 0))}
+                            <span style={secondaryAmountStyle}> (${formatMonto(item.monto)})</span>
+                          </>
+                        ) : (
+                          <>${formatMonto(item.monto)}</>
+                        )}
+                      </div>
+                      <div style={cellStyle}>{item.metodo_pago_nombre}</div>
+                      <div style={cellStyle}>{item.registrado_por || '—'}</div>
+                      <div style={cellStyle}>{item.descripcion || '—'}</div>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ fontWeight: 700, color: '#fff' }}>
+              Total propinas/extra: ${formatMonto(data.total_ingresos_extra_rango)}
+            </div>
+          </section>
+
+          <section style={panelStyle}>
             <div style={sectionTitleStyle}>Desglose día por día</div>
             <div style={tableWrapStyle}>
               <div style={diasTableStyle}>
@@ -264,6 +304,7 @@ const statusChipStyle = (closed) => ({
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const diasTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,0.8fr) minmax(120px,0.8fr) minmax(160px,1fr)', minWidth: 620, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const ingresoExtraTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(100px,0.6fr) minmax(100px,0.7fr) minmax(90px,0.6fr) minmax(170px,1fr) minmax(140px,0.9fr) minmax(160px,1.2fr)', minWidth: 900, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };

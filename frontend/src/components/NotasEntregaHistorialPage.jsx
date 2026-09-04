@@ -24,6 +24,14 @@ function estadoLabel(estado) {
   return estado;
 }
 
+// Cuando la cajera no escribe una referencia (pago en efectivo, o el metodo no
+// la exige), el backend igual guarda una autogenerada (COBRO-.../ABONO-...)
+// para que el pago nunca quede sin referencia — esa no es información útil
+// para mostrarle a nadie, así que se filtra acá.
+function esReferenciaAutogenerada(referencia) {
+  return /^(COBRO|ABONO)-\d{14}-\d+$/.test(referencia || '');
+}
+
 function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refreshToken }) {
   const tasaCambio = useExchangeRate();
   const [desde, setDesde] = useState(hoyISO);
@@ -41,6 +49,8 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
   const [metodosPago, setMetodosPago] = useState([]);
   const [montoAbono, setMontoAbono] = useState('');
   const [metodoAbono, setMetodoAbono] = useState('');
+  const [referenciaAbono, setReferenciaAbono] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('todas');
   const [savingAbono, setSavingAbono] = useState(false);
 
   const fetchNotas = useCallback(async (desdeBuscado, hastaBuscado) => {
@@ -119,6 +129,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
   const handleSelectNota = (nota) => {
     setFeedback('');
     setMontoAbono('');
+    setReferenciaAbono('');
     setSelectedNotaId(nota.id);
     fetchNotaDetalle(nota.id);
   };
@@ -159,6 +170,12 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
       setFeedback('No hay metodos de pago activos configurados.');
       return;
     }
+    const metodo = metodosPago.find((item) => item.id === metodoPagoId);
+    if (metodo && !metodo.es_efectivo && !referenciaAbono.trim()) {
+      setFeedbackType('error');
+      setFeedback(`Indica el número de referencia del pago por ${metodo.nombre}.`);
+      return;
+    }
 
     setSavingAbono(true);
     setFeedback('');
@@ -167,7 +184,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
         credentials: 'include',
-        body: JSON.stringify({ monto: montoAbono, metodo_pago_id: metodoPagoId }),
+        body: JSON.stringify({ monto: montoAbono, metodo_pago_id: metodoPagoId, referencia: referenciaAbono.trim() }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
@@ -179,6 +196,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
       setFeedback(`Abono de $${data.pago.monto} registrado. Saldo pendiente: $${data.nota_entrega.saldo_pendiente}.`);
       setNotaDetalle(data.nota_entrega);
       setMontoAbono('');
+      setReferenciaAbono('');
       await fetchNotas(desde, hasta);
     } catch (requestError) {
       setFeedbackType('error');
@@ -187,6 +205,12 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
       setSavingAbono(false);
     }
   };
+
+  const notasFiltradas = notas.filter((nota) => {
+    if (filtroEstado === 'pendientes') return nota.estado !== 'pagada';
+    if (filtroEstado === 'pagadas') return nota.estado === 'pagada';
+    return true;
+  });
 
   return (
     <section style={containerStyle(isMobile, embedded)}>
@@ -231,6 +255,19 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
         <button type="submit" style={secondaryButtonStyle} disabled={loading}>
           {loading ? 'Buscando...' : 'Buscar'}
         </button>
+        <label style={dateFieldStyle}>
+          <span style={dateLabelStyle}>Estado</span>
+          <select
+            value={filtroEstado}
+            onChange={(event) => setFiltroEstado(event.target.value)}
+            style={inputStyle}
+            className="admin-dark-select"
+          >
+            <option value="todas">Todas</option>
+            <option value="pendientes">Pendientes</option>
+            <option value="pagadas">Pagadas</option>
+          </select>
+        </label>
       </form>
 
       {feedback ? <div style={feedbackStyle(feedbackType)}>{feedback}</div> : null}
@@ -240,11 +277,14 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
       {!loading && !error && notas.length === 0 ? (
         <div style={emptyStateStyle}>No hay notas de entrega registradas en ese rango de fechas.</div>
       ) : null}
+      {!loading && !error && notas.length > 0 && notasFiltradas.length === 0 ? (
+        <div style={emptyStateStyle}>No hay notas de entrega {filtroEstado === 'pendientes' ? 'pendientes' : 'pagadas'} en ese rango de fechas.</div>
+      ) : null}
 
-      {!loading && !error && notas.length > 0 ? (
+      {!loading && !error && notasFiltradas.length > 0 ? (
         <div style={layoutStyle(isMobile)}>
           <div style={listStyle}>
-            {notas.map((nota) => (
+            {notasFiltradas.map((nota) => (
               <div key={nota.id} style={notaRowStyle(selectedNotaId === nota.id)}>
                 <div style={{ display: 'grid', gap: 2 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
@@ -257,6 +297,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                     {new Date(nota.fecha_emision).toLocaleString('es-VE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     {' · '}
                     {nota.pedidos.length} pedido(s)
+                    {nota.referencia && !esReferenciaAutogenerada(nota.referencia) ? ` · Ref: ${nota.referencia}` : ''}
                   </div>
                   <div style={{ color: '#ffcf7d', fontWeight: 700 }}>
                     Total: {formatMontoDocumento(nota.total, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
@@ -316,7 +357,10 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                     <div style={{ color: '#9fe3b0', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>Abonos registrados</div>
                     {notaDetalle.pagos.map((pago) => (
                       <div key={pago.id} style={lineaRowStyle}>
-                        <span>{pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')}</span>
+                        <span>
+                          {pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')}
+                          {pago.referencia && !esReferenciaAutogenerada(pago.referencia) ? ` · Ref: ${pago.referencia}` : ''}
+                        </span>
                         <span>{formatMontoDocumento(pago.monto, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
                       </div>
                     ))}
@@ -335,6 +379,18 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                       style={inputStyle}
                       required
                     />
+                    {/* Sin `required`: handleRegistrarAbono ya valida esto con un mensaje propio
+                        (ver el bug de `required` nativo bloqueando el aviso, mismo criterio que
+                        Mesa/Cliente en NewOrderPage/EditOrderPage). */}
+                    {!(metodosPago.find((item) => item.id === (metodoAbono || (metodosPago[0] && metodosPago[0].id)))?.es_efectivo) ? (
+                      <input
+                        type="text"
+                        placeholder="Número de referencia del pago"
+                        value={referenciaAbono}
+                        onChange={(event) => setReferenciaAbono(event.target.value)}
+                        style={inputStyle}
+                      />
+                    ) : null}
                     <select
                       value={metodoAbono || (metodosPago[0] && metodosPago[0].id) || ''}
                       onChange={(event) => setMetodoAbono(Number(event.target.value))}
@@ -420,6 +476,7 @@ const buscadorFormStyle = (isMobile) => ({
   display: 'flex',
   flexDirection: isMobile ? 'column' : 'row',
   alignItems: isMobile ? 'stretch' : 'flex-end',
+  flexWrap: 'wrap',
   gap: 8,
 });
 

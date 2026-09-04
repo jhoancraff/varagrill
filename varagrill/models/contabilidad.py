@@ -91,6 +91,40 @@ class VGIngresoExtra(VGAuditoria):
         return f"{self.get_tipo_display()} ${self.monto} — {self.metodo_pago}"
 
 
+class VGCorreccionMetodoPago(VGAuditoria):
+    """
+    Auditoría de cada corrección de cuenta (metodo_pago) hecha desde el cuadre
+    de caja — cuando la cajera cobró con la cuenta equivocada y hay que
+    "mover" el dinero a la correcta (ver reporte_cuadre_caja_view, acción
+    'cambiar_metodo_pago'). El motivo es obligatorio a propósito: es lo que
+    deja registrado un rastro auditable de por qué se movió cada plata entre
+    cuentas, en vez de solo el hecho de que se movió. creado_por (de
+    VGAuditoria) es quién hizo el cambio.
+    """
+    TIPOS = [
+        ("pago", "Pago"),
+        ("ingreso_extra", "Ingreso extra"),
+    ]
+    tipo = models.CharField(max_length=20, choices=TIPOS)
+    registro_id = models.PositiveIntegerField(help_text="ID de la VGPago o VGIngresoExtra corregida.")
+    metodo_anterior = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, related_name="correcciones_desde",
+    )
+    metodo_nuevo = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, related_name="correcciones_hacia",
+    )
+    motivo = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "vg_correcciones_metodo_pago"
+        verbose_name = "Corrección de cuenta"
+        verbose_name_plural = "Correcciones de cuenta"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} #{self.registro_id}: {self.metodo_anterior} → {self.metodo_nuevo}"
+
+
 # ---------------------------------------------------------------------------
 # Cuadre de caja diario
 # ---------------------------------------------------------------------------

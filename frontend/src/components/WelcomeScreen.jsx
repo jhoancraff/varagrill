@@ -2,8 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import AdminPanelPage from './AdminPanelPage';
 import ContabilidadPanelPage from './ContabilidadPanelPage';
 import ReporteCuadreCajaPage from './ReporteCuadreCajaPage';
+import ReporteVentasDiaPage from './ReporteVentasDiaPage';
+import ReporteCuentasPorCobrarPage from './ReporteCuentasPorCobrarPage';
+import ReporteCuentasCobradasPage from './ReporteCuentasCobradasPage';
+import ReportePropinasPage from './ReportePropinasPage';
 import ReporteCuadreCajaRangoPage from './ReporteCuadreCajaRangoPage';
 import ReporteDisponibilidadCuentasPage from './ReporteDisponibilidadCuentasPage';
+import ReporteConciliacionBancariaPage from './ReporteConciliacionBancariaPage';
 import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
 import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
 import AnalystEditUserPage from './AnalystEditUserPage';
@@ -48,7 +53,6 @@ import AnalystMargenGananciaPage from './AnalystMargenGananciaPage';
 import AnalystMovimientoProductosPage from './AnalystMovimientoProductosPage';
 import AnalystConfiguracionCosteoPage from './AnalystConfiguracionCosteoPage';
 import EditOrderPage from './EditOrderPage';
-import KitchenOrdersPage from './KitchenOrdersPage';
 import MesasAtendidasPage from './MesasAtendidasPage';
 import NewOrderPage from './NewOrderPage';
 import PromotionsPage from './PromotionsPage';
@@ -100,13 +104,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   const [products, setProducts] = useState([]);
   const [adicionales, setAdicionales] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
-  const [pendingOrdersCount, setPendingOrdersCount] = useState(0);
   const [readyToBillCount, setReadyToBillCount] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
   const [lastKitchenEvent, setLastKitchenEvent] = useState(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [newOrderPreset, setNewOrderPreset] = useState(null);
-  const [kitchenFlashMessage, setKitchenFlashMessage] = useState('');
+  const [mesaAutoAbrir, setMesaAutoAbrir] = useState(null);
 
   const handleNuevoPedido = () => {
     setNewOrderPreset(null);
@@ -124,14 +127,19 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     }
   };
 
-  const handleOrderCreated = (pedidoId) => {
-    setKitchenFlashMessage(`Pedido #${pedidoId} registrado con éxito.`);
-    goToView('kitchen');
+  // Cocina ya no tiene tablero propio (KitchenOrdersPage, eliminado — cocina
+  // no mira pantalla): tras crear o editar un pedido, el mesero aterriza
+  // directo en la mesa que lo originó, dentro de Mesas Atendidas. El `token`
+  // fuerza la reapertura aunque sea la misma mesaId de la vez anterior (mismo
+  // patrón que newOrderPreset, arriba).
+  const handleOrderCreated = (pedidoId, mesaId) => {
+    setMesaAutoAbrir({ mesaId, token: Date.now(), flashMessage: `Pedido #${pedidoId} registrado con éxito.` });
+    goToView('mesas-atendidas');
   };
 
-  const handleOrderUpdated = (pedidoId) => {
-    setKitchenFlashMessage(`Pedido #${pedidoId} actualizado con éxito.`);
-    goToView('kitchen');
+  const handleOrderUpdated = (pedidoId, mesaId) => {
+    setMesaAutoAbrir({ mesaId, token: Date.now(), flashMessage: `Pedido #${pedidoId} actualizado con éxito.` });
+    goToView('mesas-atendidas');
   };
 
   useEffect(() => {
@@ -266,45 +274,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   useEffect(() => {
     let cancelled = false;
 
-    const loadPendingOrders = async () => {
-      try {
-        const response = await fetch('/api/pedidos/cocina/?estado=activos&limit=1', {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || !data.ok || cancelled) {
-          return;
-        }
-
-        const count = Number(data.counts?.pendiente || 0);
-        setPendingOrdersCount(Number.isFinite(count) ? count : 0);
-      } catch (error) {
-        // Keep the last known value when there is a temporary network error.
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        loadPendingOrders();
-      }
-    };
-
-    loadPendingOrders();
-    const pollId = window.setInterval(loadPendingOrders, 12000);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(pollId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
     const loadReadyToBill = async () => {
       try {
         const response = await fetch('/api/pedidos/cobro/', {
@@ -355,7 +324,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     // El home genérico (promociones/recomendación del chef) no le sirve de mucho al
     // mesero en su día a día — lo que necesita ver apenas entra (o cuando recarga, o
     // cuando toca "Inicio") son sus mesas atendidas. Solo se redirige desde 'home': el
-    // resto de sus vistas (Nuevo pedido, Pedidos, etc.) siguen libres.
+    // resto de sus vistas (Nuevo pedido, etc.) siguen libres.
     if (isMesero && activeView === 'home') {
       replaceView('mesas-atendidas');
       return;
@@ -377,8 +346,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   }, [activeView, isAdmin, isCajera, isMesero, canSeeCartasRestringidas, replaceView]);
 
   const {
-    alertPermission,
-    alertsEnabled,
     triggerKitchenAlert,
     requestAlertPermission,
   } = useKitchenAlerts();
@@ -432,7 +399,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 
     if (message.event === 'NUEVA_COMANDAS') {
       setLiveNotice(`Alerta cocina: pedido #${payload.pedido_id} (${mesaLabel}) registrado por ${payload.actor}.`);
-      setPendingOrdersCount((current) => current + 1);
 
       window.setTimeout(() => {
         setLiveNotice('');
@@ -452,7 +418,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   // Socket único para todo el equipo autenticado: cocina recibe comandas
   // nuevas/actualizadas y cada usuario recibe además sus propios avisos
   // (ej. "tu pedido está listo"), sin importar en qué vista esté parado.
-  const { isConnected: isKitchenSocketConnected } = useKitchenSocket({
+  useKitchenSocket({
     socketPath: '/ws/pedidos/',
     onEvent: handleKitchenSocketEvent,
     enabled: true,
@@ -632,34 +598,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
               </svg>
             </span>
             <span>Nuevo pedido</span>
-          </button>
-        ) : null}
-
-        {!isCajera ? (
-          <button
-            type="button"
-            onClick={() => {
-              goToView('kitchen');
-              if (isSidebarOverlayMode) {
-                setIsSidebarOpen(false);
-              }
-            }}
-            style={sidebarButtonStyle(activeView === 'kitchen')}
-          >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 2h8" />
-                <path d="M9 2v3" />
-                <path d="M15 2v3" />
-                <path d="M5 5h14" />
-                <rect x="4" y="5" width="16" height="17" rx="2" />
-                <path d="M8 10h8" />
-                <path d="M8 14h8" />
-                <path d="M8 18h5" />
-              </svg>
-            </span>
-            <span style={{ flex: 1, textAlign: 'left' }}>Pedidos</span>
-            <span style={pendingBadgeStyle(pendingOrdersCount > 0)}>{pendingOrdersCount}</span>
           </button>
         ) : null}
 
@@ -895,23 +833,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             }}>
               <button
                 type="button"
-                onClick={() => goToView('kitchen')}
-                style={kitchenButtonStyle}
-              >
-                <span aria-hidden="true" style={sidebarIconWrapStyle}>
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 4h18" />
-                    <path d="M5 8h14" />
-                    <path d="M8 12h8" />
-                    <path d="M6 16h12" />
-                    <path d="M9 20h6" />
-                  </svg>
-                </span>
-                Ver cocina
-              </button>
-
-              <button
-                type="button"
                 onClick={() => {
                   setNewOrderPreset(null);
                   goToView('orders');
@@ -1004,8 +925,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onBack={goBackView}
             onAddRoundToTable={handleAddRoundToTable}
             onNuevoPedido={handleNuevoPedido}
+            onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
+            autoAbrir={mesaAutoAbrir}
             mesasCatalogo={mesas}
             canGestionarItems={isAdmin || isCajera}
+            sidebarOffset={desktopContentOffset}
           />
         ) : activeView.startsWith('orders-edit:') ? (
           <EditOrderPage
@@ -1025,6 +949,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             lastKitchenEvent={lastKitchenEvent}
             waiterName={displayName}
             canCancelarPedidos={canCancelarPedidosDesdeCaja}
+            canGestionarItems={isAdmin || isCajera}
+            mesasCatalogo={mesas}
           />
         ) : activeView === 'cuentas-cobrar' ? (
           <CuentasPorCobrarPage
@@ -1104,7 +1030,28 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <ReporteCuadreCajaPage
             isMobile={isMobile}
             onBack={goBackView}
+            onNavigate={handleAnalystNavigation}
             backLabel={isCajera ? '← Volver a Cobro' : '← Volver a Contabilidad'}
+          />
+        ) : activeView === 'contabilidad-ventas-dia' ? (
+          <ReporteVentasDiaPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'contabilidad-cuentas-por-cobrar-detalle' ? (
+          <ReporteCuentasPorCobrarPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'contabilidad-cuentas-cobradas-dia' ? (
+          <ReporteCuentasCobradasPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'contabilidad-propinas-dia' ? (
+          <ReportePropinasPage
+            isMobile={isMobile}
+            onBack={goBackView}
           />
         ) : activeView === 'contabilidad-cuadre-caja-rango' ? (
           <ReporteCuadreCajaRangoPage
@@ -1113,6 +1060,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           />
         ) : activeView === 'contabilidad-disponibilidad-cuentas' ? (
           <ReporteDisponibilidadCuentasPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'contabilidad-conciliacion-bancaria' ? (
+          <ReporteConciliacionBancariaPage
             isMobile={isMobile}
             onBack={goBackView}
           />
@@ -1320,18 +1272,16 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onBack={goBackView}
           />
         ) : (
-          <KitchenOrdersPage
+          <MesasAtendidasPage
             isMobile={isMobile}
             onBack={goBackView}
-            isSocketConnected={isKitchenSocketConnected}
-            alertPermission={alertPermission}
-            alertsEnabled={alertsEnabled}
-            onRequestPermission={requestAlertPermission}
-            lastKitchenEvent={lastKitchenEvent}
-            onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
             onAddRoundToTable={handleAddRoundToTable}
-            flashMessage={kitchenFlashMessage}
-            onClearFlashMessage={() => setKitchenFlashMessage('')}
+            onNuevoPedido={handleNuevoPedido}
+            onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
+            autoAbrir={mesaAutoAbrir}
+            mesasCatalogo={mesas}
+            canGestionarItems={isAdmin || isCajera}
+            sidebarOffset={desktopContentOffset}
           />
         )}
       </div>
@@ -1451,19 +1401,6 @@ const newOrderButtonStyle = {
   borderRadius: 999,
   padding: '11px 16px',
   background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
-  color: '#fff',
-  fontWeight: 700,
-  cursor: 'pointer',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 8,
-};
-
-const kitchenButtonStyle = {
-  border: '1px solid rgba(255,255,255,0.2)',
-  borderRadius: 999,
-  padding: '11px 16px',
-  background: 'rgba(255,255,255,0.03)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

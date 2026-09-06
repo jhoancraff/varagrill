@@ -723,6 +723,48 @@ class VGDetallePedido(models.Model):
         return f"{self.producto} x {self.cantidad}"
 
 
+class VGAjustePedido(VGAuditoria):
+    """
+    Auditoría de un ajuste manual a un pedido ya en curso: quitar un item
+    (completo o solo parte de la cantidad) o moverlo a otra mesa — para
+    cuando el mesero se equivocó y ya es tarde para que él mismo lo corrija
+    desde su propio flujo (ver pedido_detalle_eliminar_view/
+    pedido_detalle_mover_view en api_views.py). El motivo es obligatorio a
+    propósito, igual que VGCorreccionMetodoPago: es lo que deja un rastro
+    auditable de por qué se tocó el pedido de otra persona, no solo que se
+    tocó.
+
+    El VGDetallePedido ajustado puede terminar borrado (eliminacion) o con
+    otro pedido dueño (movido), así que acá se guarda una foto de sus datos
+    al momento del ajuste — producto_nombre, cantidad_ajustada, mesa_origen/
+    destino — en vez de una FK viva a algo que puede dejar de existir o de
+    tener sentido después.
+    """
+    TIPOS = [
+        ("eliminacion", "Item eliminado"),
+        ("reduccion", "Cantidad reducida"),
+        ("movido", "Movido a otra mesa"),
+    ]
+    pedido = models.ForeignKey(
+        VGPedido, on_delete=models.SET_NULL, null=True, blank=True, related_name="ajustes",
+    )
+    tipo = models.CharField(max_length=20, choices=TIPOS)
+    producto_nombre = models.CharField(max_length=150)
+    cantidad_ajustada = models.PositiveSmallIntegerField()
+    mesa_origen = models.PositiveIntegerField(null=True, blank=True)
+    mesa_destino = models.PositiveIntegerField(null=True, blank=True)
+    motivo = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "vg_ajustes_pedido"
+        verbose_name = "Ajuste de pedido"
+        verbose_name_plural = "Ajustes de pedido"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} — {self.producto_nombre} x{self.cantidad_ajustada}"
+
+
 class VGDetallePedidoAdicional(models.Model):
     """
     Un adicional (VGPreparacion con es_adicional=True) que el mesero agregó a una
@@ -903,6 +945,17 @@ class VGPago(models.Model):
     el mismo modelo sirve de abono para los tres flujos sin duplicar lógica,
     y el cuadre de caja diario (varagrill/reportes.py) sigue sumando por
     fecha/método sin importar el origen del pago.
+
+    monto usa 6 decimales (no 2), igual que VGIngresoExtra.monto: con la
+    tasa BCV actual (por encima de Bs 800/$), redondear a centavos de dolar
+    equivale a redondear en saltos de varios bolivares al convertir un pago
+    en bolivares — ver nota_entrega_abono_view/factura_abono_view, que
+    redondean la conversion a este mismo nivel de precision. saldo_pendiente
+    en VGNotaEntrega/VGFactura se queda en 2 decimales a proposito (el
+    monto de una venta es siempre un dolar "limpio", nunca tiene sentido en
+    fracciones de centavo) — esas vistas redondean el saldo resultante a 2
+    decimales despues de restar, para que un pago con precision de 6
+    decimales nunca deje un residuo de centavos de centavo pendiente.
     """
     ESTADOS = [
         ("completado", "Completado"),
@@ -917,7 +970,7 @@ class VGPago(models.Model):
     nota_entrega = models.ForeignKey(
         "varagrill.VGNotaEntrega", on_delete=models.PROTECT, null=True, blank=True, related_name="pagos",
     )
-    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    monto = models.DecimalField(max_digits=14, decimal_places=6)
     metodo_pago = models.ForeignKey(
         VGMetodoPago, on_delete=models.PROTECT, related_name="pagos",
     )

@@ -12,25 +12,32 @@ from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from .api_views import _calcular_margen_periodo
+from .api_views import _calcular_margen_periodo, _serialize_detalle_adicionales, _serialize_detalle_opciones
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import (
     VGCierreCaja,
+    VGConciliacionBancaria,
     VGConsignacionCaja,
     VGCorreccionMetodoPago,
     VGDetallePedido,
     VGGasto,
     VGIngresoExtra,
     VGMetodoPago,
+    VGNotaEntrega,
     VGPago,
 )
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
+    desglose_bancario_dia,
     desglose_caja_por_moneda,
+    detalle_cuentas_cobradas_dia,
+    detalle_cuentas_por_cobrar,
+    detalle_ventas_dia,
     disponibilidad_por_cuenta,
     efectivo_esperado_dia,
     gastos_efectivo_dia,
     resumen_cuadre_caja_rango,
+    resumen_ventas_dia,
     tasa_para_fecha,
     total_consignado,
     totales_pagos_por_metodo,
@@ -43,6 +50,7 @@ def _serialize_metodo_pago(metodo):
         'nombre': metodo.nombre,
         'moneda': metodo.moneda,
         'es_efectivo': metodo.es_efectivo,
+        'cuenta_bancaria': metodo.cuenta_bancaria,
         'activo': metodo.activo,
     }
 
@@ -127,7 +135,10 @@ def ingresos_extra_view(request):
     # VGIngresoExtra.monto se guarda siempre en USD. Si la cuenta es en
     # bolivares, se congela la tasa BCV de este momento — de lo contrario un
     # monto en bolivares se guardaria tal cual como si fueran dolares, inflando
-    # el registro (1.000 Bs pasarian a contarse como $1.000).
+    # el registro (1.000 Bs pasarian a contarse como $1.000). Se redondea a 6
+    # decimales, no 2: con la tasa BCV actual, redondear a centavos de dolar
+    # perdia varios bolivares al reconvertir para mostrarlo (ver
+    # VGIngresoExtra.monto).
     if metodo_pago.moneda == 'VES':
         tasa_conversion = tasa_cambio_para_registro()
         if not tasa_conversion or tasa_conversion <= 0:
@@ -135,10 +146,10 @@ def ingresos_extra_view(request):
                 'ok': False,
                 'message': 'No hay tasa de cambio disponible para convertir el monto a dolares.',
             }, status=400)
-        monto = (monto_input / tasa_conversion).quantize(Decimal('0.01'))
+        monto = (monto_input / tasa_conversion).quantize(Decimal('0.000001'))
     else:
         tasa_conversion = None
-        monto = monto_input.quantize(Decimal('0.01'))
+        monto = monto_input.quantize(Decimal('0.000001'))
 
     ingreso = VGIngresoExtra.objects.create(
         tipo=tipo,
@@ -190,6 +201,7 @@ def admin_metodos_pago_view(request):
             nombre=nombre,
             moneda=moneda,
             es_efectivo=bool(data.get('es_efectivo')),
+            cuenta_bancaria=str(data.get('cuenta_bancaria', '') or '').strip(),
             creado_por=request.user,
         )
         return _auth_response({
@@ -210,6 +222,21 @@ def admin_metodos_pago_view(request):
         return _auth_response({
             'ok': True,
             'message': 'Metodo de pago actualizado correctamente.',
+            'metodo_pago': _serialize_metodo_pago(metodo),
+        })
+
+    if action == 'actualizar_cuenta_bancaria':
+        try:
+            metodo = VGMetodoPago.objects.get(pk=int(data.get('id')))
+        except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El metodo de pago no existe.'}, status=400)
+
+        metodo.cuenta_bancaria = str(data.get('cuenta_bancaria', '') or '').strip()
+        metodo.actualizado_por = request.user
+        metodo.save(update_fields=['cuenta_bancaria', 'actualizado_por', 'fecha_actualizacion'])
+        return _auth_response({
+            'ok': True,
+            'message': 'Banco actualizado correctamente.',
             'metodo_pago': _serialize_metodo_pago(metodo),
         })
 
@@ -245,6 +272,18 @@ def _serialize_desglose_caja(desglose):
     return {clave: _serialize_balde(balde) for clave, balde in desglose.items()}
 
 
+def _serialize_banco_dia(banco):
+    return {
+        'nombre': banco['nombre'],
+        'agrupado': banco['agrupado'],
+        'moneda': banco['moneda'],
+        'moneda_mixta': banco.get('moneda_mixta', False),
+        'num_metodos': len(banco['metodos']),
+        'total': str(banco['total']),
+        'total_bs': str(banco['total_bs']) if banco['total_bs'] is not None else None,
+    }
+
+
 def _serialize_cierre_caja(cierre):
     if cierre is None:
         return None
@@ -260,10 +299,13 @@ def _serialize_cierre_caja(cierre):
 
 
 def _serialize_pago_dia(pago):
+    tasa_documento_origen = None
     if pago.nota_entrega_id:
         origen = f'Nota {pago.nota_entrega.codigo}'
+        tasa_documento_origen = pago.nota_entrega.tasa_cambio_referencia
     elif pago.factura_id:
         origen = f'Factura Nº {pago.factura.numero_factura}' if pago.factura.numero_factura else f'Factura #{pago.factura_id}'
+        tasa_documento_origen = pago.factura.tasa_cambio_referencia
     elif pago.pedido_id:
         origen = f'Pedido #{pago.pedido_id}'
     else:
@@ -278,6 +320,14 @@ def _serialize_pago_dia(pago):
         'referencia': pago.referencia,
         'registrado_por': (pago.creado_por.get_full_name() or pago.creado_por.username) if pago.creado_por else '',
         'fecha_pago': pago.fecha_pago.isoformat(),
+        # tasa_cambio_referencia: la tasa BCV congelada con la que se calculo
+        # ESTE pago (ver nota_entrega_abono_view/factura_abono_view). Cuando
+        # difiere de tasa_documento_origen es porque el fiado se cobro en un
+        # dia distinto al de la nota/factura y se recalculo al BCV del dia
+        # del cobro (ver totales_pagos_por_metodo en reportes.py) — el
+        # frontend usa esta diferencia para mostrar el aviso de recalculo.
+        'tasa_cambio_referencia': str(pago.tasa_cambio_referencia) if pago.tasa_cambio_referencia is not None else None,
+        'tasa_documento_origen': str(tasa_documento_origen) if tasa_documento_origen is not None else None,
     }
 
 
@@ -374,7 +424,15 @@ def reporte_cuadre_caja_view(request):
                 for item in totales
             ],
             'total_general': str(sum(item['total'] for item in totales)),
+            'resumen_ventas': {
+                key: str(value) for key, value in resumen_ventas_dia(fecha).items()
+            },
             'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
+            'desglose_bancario': [
+                _serialize_banco_dia(banco)
+                for banco in desglose_bancario_dia(fecha)
+                if not banco['es_efectivo']
+            ],
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
             'total_consignado': str(total_consignado(fecha)),
             'ingresos_extra_dia': [
@@ -610,6 +668,260 @@ def reporte_cuadre_caja_rango_view(request):
     })
 
 
+def _serialize_pago_venta(pago):
+    return {
+        'monto': str(pago['monto']),
+        'monto_bs': str(pago['monto_bs']) if pago['monto_bs'] is not None else None,
+        'metodo_pago_nombre': pago['metodo_pago_nombre'],
+        'cuenta_bancaria': pago['cuenta_bancaria'],
+        'referencia': pago['referencia'],
+        'fecha_pago': pago['fecha_pago'].isoformat(),
+    }
+
+
+def _agrupar_items_nota(nota):
+    """
+    Todas las lineas de pedido (VGDetallePedido) de los VGPedido de esta nota,
+    agrupadas por producto + adicionales + opciones exactamente iguales — asi
+    "10 cervezas" queda en una sola fila del resumen en vez de una fila por
+    cada vez que el mesero la agrego al pedido. Dos lineas del mismo producto
+    pero con adicionales/opciones distintas NO se mezclan entre si (son
+    platos distintos, aunque compartan producto base).
+    """
+    grupos = {}
+    orden = []
+    for pedido in nota.pedidos.all():
+        for detalle in pedido.detalles.all():
+            adicionales = _serialize_detalle_adicionales(detalle)
+            opciones = _serialize_detalle_opciones(detalle)
+            clave = (
+                detalle.producto_id,
+                tuple(sorted((a['nombre'], a['cantidad']) for a in adicionales)),
+                tuple(sorted((o['grupo_nombre'], o['nombre']) for o in opciones)),
+            )
+            if clave not in grupos:
+                grupos[clave] = {
+                    'producto': detalle.producto.nombre,
+                    'venta_por_peso': detalle.producto.venta_por_peso,
+                    'cantidad': 0,
+                    'peso_gramos': Decimal('0'),
+                    'subtotal': Decimal('0'),
+                    'adicionales': adicionales,
+                    'opciones': opciones,
+                }
+                orden.append(clave)
+            grupo = grupos[clave]
+            grupo['cantidad'] += detalle.cantidad
+            if detalle.peso_gramos:
+                grupo['peso_gramos'] += detalle.peso_gramos
+            grupo['subtotal'] += detalle.subtotal
+    return [grupos[clave] for clave in orden]
+
+
+def reporte_venta_nota_detalle_view(request, nota_id):
+    """
+    Detalle completo de una Nota de Entrega para el reporte de ventas del dia
+    (ver reporte_ventas_dia_view): mesa(s), mesero(s) y el resumen de lo
+    pedido (sumado por producto — ver _agrupar_items_nota), para saber
+    exactamente que se vendio en esa nota sin ir a buscarlo en Pedidos.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
+
+    try:
+        nota = (
+            VGNotaEntrega.objects
+            .select_related('cliente')
+            .prefetch_related(
+                'pedidos__mesa', 'pedidos__usuario',
+                'pedidos__detalles__producto',
+                'pedidos__detalles__adicionales__preparacion',
+                'pedidos__detalles__opciones',
+            )
+            .get(pk=nota_id)
+        )
+    except VGNotaEntrega.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
+
+    pedidos = list(nota.pedidos.all())
+    mesas = sorted({pedido.mesa.numero for pedido in pedidos if pedido.mesa_id})
+    meseros = sorted({
+        (pedido.usuario.get_full_name() or pedido.usuario.username)
+        for pedido in pedidos if pedido.usuario_id
+    })
+
+    return _auth_response({
+        'ok': True,
+        'nota': {
+            'id': nota.id,
+            'codigo': nota.codigo,
+            'cliente': nota.cliente.nombre if nota.cliente_id else '',
+            'total': str(nota.total),
+            'moneda': nota.moneda,
+            'estado': nota.estado,
+            'fecha_emision': nota.fecha_emision.isoformat(),
+        },
+        'mesas': mesas,
+        'meseros': meseros,
+        'items': [
+            {
+                'producto': item['producto'],
+                'cantidad': item['cantidad'],
+                'venta_por_peso': item['venta_por_peso'],
+                'peso_gramos': str(item['peso_gramos']) if item['venta_por_peso'] else None,
+                'subtotal': str(item['subtotal']),
+                'adicionales': [a['nombre'] for a in item['adicionales']],
+                'opciones': [f"{o['grupo_nombre']}: {o['nombre']}" for o in item['opciones']],
+            }
+            for item in _agrupar_items_nota(nota)
+        ],
+    })
+
+
+def reporte_ventas_dia_view(request):
+    """
+    Detalle fila por fila de cada Nota de Entrega emitida en un dia — el
+    desglose de "Total vendido hoy" del cuadre de caja (ver
+    detalle_ventas_dia en reportes.py). De solo lectura.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
+
+    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
+    if fecha is None:
+        return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+    notas = detalle_ventas_dia(fecha)
+
+    return _auth_response({
+        'ok': True,
+        'fecha': fecha.isoformat(),
+        'notas': [
+            {
+                'id': nota['id'],
+                'codigo': nota['codigo'],
+                'cliente': nota['cliente'],
+                'total': str(nota['total']),
+                'moneda': nota['moneda'],
+                'estado': nota['estado'],
+                'saldo_pendiente': str(nota['saldo_pendiente']),
+                'pagos': [_serialize_pago_venta(pago) for pago in nota['pagos']],
+            }
+            for nota in notas
+        ],
+        'total_vendido': str(sum((nota['total'] for nota in notas), Decimal('0'))),
+    })
+
+
+def reporte_cuentas_por_cobrar_view(request):
+    """
+    Detalle fila por fila de "Pendiente por cobrar" del cuadre de caja (ver
+    detalle_cuentas_por_cobrar en reportes.py): todas las notas de entrega
+    con saldo pendiente hasta una fecha, mas antiguas primero. De solo
+    lectura — cobrar de verdad se sigue haciendo desde Cuentas por Cobrar.
+
+    `saldo_pendiente_bs` se calcula con la tasa BCV de `fecha` (no la
+    congelada de cada nota): es cuanto habria que cobrarle HOY a ese cliente,
+    con el mismo criterio de recalculo que ya usa nota_entrega_abono_view.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
+
+    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
+    if fecha is None:
+        return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+    tasa = tasa_para_fecha(fecha)
+    notas = detalle_cuentas_por_cobrar(fecha)
+
+    return _auth_response({
+        'ok': True,
+        'fecha': fecha.isoformat(),
+        'tasa_bcv': str(tasa) if tasa is not None else None,
+        'notas': [
+            {
+                'id': nota['id'],
+                'codigo': nota['codigo'],
+                'cliente': nota['cliente'],
+                'total': str(nota['total']),
+                'saldo_pendiente': str(nota['saldo_pendiente']),
+                'saldo_pendiente_bs': (
+                    str((nota['saldo_pendiente'] * tasa).quantize(Decimal('0.01')))
+                    if tasa is not None else None
+                ),
+                'moneda': nota['moneda'],
+                'estado': nota['estado'],
+                'fecha_emision': nota['fecha_emision'].isoformat(),
+                'dias_pendiente': nota['dias_pendiente'],
+            }
+            for nota in notas
+        ],
+        'total_pendiente': str(sum((nota['saldo_pendiente'] for nota in notas), Decimal('0'))),
+    })
+
+
+def reporte_cuentas_cobradas_dia_view(request):
+    """
+    Detalle fila por fila de "Cuentas cobradas hoy" del cuadre de caja (ver
+    detalle_cuentas_cobradas_dia en reportes.py): pagos de hoy contra un
+    fiado de un dia anterior, con la diferencia en bolivares entre la tasa
+    del dia de emision y la tasa de hoy. De solo lectura.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
+
+    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
+    if fecha is None:
+        return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+    filas = detalle_cuentas_cobradas_dia(fecha)
+
+    def _str_or_none(value):
+        return str(value) if value is not None else None
+
+    return _auth_response({
+        'ok': True,
+        'fecha': fecha.isoformat(),
+        'pagos': [
+            {
+                'pago_id': fila['pago_id'],
+                'nota_id': fila['nota_id'],
+                'nota_codigo': fila['nota_codigo'],
+                'cliente': fila['cliente'],
+                'monto': str(fila['monto']),
+                'moneda': fila['moneda'],
+                'fecha_emision_nota': fila['fecha_emision_nota'].isoformat(),
+                'fecha_pago': fila['fecha_pago'].isoformat(),
+                'tasa_emision': _str_or_none(fila['tasa_emision']),
+                'tasa_cobro': _str_or_none(fila['tasa_cobro']),
+                'bs_a_tasa_emision': _str_or_none(fila['bs_a_tasa_emision']),
+                'bs_a_tasa_cobro': _str_or_none(fila['bs_a_tasa_cobro']),
+                'diferencia_bs': _str_or_none(fila['diferencia_bs']),
+                'metodo_pago_nombre': fila['metodo_pago_nombre'],
+                'cuenta_bancaria': fila['cuenta_bancaria'],
+                'referencia': fila['referencia'],
+            }
+            for fila in filas
+        ],
+        'total_cobrado': str(sum((fila['monto'] for fila in filas), Decimal('0'))),
+        'total_diferencia_bs': str(sum(
+            (fila['diferencia_bs'] for fila in filas if fila['diferencia_bs'] is not None), Decimal('0'),
+        )),
+    })
+
+
 def reporte_disponibilidad_cuentas_view(request):
     """
     Saldo acumulado disponible en cada cuenta/metodo de pago hasta una
@@ -628,34 +940,222 @@ def reporte_disponibilidad_cuentas_view(request):
     if fecha is None:
         return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
 
-    cuentas = disponibilidad_por_cuenta(fecha)
+    cuentas, bancos = disponibilidad_por_cuenta(fecha)
     tasa = tasa_para_fecha(fecha)
+
+    def _saldo_bs(saldo, moneda):
+        return (
+            str((saldo * tasa).quantize(Decimal('0.01')))
+            if moneda == 'VES' and tasa is not None else None
+        )
+
+    def _serialize_cuenta(cuenta):
+        return {
+            'id': cuenta['id'],
+            'nombre': cuenta['nombre'],
+            'moneda': cuenta['moneda'],
+            'es_efectivo': cuenta['es_efectivo'],
+            'cuenta_bancaria': cuenta['cuenta_bancaria'],
+            'activo': cuenta['activo'],
+            'ingresos_acumulados': str(cuenta['ingresos_acumulados']),
+            'ingresos_extra_acumulados': str(cuenta['ingresos_extra_acumulados']),
+            'gastos_acumulados': str(cuenta['gastos_acumulados']),
+            'compras_acumuladas': str(cuenta['compras_acumuladas']),
+            'consignado_acumulado': str(cuenta['consignado_acumulado']),
+            'saldo_disponible': str(cuenta['saldo_disponible']),
+            'saldo_disponible_bs': _saldo_bs(cuenta['saldo_disponible'], cuenta['moneda']),
+        }
 
     return _auth_response({
         'ok': True,
         'fecha': fecha.isoformat(),
         'tasa_bcv': str(tasa) if tasa is not None else None,
-        'cuentas': [
+        'cuentas': [_serialize_cuenta(cuenta) for cuenta in cuentas],
+        'bancos': [
             {
-                'id': cuenta['id'],
-                'nombre': cuenta['nombre'],
-                'moneda': cuenta['moneda'],
-                'es_efectivo': cuenta['es_efectivo'],
-                'activo': cuenta['activo'],
-                'ingresos_acumulados': str(cuenta['ingresos_acumulados']),
-                'gastos_acumulados': str(cuenta['gastos_acumulados']),
-                'compras_acumuladas': str(cuenta['compras_acumuladas']),
-                'consignado_acumulado': str(cuenta['consignado_acumulado']),
-                'saldo_disponible': str(cuenta['saldo_disponible']),
-                'saldo_disponible_bs': (
-                    str((cuenta['saldo_disponible'] * tasa).quantize(Decimal('0.01')))
-                    if cuenta['moneda'] == 'VES' and tasa is not None else None
-                ),
+                'nombre': banco['nombre'],
+                'agrupado': banco['agrupado'],
+                'moneda': banco['moneda'],
+                'moneda_mixta': banco.get('moneda_mixta', False),
+                'saldo_disponible': str(banco['saldo_disponible']),
+                'saldo_disponible_bs': _saldo_bs(banco['saldo_disponible'], banco['moneda']),
+                'metodos': [_serialize_cuenta(cuenta) for cuenta in banco['metodos']],
             }
-            for cuenta in cuentas
+            for banco in bancos
         ],
         'total_disponible': str(sum((cuenta['saldo_disponible'] for cuenta in cuentas), Decimal('0'))),
     })
+
+
+def _serialize_conciliacion(conciliacion):
+    if conciliacion is None:
+        return None
+    saldo_banco_bs = None
+    diferencia_bs = None
+    if conciliacion.moneda == 'VES' and conciliacion.tasa_cambio_referencia:
+        saldo_banco_bs = (conciliacion.saldo_banco * conciliacion.tasa_cambio_referencia).quantize(Decimal('0.01'))
+        diferencia_bs = (conciliacion.diferencia * conciliacion.tasa_cambio_referencia).quantize(Decimal('0.01'))
+    return {
+        'id': conciliacion.id,
+        'saldo_sistema': str(conciliacion.saldo_sistema),
+        'saldo_banco': str(conciliacion.saldo_banco),
+        'saldo_banco_bs': str(saldo_banco_bs) if saldo_banco_bs is not None else None,
+        'diferencia': str(conciliacion.diferencia),
+        'diferencia_bs': str(diferencia_bs) if diferencia_bs is not None else None,
+        'notas': conciliacion.notas,
+        'conciliado_por': (conciliacion.creado_por.get_full_name() or conciliacion.creado_por.username) if conciliacion.creado_por else '',
+        'fecha_creacion': conciliacion.fecha_creacion.isoformat(),
+    }
+
+
+@csrf_exempt
+def reporte_conciliacion_bancaria_view(request):
+    """
+    Conciliación bancaria por cuenta: compara, para cada banco real (ver
+    disponibilidad_por_cuenta), el saldo que calcula el sistema contra el
+    saldo que de verdad muestra el estado de cuenta o la app del banco en
+    `fecha` — el equivalente de reporte_cuadre_caja_view pero para las
+    cuentas que caen en un banco, no en la gaveta física. Las cuentas 100%
+    efectivo (es_efectivo en todos sus métodos) no aparecen aquí: esas ya se
+    cuadran en el cuadre de caja diario, no en este reporte.
+
+    Solo administrador: es una revisión de fondo del negocio completo, igual
+    que reporte_disponibilidad_cuentas_view (del que este reporte depende
+    directamente), no una tarea operativa diaria de cajera.
+
+    Una vez conciliada una cuenta para una fecha, esa fila queda fija (no se
+    permite volver a conciliar la misma cuenta/fecha) — mismo criterio que
+    VGCierreCaja: si hubo un error, se corrige con una fila nueva en la
+    fecha en que se detecta, dejando rastro de ambas, en vez de reescribir
+    la historia.
+    """
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        fecha = _parse_fecha_reporte(request.GET.get('fecha'))
+        if fecha is None:
+            return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+        _cuentas, bancos = disponibilidad_por_cuenta(fecha)
+        bancos = [banco for banco in bancos if not all(metodo['es_efectivo'] for metodo in banco['metodos'])]
+        tasa = tasa_para_fecha(fecha)
+
+        conciliaciones = {
+            item.banco_nombre: item
+            for item in VGConciliacionBancaria.objects.filter(
+                fecha=fecha, banco_nombre__in=[banco['nombre'] for banco in bancos],
+            ).select_related('creado_por')
+        }
+
+        def _saldo_bs(saldo, moneda):
+            return (
+                str((saldo * tasa).quantize(Decimal('0.01')))
+                if moneda == 'VES' and tasa is not None else None
+            )
+
+        bancos_payload = [
+            {
+                'nombre': banco['nombre'],
+                'agrupado': banco['agrupado'],
+                'moneda': banco['moneda'],
+                'moneda_mixta': banco.get('moneda_mixta', False),
+                'num_metodos': len(banco['metodos']),
+                'saldo_sistema': str(banco['saldo_disponible']),
+                'saldo_sistema_bs': _saldo_bs(banco['saldo_disponible'], banco['moneda']),
+                'conciliacion': _serialize_conciliacion(conciliaciones.get(banco['nombre'])),
+            }
+            for banco in bancos
+        ]
+
+        pendientes = sum(1 for item in bancos_payload if item['conciliacion'] is None)
+
+        return _auth_response({
+            'ok': True,
+            'fecha': fecha.isoformat(),
+            'tasa_bcv': str(tasa) if tasa is not None else None,
+            'bancos': bancos_payload,
+            'resumen': {
+                'total_bancos': len(bancos_payload),
+                'conciliados': len(bancos_payload) - pendientes,
+                'pendientes': pendientes,
+                'suma_diferencias': str(sum(
+                    (Decimal(item['conciliacion']['diferencia']) for item in bancos_payload if item['conciliacion']),
+                    Decimal('0'),
+                )),
+            },
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+    if action != 'conciliar':
+        return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+
+    fecha = _parse_fecha_reporte(data.get('fecha'))
+    if fecha is None:
+        return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
+
+    banco_nombre = str(data.get('banco_nombre', '') or '').strip()
+    if not banco_nombre:
+        return _auth_response({'ok': False, 'message': 'Falta indicar la cuenta a conciliar.'}, status=400)
+
+    try:
+        saldo_banco_input = Decimal(str(data.get('saldo_banco', '')))
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El saldo del banco no es valido.'}, status=400)
+
+    if VGConciliacionBancaria.objects.filter(fecha=fecha, banco_nombre=banco_nombre).exists():
+        return _auth_response({'ok': False, 'message': 'Esta cuenta ya fue conciliada para esta fecha.'}, status=400)
+
+    _cuentas, bancos = disponibilidad_por_cuenta(fecha)
+    banco = next((item for item in bancos if item['nombre'] == banco_nombre), None)
+    if banco is None:
+        return _auth_response({'ok': False, 'message': 'Esa cuenta no existe.'}, status=404)
+    if all(metodo['es_efectivo'] for metodo in banco['metodos']):
+        return _auth_response({
+            'ok': False,
+            'message': 'Esta cuenta es efectivo fisico; se cuadra desde el Cuadre de Caja, no aqui.',
+        }, status=400)
+
+    tasa_conversion = None
+    if banco['moneda'] == 'VES':
+        tasa_conversion = tasa_para_fecha(fecha)
+        if not tasa_conversion or tasa_conversion <= 0:
+            return _auth_response({
+                'ok': False,
+                'message': 'No hay tasa BCV registrada para esta fecha; no se puede convertir el saldo a dolares.',
+            }, status=400)
+        saldo_banco_usd = (saldo_banco_input / tasa_conversion).quantize(Decimal('0.000001'))
+    else:
+        saldo_banco_usd = saldo_banco_input.quantize(Decimal('0.000001'))
+
+    saldo_sistema = banco['saldo_disponible']
+    diferencia = saldo_banco_usd - saldo_sistema
+
+    conciliacion = VGConciliacionBancaria.objects.create(
+        fecha=fecha,
+        banco_nombre=banco_nombre,
+        moneda=banco['moneda'],
+        saldo_sistema=saldo_sistema,
+        saldo_banco=saldo_banco_usd,
+        tasa_cambio_referencia=tasa_conversion,
+        diferencia=diferencia,
+        notas=str(data.get('notas', '') or '').strip(),
+        creado_por=request.user,
+        actualizado_por=request.user,
+    )
+    return _auth_response({
+        'ok': True,
+        'message': 'Conciliacion registrada correctamente.',
+        'conciliacion': _serialize_conciliacion(conciliacion),
+    }, status=201)
 
 
 # ---------------------------------------------------------------------------

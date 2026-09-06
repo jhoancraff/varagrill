@@ -26,6 +26,13 @@ class VGMetodoPago(VGAuditoria):
     los productos); para un metodo en VES, el reporte de cuadre de caja
     convierte ese monto a bolivares con la tasa BCV del dia, para mostrarlo
     en la moneda real que recibio el cajero.
+
+    cuenta_bancaria agrupa varios metodos que en la practica caen en el mismo
+    banco real (ej. Pago Movil y Punto de Venta, ambos Banesco) — dos metodos
+    con el mismo texto aca se muestran combinados en Disponibilidad Bancaria
+    (ver disponibilidad_por_cuenta en reportes.py), sin dejar de poder ver el
+    detalle de cada uno por separado. Vacio significa que ese metodo no se
+    agrupa con ningun otro.
     """
     MONEDAS = [
         ("USD", "Dólares"),
@@ -36,6 +43,11 @@ class VGMetodoPago(VGAuditoria):
     es_efectivo = models.BooleanField(
         default=False,
         help_text="Si esta activo, este metodo cuenta como efectivo fisico en el cuadre de caja.",
+    )
+    cuenta_bancaria = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Banco/entidad real donde cae este metodo (ej. 'Banesco'). Varios metodos con el mismo texto se agrupan en Disponibilidad Bancaria. Vacio = no se agrupa.",
     )
     activo = models.BooleanField(default=True)
 
@@ -70,13 +82,19 @@ class VGIngresoExtra(VGAuditoria):
     para que el monto en bolivares que se muestre despues (en Cobro o en el
     cuadre de caja) sea siempre el mismo que se contó, sin importar que el
     BCV cambie después. Ver ingresos_extra_view.
+
+    monto usa 6 decimales (no 2) a proposito: con la tasa BCV actual (por
+    encima de Bs 800/$), redondear a centavos de dolar equivale a redondear
+    en saltos de varios bolivares — una propina de Bs 2.000 se guardaria
+    como $2.48 y, al reconvertir para mostrarla, salia Bs 2.002,32 en vez de
+    Bs 2.000,00. Con 6 decimales el redondeo es indetectable en bolivares.
     """
     TIPOS = [
         ("propina", "Propina"),
         ("pago_extra", "Pago extra"),
     ]
     tipo = models.CharField(max_length=20, choices=TIPOS)
-    monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    monto = models.DecimalField(max_digits=14, decimal_places=6, validators=[MinValueValidator(0)])
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     descripcion = models.CharField(max_length=255, blank=True)
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="ingresos_extra")
@@ -173,6 +191,59 @@ class VGCierreCaja(VGAuditoria):
 
     def __str__(self):
         return f"Cierre de caja — {self.fecha}"
+
+
+class VGConciliacionBancaria(VGAuditoria):
+    """
+    Conciliación bancaria por cuenta/banco: compara lo que el sistema calcula
+    que debería haber en cada cuenta (ver disponibilidad_por_cuenta en
+    reportes.py) contra el saldo real que muestra el estado de cuenta o la
+    app del banco en `fecha`. Es el equivalente de VGCierreCaja pero para las
+    cuentas que sí caen en un banco real (Pago Móvil, Punto de Venta,
+    Binance, Zelle...) — VGCierreCaja solo cuadra el efectivo físico.
+
+    banco_nombre identifica la cuenta con el mismo criterio que ya usa
+    disponibilidad_por_cuenta para agrupar (VGMetodoPago.cuenta_bancaria
+    cuando varios métodos comparten un banco real, o el nombre del método
+    cuando va solo) — no es una FK a VGMetodoPago porque un banco agrupado
+    no corresponde a un único método.
+
+    saldo_sistema queda congelado al momento de conciliar (no se recalcula
+    después): si una corrección posterior modifica el histórico, esta fila
+    sigue reflejando lo que el sistema decía CUANDO se concilió, igual que
+    VGCierreCaja.efectivo_esperado. moneda/tasa_cambio_referencia dejan
+    registrado en qué moneda escribió saldo_banco quien concilió y con qué
+    tasa BCV se convirtió a USD (si la cuenta es en bolívares), para poder
+    reconstruir despues el monto en bolívares exacto que se contó, sin
+    importar que el BCV cambie más adelante — mismo criterio que
+    VGIngresoExtra.monto.
+
+    diferencia = saldo_banco − saldo_sistema, ya en USD: positiva si el banco
+    tiene MÁS de lo que el sistema esperaba (ej. un ingreso no registrado),
+    negativa si tiene MENOS (ej. una comisión del banco no descontada, o un
+    pago que el sistema registró pero nunca llegó a acreditarse). Mismo signo
+    que VGCierreCaja.diferencia (lo real menos lo esperado).
+    """
+    fecha = models.DateField()
+    banco_nombre = models.CharField(max_length=80)
+    moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS)
+    saldo_sistema = models.DecimalField(max_digits=14, decimal_places=6)
+    saldo_banco = models.DecimalField(max_digits=14, decimal_places=6)
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    diferencia = models.DecimalField(max_digits=14, decimal_places=6)
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "vg_conciliaciones_bancarias"
+        verbose_name = "Conciliación bancaria"
+        verbose_name_plural = "Conciliaciones bancarias"
+        ordering = ["-fecha", "banco_nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["fecha", "banco_nombre"], name="uniq_conciliacion_fecha_banco"),
+        ]
+
+    def __str__(self):
+        return f"Conciliación {self.banco_nombre} — {self.fecha}"
 
 
 # ---------------------------------------------------------------------------

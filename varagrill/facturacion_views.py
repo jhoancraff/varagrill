@@ -47,6 +47,13 @@ from .tasa_cambio import obtener_tasa_actual
 
 logger = logging.getLogger(__name__)
 
+# Tolerancia al comparar un pago (convertido de bolivares, con 6 decimales de
+# precision) contra un saldo_pendiente de solo 2 decimales — ver
+# nota_entrega_abono_view/factura_abono_view. Muchisimo mas chica que un
+# centavo real, asi que solo absorbe el redondeo de la conversion, nunca un
+# sobrepago genuino (que siempre es de centavos completos para arriba).
+TOLERANCIA_REDONDEO_ABONO = Decimal('0.00001')
+
 
 # ---------------------------------------------------------------------------
 # Helpers internos
@@ -763,31 +770,37 @@ def factura_abono_view(request, factura_id):
         if factura.estado in ('pagada', 'anulada'):
             return _auth_response({'ok': False, 'message': 'Esta factura ya no admite cobros.'}, status=409)
 
+        tasa_pago_actual = obtener_tasa_actual()
+
         # monto_input viene en la moneda de la factura (lo que el cajero ve en
         # pantalla y le cobra al cliente) — VGPago.monto y saldo_pendiente
         # siempre se guardan en USD (ver VGMetodoPago.moneda), asi que si la
         # factura es en bolivares hay que convertir a USD antes de comparar o
-        # descontar. Se usa la tasa CONGELADA de la factura (la misma con la
-        # que se le mostro el saldo al cajero), no la tasa de hoy: si no, un
-        # cajero que cobra exacto lo que ve en pantalla podria terminar con un
-        # sobrante/faltante por el movimiento del paralelo entre que se emitio
-        # la factura y que se registra el abono.
+        # descontar. Se usa la tasa BCV de HOY (el dia en que de verdad se
+        # cobra), no la congelada de la factura: una factura pendiente en
+        # bolivares se cobra al valor actual del dolar, no al del dia en que
+        # se emitio — si no, el negocio pierde valor cada dia que la deuda
+        # sigue sin cobrarse por la devaluacion del bolivar. Cuando el cobro
+        # es el mismo dia de la emision ambas tasas son la misma, asi que
+        # esto no cambia nada en el caso normal (venta pagada de una vez). Si
+        # no hay tasa vigente hoy, se cae a la congelada de la factura como
+        # ultimo recurso, para no bloquear el cobro.
         if factura.moneda == 'VES':
-            tasa_conversion = factura.tasa_cambio_referencia
-            if not tasa_conversion:
-                tasa_actual_obj = obtener_tasa_actual()
-                tasa_conversion = tasa_actual_obj.tasa if tasa_actual_obj else None
+            tasa_conversion = (
+                (tasa_pago_actual.tasa if tasa_pago_actual else None)
+                or factura.tasa_cambio_referencia
+            )
             if not tasa_conversion or tasa_conversion <= 0:
                 return _auth_response({
                     'ok': False,
                     'message': 'No hay tasa de cambio disponible para convertir el monto a dolares.',
                 }, status=400)
-            monto = (monto_input / tasa_conversion).quantize(Decimal('0.01'))
+            monto = (monto_input / tasa_conversion).quantize(Decimal('0.000001'))
         else:
             tasa_conversion = None
-            monto = monto_input.quantize(Decimal('0.01'))
+            monto = monto_input.quantize(Decimal('0.000001'))
 
-        if monto > factura.saldo_pendiente:
+        if monto > factura.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
             saldo_en_moneda_factura = (
                 factura.saldo_pendiente * tasa_conversion if tasa_conversion else factura.saldo_pendiente
             )
@@ -799,7 +812,6 @@ def factura_abono_view(request, factura_id):
 
         referencia = referencia_usuario or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{factura.id}'
 
-        tasa_pago_actual = obtener_tasa_actual()
         pago = VGPago.objects.create(
             factura=factura,
             monto=monto,
@@ -810,7 +822,15 @@ def factura_abono_view(request, factura_id):
             creado_por=request.user,
         )
 
-        factura.saldo_pendiente = factura.saldo_pendiente - monto
+        # Se redondea a 2 decimales (y nunca se deja negativo) apenas se resta:
+        # monto tiene 6 decimales de precision (ver VGPago.monto) pero el saldo
+        # de una factura siempre es un monto "limpio" en dolares — sin este
+        # redondeo, un pago exacto por Bs podia dejar un residuo de fracciones
+        # de centavo que nunca llegaba a estado 'pagada'.
+        factura.saldo_pendiente = max(
+            (factura.saldo_pendiente - monto).quantize(Decimal('0.01')),
+            Decimal('0.00'),
+        )
         factura.estado = 'pagada' if factura.saldo_pendiente <= 0 else 'abonada_parcial'
         factura.actualizado_por = request.user
         factura.save(update_fields=['saldo_pendiente', 'estado', 'actualizado_por', 'fecha_actualizacion'])
@@ -1056,27 +1076,36 @@ def nota_entrega_abono_view(request, nota_id):
         if nota.estado == 'pagada':
             return _auth_response({'ok': False, 'message': 'Esta nota de entrega ya no admite cobros.'}, status=409)
 
+        tasa_pago_actual = obtener_tasa_actual()
+
         # Mismo criterio que factura_abono_view: monto_input llega en la
         # moneda de la nota (lo que ve el cajero en pantalla), VGPago.monto y
-        # saldo_pendiente se guardan siempre en USD, y la conversion usa la
-        # tasa CONGELADA de la nota (la que se le mostro al cajero al
-        # emitirla), no la tasa de hoy.
+        # saldo_pendiente se guardan siempre en USD. La conversion usa la
+        # tasa BCV de HOY (el dia en que de verdad se cobra), no la congelada
+        # de la nota: una nota pendiente (fiado) en bolivares se cobra al
+        # valor actual del dolar, no al del dia en que se emitio — si no, el
+        # negocio pierde valor cada dia que el fiado sigue sin cobrarse por
+        # la devaluacion del bolivar. Cuando el cobro es el mismo dia de la
+        # emision ambas tasas son la misma, asi que esto no cambia nada en el
+        # caso normal (venta pagada de una vez). Si no hay tasa vigente hoy,
+        # se cae a la congelada de la nota como ultimo recurso, para no
+        # bloquear el cobro.
         if nota.moneda == 'VES':
-            tasa_conversion = nota.tasa_cambio_referencia
-            if not tasa_conversion:
-                tasa_actual_obj = obtener_tasa_actual()
-                tasa_conversion = tasa_actual_obj.tasa if tasa_actual_obj else None
+            tasa_conversion = (
+                (tasa_pago_actual.tasa if tasa_pago_actual else None)
+                or nota.tasa_cambio_referencia
+            )
             if not tasa_conversion or tasa_conversion <= 0:
                 return _auth_response({
                     'ok': False,
                     'message': 'No hay tasa de cambio disponible para convertir el monto a dolares.',
                 }, status=400)
-            monto = (monto_input / tasa_conversion).quantize(Decimal('0.01'))
+            monto = (monto_input / tasa_conversion).quantize(Decimal('0.000001'))
         else:
             tasa_conversion = None
-            monto = monto_input.quantize(Decimal('0.01'))
+            monto = monto_input.quantize(Decimal('0.000001'))
 
-        if monto > nota.saldo_pendiente:
+        if monto > nota.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
             saldo_en_moneda_nota = (
                 nota.saldo_pendiente * tasa_conversion if tasa_conversion else nota.saldo_pendiente
             )
@@ -1088,7 +1117,6 @@ def nota_entrega_abono_view(request, nota_id):
 
         referencia = referencia_usuario or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{nota.id}'
 
-        tasa_pago_actual = obtener_tasa_actual()
         pago = VGPago.objects.create(
             nota_entrega=nota,
             monto=monto,
@@ -1099,7 +1127,14 @@ def nota_entrega_abono_view(request, nota_id):
             creado_por=request.user,
         )
 
-        nota.saldo_pendiente = nota.saldo_pendiente - monto
+        # Ver el comentario equivalente en factura_abono_view: se redondea a 2
+        # decimales (y nunca se deja negativo) para que un pago con precision
+        # de 6 decimales nunca deje un residuo de fracciones de centavo que
+        # impida llegar a estado 'pagada'.
+        nota.saldo_pendiente = max(
+            (nota.saldo_pendiente - monto).quantize(Decimal('0.01')),
+            Decimal('0.00'),
+        )
         nota.estado = 'pagada' if nota.saldo_pendiente <= 0 else 'abonada_parcial'
         nota.actualizado_por = request.user
         nota.save(update_fields=['saldo_pendiente', 'estado', 'actualizado_por', 'fecha_actualizacion'])

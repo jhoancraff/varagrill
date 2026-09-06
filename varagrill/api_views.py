@@ -21,6 +21,7 @@ from rest_framework import generics
 
 from .models import (
     VGAbonoCompra,
+    VGAjustePedido,
     VGCategoriaProducto,
     VGCliente,
     VGCompra,
@@ -1281,6 +1282,26 @@ def _serialize_detalle_opciones(detalle):
     ]
 
 
+def _serialize_order_items(pedido):
+    return [
+        {
+            'id': detalle.id,
+            'product_id': detalle.producto_id,
+            'producto_nombre': detalle.producto.nombre,
+            'cantidad': detalle.cantidad,
+            'precio_unitario': str(detalle.precio_unitario),
+            'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
+            'grupo_armado': detalle.grupo_armado,
+            'venta_por_peso': detalle.producto.venta_por_peso,
+            'subtotal': str(detalle.subtotal),
+            'notas': detalle.notas,
+            'adicionales': _serialize_detalle_adicionales(detalle),
+            'opciones': _serialize_detalle_opciones(detalle),
+        }
+        for detalle in pedido.detalles.all()
+    ]
+
+
 def _serialize_order_detail(pedido):
     return {
         'id': pedido.id,
@@ -1297,23 +1318,7 @@ def _serialize_order_detail(pedido):
         'propina': str(pedido.propina),
         'subtotal': str(pedido.subtotal),
         'total': str(pedido.total),
-        'items': [
-            {
-                'id': detalle.id,
-                'product_id': detalle.producto_id,
-                'producto_nombre': detalle.producto.nombre,
-                'cantidad': detalle.cantidad,
-                'precio_unitario': str(detalle.precio_unitario),
-                'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
-                'grupo_armado': detalle.grupo_armado,
-                'venta_por_peso': detalle.producto.venta_por_peso,
-                'subtotal': str(detalle.subtotal),
-                'notas': detalle.notas,
-                'adicionales': _serialize_detalle_adicionales(detalle),
-                'opciones': _serialize_detalle_opciones(detalle),
-            }
-            for detalle in pedido.detalles.all()
-        ],
+        'items': _serialize_order_items(pedido),
     }
 
 
@@ -1588,14 +1593,46 @@ def pedido_update_view(request, pedido_id):
     })
 
 
+def _recalcular_totales_pedido(pedido, usuario):
+    """
+    Recalcula subtotal/total de `pedido` sumando lo que de verdad quedo en sus
+    detalles (cada uno + sus adicionales + sus opciones — ver VGDetallePedido.
+    subtotal) y guarda. Compartido por pedido_detalle_eliminar_view y
+    pedido_detalle_mover_view, que ambos dejan un pedido con menos (o mas)
+    detalles de los que tenia.
+    """
+    subtotal = sum(
+        (
+            d.subtotal
+            + sum((a.subtotal for a in d.adicionales.all()), Decimal('0'))
+            + sum((o.subtotal for o in d.opciones.all()), Decimal('0'))
+        )
+        for d in pedido.detalles.all()
+    )
+    total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento
+    pedido.subtotal = subtotal.quantize(Decimal('0.01'))
+    pedido.total = total.quantize(Decimal('0.01'))
+    pedido.actualizado_por = usuario
+    pedido.save(update_fields=['subtotal', 'total', 'actualizado_por', 'fecha_actualizacion'])
+
+
 @csrf_exempt
 def pedido_detalle_eliminar_view(request, pedido_id, detalle_id):
     """
-    Quita UN item de un pedido ya en curso — para cuando el mesero eligió mal un plato
-    y ya es tarde para que él mismo lo reordene desde cero (pedido_update_view exige
-    'pendiente'; esto no). Reservado a cajera/admin/contador — el mismo criterio que la
-    excepción de mesa en pedido_create_view: son quienes atienden la mesa desde caja,
-    no el mesero dueño del pedido.
+    Quita un item de un pedido ya en curso, completo o solo una parte de la
+    cantidad (ej. de "2x Pepsi" bajar a "1x Pepsi" sin tener que borrar las
+    dos y volver a comandar una) — para cuando el mesero eligio mal y ya es
+    tarde para que el mismo lo reordene desde cero (pedido_update_view exige
+    'pendiente'; esto no). Reservado a cajera/admin/contador — el mismo
+    criterio que la excepcion de mesa en pedido_create_view: son quienes
+    atienden la mesa desde caja, no el mesero dueño del pedido.
+
+    El motivo es obligatorio (ver VGAjustePedido): deja un rastro auditable
+    de por que se toco el pedido de otra persona, no solo que se toco. La
+    reduccion parcial (`cantidad` en el body, menor a la cantidad actual del
+    detalle) solo aplica a productos por unidad — un producto por peso
+    (venta_por_peso) no tiene un "1 de 2" que restar, asi que ahi solo cabe
+    quitarlo completo.
     """
     if request.method != 'POST':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1605,6 +1642,18 @@ def pedido_detalle_eliminar_view(request, pedido_id, detalle_id):
 
     if not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para quitar items de un pedido.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    # Obligatorio a proposito — ver el docstring de VGAjustePedido: es lo que
+    # deja un rastro auditable de POR QUE se ajusto el pedido de otra
+    # persona, no solo que se ajusto.
+    motivo = str(data.get('motivo', '') or '').strip()
+    if not motivo:
+        return _auth_response({'ok': False, 'message': 'El motivo es obligatorio.'}, status=400)
 
     with transaction.atomic():
         try:
@@ -1623,31 +1672,52 @@ def pedido_detalle_eliminar_view(request, pedido_id, detalle_id):
         except VGDetallePedido.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'Ese item no pertenece a este pedido.'}, status=404)
 
-        if pedido.detalles.count() <= 1:
+        cantidad_actual = detalle.cantidad
+        cantidad_solicitada = data.get('cantidad')
+        if cantidad_solicitada is not None:
+            try:
+                cantidad_a_quitar = int(cantidad_solicitada)
+            except (TypeError, ValueError):
+                return _auth_response({'ok': False, 'message': 'La cantidad no es valida.'}, status=400)
+            if cantidad_a_quitar <= 0:
+                return _auth_response({'ok': False, 'message': 'La cantidad debe ser mayor a cero.'}, status=400)
+            if cantidad_a_quitar > cantidad_actual:
+                return _auth_response({'ok': False, 'message': 'No puedes quitar mas de lo que hay en el pedido.'}, status=400)
+        else:
+            cantidad_a_quitar = cantidad_actual
+
+        es_eliminacion_total = cantidad_a_quitar >= cantidad_actual
+        if not es_eliminacion_total and detalle.producto.venta_por_peso:
+            return _auth_response({
+                'ok': False,
+                'message': 'Un producto por peso no se puede reducir en partes — quitalo completo.',
+            }, status=400)
+
+        if es_eliminacion_total and pedido.detalles.count() <= 1:
             return _auth_response(
                 {'ok': False, 'message': 'No puedes quitar el único item del pedido — cancela el pedido completo en su lugar.'},
                 status=409,
             )
 
         producto_nombre = detalle.producto.nombre
-        detalle.delete()
-
-        # Mismo total que serializa cada item (ver VGDetallePedido.subtotal): precio
-        # base del item + sus adicionales + sus opciones — nunca hace falta recalcular
-        # precios desde cero, solo sumar lo que queda.
-        subtotal = sum(
-            (
-                d.subtotal
-                + sum((a.subtotal for a in d.adicionales.all()), Decimal('0'))
-                + sum((o.subtotal for o in d.opciones.all()), Decimal('0'))
-            )
-            for d in pedido.detalles.all()
+        VGAjustePedido.objects.create(
+            pedido=pedido,
+            tipo='eliminacion' if es_eliminacion_total else 'reduccion',
+            producto_nombre=producto_nombre,
+            cantidad_ajustada=cantidad_a_quitar,
+            mesa_origen=pedido.mesa.numero if pedido.mesa_id else None,
+            motivo=motivo,
+            creado_por=request.user,
+            actualizado_por=request.user,
         )
-        total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento
-        pedido.subtotal = subtotal.quantize(Decimal('0.01'))
-        pedido.total = total.quantize(Decimal('0.01'))
-        pedido.actualizado_por = request.user
-        pedido.save(update_fields=['subtotal', 'total', 'actualizado_por', 'fecha_actualizacion'])
+
+        if es_eliminacion_total:
+            detalle.delete()
+        else:
+            detalle.cantidad = cantidad_actual - cantidad_a_quitar
+            detalle.save(update_fields=['cantidad'])
+
+        _recalcular_totales_pedido(pedido, request.user)
 
     pedido = (
         VGPedido.objects
@@ -1660,10 +1730,235 @@ def pedido_detalle_eliminar_view(request, pedido_id, detalle_id):
     )
     _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
 
+    mensaje = (
+        f'Se quitó "{producto_nombre}" del pedido #{pedido.id}.' if es_eliminacion_total
+        else f'Se quitaron {cantidad_a_quitar} de "{producto_nombre}" del pedido #{pedido.id}.'
+    )
     return _auth_response({
         'ok': True,
-        'message': f'Se quitó "{producto_nombre}" del pedido #{pedido.id}.',
+        'message': mensaje,
         'pedido': _serialize_order_detail(pedido),
+    })
+
+
+@csrf_exempt
+def pedido_detalle_mover_view(request, pedido_id, detalle_id):
+    """
+    Mueve un item completo (con sus adicionales/opciones, que viajan solos
+    porque son CASCADE de VGDetallePedido) de este pedido a el pedido
+    abierto de otra mesa — para cuando el mesero cargo un producto a la mesa
+    equivocada. No mezcla cantidades con lineas ya existentes en el destino
+    (aunque sea el mismo producto): queda como su propia linea, para no
+    perder de vista que se movio. Mismos permisos, mismo motivo obligatorio
+    y misma proteccion de "no dejar el pedido origen en cero" que
+    pedido_detalle_eliminar_view — ver ese docstring y VGAjustePedido.
+
+    Si la mesa destino no tiene ningun pedido abierto, esto NO es un error:
+    se abre uno nuevo ahi mismo, con el mismo estado que traia el pedido
+    origen (para no hacerlo retroceder a cocina ni bloquear su cobro). Como
+    VGPedido.usuario es obligatorio y define de quien es "la mesa" para
+    mesas_atendidas_view, hace falta que quien mueve el item (cajera/admin)
+    elija a que mesero se le abre — si `usuario_id` no viene en el body, se
+    responde `requiere_usuario: true` en vez de fallar, para que el frontend
+    pida el mesero y reintente, sin que el mesero dueño de la mesa destino
+    pierda visibilidad de su propia mesa por una correccion que el no hizo.
+    """
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    if not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para mover items de un pedido.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    motivo = str(data.get('motivo', '') or '').strip()
+    if not motivo:
+        return _auth_response({'ok': False, 'message': 'El motivo es obligatorio.'}, status=400)
+
+    try:
+        mesa_destino_id = int(data.get('mesa_destino_id'))
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'Selecciona una mesa destino valida.'}, status=400)
+
+    with transaction.atomic():
+        try:
+            # Sin select_related('mesa') a proposito: Postgres no permite FOR
+            # UPDATE del lado nulable de un outer join, y mesa es nullable.
+            pedido_origen = VGPedido.objects.select_for_update().get(pk=pedido_id)
+        except VGPedido.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+        if pedido_origen.estado not in MESA_ABIERTA_ORDER_STATES:
+            return _auth_response(
+                {'ok': False, 'message': 'Solo se pueden mover items de un pedido todavía abierto (ni pagado ni cancelado).'},
+                status=409,
+            )
+
+        try:
+            detalle = pedido_origen.detalles.select_related('producto').get(pk=detalle_id)
+        except VGDetallePedido.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'Ese item no pertenece a este pedido.'}, status=404)
+
+        if pedido_origen.detalles.count() <= 1:
+            return _auth_response({
+                'ok': False,
+                'message': 'No puedes mover el único item del pedido — usa "Mover mesa" para mover la mesa completa.',
+            }, status=409)
+
+        try:
+            mesa_destino = VGMesa.objects.get(pk=mesa_destino_id)
+        except VGMesa.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'La mesa destino no existe.'}, status=404)
+
+        if mesa_destino.id == pedido_origen.mesa_id:
+            return _auth_response({'ok': False, 'message': 'Ese item ya está en esa mesa.'}, status=400)
+
+        pedido_destino = (
+            VGPedido.objects
+            .select_for_update()
+            .filter(mesa_id=mesa_destino.id, estado__in=MESA_ABIERTA_ORDER_STATES)
+            .order_by('-fecha_creacion')
+            .first()
+        )
+        if pedido_destino is None:
+            usuario_id = data.get('usuario_id')
+            if usuario_id in (None, ''):
+                return _auth_response({
+                    'ok': False,
+                    'requiere_usuario': True,
+                    'message': f'La mesa {mesa_destino.numero} no tiene ningún pedido abierto — elige a quién se le abre para que la siga atendiendo.',
+                }, status=409)
+            try:
+                mesero_destino = VGUsuario.objects.get(pk=int(usuario_id), is_active=True)
+            except (TypeError, ValueError, VGUsuario.DoesNotExist):
+                return _auth_response({'ok': False, 'message': 'Selecciona un usuario válido.'}, status=400)
+
+            pedido_destino = VGPedido.objects.create(
+                mesa=mesa_destino,
+                usuario=mesero_destino,
+                estado=pedido_origen.estado,
+                creado_por=request.user,
+                actualizado_por=request.user,
+            )
+
+        producto_nombre = detalle.producto.nombre
+        cantidad = detalle.cantidad
+        mesa_origen_numero = pedido_origen.mesa.numero if pedido_origen.mesa_id else None
+
+        VGAjustePedido.objects.create(
+            pedido=pedido_origen,
+            tipo='movido',
+            producto_nombre=producto_nombre,
+            cantidad_ajustada=cantidad,
+            mesa_origen=mesa_origen_numero,
+            mesa_destino=mesa_destino.numero,
+            motivo=motivo,
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+
+        detalle.pedido = pedido_destino
+        detalle.save(update_fields=['pedido'])
+
+        _recalcular_totales_pedido(pedido_origen, request.user)
+        _recalcular_totales_pedido(pedido_destino, request.user)
+
+    pedido_origen.refresh_from_db()
+    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido_origen, request.user)
+    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido_destino, request.user)
+
+    return _auth_response({
+        'ok': True,
+        'message': f'Se movió "{producto_nombre}" a la mesa {mesa_destino.numero}.',
+    })
+
+
+@csrf_exempt
+def pedido_detalle_reimprimir_view(request, pedido_id, detalle_id):
+    """
+    Reimprime la comanda de UN SOLO producto de un pedido que ya se mandó a
+    cocina — no el pedido completo — para cuando el ticket de ese renglón en
+    particular se dañó o se perdió, sin repetir lo que ya llegó bien. Abierta
+    a cualquier mesero autenticado, igual que kitchen_order_status_update_view:
+    es quien ahora dispara "Iniciar preparación" desde su propia mesa (ver
+    MesasAtendidasPage.jsx), así que también necesita poder reimprimir su
+    propio ticket sin depender de cajera/admin.
+    """
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion.'}, status=401)
+
+    try:
+        pedido = VGPedido.objects.select_related('mesa', 'cliente').get(pk=pedido_id)
+    except VGPedido.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
+
+    try:
+        detalle = (
+            pedido.detalles
+            .select_related('producto__categoria')
+            .prefetch_related('adicionales__preparacion', 'opciones__preparacion', 'opciones__producto__categoria')
+            .get(pk=detalle_id)
+        )
+    except VGDetallePedido.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'Ese item no pertenece a este pedido.'}, status=404)
+
+    # fecha_inicio_preparacion (no `estado != 'pendiente'`) porque es el
+    # marcador exacto de "esto ya se mandó a imprimir" — un pedido sin cocina
+    # (categoria.no_requiere_cocina) puede llegar a 'entregado' sin pasar
+    # nunca por aquí, y ahí no hay comanda que reimprimir.
+    if pedido.fecha_inicio_preparacion is None:
+        return _auth_response({
+            'ok': False,
+            'message': 'Este pedido todavía no se ha mandado a cocina — no hay nada que reimprimir.',
+        }, status=409)
+
+    try:
+        imprimir_comandas_pedido(pedido, detalles=[detalle])
+    except Exception:
+        logger.exception('Fallo al reimprimir item %s del pedido %s', detalle.id, pedido.id)
+        return _auth_response({'ok': False, 'message': 'No se pudo reimprimir — revisa la impresora.'}, status=502)
+
+    return _auth_response({
+        'ok': True,
+        'message': f'Se reimprimió "{detalle.producto.nombre}" del pedido #{pedido.id}.',
+    })
+
+
+def meseros_disponibles_view(request):
+    """
+    Lista liviana de meseros activos — para que cajera/admin elijan a quien
+    se le abre una mesa nueva al mover un item a una mesa sin pedido abierto
+    (ver pedido_detalle_mover_view). Deliberadamente no es admin_users_view
+    (esa es solo para administrador y trae de todo — roles, edicion, borrado);
+    esto es de solo lectura y accesible tambien a cajera, que es quien de
+    verdad usa este selector desde caja.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_cajera_user(request.user) or _is_admin_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver esta lista.'}, status=401)
+
+    meseros = (
+        VGUsuario.objects
+        .filter(is_active=True, id_role__nombre_role__iexact='mesero')
+        .order_by('first_name', 'username')
+    )
+    return _auth_response({
+        'ok': True,
+        'meseros': [
+            {'id': mesero.id, 'nombre': mesero.get_full_name() or mesero.username}
+            for mesero in meseros
+        ],
     })
 
 
@@ -2656,12 +2951,14 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
     Cuando una fila resulta en un aumento de stock (ingrediente nuevo, o cantidad positiva
     en uno existente), esa porción SÍ se registra como una compra real — un único VGCompra
     (el "lote") para todo el archivo, con un VGDetalleCompra por cada fila que aumentó
-    stock. El costeo de esa línea prioriza el trío nuevo (costo_unitario = precio_compra/
-    peso_real) sobre el criterio viejo de precio_total/delta ajustado por el envase ya
-    guardado (_costo_unitario_por_compra) si una fila trajera los dos. Si ninguna fila
-    aumenta stock, no se crea ningún VGCompra. Una cantidad NEGATIVA en un ingrediente
-    existente resta del stock (ej. una merma) y se registra como 'ajuste', nunca como
-    compra.
+    stock. El monto de esa línea (y por lo tanto el total del lote) SIEMPRE se calcula por
+    unidad NOMINAL comprada (precio_compra/contenido_envase, o precio_total/delta si no
+    hay trío) — nunca con ingrediente.costo_unitario, que cuando hay trío se calcula por
+    unidad ÚTIL (precio_compra/peso_real, con la merma descontada) para costear recetas;
+    usar ese costo de receta para facturar infla el monto a pagar cada vez que peso_real <
+    contenido_envase. Si ninguna fila aumenta stock, no se crea ningún VGCompra. Una
+    cantidad NEGATIVA en un ingrediente existente resta del stock (ej. una merma) y se
+    registra como 'ajuste', nunca como compra.
     """
     creados, actualizados, ignorados = 0, 0, 0
     errores = []
@@ -2717,15 +3014,24 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 delta = cantidad if cambia_stock else Decimal('0')
                 update_fields = ['actualizado_por', 'fecha_actualizacion']
 
+                # costo_linea_factura es el costo por unidad NOMINAL comprada (lo que se
+                # suma a stock_actual), para que la factura (VGDetalleCompra/VGCompra.total)
+                # refleje exactamente lo pagado. Es distinto de ingrediente.costo_unitario,
+                # que para el trío se calcula por unidad ÚTIL (peso_real, con merma) porque
+                # ese es el que se usa para costear recetas — usar ese acá infla la factura
+                # cuando peso_real < contenido_envase.
+                costo_linea_factura = None
                 if trio:
                     ingrediente.contenido_envase = trio['contenido_envase']
                     ingrediente.peso_real = trio['peso_real']
                     ingrediente.precio_compra = trio['precio_compra']
                     ingrediente.costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
                     update_fields += ['contenido_envase', 'peso_real', 'precio_compra', 'costo_unitario']
+                    costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
                 elif delta > 0 and precio_total is not None:
                     ingrediente.costo_unitario = _costo_unitario_por_compra(precio_total, delta, ingrediente)
                     update_fields.append('costo_unitario')
+                    costo_linea_factura = (precio_total / delta).quantize(Decimal('0.000001'))
 
                 if cambia_stock:
                     ingrediente.stock_actual = stock_anterior + cantidad
@@ -2737,7 +3043,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 movimiento_compra = None
                 if delta > 0:
                     lote = _obtener_compra()
-                    costo_linea = ingrediente.costo_unitario if (trio or precio_total is not None) else Decimal('0')
+                    costo_linea = costo_linea_factura if costo_linea_factura is not None else Decimal('0')
                     VGDetalleCompra.objects.create(
                         compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
                     )
@@ -2767,6 +3073,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                     errores.append(f'{nombre}: faltan el peso neto, el peso real y el precio de compra para crearlo.')
                     continue
                 costo_inicial = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
+                costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
                 nuevo = VGIngrediente.objects.create(
                     nombre=nombre,
                     unidad_medida=unidad_normalizada,
@@ -2781,9 +3088,9 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 )
                 lote = _obtener_compra()
                 VGDetalleCompra.objects.create(
-                    compra=lote, ingrediente=nuevo, cantidad=cantidad, costo_unitario=costo_inicial,
+                    compra=lote, ingrediente=nuevo, cantidad=cantidad, costo_unitario=costo_linea_factura,
                 )
-                lote.total = lote.total + (cantidad * costo_inicial)
+                lote.total = lote.total + (cantidad * costo_linea_factura)
                 lote.save(update_fields=['total'])
                 VGMovimientoInventario.objects.create(
                     ingrediente=nuevo,
@@ -4785,9 +5092,6 @@ def kitchen_orders_view(request):
     if not request.user.is_authenticated:
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para ver pedidos.'}, status=401)
 
-    _avanzar_pedidos_en_preparacion_vencidos(request.user)
-    _avanzar_pedidos_listos_vencidos(request.user)
-
     status_filter = str(request.GET.get('estado', 'activos')).strip().lower()
     limit_raw = request.GET.get('limit', 60)
 
@@ -4928,6 +5232,15 @@ def mesas_atendidas_view(request):
     if not request.user.is_authenticated:
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para ver tus mesas atendidas.'}, status=401)
 
+    # Antes este chequeo vivía en kitchen_orders_view, disparado por el polling
+    # del tablero de cocina (KitchenOrdersPage, ya eliminado — cocina no mira
+    # pantalla). Esta vista es ahora la que el mesero tiene abierta casi todo
+    # el tiempo (ver MesasAtendidasPage.jsx, polling cada 15s), así que es el
+    # lugar que mantiene viva la cadena de avance automático a 'listo'/
+    # 'entregado' — ver _avanzar_pedidos_en_preparacion_vencidos.
+    _avanzar_pedidos_en_preparacion_vencidos(request.user)
+    _avanzar_pedidos_listos_vencidos(request.user)
+
     hoy = timezone.localdate()
     # Cajera/admin/contador ven las mesas de TODOS los meseros (no solo las propias) —
     # así pueden entrar a la mesa de un mesero desbordado y registrarle una ronda desde
@@ -4952,6 +5265,10 @@ def mesas_atendidas_view(request):
     pedidos = (
         pedidos_qs
         .select_related('mesa', 'cliente', 'usuario')
+        .prefetch_related(
+            'detalles__producto', 'detalles__adicionales__preparacion',
+            'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo',
+        )
         .order_by('mesa__numero', 'fecha_creacion')
     )
 
@@ -4983,8 +5300,14 @@ def mesas_atendidas_view(request):
                     'cliente': p.cliente.nombre if p.cliente else '',
                     'estado': p.estado,
                     'total': str(p.total),
+                    'notas': p.notas,
                     'creado_en': p.fecha_creacion.isoformat(),
                     'mesero': p.usuario.get_full_name() or p.usuario.username,
+                    # Marcador de "ya se mandó a imprimir" para la carta desplegada
+                    # de MesasAtendidasPage — ver pedido_detalle_reimprimir_view,
+                    # que usa el mismo campo para decidir si hay algo que reimprimir.
+                    'impreso': p.fecha_inicio_preparacion is not None,
+                    'detalles': _serialize_order_items(p),
                 }
                 for p in pedidos_mesa
             ],
@@ -5131,7 +5454,7 @@ def kitchen_order_status_update_view(request, pedido_id):
     transitions = {
         'pendiente': {'en_preparacion', 'cancelado'},
         'en_preparacion': {'listo', 'cancelado'},
-        'listo': {'entregado', 'en_preparacion'},
+        'listo': {'entregado', 'en_preparacion', 'cancelado'},
         'entregado': {'cancelado'},
         'pagado': set(),
         'cancelado': set(),
@@ -5150,12 +5473,13 @@ def kitchen_order_status_update_view(request, pedido_id):
                 status=400,
             )
 
-        # Cancelar desde 'entregado' (el pedido ya llegó a la mesa) es la cancelación
-        # "desde caja" — solo antes de cobrar, nunca después: 'pagado' no admite
-        # ninguna transición (ver `transitions` arriba), así que un pedido ya
-        # facturado/cobrado no se puede tocar por acá. Reservada a quien maneja caja,
-        # no a cualquier mesero — ver acuerdo con el usuario, 2026-09.
-        if pedido.estado == 'entregado' and next_state == 'cancelado':
+        # Cancelar desde 'listo' o 'entregado' (el pedido ya está en Cobro, ver
+        # BILLABLE_ORDER_STATES) es la cancelación "desde caja" — solo antes de
+        # cobrar, nunca después: 'pagado' no admite ninguna transición (ver
+        # `transitions` arriba), así que un pedido ya facturado/cobrado no se puede
+        # tocar por acá. Reservada a quien maneja caja, no a cualquier mesero — ver
+        # acuerdo con el usuario, 2026-09.
+        if pedido.estado in ('listo', 'entregado') and next_state == 'cancelado':
             if not (_is_admin_user(request.user) or _is_cajera_user(request.user) or _is_analista_user(request.user)):
                 return _auth_response({
                     'ok': False,
@@ -5223,11 +5547,16 @@ def pedido_reimprimir_comanda_view(request, pedido_id):
     return _auth_response({'ok': True, 'message': 'Comanda reimpresa correctamente.'})
 
 
-# Caja solo debe poder cobrar/facturar un pedido una vez que el mesero
-# confirmó que ya llegó a la mesa (estado 'entregado') — no apenas cocina lo
-# marca 'listo', porque en ese punto todavía puede estar esperando a que lo
-# sirvan y no debería poder cobrarse.
-BILLABLE_ORDER_STATES = ['entregado']
+# Apenas el pedido llega a 'listo' (mesero mandó "Iniciar preparación", se
+# imprimió la comanda y el avance automático — ver
+# _avanzar_pedidos_en_preparacion_vencidos — lo marcó listo) ya pasa a Cobro:
+# caja decide desde ahí si lo cancela, le ajusta items (quitar/mover, ver
+# canGestionarItems en CheckoutPage) o lo cobra, sin esperar a que el mesero
+# confirme que ya lo entregó en la mesa. 'entregado' se deja también acá para
+# que el pedido no desaparezca de Cobro si nadie lo cobra antes de que
+# _avanzar_pedidos_listos_vencidos lo siga avanzando solo — ver acuerdo con el
+# usuario, 2026-09.
+BILLABLE_ORDER_STATES = ['listo', 'entregado']
 
 
 @csrf_exempt

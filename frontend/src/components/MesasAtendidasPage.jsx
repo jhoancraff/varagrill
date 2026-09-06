@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import AjustePedidoModal from './AjustePedidoModal';
 import useExchangeRate from '../hooks/useExchangeRate';
-import useMobileBackHandler from '../hooks/useMobileBackHandler';
 
 const ESTADO_LABELS = {
   pendiente: 'Pendiente',
@@ -16,7 +16,7 @@ function estadoLabel(estado) {
   return ESTADO_LABELS[estado] || estado;
 }
 
-function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, mesasCatalogo = [], canGestionarItems = false }) {
+function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, onEditOrder, autoAbrir, mesasCatalogo = [], canGestionarItems = false, sidebarOffset = '0px' }) {
   const tasaCambio = useExchangeRate();
   const [mesas, setMesas] = useState([]);
   const [todasLasMesas, setTodasLasMesas] = useState(false);
@@ -29,12 +29,15 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
   const [moveTargetMesaId, setMoveTargetMesaId] = useState('');
   const [moveError, setMoveError] = useState('');
   const [moveSubmitting, setMoveSubmitting] = useState(false);
-  const [detailPedidoId, setDetailPedidoId] = useState(null);
-  const [detailPedido, setDetailPedido] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState('');
-  const [removingItemId, setRemovingItemId] = useState(null);
-  const [removeItemError, setRemoveItemError] = useState('');
+  const [flashMessage, setFlashMessage] = useState('');
+  const [prepBusyMap, setPrepBusyMap] = useState({});
+  const [reprintBusyMap, setReprintBusyMap] = useState({});
+  const [actionError, setActionError] = useState('');
+  const [ajusteModal, setAjusteModal] = useState(null); // { modo, pedidoId, item }
+  const [ajusteBusy, setAjusteBusy] = useState(false);
+  const [ajusteError, setAjusteError] = useState('');
+  const [requiereUsuarioMover, setRequiereUsuarioMover] = useState(false);
+  const [meserosDisponibles, setMeserosDisponibles] = useState([]);
 
   const fetchMesas = useCallback(async (controller) => {
     try {
@@ -64,6 +67,14 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
     }
   }, []);
 
+  // Precargada de una vez (no al abrir el modal de mover) para que el selector de
+  // mesero nunca aparezca vacío por timing — ver AjustePedidoModal/cargarMeserosDisponibles.
+  useEffect(() => {
+    if (!canGestionarItems) return;
+    cargarMeserosDisponibles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canGestionarItems]);
+
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -80,6 +91,26 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
       window.clearInterval(intervalId);
     };
   }, [fetchMesas]);
+
+  // Al crear o editar un pedido (ver WelcomeScreen.jsx: handleOrderCreated,
+  // handleOrderUpdated) el mesero aterriza acá con la mesa ya abierta, en vez
+  // de en el extinto tablero de cocina — mismo patrón de "token" que ya usa
+  // newOrderPreset en WelcomeScreen, para forzar la reapertura aunque sea la
+  // misma mesaId de la vez anterior.
+  useEffect(() => {
+    if (!autoAbrir?.token) return;
+    handleOpenMesa(autoAbrir.mesaId);
+    if (autoAbrir.flashMessage) {
+      setFlashMessage(autoAbrir.flashMessage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAbrir?.token]);
+
+  useEffect(() => {
+    if (!flashMessage) return;
+    const timeoutId = window.setTimeout(() => setFlashMessage(''), 6000);
+    return () => window.clearTimeout(timeoutId);
+  }, [flashMessage]);
 
   const selectedMesa = useMemo(
     () => mesas.find((mesa) => mesa.mesa_id === selectedMesaId) || null,
@@ -139,64 +170,147 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
     }
   };
 
-  const openPedidoDetail = async (pedidoId) => {
-    setDetailPedidoId(pedidoId);
-    setDetailPedido(null);
-    setDetailError('');
-    setDetailLoading(true);
+  const abrirAjuste = (modo, pedidoId, item) => {
+    setAjusteError('');
+    setRequiereUsuarioMover(false);
+    setAjusteModal({
+      modo,
+      pedidoId,
+      item: { id: item.id, nombre: item.producto_nombre, cantidad: item.cantidad, esPorPeso: Boolean(item.peso_gramos) },
+    });
+  };
 
+  // "Iniciar preparación" — mismo endpoint y transición que antes disparaba
+  // KitchenOrdersPage.handleUpdateOrderState, ahora vive acá porque cocina ya
+  // no mira ninguna pantalla: es el mesero quien manda el pedido a imprimir
+  // desde su propia mesa (ver _notify_cocina_event en el backend).
+  const handleIniciarPreparacion = async (pedidoId) => {
+    if (prepBusyMap[pedidoId]) return;
+    setPrepBusyMap((current) => ({ ...current, [pedidoId]: true }));
+    setActionError('');
     try {
-      const response = await fetch(`/api/pedidos/${pedidoId}/`, {
+      const response = await fetch(`/api/pedidos/${pedidoId}/estado/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
         credentials: 'include',
-        cache: 'no-store',
+        body: JSON.stringify({ estado: 'en_preparacion' }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setDetailError(data.message || 'No se pudo cargar el detalle del pedido.');
+        setActionError(data.message || 'No se pudo iniciar la preparación.');
         return;
       }
-      setDetailPedido(data.pedido);
+      await fetchMesas();
     } catch (requestError) {
-      setDetailError('Error de red al cargar el detalle del pedido.');
+      setActionError('Error de red al iniciar la preparación.');
     } finally {
-      setDetailLoading(false);
+      setPrepBusyMap((current) => ({ ...current, [pedidoId]: false }));
     }
   };
 
-  const closePedidoDetail = () => {
-    setDetailPedidoId(null);
-    setDetailPedido(null);
-    setDetailError('');
-    setRemoveItemError('');
-  };
-
-  // Quitar un item mal elegido (ver canGestionarItems, reservado a cajera/admin/
-  // contador) — recarga el detalle Y la lista de mesas, porque el total de la mesa
-  // (y de la cuenta seleccionada, si el pedido estaba marcado) cambió. Usa su propio
-  // error (removeItemError) en vez de detailError: ese último, si está seteado,
-  // reemplaza TODO el contenido del modal por el mensaje (ver el render de abajo) —
-  // perfecto para "no se pudo cargar el pedido", pero borraría los items a la vista
-  // justo cuando el usuario más los necesita ver para saber qué falló.
-  const handleEliminarItem = async (pedidoId, detalleId) => {
-    setRemovingItemId(detalleId);
-    setRemoveItemError('');
+  // Reimprime un solo renglón (no el pedido completo) — para cuando ese
+  // ticket puntual se dañó o se perdió en cocina.
+  const handleReimprimirItem = async (pedidoId, detalleId) => {
+    const key = `${pedidoId}-${detalleId}`;
+    if (reprintBusyMap[key]) return;
+    setReprintBusyMap((current) => ({ ...current, [key]: true }));
+    setActionError('');
     try {
-      const response = await fetch(`/api/pedidos/${pedidoId}/items/${detalleId}/eliminar/`, {
+      const response = await fetch(`/api/pedidos/${pedidoId}/items/${detalleId}/reimprimir/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': getCookie('csrftoken') || '' },
         credentials: 'include',
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        setRemoveItemError(data.message || 'No se pudo quitar el item.');
+        setActionError(data.message || 'No se pudo reimprimir.');
+      }
+    } catch (requestError) {
+      setActionError('Error de red al reimprimir.');
+    } finally {
+      setReprintBusyMap((current) => ({ ...current, [key]: false }));
+    }
+  };
+
+  const cargarMeserosDisponibles = async () => {
+    if (meserosDisponibles.length > 0) return;
+    try {
+      const response = await fetch('/api/pedidos/meseros-disponibles/', { credentials: 'include', cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) {
+        setMeserosDisponibles(Array.isArray(data.meseros) ? data.meseros : []);
+      } else {
+        console.error('No se pudo cargar la lista de meseros:', data.message || response.status);
+      }
+    } catch (requestError) {
+      // Se reintenta la próxima vez que haga falta (ver el useEffect que precarga
+      // esto al montar, y la llamada de respaldo en handleConfirmarMover).
+      console.error('Error de red al cargar la lista de meseros:', requestError);
+    }
+  };
+
+  // Quitar (completo o solo parte de la cantidad) o mover a otra mesa un item mal
+  // comandado (ver canGestionarItems, reservado a cajera/admin/contador) — ambas
+  // acciones piden motivo obligatorio (ver AjustePedidoModal/VGAjustePedido) y
+  // recargan la lista de mesas completa (ya trae los items inline, ver
+  // mesas_atendidas_view), porque el total de la mesa cambió.
+  const handleConfirmarEliminar = async ({ motivo, cantidad }) => {
+    if (!ajusteModal) return;
+    setAjusteBusy(true);
+    setAjusteError('');
+    try {
+      const response = await fetch(`/api/pedidos/${ajusteModal.pedidoId}/items/${ajusteModal.item.id}/eliminar/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({ motivo, cantidad }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setAjusteError(data.message || 'No se pudo quitar el item.');
         return;
       }
-      setDetailPedido(data.pedido);
+      setAjusteModal(null);
       await fetchMesas();
     } catch (requestError) {
-      setRemoveItemError('Error de red al quitar el item.');
+      setAjusteError('Error de red al quitar el item.');
     } finally {
-      setRemovingItemId(null);
+      setAjusteBusy(false);
+    }
+  };
+
+  // Si la mesa destino no tiene pedido abierto, el backend no lo trata como error:
+  // responde requiere_usuario para que se le pida a la cajera/admin a qué mesero se
+  // le abre esa mesa (ver pedido_detalle_mover_view) — acá eso NO se muestra como
+  // ajusteError (rojo, de "algo salió mal"), sino que revela el selector de mesero
+  // dentro del mismo modal para reintentar con usuario_id.
+  const handleConfirmarMover = async ({ motivo, mesaDestinoId, usuarioId }) => {
+    if (!ajusteModal) return;
+    setAjusteBusy(true);
+    setAjusteError('');
+    try {
+      const response = await fetch(`/api/pedidos/${ajusteModal.pedidoId}/items/${ajusteModal.item.id}/mover/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({ motivo, mesa_destino_id: mesaDestinoId, usuario_id: usuarioId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        if (data.requiere_usuario) {
+          setRequiereUsuarioMover(true);
+          await cargarMeserosDisponibles();
+          return;
+        }
+        setAjusteError(data.message || 'No se pudo mover el item.');
+        return;
+      }
+      setAjusteModal(null);
+      await fetchMesas();
+    } catch (requestError) {
+      setAjusteError('Error de red al mover el item.');
+    } finally {
+      setAjusteBusy(false);
     }
   };
 
@@ -239,136 +353,248 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
   };
 
   if (selectedMesa) {
+    // Normalmente hay a lo sumo un pedido "pendiente" por mesa (se manda a
+    // cocina antes de que el mesero piense en agregar otra ronda), así que el
+    // footer puede mostrar "Iniciar preparación"/"Editar" para ese único
+    // pedido sin ambigüedad. Si por algún motivo hay más de uno todavía
+    // pendiente a la vez, no adivinamos cuál — esos dos botones vuelven a
+    // aparecer en cada tarjeta para no perder la posibilidad de mandarlos a
+    // cocina o editarlos.
+    const pedidosPendientes = selectedMesa.pedidos.filter((pedido) => pedido.estado === 'pendiente');
+    const pedidoPendienteUnico = pedidosPendientes.length === 1 ? pedidosPendientes[0] : null;
+
     return (
       <section style={containerStyle(isMobile)}>
-        <div style={headerWrapStyle}>
-          <div>
-            <div style={eyebrowStyle}>Mesas atendidas</div>
-            <h2 style={titleStyle(isMobile)}>Mesa {selectedMesa.mesa_numero}</h2>
-            <div style={{ marginTop: 8 }}>
-              <span style={stateBadgeStyle(selectedMesa.estado)}>
-                {selectedMesa.estado === 'abierta' ? 'Abierta' : 'Cerrada'}
-              </span>
-            </div>
-          </div>
-          <button type="button" onClick={handleCloseMesa} style={backButtonStyle(isMobile)}>
-            Volver
-          </button>
-        </div>
-
-        {error ? <div style={errorStyle}>{error}</div> : null}
-
-        <div style={{ display: 'grid', gap: 10 }}>
-          {selectedMesa.pedidos.map((pedido) => (
-            <div key={pedido.id} style={pedidoCardStyle(selectedPedidoIds.has(pedido.id))}>
-              <input
-                type="checkbox"
-                checked={selectedPedidoIds.has(pedido.id)}
-                onChange={() => togglePedidoSelection(pedido.id)}
-                style={pedidoCheckboxStyle}
-              />
-              <button
-                type="button"
-                onClick={() => openPedidoDetail(pedido.id)}
-                style={pedidoCardButtonStyle}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                  <div style={{ color: '#fff', fontWeight: 700 }}>Pedido #{pedido.id}</div>
-                  <div style={{ color: '#fff', fontWeight: 700 }}>
-                    ${Number(pedido.total || 0).toFixed(2)}
-                    <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
-                  </div>
-                </div>
-                <div style={{ color: '#d2c3c3', fontSize: 12, marginTop: 4 }}>
-                  {pedido.cliente || 'Sin cliente'} · {estadoLabel(pedido.estado)}
-                  {todasLasMesas && pedido.mesero ? ` · ${pedido.mesero}` : ''}
-                </div>
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {selectedPedidoIds.size > 0 ? (
-          <div style={selectedSumBarStyle}>
-            <span>Seleccionado ({selectedPedidoIds.size} {selectedPedidoIds.size === 1 ? 'cuenta' : 'cuentas'})</span>
-            <strong>
-              ${selectedSum.toFixed(2)}
-              <BsAmount amountUsd={selectedSum} tasa={tasaCambio} />
-            </strong>
-          </div>
-        ) : null}
-
-        <div style={totalsBoxStyle}>
-          <span>Total de la mesa</span>
-          <strong>
-            ${mesaTotal.toFixed(2)}
-            <BsAmount amountUsd={mesaTotal} tasa={tasaCambio} />
-          </strong>
-        </div>
-
-        {selectedMesa.estado === 'abierta' && onAddRoundToTable ? (
-          <button type="button" onClick={handleAddRound} style={addRoundButtonStyle(isMobile)}>
-            Agregar ronda a esta mesa
-          </button>
-        ) : null}
-
-        {selectedMesa.estado === 'abierta' ? (
-          isMovingTable ? (
-            <div style={moveTableBoxStyle}>
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>
-                Mover todos los pedidos abiertos de esta mesa a:
-              </span>
-              <select
-                value={moveTargetMesaId}
-                onChange={(event) => setMoveTargetMesaId(event.target.value)}
-                style={moveSelectStyle}
-              >
-                <option value="">Seleccionar mesa destino</option>
-                {mesasCatalogo
-                  .filter((mesa) => mesa.id !== selectedMesa.mesa_id)
-                  .map((mesa) => (
-                    <option key={mesa.id} value={mesa.id}>
-                      Mesa {mesa.numero}
-                    </option>
-                  ))}
-              </select>
-              {moveError ? <div style={errorStyle}>{moveError}</div> : null}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={handleMoveTable}
-                  style={confirmMoveButtonStyle(isMobile)}
-                  disabled={!moveTargetMesaId || moveSubmitting}
-                >
-                  {moveSubmitting ? 'Moviendo...' : 'Confirmar cambio'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setIsMovingTable(false); setMoveTargetMesaId(''); setMoveError(''); }}
-                  style={cancelMoveButtonStyle(isMobile)}
-                >
-                  Cancelar
-                </button>
+        <div style={selectedMesa.estado === 'abierta' ? scrollAreaWithFooterStyle : undefined}>
+          <div style={headerWrapStyle}>
+            <div>
+              <div style={eyebrowStyle}>Mesas atendidas</div>
+              <h2 style={titleStyle(isMobile)}>Mesa {selectedMesa.mesa_numero}</h2>
+              <div style={{ marginTop: 8 }}>
+                <span style={stateBadgeStyle(selectedMesa.estado)}>
+                  {selectedMesa.estado === 'abierta' ? 'Abierta' : 'Cerrada'}
+                </span>
               </div>
             </div>
-          ) : (
-            <button type="button" onClick={() => setIsMovingTable(true)} style={changeTableButtonStyle(isMobile)}>
-              Cambiar de mesa
+            <button type="button" onClick={handleCloseMesa} style={backButtonStyle(isMobile)}>
+              Volver
             </button>
-          )
+          </div>
+
+          {flashMessage ? <div style={flashBannerStyle}>{flashMessage}</div> : null}
+          {error ? <div style={errorStyle}>{error}</div> : null}
+          {actionError ? <div style={errorStyle}>{actionError}</div> : null}
+
+          <div style={{ display: 'grid', gap: 10 }}>
+            {selectedMesa.pedidos.map((pedido) => {
+              const impreso = pedido.estado !== 'pendiente';
+              const items = pedido.detalles || [];
+              const puedeAjustarItems = canGestionarItems
+                && pedido.estado !== 'pagado'
+                && pedido.estado !== 'cancelado'
+                && items.length > 1;
+
+              return (
+                <div key={pedido.id} style={pedidoCardStyle(selectedPedidoIds.has(pedido.id))}>
+                  <div style={pedidoCardHeaderRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={selectedPedidoIds.has(pedido.id)}
+                      onChange={() => togglePedidoSelection(pedido.id)}
+                      style={pedidoCheckboxStyle}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                        <div style={{ color: '#fff', fontWeight: 700 }}>Pedido #{pedido.id}</div>
+                        <div style={{ color: '#fff', fontWeight: 700 }}>
+                          ${Number(pedido.total || 0).toFixed(2)}
+                          <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
+                        </div>
+                      </div>
+                      <div style={{ color: '#d2c3c3', fontSize: 12, marginTop: 4 }}>
+                        {pedido.cliente || 'Sin cliente'} · {estadoLabel(pedido.estado)}
+                        {todasLasMesas && pedido.mesero ? ` · ${pedido.mesero}` : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                    {items.map((item) => (
+                      <div key={item.id} style={itemRowStyle(impreso)}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ color: '#fff', fontWeight: 600 }}>
+                            {item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`} {item.producto_nombre}
+                          </span>
+                          <span style={{ color: '#fff', fontWeight: 600 }}>
+                            ${Number(item.subtotal || 0).toFixed(2)}
+                          </span>
+                        </div>
+                        {item.notas ? <div style={itemNoteStyle}>{item.notas}</div> : null}
+                        {(item.adicionales || []).map((addon) => (
+                          <div key={`addon-${addon.id}`} style={itemAddonStyle}>
+                            + {addon.cantidad}x {addon.nombre} · ${Number(addon.subtotal || 0).toFixed(2)}
+                          </div>
+                        ))}
+                        {(item.opciones || []).map((opcion) => (
+                          <div key={`opcion-${opcion.id}`} style={itemNoteStyle}>
+                            {opcion.grupo_nombre}: {opcion.nombre}
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 2 }}>
+                          <span style={impresoTagStyle(impreso)}>
+                            {impreso ? 'Enviado a cocina' : 'Sin enviar'}
+                          </span>
+                          {impreso ? (
+                            <button
+                              type="button"
+                              onClick={() => handleReimprimirItem(pedido.id, item.id)}
+                              style={reprintItemButtonStyle}
+                              disabled={Boolean(reprintBusyMap[`${pedido.id}-${item.id}`])}
+                            >
+                              {reprintBusyMap[`${pedido.id}-${item.id}`] ? 'Reimprimiendo...' : 'Reimprimir'}
+                            </button>
+                          ) : null}
+                          {puedeAjustarItems ? (
+                            <>
+                              <button type="button" onClick={() => abrirAjuste('eliminar', pedido.id, item)} style={removeItemButtonStyle}>
+                                Quitar item
+                              </button>
+                              <button type="button" onClick={() => abrirAjuste('mover', pedido.id, item)} style={moveItemButtonStyle}>
+                                Mover a otra mesa
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {pedido.notas ? <p style={orderNoteStyle}>Nota: {pedido.notas}</p> : null}
+
+                  {pedido.estado === 'pendiente' && !pedidoPendienteUnico ? (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={() => handleIniciarPreparacion(pedido.id)}
+                        style={{ ...iniciarPrepButtonStyle(false), width: 'auto' }}
+                        disabled={Boolean(prepBusyMap[pedido.id])}
+                      >
+                        {prepBusyMap[pedido.id] ? 'Enviando...' : 'Iniciar preparación'}
+                      </button>
+                      {onEditOrder ? (
+                        <button type="button" onClick={() => onEditOrder(pedido.id)} style={{ ...editOrderButtonStyle(false), width: 'auto' }}>
+                          Editar
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+
+          {selectedPedidoIds.size > 0 ? (
+            <div style={selectedSumBarStyle}>
+              <span>Seleccionado ({selectedPedidoIds.size} {selectedPedidoIds.size === 1 ? 'cuenta' : 'cuentas'})</span>
+              <strong>
+                ${selectedSum.toFixed(2)}
+                <BsAmount amountUsd={selectedSum} tasa={tasaCambio} />
+              </strong>
+            </div>
+          ) : null}
+
+          <div style={totalsBoxStyle}>
+            <span>Total de la mesa</span>
+            <strong>
+              ${mesaTotal.toFixed(2)}
+              <BsAmount amountUsd={mesaTotal} tasa={tasaCambio} />
+            </strong>
+          </div>
+        </div>
+
+        {selectedMesa.estado === 'abierta' ? (
+          <div style={fixedFooterStyle(sidebarOffset)}>
+            {isMovingTable ? (
+              <div style={moveTableBoxStyle}>
+                <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>
+                  Mover todos los pedidos abiertos de esta mesa a:
+                </span>
+                <select
+                  value={moveTargetMesaId}
+                  onChange={(event) => setMoveTargetMesaId(event.target.value)}
+                  style={moveSelectStyle}
+                >
+                  <option value="">Seleccionar mesa destino</option>
+                  {mesasCatalogo
+                    .filter((mesa) => mesa.id !== selectedMesa.mesa_id)
+                    .map((mesa) => (
+                      <option key={mesa.id} value={mesa.id}>
+                        Mesa {mesa.numero}
+                      </option>
+                    ))}
+                </select>
+                {moveError ? <div style={errorStyle}>{moveError}</div> : null}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleMoveTable}
+                    style={confirmMoveButtonStyle(isMobile)}
+                    disabled={!moveTargetMesaId || moveSubmitting}
+                  >
+                    {moveSubmitting ? 'Moviendo...' : 'Confirmar cambio'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsMovingTable(false); setMoveTargetMesaId(''); setMoveError(''); }}
+                    style={cancelMoveButtonStyle(isMobile)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={footerActionsRowStyle}>
+                {pedidoPendienteUnico ? (
+                  <button
+                    type="button"
+                    onClick={() => handleIniciarPreparacion(pedidoPendienteUnico.id)}
+                    style={iniciarPrepButtonStyle(isMobile)}
+                    disabled={Boolean(prepBusyMap[pedidoPendienteUnico.id])}
+                  >
+                    {prepBusyMap[pedidoPendienteUnico.id] ? 'Enviando...' : 'Iniciar preparación'}
+                  </button>
+                ) : null}
+                {pedidoPendienteUnico && onEditOrder ? (
+                  <button type="button" onClick={() => onEditOrder(pedidoPendienteUnico.id)} style={editOrderButtonStyle(isMobile)}>
+                    Editar pedido
+                  </button>
+                ) : null}
+                {onAddRoundToTable ? (
+                  <button type="button" onClick={handleAddRound} style={addRoundButtonStyle(isMobile)}>
+                    Agregar ronda
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => setIsMovingTable(true)} style={changeTableButtonStyle(isMobile)}>
+                  Cambiar de mesa
+                </button>
+              </div>
+            )}
+          </div>
         ) : null}
 
-        {detailPedidoId ? (
-          <PedidoDetalleModal
-            pedido={detailPedido}
-            loading={detailLoading}
-            error={detailError}
-            tasaCambio={tasaCambio}
-            onClose={closePedidoDetail}
-            canGestionarItems={canGestionarItems}
-            removingItemId={removingItemId}
-            removeItemError={removeItemError}
-            onEliminarItem={(detalleId) => handleEliminarItem(detailPedidoId, detalleId)}
+        {ajusteModal ? (
+          <AjustePedidoModal
+            modo={ajusteModal.modo}
+            item={ajusteModal.item}
+            mesasCatalogo={mesasCatalogo}
+            mesaActualId={selectedMesa.mesa_id}
+            busy={ajusteBusy}
+            error={ajusteError}
+            requiereUsuario={requiereUsuarioMover}
+            meserosDisponibles={meserosDisponibles}
+            onClose={() => setAjusteModal(null)}
+            onConfirmarEliminar={handleConfirmarEliminar}
+            onConfirmarMover={handleConfirmarMover}
           />
         ) : null}
       </section>
@@ -450,102 +676,6 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
         </div>
       ) : null}
     </section>
-  );
-}
-
-function PedidoDetalleModal({ pedido, loading, error, tasaCambio, onClose, canGestionarItems = false, removingItemId = null, removeItemError = '', onEliminarItem }) {
-  // Solo se monta mientras hay un pedido seleccionado, así que montado == abierto.
-  useMobileBackHandler(true, onClose);
-
-  const items = pedido ? (pedido.items || []) : [];
-  // Nunca dejar el pedido en cero items desde acá (para eso está cancelar el pedido
-  // completo) ni tocar uno ya cobrado/cancelado — mismas reglas que valida el backend
-  // (pedido_detalle_eliminar_view), repetidas acá solo para no mostrar un botón que
-  // el servidor va a rechazar.
-  const puedeEliminarItems = canGestionarItems
-    && pedido
-    && pedido.estado !== 'pagado'
-    && pedido.estado !== 'cancelado'
-    && items.length > 1;
-
-  return (
-    <div style={modalBackdropStyle} onClick={onClose}>
-      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
-        <button type="button" onClick={onClose} style={modalCloseButtonStyle} aria-label="Cerrar">
-          ×
-        </button>
-        <div style={modalScrollAreaStyle}>
-          <div style={modalBodyStyle}>
-            {loading ? (
-              <div style={{ color: '#d8cfcf' }}>Cargando detalle del pedido...</div>
-            ) : error ? (
-              <div style={errorStyle}>{error}</div>
-            ) : pedido ? (
-              <>
-                <div style={modalTitleStyle}>Pedido #{pedido.id}</div>
-                <div style={modalSubtitleStyle}>
-                  {estadoLabel(pedido.estado)}{pedido.mesa ? ` · Mesa ${pedido.mesa}` : ''}
-                </div>
-                {pedido.cliente_nombre ? (
-                  <div style={modalSubtitleStyle}>Cliente: {pedido.cliente_nombre}</div>
-                ) : null}
-                {pedido.cliente_cedula ? (
-                  <div style={modalSubtitleStyle}>Cédula: {pedido.cliente_cedula}</div>
-                ) : null}
-                {pedido.cliente_telefono ? (
-                  <div style={modalSubtitleStyle}>Teléfono: {pedido.cliente_telefono}</div>
-                ) : null}
-
-                {removeItemError ? <div style={errorStyle}>{removeItemError}</div> : null}
-
-                <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-                  {items.map((item) => (
-                    <div key={item.id} style={itemRowStyle}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ color: '#fff', fontWeight: 600 }}>
-                          {item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`} {item.producto_nombre}
-                        </span>
-                        <span style={{ color: '#fff', fontWeight: 600 }}>
-                          ${Number(item.subtotal || 0).toFixed(2)}
-                        </span>
-                      </div>
-                      {item.notas ? <div style={itemNoteStyle}>{item.notas}</div> : null}
-                      {(item.adicionales || []).map((addon) => (
-                        <div key={`addon-${addon.id}`} style={itemAddonStyle}>
-                          + {addon.cantidad}x {addon.nombre} · ${Number(addon.subtotal || 0).toFixed(2)}
-                        </div>
-                      ))}
-                      {(item.opciones || []).map((opcion) => (
-                        <div key={`opcion-${opcion.id}`} style={itemNoteStyle}>
-                          {opcion.grupo_nombre}: {opcion.nombre}
-                        </div>
-                      ))}
-                      {puedeEliminarItems ? (
-                        <button
-                          type="button"
-                          onClick={() => onEliminarItem(item.id)}
-                          style={removeItemButtonStyle}
-                          disabled={removingItemId === item.id}
-                        >
-                          {removingItemId === item.id ? 'Quitando...' : 'Quitar item'}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-
-                {pedido.notas ? <p style={orderNoteStyle}>Nota general: {pedido.notas}</p> : null}
-
-                <div style={modalTotalStyle}>
-                  Total: ${Number(pedido.total || 0).toFixed(2)}
-                  <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
-                </div>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -701,15 +831,17 @@ const stateBadgeStyle = (estado) => ({
 });
 
 const pedidoCardStyle = (selected) => ({
-  display: 'flex',
-  gap: 10,
-  alignItems: 'flex-start',
   borderRadius: 14,
   border: selected ? '1px solid rgba(88, 166, 255, 0.6)' : '1px solid rgba(255,255,255,0.12)',
   background: selected ? 'rgba(88, 166, 255, 0.1)' : 'rgba(255,255,255,0.03)',
   padding: 11,
-  cursor: 'pointer',
 });
+
+const pedidoCardHeaderRowStyle = {
+  display: 'flex',
+  gap: 10,
+  alignItems: 'flex-start',
+};
 
 const pedidoCheckboxStyle = {
   marginTop: 3,
@@ -717,20 +849,6 @@ const pedidoCheckboxStyle = {
   height: 18,
   flexShrink: 0,
   cursor: 'pointer',
-};
-
-const pedidoCardButtonStyle = {
-  flex: 1,
-  minWidth: 0,
-  display: 'block',
-  border: 'none',
-  background: 'transparent',
-  padding: 0,
-  margin: 0,
-  cursor: 'pointer',
-  textAlign: 'left',
-  font: 'inherit',
-  color: 'inherit',
 };
 
 const selectedSumBarStyle = {
@@ -826,89 +944,105 @@ const cancelMoveButtonStyle = (isMobile) => ({
   flex: isMobile ? '1 1 100%' : '0 0 auto',
 });
 
-const modalBackdropStyle = {
+const scrollAreaWithFooterStyle = {
+  display: 'grid',
+  gap: 14,
+  paddingBottom: 260,
+};
+
+// `left` sigue a desktopContentOffset (WelcomeScreen.jsx) para no quedar por
+// debajo de la barra lateral fija en escritorio — sin esto, el footer se
+// dibuja a todo el ancho del viewport e invade el espacio de la barra
+// lateral. La transition queda igual a la que ya usa esa barra (260ms) para
+// que el footer se deslice en sincronía al abrirla/cerrarla.
+const fixedFooterStyle = (sidebarOffset) => ({
   position: 'fixed',
-  inset: 0,
-  zIndex: 40,
-  background: 'rgba(0,0,0,0.7)',
+  left: sidebarOffset,
+  right: 0,
+  bottom: 0,
+  zIndex: 20,
+  padding: 12,
   display: 'grid',
-  placeItems: 'center',
-  padding: 16,
-};
+  gap: 8,
+  transition: 'left 260ms ease',
+  background: 'linear-gradient(180deg, rgba(8,8,8,0) 0%, rgba(8,8,8,0.94) 35%, rgba(6,6,6,0.98) 100%)',
+});
 
-const modalCardStyle = {
-  position: 'relative',
-  width: '100%',
-  maxWidth: 420,
-  maxHeight: '88vh',
+const footerActionsRowStyle = {
   display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-  borderRadius: 20,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
-  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+  gap: 8,
+  flexWrap: 'wrap',
 };
 
-const modalScrollAreaStyle = {
-  overflowY: 'auto',
-  flex: '1 1 auto',
-  minHeight: 0,
-};
-
-const modalCloseButtonStyle = {
-  position: 'absolute',
-  top: 10,
-  right: 10,
-  zIndex: 2,
-  width: 32,
-  height: 32,
-  borderRadius: '50%',
-  border: 'none',
-  background: 'rgba(0,0,0,0.55)',
-  color: '#fff',
-  fontSize: 20,
-  lineHeight: 1,
-  cursor: 'pointer',
-  display: 'grid',
-  placeItems: 'center',
-};
-
-const modalBodyStyle = {
-  display: 'grid',
-  gap: 10,
-  padding: 20,
-};
-
-const modalTitleStyle = {
-  color: '#fff',
-  fontSize: 22,
-  fontWeight: 800,
-  paddingRight: 30,
-};
-
-const modalSubtitleStyle = {
-  color: '#e8bcbc',
+const flashBannerStyle = {
+  borderRadius: 14,
+  border: '1px solid rgba(52, 211, 153, 0.4)',
+  background: 'rgba(52, 211, 153, 0.12)',
+  color: '#a7f3d3',
+  padding: '10px 12px',
   fontSize: 13,
+  fontWeight: 600,
 };
 
-const modalTotalStyle = {
-  marginTop: 6,
-  paddingTop: 10,
-  borderTop: '1px solid rgba(255,255,255,0.1)',
+const iniciarPrepButtonStyle = (isMobile) => ({
+  border: 'none',
+  borderRadius: 999,
+  padding: isMobile ? '12px 16px' : '10px 16px',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
   color: '#fff',
-  fontWeight: 800,
-  fontSize: 16,
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontSize: 13,
+  minHeight: isMobile ? 44 : 40,
+  width: isMobile ? '100%' : 'auto',
+});
+
+const editOrderButtonStyle = (isMobile) => ({
+  border: '1px solid rgba(255,255,255,0.2)',
+  borderRadius: 999,
+  padding: isMobile ? '12px 16px' : '10px 16px',
+  background: 'rgba(255,255,255,0.06)',
+  color: '#fff',
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontSize: 13,
+  minHeight: isMobile ? 44 : 40,
+  width: isMobile ? '100%' : 'auto',
+});
+
+const reprintItemButtonStyle = {
+  justifySelf: 'start',
+  border: '1px solid rgba(88, 166, 255, 0.45)',
+  borderRadius: 999,
+  padding: '4px 10px',
+  background: 'rgba(88, 166, 255, 0.1)',
+  color: '#bcdcff',
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: 'pointer',
 };
 
-const itemRowStyle = {
+const impresoTagStyle = (impreso) => ({
+  display: 'inline-block',
+  borderRadius: 999,
+  padding: '2px 8px',
+  fontSize: 10,
+  fontWeight: 800,
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  color: impreso ? '#34d399' : '#f59e0b',
+  background: impreso ? 'rgba(52, 211, 153, 0.14)' : 'rgba(245, 158, 11, 0.14)',
+  border: `1px solid ${impreso ? 'rgba(52, 211, 153, 0.4)' : 'rgba(245, 158, 11, 0.45)'}`,
+});
+
+const itemRowStyle = (impreso) => ({
   borderRadius: 10,
-  background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(255,255,255,0.1)',
+  background: impreso ? 'rgba(52, 211, 153, 0.06)' : 'rgba(245, 158, 11, 0.08)',
+  border: `1px solid ${impreso ? 'rgba(52, 211, 153, 0.3)' : 'rgba(245, 158, 11, 0.35)'}`,
   padding: '8px 9px',
   display: 'grid',
   gap: 4,
-};
+});
 
 const itemNoteStyle = {
   color: '#e8bcbc',
@@ -929,6 +1063,19 @@ const removeItemButtonStyle = {
   padding: '4px 10px',
   background: 'rgba(255, 73, 73, 0.1)',
   color: '#ffb3b3',
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+const moveItemButtonStyle = {
+  justifySelf: 'start',
+  marginTop: 2,
+  border: '1px solid rgba(245, 158, 11, 0.45)',
+  borderRadius: 999,
+  padding: '4px 10px',
+  background: 'rgba(245, 158, 11, 0.1)',
+  color: '#f5c778',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',

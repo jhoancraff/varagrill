@@ -15,6 +15,7 @@ from .models import (
     VGConsignacionCaja,
     VGIngresoExtra,
     VGMetodoPago,
+    VGNotaEntrega,
     VGPago,
     VGTasaCambio,
 )
@@ -41,21 +42,20 @@ def totales_pagos_por_metodo(fecha):
     (asi se guardan los montos).
 
     Para un metodo en bolivares (moneda='VES'), `total_bs` NO es `total *
-    tasa_de_fecha` — cada VGPago se convierte con la tasa CONGELADA del
-    documento que esta saldando (nota_entrega.tasa_cambio_referencia o
-    factura.tasa_cambio_referencia, la misma que uso nota_entrega_abono_view/
-    factura_abono_view para calcular cuantos dolares representaba lo que el
-    cliente pago en bolivares), no con la tasa vigente en `fecha`. Si una
-    nota se emitio ayer con el BCV de ayer y se cobra hoy con el BCV ya
-    actualizado, `total_bs` trae el mismo monto en bolivares que de verdad
-    se le cobro al cliente — no uno recalculado con la tasa de hoy, que no
-    coincidiria con lo que el cajero realmente recibio y contaria mal el
-    cuadre. Los ingresos extra si usan la tasa de `fecha` sin problema: por
-    diseño siempre se registran el mismo dia que aparecen aca (ver
-    VGIngresoExtra), asi que no hay tasa vieja de la que arrastrar un
-    desfase. `total_bs` es None solo si algun pago en bolivares de ese
-    metodo ese dia no tiene ninguna tasa resoluble (ni la del documento, ni
-    la propia del pago, ni la de `fecha` como ultimo recurso).
+    tasa_de_fecha` — cada VGPago se convierte con SU PROPIA tasa congelada
+    (pago.tasa_cambio_referencia), que nota_entrega_abono_view/
+    factura_abono_view sellan con el BCV del dia en que ese pago en concreto
+    se registro (ver esas vistas: para una nota/factura pendiente en
+    bolivares, se cobra al valor del dolar del dia del cobro, no al del dia
+    en que se emitio, para que el fiado no pierda valor mientras esta
+    pendiente). Si el documento (nota_entrega/factura) no tiene tasa propia
+    en el pago (dato viejo previo a este cambio), se cae a la tasa congelada
+    del documento, y en ultimo caso a la de `fecha`. Los ingresos extra usan
+    su propia tasa (o la de `fecha`) igual que siempre: por diseño siempre se
+    registran el mismo dia que aparecen aca (ver VGIngresoExtra), asi que no
+    hay tasa vieja de la que arrastrar un desfase. `total_bs` es None solo si
+    algun pago en bolivares de ese metodo ese dia no tiene ninguna tasa
+    resoluble (ni la propia, ni la del documento, ni la de `fecha`).
     """
     tasa_fecha = tasa_para_fecha(fecha)
 
@@ -65,6 +65,7 @@ def totales_pagos_por_metodo(fecha):
             'nombre': metodo.nombre,
             'es_efectivo': metodo.es_efectivo,
             'moneda': metodo.moneda,
+            'cuenta_bancaria': metodo.cuenta_bancaria,
             'ventas': Decimal('0'),
             'ingresos_extra': Decimal('0'),
             'ventas_bs': Decimal('0'),
@@ -73,13 +74,14 @@ def totales_pagos_por_metodo(fecha):
         for metodo in VGMetodoPago.objects.filter(activo=True)
     }
 
-    def _metodo_entry(metodo_id, nombre, es_efectivo, moneda):
+    def _metodo_entry(metodo_id, nombre, es_efectivo, moneda, cuenta_bancaria=''):
         if metodo_id not in metodos_por_id:
             metodos_por_id[metodo_id] = {
                 'id': metodo_id,
                 'nombre': nombre,
                 'es_efectivo': es_efectivo,
                 'moneda': moneda,
+                'cuenta_bancaria': cuenta_bancaria,
                 'ventas': Decimal('0'),
                 'ingresos_extra': Decimal('0'),
                 'ventas_bs': Decimal('0'),
@@ -94,13 +96,13 @@ def totales_pagos_por_metodo(fecha):
     )
     for pago in pagos:
         metodo = pago.metodo_pago
-        entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda)
+        entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda, metodo.cuenta_bancaria)
         entry['ventas'] += pago.monto
         if metodo.moneda == 'VES':
             tasa_pago = (
-                (pago.nota_entrega.tasa_cambio_referencia if pago.nota_entrega_id else None)
+                pago.tasa_cambio_referencia
+                or (pago.nota_entrega.tasa_cambio_referencia if pago.nota_entrega_id else None)
                 or (pago.factura.tasa_cambio_referencia if pago.factura_id else None)
-                or pago.tasa_cambio_referencia
                 or tasa_fecha
             )
             if tasa_pago:
@@ -111,7 +113,7 @@ def totales_pagos_por_metodo(fecha):
     ingresos_extra_dia = VGIngresoExtra.objects.filter(fecha_creacion__date=fecha).select_related('metodo_pago')
     for ingreso in ingresos_extra_dia:
         metodo = ingreso.metodo_pago
-        entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda)
+        entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda, metodo.cuenta_bancaria)
         entry['ingresos_extra'] += ingreso.monto
         if metodo.moneda == 'VES':
             # Igual que con los VGPago de arriba: cada ingreso extra congela su
@@ -132,6 +134,213 @@ def totales_pagos_por_metodo(fecha):
         del metodo['_bs_incompleto']
 
     return sorted(metodos_por_id.values(), key=lambda item: item['nombre'])
+
+
+def resumen_ventas_dia(fecha):
+    """
+    Total vendido del dia (Notas de Entrega emitidas en `fecha`, pendientes y
+    pagadas por igual) frente a lo que de verdad entro al banco (ver
+    totales_pagos_por_metodo) — para poder explicar la diferencia:
+
+    - `total_pendiente` NO es solo el fiado nuevo de hoy: es el saldo
+      acumulado de TODAS las notas emitidas hasta `fecha` (inclusive) que
+      todavia no se terminan de cobrar — se arrastra dia a dia hasta que esa
+      nota (esa persona) termina de pagar. Si el banco subio MENOS que
+      `total_vendido`, la explicacion mas probable es que parte de la venta
+      de hoy engrosó este acumulado.
+    - `cuentas_cobradas_hoy` es el recaudo de HOY de notas emitidas en un dia
+      ANTERIOR (el pendiente de ayer que se cobro hoy) — ese monto sale del
+      acumulado de `total_pendiente` (porque su saldo_pendiente ya bajo) y se
+      reporta aca en vez de sumarse a `total_vendido`: esa venta ya se conto
+      el dia que se emitio la nota, contarla otra vez hoy la duplicaria.
+    - `total_propinas_excedentes` es dinero que SI entro al banco hoy (via
+      VGIngresoExtra) pero que NO es venta — si el banco subio MAS que
+      `total_vendido`, esta es la explicacion mas probable. Nunca se suma a
+      `total_vendido` a proposito, para no inflar la venta real.
+    """
+    total_vendido = (
+        VGNotaEntrega.objects
+        .filter(fecha_emision__date=fecha)
+        .aggregate(total=Sum('total'))
+        .get('total')
+    ) or Decimal('0')
+
+    total_pendiente = (
+        VGNotaEntrega.objects
+        .filter(fecha_emision__date__lte=fecha)
+        .aggregate(total=Sum('saldo_pendiente'))
+        .get('total')
+    ) or Decimal('0')
+
+    total_propinas_excedentes = (
+        VGIngresoExtra.objects
+        .filter(fecha_creacion__date=fecha)
+        .aggregate(total=Sum('monto'))
+        .get('total')
+    ) or Decimal('0')
+
+    cuentas_cobradas_hoy = (
+        VGPago.objects
+        .filter(fecha_pago__date=fecha, estado='completado', nota_entrega__isnull=False)
+        .exclude(nota_entrega__fecha_emision__date=fecha)
+        .aggregate(total=Sum('monto'))
+        .get('total')
+    ) or Decimal('0')
+
+    return {
+        'total_vendido': total_vendido,
+        'total_pendiente': total_pendiente,
+        'total_propinas_excedentes': total_propinas_excedentes,
+        'cuentas_cobradas_hoy': cuentas_cobradas_hoy,
+    }
+
+
+def detalle_ventas_dia(fecha):
+    """
+    Detalle fila por fila de cada Nota de Entrega emitida en `fecha` — el
+    desglose de "Total vendido hoy" (ver resumen_ventas_dia): para saber
+    exactamente que notas se hicieron, cuanto es en dolares, cuanto se pago
+    en bolivares (si aplica), con que metodo, en que banco (VGMetodoPago.
+    cuenta_bancaria) y con que referencia.
+
+    Una nota puede tener varios pagos (abonos parciales) o ninguno todavia
+    (pendiente); se listan todos los pagos completados de esa nota, sin
+    importar el dia en que se cobraron (una nota de hoy solo puede tener
+    pagos de hoy en adelante, nunca de antes).
+    """
+    notas = (
+        VGNotaEntrega.objects
+        .filter(fecha_emision__date=fecha)
+        .select_related('cliente')
+        .prefetch_related('pagos__metodo_pago')
+        .order_by('fecha_emision')
+    )
+
+    resultado = []
+    for nota in notas:
+        pagos = []
+        for pago in nota.pagos.all():
+            if pago.estado != 'completado':
+                continue
+            metodo = pago.metodo_pago
+            monto_bs = None
+            if metodo.moneda == 'VES':
+                tasa = pago.tasa_cambio_referencia or nota.tasa_cambio_referencia
+                if tasa:
+                    monto_bs = (pago.monto * tasa).quantize(Decimal('0.01'))
+            pagos.append({
+                'monto': pago.monto,
+                'monto_bs': monto_bs,
+                'metodo_pago_nombre': metodo.nombre,
+                'cuenta_bancaria': metodo.cuenta_bancaria,
+                'referencia': pago.referencia,
+                'fecha_pago': pago.fecha_pago,
+            })
+        resultado.append({
+            'id': nota.id,
+            'codigo': nota.codigo,
+            'cliente': nota.cliente.nombre if nota.cliente_id else '',
+            'total': nota.total,
+            'moneda': nota.moneda,
+            'estado': nota.estado,
+            'saldo_pendiente': nota.saldo_pendiente,
+            'pagos': pagos,
+        })
+    return resultado
+
+
+def detalle_cuentas_por_cobrar(fecha):
+    """
+    Detalle fila por fila de "Pendiente por cobrar" (ver resumen_ventas_dia):
+    todas las Notas de Entrega emitidas hasta `fecha` (inclusive) que todavia
+    tienen saldo pendiente, mas antiguas primero — para saber exactamente
+    quien debe, desde cuando y cuanto (arrastra dia a dia hasta que se paga,
+    no es solo el fiado nuevo de `fecha`).
+    """
+    notas = (
+        VGNotaEntrega.objects
+        .filter(fecha_emision__date__lte=fecha, saldo_pendiente__gt=0)
+        .select_related('cliente')
+        .order_by('fecha_emision')
+    )
+    return [
+        {
+            'id': nota.id,
+            'codigo': nota.codigo,
+            'cliente': nota.cliente.nombre if nota.cliente_id else '',
+            'total': nota.total,
+            'saldo_pendiente': nota.saldo_pendiente,
+            'moneda': nota.moneda,
+            'estado': nota.estado,
+            'fecha_emision': nota.fecha_emision,
+            'dias_pendiente': (fecha - nota.fecha_emision.date()).days,
+        }
+        for nota in notas
+    ]
+
+
+def detalle_cuentas_cobradas_dia(fecha):
+    """
+    Detalle fila por fila de "Cuentas cobradas hoy" (ver resumen_ventas_dia):
+    pagos de `fecha` contra una Nota de Entrega emitida en un dia ANTERIOR —
+    el pendiente de un dia anterior que se cobro hoy.
+
+    Para una nota en bolivares, muestra la diferencia entre lo que hubiera
+    sido en bolivares a la tasa del dia en que se emitio (`bs_a_tasa_emision`)
+    y lo que realmente se cobro hoy a la tasa vigente (`bs_a_tasa_cobro`) —
+    la plata sigue siendo el mismo monto en dolares (la deuda nunca cambia),
+    pero como el bolivar se devalua mientras el fiado esta pendiente, el
+    monto en bolivares que hay que cobrar sube (ver nota_entrega_abono_view).
+    Para una nota pagada directo en dolares no aplica ninguna tasa (las
+    claves `*_bs`/`tasa_*`/`diferencia_bs` quedan en None).
+    """
+    pagos = (
+        VGPago.objects
+        .filter(fecha_pago__date=fecha, estado='completado', nota_entrega__isnull=False)
+        .exclude(nota_entrega__fecha_emision__date=fecha)
+        .select_related('nota_entrega__cliente', 'metodo_pago')
+        .order_by('fecha_pago')
+    )
+
+    resultado = []
+    for pago in pagos:
+        nota = pago.nota_entrega
+        metodo = pago.metodo_pago
+
+        tasa_emision = None
+        tasa_cobro = None
+        bs_a_tasa_emision = None
+        bs_a_tasa_cobro = None
+        diferencia_bs = None
+        if nota.moneda == 'VES':
+            tasa_emision = nota.tasa_cambio_referencia
+            tasa_cobro = pago.tasa_cambio_referencia
+            if tasa_emision:
+                bs_a_tasa_emision = (pago.monto * tasa_emision).quantize(Decimal('0.01'))
+            if tasa_cobro:
+                bs_a_tasa_cobro = (pago.monto * tasa_cobro).quantize(Decimal('0.01'))
+            if bs_a_tasa_emision is not None and bs_a_tasa_cobro is not None:
+                diferencia_bs = bs_a_tasa_cobro - bs_a_tasa_emision
+
+        resultado.append({
+            'pago_id': pago.id,
+            'nota_id': nota.id,
+            'nota_codigo': nota.codigo,
+            'cliente': nota.cliente.nombre if nota.cliente_id else '',
+            'monto': pago.monto,
+            'moneda': nota.moneda,
+            'fecha_emision_nota': nota.fecha_emision,
+            'fecha_pago': pago.fecha_pago,
+            'tasa_emision': tasa_emision,
+            'tasa_cobro': tasa_cobro,
+            'bs_a_tasa_emision': bs_a_tasa_emision,
+            'bs_a_tasa_cobro': bs_a_tasa_cobro,
+            'diferencia_bs': diferencia_bs,
+            'metodo_pago_nombre': metodo.nombre,
+            'cuenta_bancaria': metodo.cuenta_bancaria,
+            'referencia': pago.referencia,
+        })
+    return resultado
 
 
 def desglose_caja_por_moneda(fecha):
@@ -174,6 +383,59 @@ def desglose_caja_por_moneda(fecha):
             buckets[clave]['total_bs'] = None
 
     return buckets
+
+
+def desglose_bancario_dia(fecha):
+    """
+    Lo cobrado en `fecha` (ver totales_pagos_por_metodo — ya incluye ventas de
+    notas emitidas hoy Y fiados de días anteriores cobrados hoy, más propinas/
+    pagos extra de cada método) agrupado por banco real en vez de por método
+    individual — mismo criterio de agrupación que disponibilidad_por_cuenta
+    (VGMetodoPago.cuenta_bancaria), pero con el movimiento de ESTE día, no el
+    acumulado histórico. Para responder "cuánto entró hoy a cada banco de
+    verdad" cuando dos métodos (ej. Pago Móvil y Punto de Venta) caen en la
+    misma cuenta, en vez de tener que sumarlos a mano fila por fila.
+
+    Incluye también los métodos 100% efectivo (ese dinero no cae en ningún
+    banco) — quien llama a esta función decide si los filtra, ver
+    reporte_cuadre_caja_view.
+    """
+    bancos_por_clave = {}
+    orden_claves = []
+    for metodo in totales_pagos_por_metodo(fecha):
+        clave = metodo['cuenta_bancaria'] or f"__metodo_{metodo['id']}"
+        if clave not in bancos_por_clave:
+            bancos_por_clave[clave] = {
+                'nombre': metodo['cuenta_bancaria'] or metodo['nombre'],
+                'agrupado': bool(metodo['cuenta_bancaria']),
+                'moneda': metodo['moneda'],
+                'es_efectivo': True,
+                'total': Decimal('0'),
+                'total_bs': Decimal('0') if metodo['moneda'] == 'VES' else None,
+                '_falta_tasa': False,
+                'metodos': [],
+            }
+            orden_claves.append(clave)
+        banco = bancos_por_clave[clave]
+        banco['metodos'].append(metodo)
+        banco['es_efectivo'] = banco['es_efectivo'] and metodo['es_efectivo']
+        banco['total'] += metodo['total']
+        if metodo['moneda'] == 'VES':
+            if metodo['total_bs'] is not None:
+                banco['total_bs'] += metodo['total_bs']
+            else:
+                banco['_falta_tasa'] = True
+        if banco['moneda'] != metodo['moneda']:
+            banco['moneda_mixta'] = True
+
+    bancos = []
+    for clave in orden_claves:
+        banco = bancos_por_clave[clave]
+        falta_tasa = banco.pop('_falta_tasa')
+        if banco['moneda'] == 'VES' and falta_tasa:
+            banco['total_bs'] = None
+        bancos.append(banco)
+    return bancos
 
 
 def gastos_efectivo_dia(fecha):
@@ -352,6 +614,13 @@ def disponibilidad_por_cuenta(fecha):
     Tambien suma las propinas y "pagos extra" (VGIngresoExtra) cobrados con ese
     metodo — no pasan por VGPago (no son parte de ninguna venta) pero son
     dinero real que entro por esa cuenta igual.
+
+    Devuelve (cuentas, bancos): `cuentas` es la lista de siempre, una fila por
+    metodo de pago; `bancos` agrupa esas mismas filas por VGMetodoPago.cuenta_bancaria
+    (varios metodos pueden caer en el mismo banco real, ej. Pago Movil y Punto
+    de Venta ambos en Banesco) sumando sus saldos, con el detalle de cada
+    metodo debajo. Un metodo sin cuenta_bancaria se agrupa solo, bajo su
+    propio nombre.
     """
     metodos = list(VGMetodoPago.objects.all().order_by('nombre'))
 
@@ -392,6 +661,7 @@ def disponibilidad_por_cuenta(fecha):
             'nombre': metodo.nombre,
             'moneda': metodo.moneda,
             'es_efectivo': metodo.es_efectivo,
+            'cuenta_bancaria': metodo.cuenta_bancaria,
             'activo': metodo.activo,
             'ingresos_acumulados': ingresos,
             'ingresos_extra_acumulados': ingresos_extra,
@@ -400,4 +670,42 @@ def disponibilidad_por_cuenta(fecha):
             'consignado_acumulado': consignado,
             'saldo_disponible': ingresos + ingresos_extra - gastos - compras - consignado,
         })
-    return resultado
+
+    # Agrupa por cuenta_bancaria — varias filas de `resultado` con el mismo
+    # texto (ej. "Banesco") son en la vida real un solo banco recibiendo por
+    # metodos distintos (Pago Movil, Punto de Venta...). Sin cuenta_bancaria,
+    # cada metodo forma su propio grupo de un solo elemento, bajo su nombre.
+    bancos_por_clave = {}
+    orden_claves = []
+    for cuenta in resultado:
+        clave = cuenta['cuenta_bancaria'] or f"__metodo_{cuenta['id']}"
+        if clave not in bancos_por_clave:
+            bancos_por_clave[clave] = {
+                'nombre': cuenta['cuenta_bancaria'] or cuenta['nombre'],
+                'agrupado': bool(cuenta['cuenta_bancaria']),
+                'metodos': [],
+                'ingresos_acumulados': Decimal('0'),
+                'ingresos_extra_acumulados': Decimal('0'),
+                'gastos_acumulados': Decimal('0'),
+                'compras_acumuladas': Decimal('0'),
+                'consignado_acumulado': Decimal('0'),
+                'saldo_disponible': Decimal('0'),
+            }
+            orden_claves.append(clave)
+        banco = bancos_por_clave[clave]
+        banco['metodos'].append(cuenta)
+        banco['ingresos_acumulados'] += cuenta['ingresos_acumulados']
+        banco['ingresos_extra_acumulados'] += cuenta['ingresos_extra_acumulados']
+        banco['gastos_acumulados'] += cuenta['gastos_acumulados']
+        banco['compras_acumuladas'] += cuenta['compras_acumuladas']
+        banco['consignado_acumulado'] += cuenta['consignado_acumulado']
+        banco['saldo_disponible'] += cuenta['saldo_disponible']
+        # Un banco agrupado con monedas mixtas no deberia pasar en la
+        # practica (una cuenta bancaria real tiene una sola moneda) — se dej
+        # a la del primer metodo, y se marca la inconsistencia si aparece.
+        banco.setdefault('moneda', cuenta['moneda'])
+        if banco['moneda'] != cuenta['moneda']:
+            banco['moneda_mixta'] = True
+
+    bancos = [bancos_por_clave[clave] for clave in orden_claves]
+    return resultado, bancos

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
+import AjustePedidoModal from './AjustePedidoModal';
 import ConfirmModal from './ConfirmModal';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
@@ -19,7 +20,7 @@ const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
 // solo queda oculto detras de esta bandera.
 const FACTURACION_HABILITADA = false;
 
-function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos = false }) {
+function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos = false, canGestionarItems = false, mesasCatalogo = [] }) {
   const tasaCambio = useExchangeRate();
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const [clienteByGroup, setClienteByGroup] = useState({});
   const [prefacturaByGroup, setPrefacturaByGroup] = useState({});
   const [metodosPago, setMetodosPago] = useState([]);
+  const [ajusteModal, setAjusteModal] = useState(null); // { modo, item, pedidoId, mesaActualId }
+  const [ajusteBusy, setAjusteBusy] = useState(false);
+  const [ajusteError, setAjusteError] = useState('');
+  const [requiereUsuarioMover, setRequiereUsuarioMover] = useState(false);
+  const [meserosDisponibles, setMeserosDisponibles] = useState([]);
 
   useEffect(() => {
     const loadMetodosPago = async () => {
@@ -170,6 +176,107 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       fetchPedidos();
     }
   }, [lastKitchenEvent, fetchPedidos]);
+
+  // Precargada de una vez (no al abrir el modal de mover) para que el selector de
+  // mesero nunca aparezca vacío por timing — ver AjustePedidoModal/cargarMeserosDisponibles.
+  useEffect(() => {
+    if (!canGestionarItems) return;
+    cargarMeserosDisponibles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canGestionarItems]);
+
+  // Quitar (completo o solo parte de la cantidad) o mover a otra mesa un item mal
+  // comandado — mismo patrón que MesasAtendidasPage (ver AjustePedidoModal), pero acá
+  // no hay un "detailPedido" propio que parchear: el detalle es solo una expansión
+  // local de lo que ya trae /api/pedidos/cobro/, así que tras el ajuste se refresca
+  // toda la lista (fetchPedidos) para no arrastrar un shape de respuesta distinto
+  // (pedido_detalle_eliminar_view usa producto_nombre; esta pantalla usa producto).
+  const abrirAjuste = (modo, item, pedido) => {
+    setAjusteError('');
+    setRequiereUsuarioMover(false);
+    setAjusteModal({
+      modo,
+      pedidoId: pedido.id,
+      mesaActualId: pedido.mesa_id,
+      item: { id: item.id, nombre: item.producto, cantidad: item.cantidad, esPorPeso: Boolean(item.peso_gramos) },
+    });
+  };
+
+  const cargarMeserosDisponibles = async () => {
+    if (meserosDisponibles.length > 0) return;
+    try {
+      const response = await fetch('/api/pedidos/meseros-disponibles/', { credentials: 'include', cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) {
+        setMeserosDisponibles(Array.isArray(data.meseros) ? data.meseros : []);
+      } else {
+        console.error('No se pudo cargar la lista de meseros:', data.message || response.status);
+      }
+    } catch (requestError) {
+      // Se reintenta la próxima vez que haga falta (ver el useEffect que precarga
+      // esto al montar, y la llamada de respaldo en handleConfirmarMover).
+      console.error('Error de red al cargar la lista de meseros:', requestError);
+    }
+  };
+
+  const handleConfirmarEliminar = async ({ motivo, cantidad }) => {
+    if (!ajusteModal) return;
+    setAjusteBusy(true);
+    setAjusteError('');
+    try {
+      const response = await fetch(`/api/pedidos/${ajusteModal.pedidoId}/items/${ajusteModal.item.id}/eliminar/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({ motivo, cantidad }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        setAjusteError(data.message || 'No se pudo quitar el item.');
+        return;
+      }
+      setAjusteModal(null);
+      await fetchPedidos();
+    } catch (requestError) {
+      setAjusteError('Error de red al quitar el item.');
+    } finally {
+      setAjusteBusy(false);
+    }
+  };
+
+  // Si la mesa destino no tiene pedido abierto, el backend no lo trata como error:
+  // responde requiere_usuario para que se elija a qué mesero se le abre esa mesa
+  // (ver pedido_detalle_mover_view) — acá eso NO se muestra como ajusteError (rojo),
+  // sino que revela el selector de mesero dentro del mismo modal para reintentar.
+  const handleConfirmarMover = async ({ motivo, mesaDestinoId, usuarioId }) => {
+    if (!ajusteModal) return;
+    setAjusteBusy(true);
+    setAjusteError('');
+    try {
+      const response = await fetch(`/api/pedidos/${ajusteModal.pedidoId}/items/${ajusteModal.item.id}/mover/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({ motivo, mesa_destino_id: mesaDestinoId, usuario_id: usuarioId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        if (data.requiere_usuario) {
+          setRequiereUsuarioMover(true);
+          await cargarMeserosDisponibles();
+          return;
+        }
+        setAjusteError(data.message || 'No se pudo mover el item.');
+        return;
+      }
+      setAjusteModal(null);
+      await fetchPedidos();
+    } catch (requestError) {
+      setAjusteError('Error de red al mover el item.');
+    } finally {
+      setAjusteBusy(false);
+    }
+  };
 
   const groups = useMemo(() => {
     const map = new Map();
@@ -366,7 +473,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       );
       setNotasRefreshToken((current) => current + 1);
       clearGroupState(group.key);
-      await fetchPedidos();
+      // No fetchPedidos() acá a propósito: el backend ya marcó el pedido como
+      // 'pagado' (pedidos_cobro_view lo excluye de BILLABLE_ORDER_STATES), así
+      // que un refresh inmediato lo haría desaparecer de un salto justo cuando
+      // la cajera recién ve el toast de éxito. Se va solo con el próximo poll
+      // de 15s (o si recarga la página) — no hace falta forzarlo.
     } catch (requestError) {
       showError('Error de red al procesar la nota de entrega.');
     } finally {
@@ -444,7 +555,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       );
       clearGroupState(group.key);
       setCuentasRefreshToken((current) => current + 1);
-      await fetchPedidos();
+      // Sin fetchPedidos() acá tampoco, mismo motivo que en handleNotaEntrega:
+      // el pedido ya quedó facturado (pedidos_cobro_view lo marca 'pagado'), un
+      // refresh inmediato lo sacaría de la lista de un salto.
     } catch (requestError) {
       showError('Error de red al emitir la factura.');
     } finally {
@@ -488,7 +601,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       );
       clearGroupState(group.key);
       setCuentasRefreshToken((current) => current + 1);
-      await fetchPedidos();
+      // Sin fetchPedidos() acá tampoco, mismo motivo que en handleNotaEntrega:
+      // el pedido ya quedó facturado (pedidos_cobro_view lo marca 'pagado'), un
+      // refresh inmediato lo sacaría de la lista de un salto.
     } catch (requestError) {
       showError('Error de red al emitir la factura.');
     } finally {
@@ -719,10 +834,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                               {groupItemsByPlato(items).platos.map(({ grupoId, items: grupoItems }) => (
                                 <div key={`plato-${grupoId}`} style={platoGroupStyle}>
                                   <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
-                                  {grupoItems.map((item) => renderDetailItemRow(item, tasaCambio))}
+                                  {grupoItems.map((item) => renderDetailItemRow(item, tasaCambio, {
+                                    canGestionarItems, onAjustarItem: (modo, it) => abrirAjuste(modo, it, pedido), soloItem: items.length <= 1,
+                                  }))}
                                 </div>
                               ))}
-                              {groupItemsByPlato(items).sueltos.map((item) => renderDetailItemRow(item, tasaCambio))}
+                              {groupItemsByPlato(items).sueltos.map((item) => renderDetailItemRow(item, tasaCambio, {
+                                canGestionarItems, onAjustarItem: (modo, it) => abrirAjuste(modo, it, pedido), soloItem: items.length <= 1,
+                              }))}
                             </div>
 
                             {itemsWithNotes.length > 0 ? (
@@ -964,6 +1083,22 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           onSubmit={handleRegistrarIngresoExtra}
         />
       ) : null}
+
+      {ajusteModal ? (
+        <AjustePedidoModal
+          modo={ajusteModal.modo}
+          item={ajusteModal.item}
+          mesasCatalogo={mesasCatalogo}
+          mesaActualId={ajusteModal.mesaActualId}
+          busy={ajusteBusy}
+          error={ajusteError}
+          requiereUsuario={requiereUsuarioMover}
+          meserosDisponibles={meserosDisponibles}
+          onClose={() => setAjusteModal(null)}
+          onConfirmarEliminar={handleConfirmarEliminar}
+          onConfirmarMover={handleConfirmarMover}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1102,17 +1237,29 @@ function groupItemsByPlato(items) {
   return { platos, sueltos };
 }
 
-function renderDetailItemRow(item, tasaCambio) {
+function renderDetailItemRow(item, tasaCambio, { canGestionarItems = false, onAjustarItem, soloItem = false } = {}) {
   const cantidadLabel = item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`;
   const lineTotal = item.subtotal !== undefined ? Number(item.subtotal) : Number(item.precio_unitario) * item.cantidad;
   return (
-    <div key={item.id} style={detailItemRowStyle}>
-      <span style={{ color: '#fff' }}>{cantidadLabel} {item.producto}</span>
-      <span style={{ color: '#d2c4c4' }}>${item.precio_unitario}{item.venta_por_peso ? '/kg' : ' c/u'}</span>
-      <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
-        ${lineTotal.toFixed(2)}
-        <BsAmount amountUsd={lineTotal} tasa={tasaCambio} />
-      </span>
+    <div key={item.id} style={{ display: 'grid', gap: 3 }}>
+      <div style={detailItemRowStyle}>
+        <span style={{ color: '#fff' }}>{cantidadLabel} {item.producto}</span>
+        <span style={{ color: '#d2c4c4' }}>${item.precio_unitario}{item.venta_por_peso ? '/kg' : ' c/u'}</span>
+        <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
+          ${lineTotal.toFixed(2)}
+          <BsAmount amountUsd={lineTotal} tasa={tasaCambio} />
+        </span>
+      </div>
+      {canGestionarItems && !soloItem ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => onAjustarItem('eliminar', item)} style={ajusteItemButtonStyle('eliminar')}>
+            Quitar item
+          </button>
+          <button type="button" onClick={() => onAjustarItem('mover', item)} style={ajusteItemButtonStyle('mover')}>
+            Mover a otra mesa
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1441,6 +1588,18 @@ const detailNoteStyle = {
   color: '#ffd8d8',
   fontSize: 13,
 };
+
+const ajusteItemButtonStyle = (modo) => ({
+  justifySelf: 'start',
+  border: modo === 'eliminar' ? '1px solid rgba(255, 102, 102, 0.45)' : '1px solid rgba(245, 158, 11, 0.45)',
+  borderRadius: 999,
+  padding: '4px 10px',
+  background: modo === 'eliminar' ? 'rgba(255, 73, 73, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+  color: modo === 'eliminar' ? '#ffb3b3' : '#f5c778',
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: 'pointer',
+});
 
 const detailItemRowStyle = {
   display: 'flex',

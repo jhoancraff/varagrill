@@ -44,6 +44,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
   }, [fecha, loadReport]);
 
   const cuentas = data?.cuentas || [];
+  const bancos = data?.bancos || [];
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -91,36 +92,56 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
             )}
 
             <div style={cuentasGridStyle(isMobile)}>
-              {cuentas.map((cuenta) => (
-                <article key={cuenta.id} style={cuentaCardStyle(Number(cuenta.saldo_disponible) < 0)}>
+              {bancos.map((banco) => (
+                <article key={banco.nombre} style={cuentaCardStyle(Number(banco.saldo_disponible) < 0)}>
                   <div style={cuentaHeaderStyle}>
                     <div style={cuentaNombreStyle}>
-                      {cuenta.nombre}
-                      {!cuenta.activo ? <span style={inactivaBadgeStyle}>Inactiva</span> : null}
+                      {banco.nombre}
+                      {!banco.agrupado && !banco.metodos[0].activo ? <span style={inactivaBadgeStyle}>Inactiva</span> : null}
+                      {banco.agrupado ? <span style={efectivoBadgeStyle}>{banco.metodos.length} métodos</span> : null}
+                      {banco.moneda_mixta ? <span style={inactivaBadgeStyle}>Monedas mixtas</span> : null}
                     </div>
-                    {cuenta.es_efectivo ? <span style={efectivoBadgeStyle}>Efectivo</span> : null}
                   </div>
-                  <div style={cuentaSaldoStyle(Number(cuenta.saldo_disponible) < 0)}>
-                    {cuenta.moneda === 'VES' ? (
+                  <div style={cuentaSaldoStyle(Number(banco.saldo_disponible) < 0)}>
+                    {banco.moneda === 'VES' ? (
                       <>
-                        Bs. {cuenta.saldo_disponible_bs !== null ? formatMonto(cuenta.saldo_disponible_bs) : '—'}
-                        <span style={secondaryAmountStyle}> (${formatMonto(cuenta.saldo_disponible)})</span>
+                        Bs. {banco.saldo_disponible_bs !== null ? formatMonto(banco.saldo_disponible_bs) : '—'}
+                        <span style={secondaryAmountStyle}> (${formatMonto(banco.saldo_disponible)})</span>
                       </>
                     ) : (
-                      <>${formatMonto(cuenta.saldo_disponible)}</>
+                      <>${formatMonto(banco.saldo_disponible)}</>
                     )}
                   </div>
-                  <div style={cuentaDetalleStyle}>
-                    <span>+${formatMonto(cuenta.ingresos_acumulados)} cobrado</span>
-                    {Number(cuenta.ingresos_extra_acumulados) > 0 ? (
-                      <span>+${formatMonto(cuenta.ingresos_extra_acumulados)} propinas/extra</span>
-                    ) : null}
-                    <span>−${formatMonto(cuenta.gastos_acumulados)} gastos</span>
-                    <span>−${formatMonto(cuenta.compras_acumuladas)} proveedores</span>
-                    {Number(cuenta.consignado_acumulado) > 0 ? (
-                      <span>−${formatMonto(cuenta.consignado_acumulado)} consignado</span>
-                    ) : null}
-                  </div>
+                  {banco.agrupado ? (
+                    <div style={metodosAnidadosStyle}>
+                      {banco.metodos.map((metodo) => (
+                        <div key={metodo.id} style={metodoAnidadoRowStyle}>
+                          <span>
+                            {metodo.nombre}
+                            {!metodo.activo ? <span style={inactivaBadgeStyle}> Inactiva</span> : null}
+                          </span>
+                          <span>
+                            {metodo.moneda === 'VES'
+                              ? `Bs. ${metodo.saldo_disponible_bs !== null ? formatMonto(metodo.saldo_disponible_bs) : '—'}`
+                              : `$${formatMonto(metodo.saldo_disponible)}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={cuentaDetalleStyle}>
+                      <span>+${formatMonto(banco.metodos[0].ingresos_acumulados)} cobrado</span>
+                      {Number(banco.metodos[0].ingresos_extra_acumulados) > 0 ? (
+                        <span>+${formatMonto(banco.metodos[0].ingresos_extra_acumulados)} propinas/extra</span>
+                      ) : null}
+                      <span>−${formatMonto(banco.metodos[0].gastos_acumulados)} gastos</span>
+                      <span>−${formatMonto(banco.metodos[0].compras_acumuladas)} proveedores</span>
+                      {Number(banco.metodos[0].consignado_acumulado) > 0 ? (
+                        <span>−${formatMonto(banco.metodos[0].consignado_acumulado)} consignado</span>
+                      ) : null}
+                      {banco.metodos[0].es_efectivo ? <span style={efectivoBadgeStyle}>Efectivo</span> : null}
+                    </div>
+                  )}
                 </article>
               ))}
             </div>
@@ -190,6 +211,8 @@ const efectivoBadgeStyle = { fontSize: 10.5, fontWeight: 800, color: '#bdf0cf', 
 const cuentaSaldoStyle = (negativo) => ({ fontSize: 22, fontWeight: 800, color: negativo ? '#ff9d9d' : '#fff' });
 const cuentaDetalleStyle = { display: 'flex', flexDirection: 'column', gap: 2, color: '#c8bbbb', fontSize: 12.5 };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 13, marginLeft: 6, fontWeight: 600 };
+const metodosAnidadosStyle = { display: 'grid', gap: 4, paddingTop: 6, borderTop: '1px dashed rgba(255,255,255,0.12)' };
+const metodoAnidadoRowStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: '#d2c3c3', fontSize: 12.5 };
 
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(110px,0.8fr) minmax(120px,0.8fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(110px,0.7fr) minmax(140px,0.9fr)', minWidth: 940, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };

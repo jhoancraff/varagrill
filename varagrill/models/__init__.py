@@ -14,6 +14,7 @@ from .contabilidad import (
     VGAbonoGasto,
     VGCategoriaGasto,
     VGCierreCaja,
+    VGConciliacionBancaria,
     VGConsignacionCaja,
     VGCorreccionMetodoPago,
     VGCorrelativoFiscal,
@@ -30,6 +31,7 @@ from .contabilidad import (
 )
 from .restaurant import (
     VGAbonoCompra,
+    VGAjustePedido,
     VGCategoriaProducto,
     VGCliente,
     VGCompra,
@@ -62,6 +64,7 @@ from .restaurant import (
 __all__ = [
     "VGAbonoCompra",
     "VGAbonoGasto",
+    "VGAjustePedido",
     "VGAuditoria",
     "VGCategoriaGasto",
     "VGCategoriaProducto",
@@ -69,6 +72,7 @@ __all__ = [
     "VGCliente",
     "VGCompra",
     "VGCompraBorrador",
+    "VGConciliacionBancaria",
     "VGConfiguracionCosteo",
     "VGConsignacionCaja",
     "VGCorreccionMetodoPago",

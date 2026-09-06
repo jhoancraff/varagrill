@@ -467,7 +467,7 @@ def _enviar_ticket_comanda(ip_impresora, puerto_impresora, ticket, pedido_id, et
         logger.exception('No se pudo imprimir pedido %s [%s] hacia %s', pedido_id, etiqueta, destino)
 
 
-def imprimir_comandas_pedido(pedido):
+def imprimir_comandas_pedido(pedido, detalles=None):
     """
     Imprime una comanda por cada impresora física con ítems asignados (ip:puerto),
     combinando en un solo ticket todo lo que comparte esa impresora — así un plato
@@ -485,15 +485,21 @@ def imprimir_comandas_pedido(pedido):
     propias líneas — sin tocar el reparto por impresora primaria de arriba. Así una
     categoría como Especialidad de la Casa puede imprimir el ticket completo en su
     estación de siempre y, además, solo el corte de carne en una segunda impresora.
+
+    `detalles`, si se pasa, limita la impresión a esa lista puntual de VGDetallePedido
+    (ver pedido_detalle_reimprimir_view) en vez de reimprimir el pedido completo — útil
+    para reimprimir un solo producto sin repetir los demás renglones ya entregados a
+    cocina.
     """
-    detalles = list(
-        pedido.detalles
-        .select_related('producto__categoria')
-        .prefetch_related(
-            'adicionales__preparacion', 'opciones__preparacion', 'opciones__producto__categoria',
+    if detalles is None:
+        detalles = list(
+            pedido.detalles
+            .select_related('producto__categoria')
+            .prefetch_related(
+                'adicionales__preparacion', 'opciones__preparacion', 'opciones__producto__categoria',
+            )
+            .all()
         )
-        .all()
-    )
     if not detalles:
         return
 

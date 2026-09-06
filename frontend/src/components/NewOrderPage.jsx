@@ -583,7 +583,7 @@ function NewOrderPage({
       markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
 
       if (onSubmitSuccess) {
-        onSubmitSuccess(data.pedido.id);
+        onSubmitSuccess(data.pedido.id, selectedMesa?.id);
       }
     } catch (error) {
       if (!navigator.onLine) {

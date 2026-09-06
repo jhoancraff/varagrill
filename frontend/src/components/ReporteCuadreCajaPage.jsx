@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import useMobileBackHandler from '../hooks/useMobileBackHandler';
 
 function todayIso() {
   const now = new Date();
@@ -13,14 +12,7 @@ function formatMonto(value) {
   return number.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Sin referencia propia (efectivo, o el metodo no la exigia cuando se cobro),
-// el backend igual guarda una autogenerada (COBRO-.../ABONO-...) para que el
-// pago nunca quede sin referencia — no es informacion util para mostrar.
-function esReferenciaAutogenerada(referencia) {
-  return /^(COBRO|ABONO)-\d{14}-\d+$/.test(referencia || '');
-}
-
-function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Contabilidad' }) {
+function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← Volver a Contabilidad' }) {
   const [fecha, setFecha] = useState(todayIso());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,8 +22,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
   const [consignacionNotas, setConsignacionNotas] = useState('');
   const [efectivoContado, setEfectivoContado] = useState('');
   const [cierreNotas, setCierreNotas] = useState('');
-  const [cambioMetodoModal, setCambioMetodoModal] = useState(null);
-  const [cambiandoMetodo, setCambiandoMetodo] = useState(false);
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -95,44 +85,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
     }
   };
 
-  // Corrige la cuenta (metodo_pago) de un pago o una propina/pago extra de este
-  // dia — para cuando la cajera cobro con la cuenta equivocada y esa plata
-  // necesita "moverse" a la correcta para que el cuadre coincida con lo que de
-  // verdad hay en el banco. No se aplica directo desde el <select>: abre un
-  // modal que pide el motivo (obligatorio, es lo que queda en la auditoria —
-  // ver VGCorreccionMetodoPago) y hay que confirmar ahi.
-  const abrirCambioMetodo = (tipo, id, metodoActualId, metodoActualNombre, metodoNuevoId, metodoNuevoNombre) => {
-    setCambioMetodoModal({ tipo, id, metodoActualId, metodoActualNombre, metodoNuevoId, metodoNuevoNombre });
-  };
-
-  const confirmarCambioMetodo = async (motivo) => {
-    if (!cambioMetodoModal) {
-      return;
-    }
-    const { tipo, id, metodoNuevoId } = cambioMetodoModal;
-    setCambiandoMetodo(true);
-    setMessage('');
-    try {
-      const response = await fetch('/api/admin/reportes/cuadre-caja/', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cambiar_metodo_pago', fecha, tipo, id, metodo_pago_id: metodoNuevoId, motivo }),
-      });
-      const json = await response.json();
-      if (!response.ok || !json.ok) {
-        throw new Error(json.message || 'No se pudo cambiar la cuenta.');
-      }
-      setMessage(json.message || 'Cuenta actualizada.');
-      setCambioMetodoModal(null);
-      loadReport(fecha);
-    } catch (error) {
-      setMessage(error.message || 'No se pudo cambiar la cuenta.');
-    } finally {
-      setCambiandoMetodo(false);
-    }
-  };
-
   const handleCerrarCaja = async (event) => {
     event.preventDefault();
     if (efectivoContado === '' || Number(efectivoContado) < 0) {
@@ -172,8 +124,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
 
   const cierre = data?.cierre || null;
   const totalesPorMetodo = data?.totales_por_metodo || [];
-  const metodosPago = data?.metodos_pago || [];
-  const pagosDia = data?.pagos_dia || [];
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -209,6 +159,63 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
 
       {!loading && data ? (
         <>
+          <section style={panelStyle}>
+            <div style={sectionTitleStyle}>Ventas del día — {fecha}</div>
+            <div style={ventasGridStyle(isMobile)}>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Facturado</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_vendido)}</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-ventas-dia')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Pendiente por cobrar</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_pendiente)}</div>
+                <div style={desgloseSecondaryStyle}>Acumulado, no solo de hoy</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-cuentas-por-cobrar-detalle')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Cuentas cobradas hoy</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.cuentas_cobradas_hoy)}</div>
+                <div style={desgloseSecondaryStyle}>Pendiente de días anteriores</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-cuentas-cobradas-dia')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Propinas / excedentes</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_propinas_excedentes)}</div>
+                <div style={desgloseSecondaryStyle}>No cuenta como venta</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-propinas-dia')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Desglose por moneda — {fecha}</div>
             <div style={desgloseGridStyle(isMobile)}>
@@ -247,6 +254,39 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
           </section>
 
           <section style={panelStyle}>
+            <div style={sectionTitleStyle}>Desglose bancario — {fecha}</div>
+            <div style={{ fontSize: 12, color: '#c8bbbb' }}>
+              Lo que de verdad entró hoy a cada banco: ventas de hoy, fiados de días anteriores cobrados
+              hoy y propinas, agrupado por cuenta real (el efectivo físico no cae en ningún banco, se
+              cuadra en la sección de abajo).
+            </div>
+            {(data.desglose_bancario || []).length === 0 ? (
+              <div style={emptyStyle}>No hubo movimiento bancario hoy.</div>
+            ) : (
+              <div style={bancosGridStyle(isMobile)}>
+                {data.desglose_bancario.map((banco) => (
+                  <div key={banco.nombre} style={desgloseTileStyle}>
+                    <div style={desgloseLabelStyle}>
+                      {banco.nombre}
+                      {banco.num_metodos > 1 ? ` · ${banco.num_metodos} métodos` : ''}
+                    </div>
+                    <div style={desgloseValueStyle}>
+                      {banco.moneda === 'VES' ? (
+                        <>
+                          {banco.total_bs !== null ? `Bs. ${formatMonto(banco.total_bs)}` : '—'}
+                          <span style={secondaryAmountStyle}> (${formatMonto(banco.total)})</span>
+                        </>
+                      ) : (
+                        <>${formatMonto(banco.total)}</>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section style={panelStyle}>
             <div style={sectionTitleStyle}>Totales por metodo de pago — {fecha}</div>
             {data.tasa_bcv ? (
               <div style={{ fontSize: 12, color: '#c8bbbb' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
@@ -261,6 +301,9 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                   <Fragment key={metodo.id}>
                     <div style={cellStyle}>
                       {metodo.nombre}{metodo.es_efectivo ? ' (efectivo)' : ''}
+                      {metodo.cuenta_bancaria ? (
+                        <div style={secondaryAmountStyle}>Banco: {metodo.cuenta_bancaria}</div>
+                      ) : null}
                     </div>
                     <div style={cellStyle}>
                       {metodo.moneda === 'VES' ? (
@@ -283,63 +326,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                 <div style={{ ...cellStyle, fontWeight: 800 }}>${formatMonto(data.total_general)}</div>
               </div>
             </div>
-          </section>
-
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>Pagos del día</div>
-            <p style={{ margin: 0, color: '#c8bbbb', fontSize: 12 }}>
-              Si la cajera cobró con la cuenta equivocada, cámbiala acá — el pago se mueve a la cuenta
-              correcta y el cuadre de este día se recalcula solo.
-            </p>
-            {pagosDia.length === 0 ? (
-              <div style={emptyStyle}>No hay pagos registrados este día.</div>
-            ) : (
-              <div style={tableWrapStyle}>
-                <div style={pagosTableStyle}>
-                  <div style={headStyle}>Origen</div>
-                  <div style={headStyle}>Monto</div>
-                  <div style={headStyle}>Registrado por</div>
-                  <div style={headStyle}>Hora</div>
-                  <div style={headStyle}>Cuenta</div>
-                  {pagosDia.map((pago) => (
-                    <Fragment key={pago.id}>
-                      <div style={cellStyle}>
-                        <div>{pago.origen}</div>
-                        {pago.referencia && !esReferenciaAutogenerada(pago.referencia) ? (
-                          <div style={secondaryAmountStyle}>Ref: {pago.referencia}</div>
-                        ) : null}
-                      </div>
-                      <div style={cellStyle}>${formatMonto(pago.monto)}</div>
-                      <div style={cellStyle}>{pago.registrado_por || '—'}</div>
-                      <div style={cellStyle}>{new Date(pago.fecha_pago).toLocaleTimeString('es-VE')}</div>
-                      <div style={cellStyle}>
-                        <select
-                          value={pago.metodo_pago_id}
-                          onChange={(event) => {
-                            const nuevoId = Number(event.target.value);
-                            const nuevo = metodosPago.find((m) => m.id === nuevoId);
-                            if (!nuevo || nuevoId === pago.metodo_pago_id) return;
-                            abrirCambioMetodo('pago', pago.id, pago.metodo_pago_id, pago.metodo_pago_nombre, nuevoId, nuevo.nombre);
-                          }}
-                          style={cuentaSelectStyle}
-                          className="admin-dark-select"
-                        >
-                          {metodosPago.map((metodo) => (
-                            <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-                          ))}
-                        </select>
-                      </div>
-                      {pago.ultima_correccion ? (
-                        <div style={correccionNotaStyle}>
-                          ✎ Corregido de {pago.ultima_correccion.metodo_anterior} a {pago.ultima_correccion.metodo_nuevo} por{' '}
-                          {pago.ultima_correccion.corregido_por || '—'}: “{pago.ultima_correccion.motivo}”
-                        </div>
-                      ) : null}
-                    </Fragment>
-                  ))}
-                </div>
-              </div>
-            )}
           </section>
 
           <section style={panelStyle}>
@@ -391,68 +377,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
                 </button>
               </form>
             ) : null}
-          </section>
-
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>Propinas y pagos extra del dia</div>
-            {(data.ingresos_extra_dia || []).length === 0 ? (
-              <div style={emptyStyle}>Aun no se registro ninguna propina ni pago extra este dia.</div>
-            ) : (
-              <div style={tableWrapStyle}>
-                <div style={ingresoExtraTableStyle}>
-                  <div style={headStyle}>Tipo</div>
-                  <div style={headStyle}>Monto</div>
-                  <div style={headStyle}>Cuenta</div>
-                  <div style={headStyle}>Registrado por</div>
-                  <div style={headStyle}>Hora</div>
-                  <div style={headStyle}>Descripcion</div>
-                  {data.ingresos_extra_dia.map((item) => (
-                    <Fragment key={item.id}>
-                      <div style={cellStyle}>{item.tipo_label}</div>
-                      <div style={cellStyle}>
-                        {item.moneda === 'VES' ? (
-                          <>
-                            Bs. {formatMonto(Number(item.monto) * Number(item.tasa_cambio_referencia || data.tasa_bcv || 0))}
-                            <span style={secondaryAmountStyle}> (${formatMonto(item.monto)})</span>
-                          </>
-                        ) : (
-                          <>${formatMonto(item.monto)}</>
-                        )}
-                      </div>
-                      <div style={cellStyle}>
-                        <select
-                          value={item.metodo_pago_id}
-                          onChange={(event) => {
-                            const nuevoId = Number(event.target.value);
-                            const nuevo = metodosPago.find((m) => m.id === nuevoId);
-                            if (!nuevo || nuevoId === item.metodo_pago_id) return;
-                            abrirCambioMetodo('ingreso_extra', item.id, item.metodo_pago_id, item.metodo_pago_nombre, nuevoId, nuevo.nombre);
-                          }}
-                          style={cuentaSelectStyle}
-                          className="admin-dark-select"
-                        >
-                          {metodosPago.map((metodo) => (
-                            <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div style={cellStyle}>{item.registrado_por || '—'}</div>
-                      <div style={cellStyle}>{new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}</div>
-                      <div style={cellStyle}>{item.descripcion || '—'}</div>
-                      {item.ultima_correccion ? (
-                        <div style={correccionNotaStyle}>
-                          ✎ Corregido de {item.ultima_correccion.metodo_anterior} a {item.ultima_correccion.metodo_nuevo} por{' '}
-                          {item.ultima_correccion.corregido_por || '—'}: “{item.ultima_correccion.motivo}”
-                        </div>
-                      ) : null}
-                    </Fragment>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div style={{ fontWeight: 700, color: '#fff' }}>
-              Total propinas/extra: ${formatMonto(data.total_ingresos_extra_dia)}
-            </div>
           </section>
 
           <section style={panelStyle}>
@@ -508,58 +432,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, backLabel = '← Volver a Con
           </section>
         </>
       ) : null}
-
-      {cambioMetodoModal ? (
-        <CambiarMetodoModal
-          info={cambioMetodoModal}
-          busy={cambiandoMetodo}
-          onClose={() => setCambioMetodoModal(null)}
-          onConfirm={confirmarCambioMetodo}
-        />
-      ) : null}
     </section>
-  );
-}
-
-function CambiarMetodoModal({ info, busy, onClose, onConfirm }) {
-  // Solo se monta mientras hay un cambio en curso, así que montado == abierto.
-  useMobileBackHandler(true, onClose);
-  const [motivo, setMotivo] = useState('');
-
-  return (
-    <div style={modalBackdropStyle} onClick={busy ? undefined : onClose}>
-      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
-        <div style={modalTitleStyle}>Cambiar cuenta</div>
-        <p style={modalDescStyle}>
-          Vas a mover este {info.tipo === 'pago' ? 'pago' : 'registro'} de <strong>{info.metodoActualNombre}</strong> a{' '}
-          <strong>{info.metodoNuevoNombre}</strong>. Escribe el motivo del cambio — queda guardado para auditoría.
-        </p>
-        <label style={modalFieldLabelStyle}>
-          Motivo del cambio *
-          <textarea
-            value={motivo}
-            onChange={(event) => setMotivo(event.target.value)}
-            style={modalTextareaStyle}
-            placeholder="Ej: La cajera cobró por Efectivo pero el cliente pagó por Transferencia."
-            rows={3}
-            autoFocus
-          />
-        </label>
-        <div style={modalFooterStyle}>
-          <button type="button" onClick={onClose} style={secondaryModalButtonStyle} disabled={busy}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm(motivo.trim())}
-            style={primaryButtonStyle}
-            disabled={busy || !motivo.trim()}
-          >
-            {busy ? 'Guardando...' : 'Confirmar cambio'}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -575,28 +448,18 @@ const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borde
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const consignacionTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.8fr) minmax(160px,1fr) minmax(100px,0.6fr) minmax(180px,1.2fr)', minWidth: 700, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const ingresoExtraTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(100px,0.7fr) minmax(90px,0.6fr) minmax(170px,1fr) minmax(140px,0.9fr) minmax(90px,0.6fr) minmax(160px,1.2fr)', minWidth: 880, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const pagosTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(140px,1fr) minmax(100px,0.7fr) minmax(140px,0.9fr) minmax(90px,0.6fr) minmax(170px,1fr)', minWidth: 780, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const cuentaSelectStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', padding: '6px 8px', fontSize: 13, width: '100%' };
-const correccionNotaStyle = { gridColumn: '1 / -1', padding: '2px 14px 10px', fontSize: 11.5, color: '#ffcf85', fontStyle: 'italic' };
-
-const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
-const modalCardStyle = { width: '100%', maxWidth: 440, borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 12 };
-const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
-const modalDescStyle = { margin: 0, color: '#d2c3c3', lineHeight: 1.55, fontSize: 13.5 };
-const modalFieldLabelStyle = { display: 'grid', gap: 6, color: '#e8dede', fontSize: 13, fontWeight: 700 };
-const modalTextareaStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff4f4', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' };
-const modalFooterStyle = { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6, flexWrap: 'wrap' };
-const secondaryModalButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
 const desgloseGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
+const ventasGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
+const bancosGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 });
 const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
 const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
 const desgloseValueStyle = { color: '#fff', fontSize: 20, fontWeight: 800 };
 const desgloseSecondaryStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const verDetalleLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
 const formRowStyle = (isMobile) => ({ display: 'flex', gap: 10, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' });
 const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

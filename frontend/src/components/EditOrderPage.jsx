@@ -522,7 +522,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       markClean({ cartItems, orderHeader });
 
       if (onSubmitSuccess) {
-        onSubmitSuccess(data.pedido.id);
+        onSubmitSuccess(data.pedido.id, data.pedido.mesa_id);
       }
     } catch (error) {
       showError('Error de conexion al actualizar el pedido. Verifica la red e intenta otra vez.');
@@ -643,7 +643,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
       <section style={orderContainerStyle(isCompact)}>
         <div style={feedbackStyle('error')}>{loadError}</div>
         <button type="button" onClick={onBack} style={{ ...ghostButtonStyle(isCompact), marginTop: 12 }}>
-          Volver a pedidos
+          Volver a mesas atendidas
         </button>
       </section>
     );
@@ -656,7 +656,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           Este pedido ya no se puede editar (estado actual: {originalEstado}). Solo los pedidos pendientes admiten cambios.
         </div>
         <button type="button" onClick={onBack} style={{ ...ghostButtonStyle(isCompact), marginTop: 12 }}>
-          Volver a pedidos
+          Volver a mesas atendidas
         </button>
       </section>
     );
@@ -678,7 +678,7 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           </div>
         </div>
         <button type="button" onClick={() => guard(onBack)} style={ghostButtonStyle(isCompact)}>
-          Volver a pedidos
+          Volver a mesas atendidas
         </button>
       </div>
 

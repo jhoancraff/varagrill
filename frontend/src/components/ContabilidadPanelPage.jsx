@@ -80,6 +80,15 @@ const AvailabilityIcon = () => (
   </svg>
 );
 
+const ReconciliationIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="4" width="7" height="16" rx="1.5" />
+    <rect x="15" y="4" width="7" height="16" rx="1.5" />
+    <path d="M10.5 9.5l2 2 2-2" />
+    <path d="M10.5 14.5l2-2 2 2" />
+  </svg>
+);
+
 const ExpensesIcon = () => (
   <svg {...iconProps}>
     <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -103,6 +112,11 @@ const MovementIcon = () => (
   </svg>
 );
 
+// Conciliación bancaria: construida pero oculta a pedido del usuario (2026-09)
+// mientras se termina de definir el flujo — la página y el backend siguen
+// intactos, solo se le quita el acceso desde este panel.
+const CONCILIACION_BANCARIA_HABILITADA = false;
+
 const reportSections = [
   {
     id: 'contabilidad-cuadre-caja',
@@ -122,6 +136,12 @@ const reportSections = [
     description: 'Saldo acumulado de cada método de pago (efectivo, bancos, Binance, Zelle...) hasta el día que elijas.',
     icon: AvailabilityIcon,
   },
+  ...(CONCILIACION_BANCARIA_HABILITADA ? [{
+    id: 'contabilidad-conciliacion-bancaria',
+    title: 'Conciliación bancaria',
+    description: 'Compara el saldo que calcula el sistema en cada cuenta contra lo que de verdad muestra el banco, cuenta por cuenta.',
+    icon: ReconciliationIcon,
+  }] : []),
   {
     id: 'cuentas-cobrar',
     title: 'Cuentas por cobrar',

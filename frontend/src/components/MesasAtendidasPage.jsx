@@ -16,7 +16,7 @@ function estadoLabel(estado) {
   return ESTADO_LABELS[estado] || estado;
 }
 
-function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, onEditOrder, autoAbrir, mesasCatalogo = [], canGestionarItems = false, sidebarOffset = '0px' }) {
+function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido, onEditOrder, autoAbrir, onAutoAbrirConsumido, mesasCatalogo = [], canGestionarItems = false, sidebarOffset = '0px' }) {
   const tasaCambio = useExchangeRate();
   const [mesas, setMesas] = useState([]);
   const [todasLasMesas, setTodasLasMesas] = useState(false);
@@ -103,6 +103,11 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
     if (autoAbrir.flashMessage) {
       setFlashMessage(autoAbrir.flashMessage);
     }
+    // Se avisa al padre que ya se uso esta señal (ver WelcomeScreen.mesaAutoAbrir) —
+    // sin esto, la proxima vez que se monte esta pagina (ej. tocando "Mesas
+    // atendidas" en el menu, sin haber creado/editado ningun pedido) volveria a
+    // abrir de un salto la misma mesa de la ultima vez, en vez de mostrar la lista.
+    onAutoAbrirConsumido?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAbrir?.token]);
 

@@ -927,6 +927,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onNuevoPedido={handleNuevoPedido}
             onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
             autoAbrir={mesaAutoAbrir}
+            onAutoAbrirConsumido={() => setMesaAutoAbrir(null)}
             mesasCatalogo={mesas}
             canGestionarItems={isAdmin || isCajera}
             sidebarOffset={desktopContentOffset}
@@ -1279,6 +1280,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onNuevoPedido={handleNuevoPedido}
             onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
             autoAbrir={mesaAutoAbrir}
+            onAutoAbrirConsumido={() => setMesaAutoAbrir(null)}
             mesasCatalogo={mesas}
             canGestionarItems={isAdmin || isCajera}
             sidebarOffset={desktopContentOffset}

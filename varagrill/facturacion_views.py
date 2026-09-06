@@ -115,8 +115,9 @@ def _resolve_moneda(data):
 def _pedidos_facturables_por_ids(pedido_ids):
     """
     Bloquea (select_for_update) y valida los pedidos: deben existir, estar
-    en un estado facturable (listo/entregado) y no tener ya una factura no
-    anulada. Debe llamarse dentro de una transaction.atomic().
+    en un estado facturable (ver BILLABLE_ORDER_STATES en api_views.py) y no
+    tener ya una factura no anulada. Debe llamarse dentro de una
+    transaction.atomic().
     Devuelve (pedidos, error_message).
     """
     pedidos = list(

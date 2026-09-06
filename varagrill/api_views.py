@@ -5473,13 +5473,14 @@ def kitchen_order_status_update_view(request, pedido_id):
                 status=400,
             )
 
-        # Cancelar desde 'listo' o 'entregado' (el pedido ya está en Cobro, ver
-        # BILLABLE_ORDER_STATES) es la cancelación "desde caja" — solo antes de
-        # cobrar, nunca después: 'pagado' no admite ninguna transición (ver
-        # `transitions` arriba), así que un pedido ya facturado/cobrado no se puede
-        # tocar por acá. Reservada a quien maneja caja, no a cualquier mesero — ver
-        # acuerdo con el usuario, 2026-09.
-        if pedido.estado in ('listo', 'entregado') and next_state == 'cancelado':
+        # Cancelar desde 'en_preparacion', 'listo' o 'entregado' (el pedido ya
+        # está en Cobro apenas se manda a preparar, ver BILLABLE_ORDER_STATES)
+        # es la cancelación "desde caja" — solo antes de cobrar, nunca después:
+        # 'pagado' no admite ninguna transición (ver `transitions` arriba), así
+        # que un pedido ya facturado/cobrado no se puede tocar por acá.
+        # Reservada a quien maneja caja, no a cualquier mesero — ver acuerdo
+        # con el usuario, 2026-09.
+        if pedido.estado in ('en_preparacion', 'listo', 'entregado') and next_state == 'cancelado':
             if not (_is_admin_user(request.user) or _is_cajera_user(request.user) or _is_analista_user(request.user)):
                 return _auth_response({
                     'ok': False,
@@ -5547,16 +5548,15 @@ def pedido_reimprimir_comanda_view(request, pedido_id):
     return _auth_response({'ok': True, 'message': 'Comanda reimpresa correctamente.'})
 
 
-# Apenas el pedido llega a 'listo' (mesero mandó "Iniciar preparación", se
-# imprimió la comanda y el avance automático — ver
-# _avanzar_pedidos_en_preparacion_vencidos — lo marcó listo) ya pasa a Cobro:
-# caja decide desde ahí si lo cancela, le ajusta items (quitar/mover, ver
-# canGestionarItems en CheckoutPage) o lo cobra, sin esperar a que el mesero
-# confirme que ya lo entregó en la mesa. 'entregado' se deja también acá para
-# que el pedido no desaparezca de Cobro si nadie lo cobra antes de que
-# _avanzar_pedidos_listos_vencidos lo siga avanzando solo — ver acuerdo con el
-# usuario, 2026-09.
-BILLABLE_ORDER_STATES = ['listo', 'entregado']
+# Apenas el mesero manda "Iniciar preparación" (se imprime la comanda y el
+# pedido pasa a 'en_preparacion') ya debe verse en Cobro — caja decide desde
+# ahí si lo cancela, le ajusta items (quitar/mover, ver canGestionarItems en
+# CheckoutPage) o lo cobra, sin esperar ningún avance automático. 'listo' y
+# 'entregado' se dejan también acá para que el pedido no desaparezca de Cobro
+# a medida que _avanzar_pedidos_en_preparacion_vencidos/
+# _avanzar_pedidos_listos_vencidos lo van avanzando solo en el fondo — ver
+# acuerdo con el usuario, 2026-09.
+BILLABLE_ORDER_STATES = ['en_preparacion', 'listo', 'entregado']
 
 
 @csrf_exempt

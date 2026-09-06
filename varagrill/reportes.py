@@ -142,12 +142,11 @@ def resumen_ventas_dia(fecha):
     pagadas por igual) frente a lo que de verdad entro al banco (ver
     totales_pagos_por_metodo) — para poder explicar la diferencia:
 
-    - `total_pendiente` NO es solo el fiado nuevo de hoy: es el saldo
-      acumulado de TODAS las notas emitidas hasta `fecha` (inclusive) que
-      todavia no se terminan de cobrar — se arrastra dia a dia hasta que esa
-      nota (esa persona) termina de pagar. Si el banco subio MENOS que
-      `total_vendido`, la explicacion mas probable es que parte de la venta
-      de hoy engrosó este acumulado.
+    - `total_pendiente` es el fiado de HOY nomás: notas emitidas en `fecha`
+      que todavia no se terminan de cobrar (no arrastra el pendiente de dias
+      anteriores — ver detalle_cuentas_por_cobrar). Si el banco subio MENOS
+      que `total_vendido`, la explicacion mas probable es que parte de la
+      venta de hoy quedo fiada.
     - `cuentas_cobradas_hoy` es el recaudo de HOY de notas emitidas en un dia
       ANTERIOR (el pendiente de ayer que se cobro hoy) — ese monto sale del
       acumulado de `total_pendiente` (porque su saldo_pendiente ya bajo) y se
@@ -167,7 +166,7 @@ def resumen_ventas_dia(fecha):
 
     total_pendiente = (
         VGNotaEntrega.objects
-        .filter(fecha_emision__date__lte=fecha)
+        .filter(fecha_emision__date=fecha)
         .aggregate(total=Sum('saldo_pendiente'))
         .get('total')
     ) or Decimal('0')
@@ -252,14 +251,13 @@ def detalle_ventas_dia(fecha):
 def detalle_cuentas_por_cobrar(fecha):
     """
     Detalle fila por fila de "Pendiente por cobrar" (ver resumen_ventas_dia):
-    todas las Notas de Entrega emitidas hasta `fecha` (inclusive) que todavia
-    tienen saldo pendiente, mas antiguas primero — para saber exactamente
-    quien debe, desde cuando y cuanto (arrastra dia a dia hasta que se paga,
-    no es solo el fiado nuevo de `fecha`).
+    las Notas de Entrega emitidas en `fecha` que todavia tienen saldo
+    pendiente — solo el fiado de ese dia, no lo arrastrado de dias
+    anteriores.
     """
     notas = (
         VGNotaEntrega.objects
-        .filter(fecha_emision__date__lte=fecha, saldo_pendiente__gt=0)
+        .filter(fecha_emision__date=fecha, saldo_pendiente__gt=0)
         .select_related('cliente')
         .order_by('fecha_emision')
     )
@@ -273,7 +271,6 @@ def detalle_cuentas_por_cobrar(fecha):
             'moneda': nota.moneda,
             'estado': nota.estado,
             'fecha_emision': nota.fecha_emision,
-            'dias_pendiente': (fecha - nota.fecha_emision.date()).days,
         }
         for nota in notas
     ]
@@ -383,59 +380,6 @@ def desglose_caja_por_moneda(fecha):
             buckets[clave]['total_bs'] = None
 
     return buckets
-
-
-def desglose_bancario_dia(fecha):
-    """
-    Lo cobrado en `fecha` (ver totales_pagos_por_metodo — ya incluye ventas de
-    notas emitidas hoy Y fiados de días anteriores cobrados hoy, más propinas/
-    pagos extra de cada método) agrupado por banco real en vez de por método
-    individual — mismo criterio de agrupación que disponibilidad_por_cuenta
-    (VGMetodoPago.cuenta_bancaria), pero con el movimiento de ESTE día, no el
-    acumulado histórico. Para responder "cuánto entró hoy a cada banco de
-    verdad" cuando dos métodos (ej. Pago Móvil y Punto de Venta) caen en la
-    misma cuenta, en vez de tener que sumarlos a mano fila por fila.
-
-    Incluye también los métodos 100% efectivo (ese dinero no cae en ningún
-    banco) — quien llama a esta función decide si los filtra, ver
-    reporte_cuadre_caja_view.
-    """
-    bancos_por_clave = {}
-    orden_claves = []
-    for metodo in totales_pagos_por_metodo(fecha):
-        clave = metodo['cuenta_bancaria'] or f"__metodo_{metodo['id']}"
-        if clave not in bancos_por_clave:
-            bancos_por_clave[clave] = {
-                'nombre': metodo['cuenta_bancaria'] or metodo['nombre'],
-                'agrupado': bool(metodo['cuenta_bancaria']),
-                'moneda': metodo['moneda'],
-                'es_efectivo': True,
-                'total': Decimal('0'),
-                'total_bs': Decimal('0') if metodo['moneda'] == 'VES' else None,
-                '_falta_tasa': False,
-                'metodos': [],
-            }
-            orden_claves.append(clave)
-        banco = bancos_por_clave[clave]
-        banco['metodos'].append(metodo)
-        banco['es_efectivo'] = banco['es_efectivo'] and metodo['es_efectivo']
-        banco['total'] += metodo['total']
-        if metodo['moneda'] == 'VES':
-            if metodo['total_bs'] is not None:
-                banco['total_bs'] += metodo['total_bs']
-            else:
-                banco['_falta_tasa'] = True
-        if banco['moneda'] != metodo['moneda']:
-            banco['moneda_mixta'] = True
-
-    bancos = []
-    for clave in orden_claves:
-        banco = bancos_por_clave[clave]
-        falta_tasa = banco.pop('_falta_tasa')
-        if banco['moneda'] == 'VES' and falta_tasa:
-            banco['total_bs'] = None
-        bancos.append(banco)
-    return bancos
 
 
 def gastos_efectivo_dia(fecha):

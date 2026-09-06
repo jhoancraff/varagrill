@@ -102,8 +102,7 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
         <div>
           <h2 style={titleStyle(isMobile)}>Cuentas por cobrar — detalle</h2>
           <p style={subtitleStyle}>
-            Todas las notas de entrega con saldo pendiente hasta esta fecha, más antiguas primero — se
-            arrastran día a día hasta que se pagan, no solo el fiado nuevo del día.
+            Notas de entrega emitidas este día que todavía tienen saldo pendiente.
           </p>
         </div>
         <label className="no-print" style={dateLabelStyle}>
@@ -137,7 +136,6 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
                 <div style={headStyle}>Nota</div>
                 <div style={headStyle}>Cliente</div>
                 <div style={headStyle}>Emitida</div>
-                <div style={headStyle}>Días pendiente</div>
                 <div style={headStyle}>Total</div>
                 <div style={headStyle}>Saldo pendiente</div>
                 <div style={headStyle}>Estado</div>
@@ -150,9 +148,6 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
                     </div>
                     <div style={cellStyle}>{nota.cliente || '—'}</div>
                     <div style={cellStyle}>{new Date(nota.fecha_emision).toLocaleDateString('es-VE')}</div>
-                    <div style={cellStyle}>
-                      <span style={diasPendienteStyle(nota.dias_pendiente)}>{nota.dias_pendiente} día{nota.dias_pendiente === 1 ? '' : 's'}</span>
-                    </div>
                     <div style={cellStyle}>${formatMonto(nota.total)}</div>
                     <div style={cellStyle}>
                       ${formatMonto(nota.saldo_pendiente)}
@@ -278,7 +273,7 @@ const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, bo
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const cxcTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(90px,0.6fr) minmax(150px,0.9fr) minmax(120px,0.7fr)', minWidth: 900, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const cxcTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(90px,0.6fr) minmax(150px,0.9fr) minmax(120px,0.7fr)', minWidth: 780, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginTop: 2 };
@@ -286,11 +281,6 @@ const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid
 const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 const notaLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
-const diasPendienteStyle = (dias) => ({
-  display: 'inline-flex', padding: '3px 9px', borderRadius: 999, fontSize: 12, fontWeight: 800,
-  color: dias >= 7 ? '#ffd3d3' : dias >= 3 ? '#ffe4b0' : '#d2f0d2',
-  background: dias >= 7 ? 'rgba(180,40,40,0.3)' : dias >= 3 ? 'rgba(200,150,30,0.25)' : 'rgba(40,150,80,0.2)',
-});
 
 const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
 const modalCardStyle = { width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 14 };

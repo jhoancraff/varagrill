@@ -28,7 +28,6 @@ from .models import (
 )
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
-    desglose_bancario_dia,
     desglose_caja_por_moneda,
     detalle_cuentas_cobradas_dia,
     detalle_cuentas_por_cobrar,
@@ -272,18 +271,6 @@ def _serialize_desglose_caja(desglose):
     return {clave: _serialize_balde(balde) for clave, balde in desglose.items()}
 
 
-def _serialize_banco_dia(banco):
-    return {
-        'nombre': banco['nombre'],
-        'agrupado': banco['agrupado'],
-        'moneda': banco['moneda'],
-        'moneda_mixta': banco.get('moneda_mixta', False),
-        'num_metodos': len(banco['metodos']),
-        'total': str(banco['total']),
-        'total_bs': str(banco['total_bs']) if banco['total_bs'] is not None else None,
-    }
-
-
 def _serialize_cierre_caja(cierre):
     if cierre is None:
         return None
@@ -428,11 +415,6 @@ def reporte_cuadre_caja_view(request):
                 key: str(value) for key, value in resumen_ventas_dia(fecha).items()
             },
             'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
-            'desglose_bancario': [
-                _serialize_banco_dia(banco)
-                for banco in desglose_bancario_dia(fecha)
-                if not banco['es_efectivo']
-            ],
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
             'total_consignado': str(total_consignado(fecha)),
             'ingresos_extra_dia': [
@@ -822,9 +804,9 @@ def reporte_ventas_dia_view(request):
 def reporte_cuentas_por_cobrar_view(request):
     """
     Detalle fila por fila de "Pendiente por cobrar" del cuadre de caja (ver
-    detalle_cuentas_por_cobrar en reportes.py): todas las notas de entrega
-    con saldo pendiente hasta una fecha, mas antiguas primero. De solo
-    lectura — cobrar de verdad se sigue haciendo desde Cuentas por Cobrar.
+    detalle_cuentas_por_cobrar en reportes.py): las notas de entrega emitidas
+    en `fecha` que todavia tienen saldo pendiente. De solo lectura — cobrar
+    de verdad se sigue haciendo desde Cuentas por Cobrar.
 
     `saldo_pendiente_bs` se calcula con la tasa BCV de `fecha` (no la
     congelada de cada nota): es cuanto habria que cobrarle HOY a ese cliente,
@@ -861,7 +843,6 @@ def reporte_cuentas_por_cobrar_view(request):
                 'moneda': nota['moneda'],
                 'estado': nota['estado'],
                 'fecha_emision': nota['fecha_emision'].isoformat(),
-                'dias_pendiente': nota['dias_pendiente'],
             }
             for nota in notas
         ],

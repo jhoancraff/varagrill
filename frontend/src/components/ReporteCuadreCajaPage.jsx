@@ -177,7 +177,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
               <div style={desgloseTileStyle}>
                 <div style={desgloseLabelStyle}>Pendiente por cobrar</div>
                 <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_pendiente)}</div>
-                <div style={desgloseSecondaryStyle}>Acumulado, no solo de hoy</div>
                 <button
                   type="button"
                   onClick={() => onNavigate && onNavigate('contabilidad-cuentas-por-cobrar-detalle')}
@@ -251,39 +250,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
                 No hay tasa BCV registrada para esta fecha; los montos en bolívares no se pueden convertir.
               </div>
             ) : null}
-          </section>
-
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>Desglose bancario — {fecha}</div>
-            <div style={{ fontSize: 12, color: '#c8bbbb' }}>
-              Lo que de verdad entró hoy a cada banco: ventas de hoy, fiados de días anteriores cobrados
-              hoy y propinas, agrupado por cuenta real (el efectivo físico no cae en ningún banco, se
-              cuadra en la sección de abajo).
-            </div>
-            {(data.desglose_bancario || []).length === 0 ? (
-              <div style={emptyStyle}>No hubo movimiento bancario hoy.</div>
-            ) : (
-              <div style={bancosGridStyle(isMobile)}>
-                {data.desglose_bancario.map((banco) => (
-                  <div key={banco.nombre} style={desgloseTileStyle}>
-                    <div style={desgloseLabelStyle}>
-                      {banco.nombre}
-                      {banco.num_metodos > 1 ? ` · ${banco.num_metodos} métodos` : ''}
-                    </div>
-                    <div style={desgloseValueStyle}>
-                      {banco.moneda === 'VES' ? (
-                        <>
-                          {banco.total_bs !== null ? `Bs. ${formatMonto(banco.total_bs)}` : '—'}
-                          <span style={secondaryAmountStyle}> (${formatMonto(banco.total)})</span>
-                        </>
-                      ) : (
-                        <>${formatMonto(banco.total)}</>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </section>
 
           <section style={panelStyle}>
@@ -454,7 +420,6 @@ const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
 const desgloseGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
 const ventasGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
-const bancosGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 });
 const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
 const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
 const desgloseValueStyle = { color: '#fff', fontSize: 20, fontWeight: 800 };

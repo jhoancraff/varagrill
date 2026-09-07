@@ -5085,6 +5085,53 @@ def _avanzar_pedidos_listos_vencidos(actor_user):
     return vencidos
 
 
+def _cancelar_pedidos_vacios(actor_user):
+    """
+    Cancela cualquier pedido "abierto" (pendiente/en_preparacion/listo/entregado)
+    que se haya quedado sin ningún item — nunca debería pasar (quitar/mover el
+    último item de un pedido ya está bloqueado, ver pedido_detalle_eliminar_view/
+    pedido_detalle_mover_view/pedido_update_view), pero esto es una red de
+    seguridad extra: un pedido vacío no tiene nada que cobrar, así que si por
+    cualquier vía llega a quedar así, no debe seguir apareciendo como una fila
+    de "$0.00" en Cobro ni en Mesas atendidas — se cancela solo, igual que si
+    alguien lo hubiera cancelado a mano desde caja.
+
+    Reportado 2026-09. Misma mecánica que _avanzar_pedidos_en_preparacion_vencidos:
+    se dispara desde el polling de mesas_atendidas_view/pedidos_cobro_view,
+    select_for_update(skip_locked=True) evita procesar el mismo pedido dos veces
+    desde dos pantallas abiertas a la vez.
+    """
+    # Postgres no permite combinar SELECT ... FOR UPDATE con GROUP BY (lo que
+    # genera annotate(Count(...))), asi que primero se ubican los candidatos
+    # sin lock y despues se bloquean por id — re-chequeando el conteo de
+    # detalles ya con el lock tomado, por si algo cambio entre medio.
+    candidato_ids = list(
+        VGPedido.objects
+        .annotate(num_detalles=Count('detalles'))
+        .filter(estado__in=MESA_ABIERTA_ORDER_STATES, num_detalles=0)
+        .values_list('id', flat=True)
+    )
+    if not candidato_ids:
+        return []
+
+    with transaction.atomic():
+        vacios = []
+        previous_estados = {}
+        for pedido in VGPedido.objects.select_for_update(skip_locked=True).filter(pk__in=candidato_ids):
+            if pedido.detalles.exists():
+                continue
+            previous_estados[pedido.id] = pedido.estado
+            pedido.estado = 'cancelado'
+            pedido.actualizado_por = actor_user
+            pedido.save(update_fields=['estado', 'actualizado_por', 'fecha_actualizacion'])
+            vacios.append(pedido)
+
+    for pedido in vacios:
+        _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, actor_user, previous_estado=previous_estados[pedido.id])
+
+    return vacios
+
+
 def kitchen_orders_view(request):
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -5240,6 +5287,7 @@ def mesas_atendidas_view(request):
     # 'entregado' — ver _avanzar_pedidos_en_preparacion_vencidos.
     _avanzar_pedidos_en_preparacion_vencidos(request.user)
     _avanzar_pedidos_listos_vencidos(request.user)
+    _cancelar_pedidos_vacios(request.user)
 
     hoy = timezone.localdate()
     # Cajera/admin/contador ven las mesas de TODOS los meseros (no solo las propias) —
@@ -5568,6 +5616,8 @@ def pedidos_cobro_view(request):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para cobrar pedidos.'}, status=401)
 
     if request.method == 'GET':
+        _cancelar_pedidos_vacios(request.user)
+
         pedidos = (
             VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
             .select_related('mesa', 'cliente', 'usuario')

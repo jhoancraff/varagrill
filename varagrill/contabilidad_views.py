@@ -652,8 +652,10 @@ def reporte_cuadre_caja_rango_view(request):
 
 def _serialize_pago_venta(pago):
     return {
+        'id': pago['id'],
         'monto': str(pago['monto']),
         'monto_bs': str(pago['monto_bs']) if pago['monto_bs'] is not None else None,
+        'metodo_pago_id': pago['metodo_pago_id'],
         'metodo_pago_nombre': pago['metodo_pago_nombre'],
         'cuenta_bancaria': pago['cuenta_bancaria'],
         'referencia': pago['referencia'],
@@ -781,6 +783,9 @@ def reporte_ventas_dia_view(request):
 
     notas = detalle_ventas_dia(fecha)
 
+    todos_los_pago_ids = [pago['id'] for nota in notas for pago in nota['pagos']]
+    correcciones_pago = _ultimas_correcciones_por_registro('pago', todos_los_pago_ids)
+
     return _auth_response({
         'ok': True,
         'fecha': fecha.isoformat(),
@@ -793,11 +798,15 @@ def reporte_ventas_dia_view(request):
                 'moneda': nota['moneda'],
                 'estado': nota['estado'],
                 'saldo_pendiente': str(nota['saldo_pendiente']),
-                'pagos': [_serialize_pago_venta(pago) for pago in nota['pagos']],
+                'pagos': [
+                    {**_serialize_pago_venta(pago), 'ultima_correccion': correcciones_pago.get(pago['id'])}
+                    for pago in nota['pagos']
+                ],
             }
             for nota in notas
         ],
         'total_vendido': str(sum((nota['total'] for nota in notas), Decimal('0'))),
+        'metodos_pago': [_serialize_metodo_pago(metodo) for metodo in VGMetodoPago.objects.filter(activo=True).order_by('nombre')],
     })
 
 
@@ -808,9 +817,14 @@ def reporte_cuentas_por_cobrar_view(request):
     en `fecha` que todavia tienen saldo pendiente. De solo lectura — cobrar
     de verdad se sigue haciendo desde Cuentas por Cobrar.
 
-    `saldo_pendiente_bs` se calcula con la tasa BCV de `fecha` (no la
-    congelada de cada nota): es cuanto habria que cobrarle HOY a ese cliente,
-    con el mismo criterio de recalculo que ya usa nota_entrega_abono_view.
+    Este es un reporte HISTORICO de lo que se generó ese día: `saldo_pendiente_bs`
+    se calcula con la tasa que se congeló al EMITIR cada nota
+    (nota.tasa_cambio_referencia), no con la tasa BCV de hoy — reportado
+    2026-09: mostrar esto "a valor de hoy" hacía que el mismo día pasado se
+    viera distinto cada vez que se refrescaba el cache del BCV, aunque nada
+    hubiera cambiado de verdad. El recálculo a la tasa vigente (para saber
+    cuánto cobrarle de verdad a un fiado viejo) sólo corresponde en el
+    momento de cobrar, no acá — ver nota_entrega_abono_view.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -822,13 +836,11 @@ def reporte_cuentas_por_cobrar_view(request):
     if fecha is None:
         return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
 
-    tasa = tasa_para_fecha(fecha)
     notas = detalle_cuentas_por_cobrar(fecha)
 
     return _auth_response({
         'ok': True,
         'fecha': fecha.isoformat(),
-        'tasa_bcv': str(tasa) if tasa is not None else None,
         'notas': [
             {
                 'id': nota['id'],
@@ -836,9 +848,12 @@ def reporte_cuentas_por_cobrar_view(request):
                 'cliente': nota['cliente'],
                 'total': str(nota['total']),
                 'saldo_pendiente': str(nota['saldo_pendiente']),
+                'tasa_cambio_referencia': (
+                    str(nota['tasa_cambio_referencia']) if nota['tasa_cambio_referencia'] is not None else None
+                ),
                 'saldo_pendiente_bs': (
-                    str((nota['saldo_pendiente'] * tasa).quantize(Decimal('0.01')))
-                    if tasa is not None else None
+                    str((nota['saldo_pendiente'] * nota['tasa_cambio_referencia']).quantize(Decimal('0.01')))
+                    if nota['moneda'] == 'VES' and nota['tasa_cambio_referencia'] else None
                 ),
                 'moneda': nota['moneda'],
                 'estado': nota['estado'],

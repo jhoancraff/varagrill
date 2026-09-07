@@ -228,8 +228,10 @@ def detalle_ventas_dia(fecha):
                 if tasa:
                     monto_bs = (pago.monto * tasa).quantize(Decimal('0.01'))
             pagos.append({
+                'id': pago.id,
                 'monto': pago.monto,
                 'monto_bs': monto_bs,
+                'metodo_pago_id': metodo.id,
                 'metodo_pago_nombre': metodo.nombre,
                 'cuenta_bancaria': metodo.cuenta_bancaria,
                 'referencia': pago.referencia,
@@ -254,6 +256,14 @@ def detalle_cuentas_por_cobrar(fecha):
     las Notas de Entrega emitidas en `fecha` que todavia tienen saldo
     pendiente — solo el fiado de ese dia, no lo arrastrado de dias
     anteriores.
+
+    Este reporte es un registro HISTORICO de lo que se generó ese día, no una
+    proyección de cuánto habría que cobrar hoy — `tasa_cambio_referencia` es
+    la tasa BCV que se congeló al EMITIR cada nota (la misma que se le
+    cotizó al cliente ese día), no la de hoy. El recálculo a la tasa vigente
+    (para saber cuánto cobrar de verdad si el fiado sigue pendiente) sólo
+    corresponde en el momento de cobrar — ver
+    nota_entrega_abono_view/_tasa_conversion_vigente en facturacion_views.py.
     """
     notas = (
         VGNotaEntrega.objects
@@ -269,6 +279,7 @@ def detalle_cuentas_por_cobrar(fecha):
             'total': nota.total,
             'saldo_pendiente': nota.saldo_pendiente,
             'moneda': nota.moneda,
+            'tasa_cambio_referencia': nota.tasa_cambio_referencia,
             'estado': nota.estado,
             'fecha_emision': nota.fecha_emision,
         }

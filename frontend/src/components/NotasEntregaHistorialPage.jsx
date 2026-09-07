@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import ConfirmModal from './ConfirmModal';
 import useExchangeRate from '../hooks/useExchangeRate';
-import { formatMontoDocumento } from '../utils/currency';
+import { formatBsRaw, formatMontoDocumento } from '../utils/currency';
 
 function getCookie(name) {
   const all = `; ${document.cookie}`;
@@ -52,6 +53,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
   const [referenciaAbono, setReferenciaAbono] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('todas');
   const [savingAbono, setSavingAbono] = useState(false);
+  const [confirmCambioMetodo, setConfirmCambioMetodo] = useState(null); // { metodo_anterior, metodo_nuevo, message }
 
   const fetchNotas = useCallback(async (desdeBuscado, hastaBuscado) => {
     setLoading(true);
@@ -159,6 +161,21 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
     }
   };
 
+  const enviarAbono = async (metodoPagoId, confirmarCambioMetodo = false) => {
+    const response = await fetch(`/api/notas-entrega/${selectedNotaId}/abonos/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+      credentials: 'include',
+      body: JSON.stringify({
+        monto: montoAbono,
+        metodo_pago_id: metodoPagoId,
+        referencia: referenciaAbono.trim(),
+        confirmar_cambio_metodo: confirmarCambioMetodo,
+      }),
+    });
+    return { response, data: await response.json().catch(() => ({})) };
+  };
+
   const handleRegistrarAbono = async (event) => {
     event.preventDefault();
     if (!selectedNotaId) {
@@ -180,14 +197,15 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
     setSavingAbono(true);
     setFeedback('');
     try {
-      const response = await fetch(`/api/notas-entrega/${selectedNotaId}/abonos/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
-        credentials: 'include',
-        body: JSON.stringify({ monto: montoAbono, metodo_pago_id: metodoPagoId, referencia: referenciaAbono.trim() }),
-      });
-      const data = await response.json().catch(() => ({}));
+      const { response, data } = await enviarAbono(metodoPagoId, false);
       if (!response.ok || !data.ok) {
+        // La nota se generó con otra cuenta y esta se le está cobrando con una
+        // distinta — el backend pide confirmación explícita antes de mover la
+        // plata (ver requiere_confirmacion en nota_entrega_abono_view).
+        if (data.requiere_confirmacion) {
+          setConfirmCambioMetodo({ metodoPagoId, message: data.message });
+          return;
+        }
         setFeedbackType('error');
         setFeedback(data.message || 'No se pudo registrar el abono.');
         return;
@@ -203,6 +221,33 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
       setFeedback('Error de red al registrar el abono.');
     } finally {
       setSavingAbono(false);
+    }
+  };
+
+  const handleConfirmarCambioMetodo = async () => {
+    if (!confirmCambioMetodo) {
+      return;
+    }
+    setSavingAbono(true);
+    try {
+      const { response, data } = await enviarAbono(confirmCambioMetodo.metodoPagoId, true);
+      if (!response.ok || !data.ok) {
+        setFeedbackType('error');
+        setFeedback(data.message || 'No se pudo registrar el abono.');
+        return;
+      }
+      setFeedbackType('success');
+      setFeedback(`Abono de $${data.pago.monto} registrado (cuenta cambiada). Saldo pendiente: $${data.nota_entrega.saldo_pendiente}.`);
+      setNotaDetalle(data.nota_entrega);
+      setMontoAbono('');
+      setReferenciaAbono('');
+      await fetchNotas(desde, hasta);
+    } catch (requestError) {
+      setFeedbackType('error');
+      setFeedback('Error de red al registrar el abono.');
+    } finally {
+      setSavingAbono(false);
+      setConfirmCambioMetodo(null);
     }
   };
 
@@ -348,9 +393,20 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                     Total: {formatMontoDocumento(notaDetalle.total, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
                   </span>
                   <span style={{ fontWeight: 800, color: '#ffcf7d' }}>
-                    Saldo pendiente: {formatMontoDocumento(notaDetalle.saldo_pendiente, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
+                    Saldo pendiente: {notaDetalle.moneda === 'VES' && notaDetalle.saldo_pendiente_bs_vigente
+                      ? formatBsRaw(notaDetalle.saldo_pendiente_bs_vigente)
+                      : formatMontoDocumento(notaDetalle.saldo_pendiente, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
                   </span>
                 </div>
+
+                {!notaDetalle.es_de_hoy && notaDetalle.moneda === 'VES' && notaDetalle.estado !== 'pagada' ? (
+                  <div style={fiadoRecalculadoStyle}>
+                    Esta nota es de días anteriores — el saldo se recalculó a la tasa BCV de HOY
+                    (Bs. {Number(notaDetalle.tasa_cobro_vigente || 0).toFixed(2)}/$), no a la tasa con la que se
+                    cotizó originalmente (Bs. {Number(notaDetalle.tasa_cambio_referencia || 0).toFixed(2)}/$).
+                    Cóbrale a este monto recalculado, no al que aparece impreso en la nota vieja.
+                  </div>
+                ) : null}
 
                 {notaDetalle.pagos.length > 0 ? (
                   <div style={{ display: 'grid', gap: 4 }}>
@@ -361,7 +417,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                           {pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')}
                           {pago.referencia && !esReferenciaAutogenerada(pago.referencia) ? ` · Ref: ${pago.referencia}` : ''}
                         </span>
-                        <span>{formatMontoDocumento(pago.monto, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}</span>
+                        <span>{formatMontoDocumento(pago.monto, pago.moneda, pago.tasa_cambio_referencia || tasaCambio)}</span>
                       </div>
                     ))}
                   </div>
@@ -373,12 +429,21 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                       type="number"
                       min="0.01"
                       step="0.01"
-                      placeholder={notaDetalle.moneda === 'VES' ? 'Monto del abono (Bs)' : 'Monto del abono ($)'}
+                      placeholder={
+                        metodosPago.find((item) => item.id === (metodoAbono || (metodosPago[0] && metodosPago[0].id)))?.moneda === 'VES'
+                          ? 'Monto del abono (Bs)'
+                          : 'Monto del abono ($)'
+                      }
                       value={montoAbono}
                       onChange={(event) => setMontoAbono(event.target.value)}
                       style={inputStyle}
                       required
                     />
+                    {/* El placeholder usa la moneda de la cuenta SELECCIONADA en el
+                        select de abajo, no la de la nota — pueden ser distintas (ver
+                        cambia_metodo en nota_entrega_abono_view): lo que importa para
+                        saber si escribir dólares o bolívares es con qué cuenta se está
+                        cobrando ESTE abono, no con la que se declaró al emitir la nota. */}
                     {/* Sin `required`: handleRegistrarAbono ya valida esto con un mensaje propio
                         (ver el bug de `required` nativo bloqueando el aviso, mismo criterio que
                         Mesa/Cliente en NewOrderPage/EditOrderPage). */}
@@ -413,6 +478,17 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
           </div>
         </div>
       ) : null}
+
+      <ConfirmModal
+        open={Boolean(confirmCambioMetodo)}
+        title="¿Cambiar la cuenta de esta nota?"
+        message={confirmCambioMetodo?.message || ''}
+        confirmLabel="Sí, cambiar cuenta"
+        cancelLabel="Cancelar"
+        busy={savingAbono}
+        onConfirm={handleConfirmarCambioMetodo}
+        onCancel={() => setConfirmCambioMetodo(null)}
+      />
     </section>
   );
 }
@@ -609,6 +685,16 @@ const detailTotalsStyle = {
   borderTop: '1px solid rgba(255, 255, 255, 0.06)',
   color: '#d2c4c4',
   fontSize: 13,
+};
+
+const fiadoRecalculadoStyle = {
+  padding: '10px 12px',
+  borderRadius: 12,
+  border: '1px solid rgba(255, 200, 120, 0.3)',
+  background: 'rgba(255, 200, 120, 0.08)',
+  color: '#ffd8a3',
+  fontSize: 12.5,
+  lineHeight: 1.5,
 };
 
 const abonoFormStyle = (isMobile) => ({

@@ -37,6 +37,11 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
   const [notaDetalle, setNotaDetalle] = useState(null);
   const [notaDetalleLoading, setNotaDetalleLoading] = useState(false);
   const [notaDetalleError, setNotaDetalleError] = useState('');
+  const [editandoPagoId, setEditandoPagoId] = useState(null);
+  const [nuevoMetodoId, setNuevoMetodoId] = useState('');
+  const [motivoCambio, setMotivoCambio] = useState('');
+  const [guardandoCambio, setGuardandoCambio] = useState(false);
+  const [errorCambio, setErrorCambio] = useState('');
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -86,6 +91,59 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
   };
 
   const notas = data?.notas || [];
+  const metodosPago = data?.metodos_pago || [];
+
+  const empezarCambioMetodo = (pago) => {
+    setEditandoPagoId(pago.id);
+    setNuevoMetodoId(String(pago.metodo_pago_id));
+    setMotivoCambio('');
+    setErrorCambio('');
+  };
+
+  const cancelarCambioMetodo = () => {
+    setEditandoPagoId(null);
+    setMotivoCambio('');
+    setErrorCambio('');
+  };
+
+  const guardarCambioMetodo = async (pago) => {
+    if (!motivoCambio.trim()) {
+      setErrorCambio('Indica el motivo del cambio.');
+      return;
+    }
+    if (Number(nuevoMetodoId) === pago.metodo_pago_id) {
+      setErrorCambio('Selecciona una cuenta distinta a la actual.');
+      return;
+    }
+    setGuardandoCambio(true);
+    setErrorCambio('');
+    try {
+      const response = await fetch('/api/admin/reportes/cuadre-caja/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({
+          action: 'cambiar_metodo_pago',
+          tipo: 'pago',
+          id: pago.id,
+          metodo_pago_id: Number(nuevoMetodoId),
+          motivo: motivoCambio.trim(),
+          fecha,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) {
+        throw new Error(json.message || 'No se pudo cambiar la cuenta de este pago.');
+      }
+      setEditandoPagoId(null);
+      setMotivoCambio('');
+      await loadReport(fecha);
+    } catch (error) {
+      setErrorCambio(error.message || 'No se pudo cambiar la cuenta de este pago.');
+    } finally {
+      setGuardandoCambio(false);
+    }
+  };
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -136,6 +194,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                 <div style={headStyle}>Banco</div>
                 <div style={headStyle}>Referencia</div>
                 <div style={headStyle}>Estado</div>
+                <div style={headStyle} className="no-print">Cuenta</div>
                 {notas.map((nota) => {
                   const pagos = nota.pagos.length > 0 ? nota.pagos : [null];
                   return pagos.map((pago, index) => (
@@ -151,10 +210,64 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                       <div style={cellStyle}>{nota.cliente || '—'}</div>
                       <div style={cellStyle}>{index === 0 ? `$${formatMonto(nota.total)}` : '—'}</div>
                       <div style={cellStyle}>{pago && pago.monto_bs !== null ? `Bs. ${formatMonto(pago.monto_bs)}` : '—'}</div>
-                      <div style={cellStyle}>{pago ? pago.metodo_pago_nombre : '—'}</div>
+                      <div style={cellStyle}>
+                        {pago ? pago.metodo_pago_nombre : '—'}
+                        {pago && pago.ultima_correccion ? (
+                          <div style={secondaryAmountStyle} title={pago.ultima_correccion.motivo}>
+                            Corregido: {pago.ultima_correccion.metodo_anterior} → {pago.ultima_correccion.metodo_nuevo}
+                          </div>
+                        ) : null}
+                      </div>
                       <div style={cellStyle}>{pago && pago.cuenta_bancaria ? pago.cuenta_bancaria : '—'}</div>
                       <div style={cellStyle}>{pago ? pago.referencia : '—'}</div>
                       <div style={cellStyle}>{index === 0 ? (ESTADO_LABEL[nota.estado] || nota.estado) : '—'}</div>
+                      <div style={cellStyle} className="no-print">
+                        {pago ? (
+                          <button type="button" onClick={() => empezarCambioMetodo(pago)} style={cambiarCuentaButtonStyle}>
+                            Cambiar
+                          </button>
+                        ) : '—'}
+                      </div>
+                      {pago && editandoPagoId === pago.id ? (
+                        <div style={editRowWrapStyle} className="no-print">
+                          <span style={{ color: '#d2c3c3', fontSize: 13 }}>
+                            Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta —
+                            si la cuenta nueva es en bolívares, el monto se muestra convertido; si es en dólares, se muestra tal cual.
+                          </span>
+                          <select
+                            value={nuevoMetodoId}
+                            onChange={(event) => setNuevoMetodoId(event.target.value)}
+                            style={editSelectStyle}
+                          >
+                            {metodosPago.map((metodo) => (
+                              <option key={metodo.id} value={metodo.id}>
+                                {metodo.nombre} ({metodo.moneda === 'VES' ? 'Bs' : '$'})
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            placeholder="Motivo del cambio (obligatorio)"
+                            value={motivoCambio}
+                            onChange={(event) => setMotivoCambio(event.target.value)}
+                            style={editInputStyle}
+                          />
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => guardarCambioMetodo(pago)}
+                              disabled={guardandoCambio}
+                              style={guardarCambioButtonStyle}
+                            >
+                              {guardandoCambio ? 'Guardando...' : 'Guardar'}
+                            </button>
+                            <button type="button" onClick={cancelarCambioMetodo} style={cancelarCambioButtonStyle}>
+                              Cancelar
+                            </button>
+                          </div>
+                          {errorCambio ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{errorCambio}</div> : null}
+                        </div>
+                      ) : null}
                     </Fragment>
                   ));
                 })}
@@ -273,7 +386,13 @@ const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, bo
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const ventasTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr)', minWidth: 1000, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const ventasTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr) minmax(100px,0.6fr)', minWidth: 1120, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const cambiarCuentaButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '5px 12px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const editRowWrapStyle = { gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,157,157,0.06)' };
+const editSelectStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.16)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13 };
+const editInputStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.16)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13, minWidth: 220, flex: 1 };
+const guardarCambioButtonStyle = { border: 'none', borderRadius: 999, padding: '8px 16px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
+const cancelarCambioButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginTop: 2 };

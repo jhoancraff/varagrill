@@ -138,9 +138,12 @@ function ReportePropinasPage({ isMobile, onBack }) {
                   <Fragment key={item.id}>
                     <div style={cellStyle}>{item.tipo_label}</div>
                     <div style={cellStyle}>
-                      {item.moneda === 'VES' ? (
+                      {item.moneda === 'VES' && item.tasa_cambio_referencia ? (
                         <>
-                          Bs. {formatMonto(Number(item.monto) * Number(item.tasa_cambio_referencia || data.tasa_bcv || 0))}
+                          {/* Siempre con la tasa que se congeló al registrar este ingreso —
+                              nunca la de hoy: esto es un registro histórico, no debe cambiar
+                              de valor cada vez que se refresca el cache del BCV. */}
+                          Bs. {formatMonto(Number(item.monto) * Number(item.tasa_cambio_referencia))}
                           <span style={secondaryAmountStyle}> (${formatMonto(item.monto)})</span>
                         </>
                       ) : (

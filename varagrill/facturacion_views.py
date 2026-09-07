@@ -55,6 +55,38 @@ logger = logging.getLogger(__name__)
 TOLERANCIA_REDONDEO_ABONO = Decimal('0.00001')
 
 
+def _tasa_conversion_vigente(moneda, fecha_emision, tasa_cambio_referencia, tasa_pago_actual):
+    """
+    Tasa BCV que corresponde usar AHORA para convertir un pago en bolivares de
+    una nota de entrega o factura — la misma logica para calcularla al mostrar
+    el saldo pendiente (ver nota_entrega_detail_view/factura_detail_view) y al
+    registrar de verdad el abono (ver nota_entrega_abono_view/
+    factura_abono_view), para que lo que se le muestra a la cajera ANTES de
+    cobrar sea exactamente lo que el sistema va a registrar.
+
+    Si el documento es de HOY: se usa la tasa que se congelo al emitirlo (la
+    que se le cotizo al cliente) — un pago del mismo dia no debe moverse ni un
+    centimo aunque el cache de la tasa BCV se haya refrescado mientras tanto
+    (ver TASA_TTL en tasa_cambio.py, se refresca solo varias veces al dia).
+
+    Si el documento es de un dia anterior (fiado de verdad, no cobrado el
+    mismo dia): se usa la tasa BCV de HOY a proposito, para que el negocio no
+    pierda valor por la devaluacion del bolivar mientras la deuda sigue sin
+    cobrarse — el excedente (o la diferencia) por el cambio de tasa se le
+    cobra al cliente en ese momento.
+
+    Devuelve None si el documento no es en bolivares, o si no hay ninguna tasa
+    disponible en ningun lado (documento sin congelar y sin tasa BCV vigente).
+    """
+    if moneda != 'VES':
+        return None
+    tasa_actual = tasa_pago_actual.tasa if tasa_pago_actual else None
+    es_de_hoy = timezone.localdate(fecha_emision) == timezone.localdate()
+    if es_de_hoy:
+        return tasa_cambio_referencia or tasa_actual
+    return tasa_actual or tasa_cambio_referencia
+
+
 # ---------------------------------------------------------------------------
 # Helpers internos
 # ---------------------------------------------------------------------------
@@ -329,6 +361,13 @@ def _serialize_pago(pago):
         'monto': str(pago.monto),
         'metodo_pago': pago.metodo_pago.nombre,
         'metodo_pago_id': pago.metodo_pago_id,
+        # Moneda del metodo CON EL QUE SE HIZO ESTE PAGO — no necesariamente la
+        # misma que nota.moneda/factura.moneda si distintos abonos de un mismo
+        # documento se hicieron con cuentas de distinta moneda (ver
+        # cambia_metodo en nota_entrega_abono_view). El frontend debe usar
+        # esto (junto con tasa_cambio_referencia, de abajo) para mostrar CADA
+        # pago en su propia moneda, no en la del documento.
+        'moneda': pago.metodo_pago.moneda,
         'referencia': pago.referencia,
         'fecha_pago': pago.fecha_pago.isoformat(),
         'tasa_cambio_referencia': str(pago.tasa_cambio_referencia) if pago.tasa_cambio_referencia is not None else None,
@@ -777,20 +816,16 @@ def factura_abono_view(request, factura_id):
         # pantalla y le cobra al cliente) — VGPago.monto y saldo_pendiente
         # siempre se guardan en USD (ver VGMetodoPago.moneda), asi que si la
         # factura es en bolivares hay que convertir a USD antes de comparar o
-        # descontar. Se usa la tasa BCV de HOY (el dia en que de verdad se
-        # cobra), no la congelada de la factura: una factura pendiente en
-        # bolivares se cobra al valor actual del dolar, no al del dia en que
-        # se emitio — si no, el negocio pierde valor cada dia que la deuda
-        # sigue sin cobrarse por la devaluacion del bolivar. Cuando el cobro
-        # es el mismo dia de la emision ambas tasas son la misma, asi que
-        # esto no cambia nada en el caso normal (venta pagada de una vez). Si
-        # no hay tasa vigente hoy, se cae a la congelada de la factura como
-        # ultimo recurso, para no bloquear el cobro.
+        # descontar. Ver _tasa_conversion_vigente: si el pago es del mismo dia
+        # en que se emitio la factura se usa la tasa que se le cotizo al
+        # cliente entonces (no debe moverse ni un centimo aunque el cache de
+        # la tasa BCV se haya refrescado mientras tanto — reportado 2026-09);
+        # si es fiado de un dia anterior se usa la tasa de HOY a proposito,
+        # para no perder valor por la devaluacion del bolivar.
+        tasa_conversion = _tasa_conversion_vigente(
+            factura.moneda, factura.fecha_emision, factura.tasa_cambio_referencia, tasa_pago_actual,
+        )
         if factura.moneda == 'VES':
-            tasa_conversion = (
-                (tasa_pago_actual.tasa if tasa_pago_actual else None)
-                or factura.tasa_cambio_referencia
-            )
             if not tasa_conversion or tasa_conversion <= 0:
                 return _auth_response({
                     'ok': False,
@@ -798,7 +833,6 @@ def factura_abono_view(request, factura_id):
                 }, status=400)
             monto = (monto_input / tasa_conversion).quantize(Decimal('0.000001'))
         else:
-            tasa_conversion = None
             monto = monto_input.quantize(Decimal('0.000001'))
 
         if monto > factura.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
@@ -819,7 +853,12 @@ def factura_abono_view(request, factura_id):
             metodo_pago=metodo_pago,
             referencia=referencia,
             estado='completado',
-            tasa_cambio_referencia=tasa_pago_actual.tasa if tasa_pago_actual else None,
+            # Ver el comentario equivalente en nota_entrega_abono_view: la tasa
+            # que de verdad se uso para convertir este pago, no siempre la de hoy.
+            tasa_cambio_referencia=(
+                tasa_conversion if factura.moneda == 'VES'
+                else (tasa_pago_actual.tasa if tasa_pago_actual else None)
+            ),
             creado_por=request.user,
         )
 
@@ -961,20 +1000,40 @@ def cuentas_por_cobrar_view(request):
 # Se generan desde pedidos_cobro_view (api_views.py) al cobrar directo; aca
 # solo viven la consulta del historial y la reimpresion.
 # ---------------------------------------------------------------------------
-def _serialize_nota_entrega(nota, incluir_detalle=True):
+def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
+    es_de_hoy = timezone.localdate(nota.fecha_emision) == timezone.localdate()
     data = {
         'id': nota.id,
         'codigo': nota.codigo,
         'fecha_emision': nota.fecha_emision.isoformat(),
+        'es_de_hoy': es_de_hoy,
         'total': str(nota.total),
         'saldo_pendiente': str(nota.saldo_pendiente),
         'estado': nota.estado,
         'moneda': nota.moneda,
         'tasa_cambio_referencia': str(nota.tasa_cambio_referencia) if nota.tasa_cambio_referencia is not None else None,
         'metodo_pago': nota.metodo_pago.nombre,
+        'metodo_pago_id': nota.metodo_pago_id,
         'referencia': nota.referencia,
         'pedidos': [pedido.id for pedido in nota.pedidos.all()],
     }
+    if nota.estado != 'pagada':
+        # Tasa que se usaria AHORA MISMO si se le registrara un abono a esta
+        # nota (ver _tasa_conversion_vigente) — para fiado de dias anteriores
+        # es la tasa BCV de hoy, distinta a la congelada al emitir. Se manda
+        # aparte de tasa_cambio_referencia para que la cajera vea, ANTES de
+        # cobrar, cuanto es el saldo pendiente a valor de hoy (con la
+        # diferencia por la devaluacion ya calculada) en vez de enterarse
+        # despues de que el abono no le cuadro. En una nota de hoy da lo
+        # mismo que tasa_cambio_referencia (es la misma tasa).
+        tasa_vigente = _tasa_conversion_vigente(
+            nota.moneda, nota.fecha_emision, nota.tasa_cambio_referencia, tasa_pago_actual,
+        )
+        data['tasa_cobro_vigente'] = str(tasa_vigente) if tasa_vigente else None
+        data['saldo_pendiente_bs_vigente'] = (
+            str((nota.saldo_pendiente * tasa_vigente).quantize(Decimal('0.01')))
+            if nota.moneda == 'VES' and tasa_vigente else None
+        )
     if incluir_detalle:
         data['pagos'] = [
             _serialize_pago(pago) for pago in nota.pagos.filter(estado='completado').order_by('fecha_pago')
@@ -1009,9 +1068,13 @@ def notas_entrega_view(request):
     if hasta:
         notas = notas.filter(fecha_emision__date__lte=hasta)
 
+    tasa_pago_actual = obtener_tasa_actual()
     return _auth_response({
         'ok': True,
-        'notas_entrega': [_serialize_nota_entrega(nota, incluir_detalle=False) for nota in notas[:200]],
+        'notas_entrega': [
+            _serialize_nota_entrega(nota, incluir_detalle=False, tasa_pago_actual=tasa_pago_actual)
+            for nota in notas[:200]
+        ],
     })
 
 
@@ -1031,7 +1094,11 @@ def nota_entrega_detail_view(request, nota_id):
     except VGNotaEntrega.DoesNotExist:
         return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
 
-    return _auth_response({'ok': True, 'nota_entrega': _serialize_nota_entrega(nota)})
+    tasa_pago_actual = obtener_tasa_actual()
+    return _auth_response({
+        'ok': True,
+        'nota_entrega': _serialize_nota_entrega(nota, tasa_pago_actual=tasa_pago_actual),
+    })
 
 
 @csrf_exempt
@@ -1068,34 +1135,52 @@ def nota_entrega_abono_view(request, nota_id):
             'message': f'Indica el número de referencia del pago por {metodo_pago.nombre}.',
         }, status=400)
 
+    confirma_cambio_metodo = bool(data.get('confirmar_cambio_metodo'))
+
     with transaction.atomic():
         try:
-            nota = VGNotaEntrega.objects.select_for_update().get(pk=nota_id)
+            nota = VGNotaEntrega.objects.select_related('metodo_pago').select_for_update().get(pk=nota_id)
         except VGNotaEntrega.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
 
         if nota.estado == 'pagada':
             return _auth_response({'ok': False, 'message': 'Esta nota de entrega ya no admite cobros.'}, status=409)
 
+        # La nota se emitio con un metodo "declarado" (lo que se imprimio en
+        # el momento del cobro rapido — ver pedidos_cobro_view), pero el
+        # cliente puede terminar pagando con una cuenta distinta (p. ej. se
+        # declaro Efectivo pero paga por Pago Movil). Eso mueve la plata a
+        # otra cuenta bancaria real, asi que se le pide confirmacion explicita
+        # a la cajera antes de aplicarlo — si no confirma, no se registra
+        # nada todavia y el frontend le muestra la alerta.
+        cambia_metodo = metodo_pago.id != nota.metodo_pago_id
+        if cambia_metodo and not confirma_cambio_metodo:
+            return _auth_response({
+                'ok': False,
+                'requiere_confirmacion': True,
+                'metodo_anterior': nota.metodo_pago.nombre,
+                'metodo_nuevo': metodo_pago.nombre,
+                'message': (
+                    f'Esta nota se generó con «{nota.metodo_pago.nombre}» y la estás '
+                    f'cobrando con «{metodo_pago.nombre}». ¿Confirmas el cambio de cuenta?'
+                ),
+            }, status=409)
+
         tasa_pago_actual = obtener_tasa_actual()
 
-        # Mismo criterio que factura_abono_view: monto_input llega en la
-        # moneda de la nota (lo que ve el cajero en pantalla), VGPago.monto y
-        # saldo_pendiente se guardan siempre en USD. La conversion usa la
-        # tasa BCV de HOY (el dia en que de verdad se cobra), no la congelada
-        # de la nota: una nota pendiente (fiado) en bolivares se cobra al
-        # valor actual del dolar, no al del dia en que se emitio — si no, el
-        # negocio pierde valor cada dia que el fiado sigue sin cobrarse por
-        # la devaluacion del bolivar. Cuando el cobro es el mismo dia de la
-        # emision ambas tasas son la misma, asi que esto no cambia nada en el
-        # caso normal (venta pagada de una vez). Si no hay tasa vigente hoy,
-        # se cae a la congelada de la nota como ultimo recurso, para no
-        # bloquear el cobro.
-        if nota.moneda == 'VES':
-            tasa_conversion = (
-                (tasa_pago_actual.tasa if tasa_pago_actual else None)
-                or nota.tasa_cambio_referencia
-            )
+        # monto_input llega en la moneda del metodo de pago que se esta usando
+        # PARA ESTE abono (no necesariamente la moneda declarada en la nota —
+        # ver cambia_metodo arriba), VGPago.monto y saldo_pendiente se guardan
+        # siempre en USD. Ver _tasa_conversion_vigente: si el pago es del
+        # mismo dia en que se emitio la nota se usa la tasa que se le cotizo
+        # al cliente entonces (no debe moverse ni un centimo aunque el cache
+        # de la tasa BCV se haya refrescado mientras tanto — reportado
+        # 2026-09); si es fiado de un dia anterior se usa la tasa de HOY a
+        # proposito, para no perder valor por la devaluacion del bolivar.
+        tasa_conversion = _tasa_conversion_vigente(
+            metodo_pago.moneda, nota.fecha_emision, nota.tasa_cambio_referencia, tasa_pago_actual,
+        )
+        if metodo_pago.moneda == 'VES':
             if not tasa_conversion or tasa_conversion <= 0:
                 return _auth_response({
                     'ok': False,
@@ -1103,17 +1188,16 @@ def nota_entrega_abono_view(request, nota_id):
                 }, status=400)
             monto = (monto_input / tasa_conversion).quantize(Decimal('0.000001'))
         else:
-            tasa_conversion = None
             monto = monto_input.quantize(Decimal('0.000001'))
 
         if monto > nota.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
-            saldo_en_moneda_nota = (
+            saldo_en_moneda_metodo = (
                 nota.saldo_pendiente * tasa_conversion if tasa_conversion else nota.saldo_pendiente
             )
-            unidad = 'Bs' if nota.moneda == 'VES' else '$'
+            unidad = 'Bs' if metodo_pago.moneda == 'VES' else '$'
             return _auth_response({
                 'ok': False,
-                'message': f'El monto excede el saldo pendiente ({unidad} {saldo_en_moneda_nota:.2f}).',
+                'message': f'El monto excede el saldo pendiente ({unidad} {saldo_en_moneda_metodo:.2f}).',
             }, status=400)
 
         referencia = referencia_usuario or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{nota.id}'
@@ -1124,7 +1208,18 @@ def nota_entrega_abono_view(request, nota_id):
             metodo_pago=metodo_pago,
             referencia=referencia,
             estado='completado',
-            tasa_cambio_referencia=tasa_pago_actual.tasa if tasa_pago_actual else None,
+            # La tasa que de verdad se uso para convertir este pago (ver
+            # arriba) — no siempre la de hoy: asi el monto en bolivares que se
+            # muestre despues (cuadre de caja, historial de notas) siempre
+            # reconstruye exactamente lo que la cajera cobro, sin importar que
+            # el BCV cambie despues. Si el metodo es en dolares no hubo
+            # conversion, pero se congela la tasa de hoy igual por si mas
+            # adelante se corrige la cuenta de este pago hacia una cuenta en
+            # bolivares (ver cambiar_metodo_pago).
+            tasa_cambio_referencia=(
+                tasa_conversion if metodo_pago.moneda == 'VES'
+                else (tasa_pago_actual.tasa if tasa_pago_actual else None)
+            ),
             creado_por=request.user,
         )
 
@@ -1138,12 +1233,21 @@ def nota_entrega_abono_view(request, nota_id):
         )
         nota.estado = 'pagada' if nota.saldo_pendiente <= 0 else 'abonada_parcial'
         nota.actualizado_por = request.user
-        nota.save(update_fields=['saldo_pendiente', 'estado', 'actualizado_por', 'fecha_actualizacion'])
+        update_fields = ['saldo_pendiente', 'estado', 'actualizado_por', 'fecha_actualizacion']
+        if cambia_metodo:
+            # Confirmado por la cajera arriba: la nota pasa a declarar la
+            # cuenta con la que de verdad se esta cobrando, para que el resto
+            # del saldo (si queda pendiente) se siga cotizando en la moneda
+            # correcta de aqui en adelante.
+            nota.metodo_pago = metodo_pago
+            nota.moneda = metodo_pago.moneda
+            update_fields += ['metodo_pago', 'moneda']
+        nota.save(update_fields=update_fields)
 
     return _auth_response({
         'ok': True,
         'message': 'Abono registrado correctamente.',
-        'nota_entrega': _serialize_nota_entrega(nota),
+        'nota_entrega': _serialize_nota_entrega(nota, tasa_pago_actual=tasa_pago_actual),
         'pago': _serialize_pago(pago),
     }, status=201)
 

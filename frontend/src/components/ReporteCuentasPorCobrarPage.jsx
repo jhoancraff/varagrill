@@ -124,9 +124,6 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
       {!loading && data ? (
         <section style={panelStyle}>
           <div style={sectionTitleStyle}>Pendientes al {fecha}</div>
-          {data.tasa_bcv ? (
-            <div style={{ fontSize: 12, color: '#c8bbbb' }}>Tasa BCV usada para el saldo en bolívares: Bs. {formatMonto(data.tasa_bcv)} / $</div>
-          ) : null}
 
           {notas.length === 0 ? (
             <div style={emptyStyle}>No hay ninguna cuenta pendiente por cobrar.</div>
@@ -152,7 +149,10 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
                     <div style={cellStyle}>
                       ${formatMonto(nota.saldo_pendiente)}
                       {nota.saldo_pendiente_bs !== null ? (
-                        <div style={secondaryAmountStyle}>Bs. {formatMonto(nota.saldo_pendiente_bs)} hoy</div>
+                        <div style={secondaryAmountStyle}>
+                          Bs. {formatMonto(nota.saldo_pendiente_bs)}
+                          {nota.tasa_cambio_referencia ? ` (a Bs. ${formatMonto(nota.tasa_cambio_referencia)}/$, tasa del día)` : ''}
+                        </div>
                       ) : null}
                     </div>
                     <div style={cellStyle}>{ESTADO_LABEL[nota.estado] || nota.estado}</div>

@@ -9,14 +9,41 @@ from .models import VGTasaCambio
 
 logger = logging.getLogger(__name__)
 
-BCV_API_URL = "https://ve.dolarapi.com/v1/dolares/oficial"
+BCV_OFICIAL_URL = "https://www.bcv.org.ve/"
+BCV_FALLBACK_API_URL = "https://ve.dolarapi.com/v1/dolares/oficial"
 BCV_REQUEST_TIMEOUT = 5
 TASA_TTL = timedelta(hours=6)
 
 
+def _parse_tasa_bcv_html(html):
+    """Extrae la tasa USD del bloque oficial publicado por el BCV."""
+    import re
+
+    match = re.search(
+        r'<div\s+id=["\']dolar["\'][^>]*>.*?'
+        r'<strong[^>]*class=["\']strong-tb["\'][^>]*>\s*([0-9.,]+)\s*</strong>',
+        html,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        raise ValueError("El portal del BCV no contiene la tasa USD")
+    return Decimal(match.group(1).replace('.', '').replace(',', '.'))
+
+
 def _fetch_tasa_bcv():
-    """Consulta el proveedor externo que replica la tasa oficial del BCV."""
-    response = requests.get(BCV_API_URL, timeout=BCV_REQUEST_TIMEOUT)
+    """Consulta primero la tasa publicada por el portal oficial del BCV."""
+    try:
+        response = requests.get(
+            BCV_OFICIAL_URL,
+            timeout=BCV_REQUEST_TIMEOUT,
+            verify=False,
+        )
+        response.raise_for_status()
+        return _parse_tasa_bcv_html(response.text)
+    except (requests.RequestException, InvalidOperation, ValueError) as exc:
+        logger.warning("No se pudo consultar el portal oficial del BCV: %s", exc)
+
+    response = requests.get(BCV_FALLBACK_API_URL, timeout=BCV_REQUEST_TIMEOUT)
     response.raise_for_status()
     data = response.json()
     return Decimal(str(data["promedio"]))

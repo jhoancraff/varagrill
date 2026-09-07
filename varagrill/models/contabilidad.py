@@ -535,6 +535,7 @@ class VGNotaEntrega(VGAuditoria):
         ("pendiente_pago", "Pendiente de pago"),
         ("abonada_parcial", "Abonada parcialmente"),
         ("pagada", "Pagada"),
+        ("anulada", "Anulada"),
     ]
     cliente = models.ForeignKey(
         "varagrill.VGCliente", on_delete=models.PROTECT, null=True, blank=True, related_name="notas_entrega",

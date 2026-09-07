@@ -22,6 +22,7 @@ function estadoLabel(estado) {
   if (estado === 'pendiente_pago') return 'Pendiente';
   if (estado === 'abonada_parcial') return 'Abonada';
   if (estado === 'pagada') return 'Pagada';
+  if (estado === 'anulada') return 'Anulada';
   return estado;
 }
 
@@ -252,7 +253,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
   };
 
   const notasFiltradas = notas.filter((nota) => {
-    if (filtroEstado === 'pendientes') return nota.estado !== 'pagada';
+    if (filtroEstado === 'pendientes') return !['pagada', 'anulada'].includes(nota.estado);
     if (filtroEstado === 'pagadas') return nota.estado === 'pagada';
     return true;
   });
@@ -347,7 +348,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                   <div style={{ color: '#ffcf7d', fontWeight: 700 }}>
                     Total: {formatMontoDocumento(nota.total, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
                   </div>
-                  {nota.estado !== 'pagada' ? (
+                  {!['pagada', 'anulada'].includes(nota.estado) ? (
                     <div style={{ color: '#ff9b9b', fontWeight: 700 }}>
                       Saldo: {formatMontoDocumento(nota.saldo_pendiente, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
                     </div>
@@ -423,7 +424,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                   </div>
                 ) : null}
 
-                {notaDetalle.estado !== 'pagada' ? (
+                {!['pagada', 'anulada'].includes(notaDetalle.estado) ? (
                   <form onSubmit={handleRegistrarAbono} style={abonoFormStyle(isMobile)}>
                     <input
                       type="number"
@@ -471,7 +472,9 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                     </button>
                   </form>
                 ) : (
-                  <div style={{ color: '#9fe3b0', fontWeight: 700 }}>Esta nota de entrega ya esta saldada.</div>
+                  <div style={{ color: '#9fe3b0', fontWeight: 700 }}>
+                    {notaDetalle.estado === 'anulada' ? 'Esta nota de entrega esta anulada.' : 'Esta nota de entrega ya esta saldada.'}
+                  </div>
                 )}
               </>
             )}

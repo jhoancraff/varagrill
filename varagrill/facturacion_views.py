@@ -1143,7 +1143,7 @@ def nota_entrega_abono_view(request, nota_id):
         except VGNotaEntrega.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
 
-        if nota.estado == 'pagada':
+        if nota.estado in ('pagada', 'anulada'):
             return _auth_response({'ok': False, 'message': 'Esta nota de entrega ya no admite cobros.'}, status=409)
 
         # La nota se emitio con un metodo "declarado" (lo que se imprimio en

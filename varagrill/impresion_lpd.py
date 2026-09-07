@@ -110,19 +110,31 @@ def _monto_texto(valor_usd, moneda, tasa):
     return f'${valor_usd:.2f}'
 
 
+def _producto_label(detalle):
+    producto = getattr(detalle, 'producto', None)
+    if producto is None:
+        return 'Plato eliminado'
+    nombre = getattr(producto, 'nombre', None)
+    return nombre or 'Plato eliminado'
+
+
 def _render_recibo_item(detalle, moneda, tasa):
     out = bytearray()
-    out += _text(f'{_cantidad_label(detalle)} {detalle.producto.nombre}') + FEED
+    nombre_producto = _producto_label(detalle)
+    out += _text(f'{_cantidad_label(detalle)} {nombre_producto}') + FEED
     if detalle.notas:
         out += _text(f'  - {detalle.notas}') + FEED
     out += _text(f'  {_monto_texto(detalle.subtotal, moneda, tasa)}') + FEED
     for opcion in detalle.opciones.all():
+        nombre_opcion = getattr(opcion, 'nombre', None) or 'Opción eliminada'
         if opcion.precio_unitario:
-            out += _text(f'  » {opcion.grupo_nombre}: {opcion.nombre}  {_monto_texto(opcion.subtotal, moneda, tasa)}') + FEED
+            out += _text(f'  » {opcion.grupo_nombre}: {nombre_opcion}  {_monto_texto(opcion.subtotal, moneda, tasa)}') + FEED
         else:
-            out += _text(f'  » {opcion.grupo_nombre}: {opcion.nombre}') + FEED
+            out += _text(f'  » {opcion.grupo_nombre}: {nombre_opcion}') + FEED
     for adicional in detalle.adicionales.all():
-        out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}  {_monto_texto(adicional.subtotal, moneda, tasa)}') + FEED
+        preparacion = getattr(adicional, 'preparacion', None)
+        nombre_adicional = getattr(preparacion, 'nombre', None) or 'Adicional eliminado'
+        out += _text(f'  + {adicional.cantidad}x {nombre_adicional}  {_monto_texto(adicional.subtotal, moneda, tasa)}') + FEED
     return bytes(out)
 
 

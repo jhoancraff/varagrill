@@ -100,6 +100,14 @@ def _destino_categoria_secundaria(categoria):
     return (categoria.ip_impresora_secundaria, categoria.puerto_impresora_secundaria)
 
 
+def _detalle_nombre(detalle):
+    producto = getattr(detalle, 'producto', None)
+    if producto is None:
+        return 'Plato eliminado'
+    nombre = getattr(producto, 'nombre', None)
+    return nombre or 'Plato eliminado'
+
+
 def _render_detalle_principal(detalle, cantidad_override=None):
     """
     Línea principal de un detalle (cantidad/peso + nombre + notas + adicionales +
@@ -115,15 +123,19 @@ def _render_detalle_principal(detalle, cantidad_override=None):
     """
     out = bytearray()
     etiqueta = f'{cantidad_override}x' if cantidad_override is not None else _cantidad_label(detalle)
-    out += _text(f'{etiqueta} {detalle.producto.nombre}') + FEED
+    out += _text(f'{etiqueta} {_detalle_nombre(detalle)}') + FEED
     if detalle.notas:
         out += _text(f'  * {detalle.notas}') + FEED
     for opcion in detalle.opciones.all():
         if opcion.producto_id:
             continue
-        out += _text(f'  » {opcion.grupo_nombre}: {opcion.preparacion.nombre}') + FEED
+        preparacion = getattr(opcion, 'preparacion', None)
+        nombre_opcion = getattr(preparacion, 'nombre', None) or 'Opción eliminada'
+        out += _text(f'  » {opcion.grupo_nombre}: {nombre_opcion}') + FEED
     for adicional in detalle.adicionales.all():
-        out += _text(f'  + {adicional.cantidad}x {adicional.preparacion.nombre}') + FEED
+        preparacion = getattr(adicional, 'preparacion', None)
+        nombre_adicional = getattr(preparacion, 'nombre', None) or 'Adicional eliminado'
+        out += _text(f'  + {adicional.cantidad}x {nombre_adicional}') + FEED
     return bytes(out)
 
 

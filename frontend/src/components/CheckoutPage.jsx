@@ -356,6 +356,29 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     });
   };
 
+  const selectAllInGroup = (group) => {
+    setSelectedByGroup((current) => ({
+      ...current,
+      [group.key]: new Set(group.pedidos.map((pedido) => pedido.id)),
+    }));
+  };
+
+  // Si al momento de cobrar (nota de entrega, pre-factura o factura directa)
+  // quedan pedidos de la mesa sin marcar, es fácil que sea un olvido (un
+  // pedido llegó después y no se seleccionó) y no una decisión a propósito —
+  // se pide confirmar antes de seguir, para evitar dejar pedidos sin cobrar
+  // por error humano. Con selección vacía o completa no interrumpe: el caso
+  // vacío ya lo bloquean los propios handlers de cada acción con su mensaje
+  // específico.
+  const continuarConSeleccionParcial = (group, siguienteAccion) => {
+    const selectedSet = selectedByGroup[group.key] || new Set();
+    if (selectedSet.size > 0 && selectedSet.size < group.pedidos.length) {
+      setPendingConfirm({ action: 'advertencia-parcial', group, siguienteAccion });
+      return;
+    }
+    siguienteAccion();
+  };
+
   const updateCliente = (groupKey, field, value) => {
     setClienteByGroup((current) => ({
       ...current,
@@ -372,7 +395,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const validateClienteDocumento = (group) => {
     const cliente = clienteByGroup[group.key] || emptyCliente;
     if (!cliente.tipo_documento || !cliente.numero_documento.trim()) {
-      showError(`Indica el tipo y número de documento del cliente de ${group.label} antes de generar la pre-factura o factura.`);
+      showError(`Indica el tipo y número de documento del cliente de ${group.label} antes de generar la cuenta del cliente o factura.`);
       return false;
     }
     return true;
@@ -510,13 +533,13 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        showError(data.message || 'No se pudo generar la pre-factura.');
+        showError(data.message || 'No se pudo generar la cuenta del cliente.');
         return;
       }
-      showSuccess(`Pre-factura ${data.prefactura.codigo} generada. Revisa la cuenta con el cliente antes de confirmar.`);
+      showSuccess(`Cuenta del cliente ${data.prefactura.codigo} generada. Revísala con el cliente antes de confirmar.`);
       setPrefacturaByGroup((current) => ({ ...current, [group.key]: data.prefactura }));
     } catch (requestError) {
-      showError('Error de red al generar la pre-factura.');
+      showError('Error de red al generar la cuenta del cliente.');
     } finally {
       setBusyGroup('');
     }
@@ -623,6 +646,16 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }
     const { action, group } = pending;
 
+    if (action === 'advertencia-parcial') {
+      const selectedSet = selectedByGroup[group.key] || new Set();
+      return {
+        title: 'Pedidos sin seleccionar',
+        message: `Seleccionaste ${selectedSet.size} de ${group.pedidos.length} pedido(s) de ${group.label}. `
+          + 'Si continúas, los pedidos sin marcar quedarán pendientes por cobrar. ¿Estás seguro de continuar sin seleccionar todos los pedidos de la mesa?',
+        confirmLabel: 'Sí, continuar así',
+      };
+    }
+
     if (action === 'cancelar-pedido') {
       const { pedido } = pending;
       return {
@@ -639,7 +672,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         : '';
       return {
         title: 'Emitir factura',
-        message: `Vas a emitir la factura fiscal${prefactura ? ` de la pre-factura ${prefactura.codigo}` : ''} de ${group.label} por ${totalLabel}. Esta acción no se puede deshacer. ¿Confirmas?`,
+        message: `Vas a emitir la factura fiscal${prefactura ? ` de la cuenta del cliente ${prefactura.codigo}` : ''} de ${group.label} por ${totalLabel}. Esta acción no se puede deshacer. ¿Confirmas?`,
         confirmLabel: 'Sí, emitir factura',
       };
     }
@@ -684,7 +717,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     if (!pendingConfirm) {
       return;
     }
-    const { action, group, pedido } = pendingConfirm;
+    const { action, group, pedido, siguienteAccion } = pendingConfirm;
+    if (action === 'advertencia-parcial') {
+      setPendingConfirm(null);
+      siguienteAccion();
+      return;
+    }
     if (action === 'nota') {
       await handleNotaEntrega(group);
     } else if (action === 'factura') {
@@ -705,7 +743,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           <h2 style={titleStyle(isMobile)}>Pedidos listos para cobrar</h2>
           <p style={subtitleStyle}>
             Busca la mesa para ver su cuenta. Por cada mesa elige el documento que convenga: una nota de
-            entrega rápida, una pre-factura para que el cliente revise la cuenta, o la factura fiscal directa.
+            entrega rápida, una cuenta del cliente para que la revise antes de pagar, o la factura fiscal directa.
           </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
@@ -770,7 +808,18 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
             <article style={groupCardStyle}>
                 <div style={groupHeaderStyle}>
                   <div style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>{selectedGroup.label}</div>
-                  <span style={groupCountStyle}>{selectedGroup.pedidos.length} pedido(s)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={groupCountStyle}>{selectedGroup.pedidos.length} pedido(s)</span>
+                    {selectedGroup.pedidos.length > 1 && selectedSet.size < selectedGroup.pedidos.length ? (
+                      <button
+                        type="button"
+                        onClick={() => selectAllInGroup(selectedGroup)}
+                        style={selectAllButtonStyle}
+                      >
+                        Seleccionar todos los pedidos
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div style={ordersScrollStyle}>
@@ -902,8 +951,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     </div>
                     <p style={clienteHintStyle}>
                       {FACTURACION_HABILITADA
-                        ? 'El tipo y número de documento son obligatorios para generar factura fiscal (no aplica a la pre-factura ni a la nota de entrega).'
-                        : 'Opcional: solo para que el nombre del cliente aparezca en la pre-factura que se le entrega.'}
+                        ? 'El tipo y número de documento son obligatorios para generar factura fiscal (no aplica a la cuenta del cliente ni a la nota de entrega).'
+                        : 'Opcional: solo para que el nombre del cliente aparezca en la cuenta que se le entrega.'}
                     </p>
 
                     <div style={groupFooterStyle(isMobile)}>
@@ -926,7 +975,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     <div style={docButtonsRowStyle(isMobile)}>
                       <button
                         type="button"
-                        onClick={() => handleClickNotaEntrega(selectedGroup)}
+                        onClick={() => continuarConSeleccionParcial(selectedGroup, () => handleClickNotaEntrega(selectedGroup))}
                         style={checkoutButtonStyle}
                         disabled={isBusy}
                       >
@@ -934,19 +983,19 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleGenerarPrefactura(selectedGroup)}
+                        onClick={() => continuarConSeleccionParcial(selectedGroup, () => handleGenerarPrefactura(selectedGroup))}
                         style={secondaryButtonStyle}
                         disabled={selectedSet.size === 0 || isBusy}
                       >
-                        {isBusy ? 'Generando...' : 'Pre-factura (vista previa)'}
+                        {isBusy ? 'Generando...' : 'Generar cuenta del cliente'}
                       </button>
                       {FACTURACION_HABILITADA ? (
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={() => continuarConSeleccionParcial(selectedGroup, () => {
                             if (!validateClienteDocumento(selectedGroup)) return;
                             setPendingConfirm({ action: 'factura', group: selectedGroup });
-                          }}
+                          })}
                           style={primaryButtonStyle}
                           disabled={selectedSet.size === 0 || isBusy}
                         >
@@ -958,7 +1007,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                 ) : (
                   <div style={prefacturaPanelStyle}>
                     <div style={{ color: '#ffb0b0', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Pre-factura {prefactura.codigo}
+                      Cuenta del cliente {prefactura.codigo}
                     </div>
                     <div style={{ color: '#d2c4c4', fontSize: 13 }}>
                       Cliente: {prefactura.cliente ? prefactura.cliente.nombre : 'Consumidor Final'}
@@ -985,7 +1034,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleClickNotaEntrega(selectedGroup)}
+                        onClick={() => continuarConSeleccionParcial(selectedGroup, () => handleClickNotaEntrega(selectedGroup))}
                         style={checkoutButtonStyle}
                         disabled={isBusy}
                       >
@@ -994,7 +1043,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       {FACTURACION_HABILITADA ? (
                         <button
                           type="button"
-                          onClick={() => setPendingConfirm({ action: 'prefactura', group: selectedGroup })}
+                          onClick={() => continuarConSeleccionParcial(selectedGroup, () => setPendingConfirm({ action: 'prefactura', group: selectedGroup }))}
                           style={primaryButtonStyle}
                           disabled={isBusy}
                         >
@@ -1537,6 +1586,19 @@ const orderActionsStyle = {
   display: 'flex',
   gap: 6,
   flexShrink: 0,
+};
+
+const selectAllButtonStyle = {
+  border: '1px solid rgba(255, 255, 255, 0.16)',
+  borderRadius: 999,
+  padding: '4px 10px',
+  background: 'rgba(255, 255, 255, 0.05)',
+  color: '#e0c9a3',
+  fontSize: 11.5,
+  fontWeight: 700,
+  cursor: 'pointer',
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
 };
 
 const detailToggleStyle = {

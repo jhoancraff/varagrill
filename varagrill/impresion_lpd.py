@@ -110,6 +110,20 @@ def _monto_texto(valor_usd, moneda, tasa):
     return f'${valor_usd:.2f}'
 
 
+def _monto_texto_ambas_monedas(valor_usd, tasa):
+    """
+    Como _monto_texto, pero mostrando dólares Y bolívares juntos — usado solo
+    en la cuenta (pre-factura) que se le entrega al cliente en la mesa antes
+    de decidir cómo va a pagar: ahí todavía no se eligió método de pago (ver
+    handleGenerarPrefactura en el frontend), así que no hay una sola moneda
+    "correcta" que mostrar. Si no hay tasa cacheada se cae a solo dólares,
+    igual que _monto_texto.
+    """
+    if tasa:
+        return f'${valor_usd:.2f} / Bs. {_formatear_bs(valor_usd * tasa)}'
+    return f'${valor_usd:.2f}'
+
+
 def _producto_label(detalle):
     producto = getattr(detalle, 'producto', None)
     if producto is None:
@@ -258,18 +272,18 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
 # ---------------------------------------------------------------------------
 # Pre-factura / factura (modulo de facturacion)
 # ---------------------------------------------------------------------------
-def _render_documento_linea(linea, moneda, tasa):
+def _render_documento_linea(linea, monto_fn):
     out = bytearray()
     out += _text(f'{linea.cantidad}x {linea.descripcion}') + FEED
-    precio_texto = _monto_texto(linea.precio_unitario, moneda, tasa)
-    subtotal_texto = _monto_texto(linea.subtotal, moneda, tasa)
+    precio_texto = monto_fn(linea.precio_unitario)
+    subtotal_texto = monto_fn(linea.subtotal)
     out += _text(f'  {precio_texto} c/u  {subtotal_texto}') + FEED
     return bytes(out)
 
 
 def _build_documento_venta_bytes(
     titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, moneda, tasa, datos_fiscales,
-    extra_lineas=None, mostrar_iva=True,
+    extra_lineas=None, mostrar_iva=True, info_encabezado=None, mostrar_ambas_monedas=False,
 ):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
 
@@ -297,21 +311,26 @@ def _build_documento_venta_bytes(
     out += ALIGN_LEFT
     out += _text('-' * LINE_WIDTH) + FEED
     out += _text(hora) + FEED
+    for texto in (info_encabezado or []):
+        out += _text(texto) + FEED
     if cliente is not None:
         out += _text(f'Cliente: {cliente.nombre}') + FEED
         if cliente.numero_documento:
             out += _text(f'{cliente.tipo_documento}-{cliente.numero_documento}') + FEED
     out += _text('-' * LINE_WIDTH) + FEED
 
+    monto_fn = (lambda valor: _monto_texto_ambas_monedas(valor, tasa)) if mostrar_ambas_monedas \
+        else (lambda valor: _monto_texto(valor, moneda, tasa))
+
     for linea in lineas:
-        out += _render_documento_linea(linea, moneda, tasa)
+        out += _render_documento_linea(linea, monto_fn)
 
     out += _text('-' * LINE_WIDTH) + FEED
     if mostrar_iva:
-        out += _text(f'Subtotal: {_monto_texto(subtotal, moneda, tasa)}') + FEED
-        out += _text(f'IVA: {_monto_texto(total_iva, moneda, tasa)}') + FEED
+        out += _text(f'Subtotal: {monto_fn(subtotal)}') + FEED
+        out += _text(f'IVA: {monto_fn(total_iva)}') + FEED
     out += BOLD_ON
-    out += _text(f'TOTAL: {_monto_texto(total, moneda, tasa)}') + FEED
+    out += _text(f'TOTAL: {monto_fn(total)}') + FEED
     out += BOLD_OFF
 
     for texto in (extra_lineas or []):
@@ -349,12 +368,28 @@ def imprimir_prefactura_caja(prefactura):
     datos_fiscales = VGDatosFiscalesEmisor.objects.first()
     codigo = f'PF-{prefactura.numero:06d}'
 
+    # Mesa y mesero de origen: para que el cajero (u otro mesero) pueda ver de
+    # dónde salió esta cuenta sin tener que ir a preguntar. Todos los pedidos
+    # de una cuenta vienen de la misma mesa (se genera por mesa desde Cobro),
+    # así que basta con leerlos del primero; si el pedido es para llevar/sin
+    # mesa asignada, simplemente no hay mesa que mostrar.
+    pedidos = list(prefactura.pedidos.select_related('mesa', 'usuario').all())
+    info_encabezado = []
+    if pedidos:
+        primero = pedidos[0]
+        if primero.mesa:
+            info_encabezado.append(f'Mesa: {primero.mesa.numero}')
+        if primero.usuario:
+            mesero_nombre = primero.usuario.get_full_name() or primero.usuario.username
+            info_encabezado.append(f'Mesero: {mesero_nombre}')
+
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
         ticket = _build_documento_venta_bytes(
             'CUENTA (no es factura fiscal)', codigo, prefactura.cliente,
             list(prefactura.lineas.all()), prefactura.subtotal, prefactura.total_iva, prefactura.total,
             prefactura.moneda, tasa, datos_fiscales, mostrar_iva=False,
+            info_encabezado=info_encabezado, mostrar_ambas_monedas=True,
         )
         logger.info('Enviando pre-factura %s a %s (%s bytes)', codigo, destino, len(ticket))
         enviar_trabajo_lpd(

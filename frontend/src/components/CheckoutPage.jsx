@@ -508,14 +508,19 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }
   };
 
-  // --- Documento 2: Pre-factura (vista previa, sin cobrar todavia) ---
+  // --- Documento 2: Cuenta del cliente / pre-factura (vista previa, sin cobrar todavia) ---
+  // No se manda metodo_pago_id acá: a esta altura el cliente puede seguir
+  // comiendo o decidir cómo pagar después, así que pedirlo aquí era
+  // redundante con lo que ya se vuelve a preguntar al cobrar (nota de
+  // entrega/factura) y no aporta nada — sin método de pago el backend
+  // simplemente muestra la cuenta en USD (ver _resolve_moneda), y como esto
+  // no genera ningún pago real tampoco afecta el cuadre de caja.
   const handleGenerarPrefactura = async (group) => {
     const selectedIds = Array.from(selectedByGroup[group.key] || []);
     if (selectedIds.length === 0) {
       return;
     }
     const cliente = clienteByGroup[group.key] || emptyCliente;
-    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
 
     setBusyGroup(group.key);
     try {
@@ -528,7 +533,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           cliente_nombre: cliente.nombre,
           cliente_tipo_documento: cliente.tipo_documento,
           cliente_numero_documento: cliente.numero_documento,
-          metodo_pago_id: metodoPagoId,
         }),
       });
       const data = await response.json().catch(() => ({}));

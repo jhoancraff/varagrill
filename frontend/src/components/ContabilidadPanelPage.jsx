@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { limpiarFechaSeleccionada } from '../utils/fechaContabilidad';
 
 const iconProps = {
   viewBox: '0 0 24 24',
@@ -237,7 +238,18 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
             <button
               key={section.id}
               type="button"
-              onClick={() => onNavigate(section.id)}
+              onClick={() => {
+                if (section.id === 'contabilidad-cuadre-caja') {
+                  // Entrar desde esta tarjeta es un arranque nuevo del cuadre
+                  // diario — debe mostrar hoy, no la fecha que haya quedado
+                  // guardada de una visita anterior a algún reporte de
+                  // detalle. Esa fecha guardada solo debe sobrevivir cuando
+                  // se vuelve AL cuadre DESDE un detalle (botón Volver), lo
+                  // cual no pasa por acá.
+                  limpiarFechaSeleccionada();
+                }
+                onNavigate(section.id);
+              }}
               style={cardButtonStyle}
             >
               {badgeCount > 0 ? <span style={cardBadgeStyle}>{badgeCount}</span> : null}

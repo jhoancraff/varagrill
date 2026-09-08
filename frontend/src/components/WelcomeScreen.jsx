@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { limpiarFechaSeleccionada } from '../utils/fechaContabilidad';
 import AdminPanelPage from './AdminPanelPage';
 import ContabilidadPanelPage from './ContabilidadPanelPage';
 import ReporteCuadreCajaPage from './ReporteCuadreCajaPage';
@@ -651,6 +652,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
+              limpiarFechaSeleccionada();
               goToView('contabilidad-cuadre-caja');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);

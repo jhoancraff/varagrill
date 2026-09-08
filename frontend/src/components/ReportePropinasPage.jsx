@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
+import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -14,7 +15,7 @@ function formatMonto(value) {
 }
 
 function ReportePropinasPage({ isMobile, onBack }) {
-  const [fecha, setFecha] = useState(todayIso());
+  const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -44,6 +45,7 @@ function ReportePropinasPage({ isMobile, onBack }) {
 
   useEffect(() => {
     loadReport(fecha);
+    setFechaSeleccionada(fecha);
   }, [fecha, loadReport]);
 
   // Igual que en ReporteVentasDiaPage: no se aplica directo desde el <select>,

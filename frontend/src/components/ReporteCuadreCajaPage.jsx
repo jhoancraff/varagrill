@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -13,7 +14,7 @@ function formatMonto(value) {
 }
 
 function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← Volver a Contabilidad' }) {
-  const [fecha, setFecha] = useState(todayIso());
+  const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -46,6 +47,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
 
   useEffect(() => {
     loadReport(fecha);
+    setFechaSeleccionada(fecha);
   }, [fecha, loadReport]);
 
   const handleAddConsignacion = async (event) => {

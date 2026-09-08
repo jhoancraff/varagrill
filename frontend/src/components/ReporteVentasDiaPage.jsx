@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
+import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -29,7 +30,7 @@ const ESTADO_LABEL = {
 };
 
 function ReporteVentasDiaPage({ isMobile, onBack }) {
-  const [fecha, setFecha] = useState(todayIso());
+  const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -66,6 +67,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
 
   useEffect(() => {
     loadReport(fecha);
+    setFechaSeleccionada(fecha);
   }, [fecha, loadReport]);
 
   const abrirDetalleNota = async (notaId) => {

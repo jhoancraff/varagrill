@@ -596,6 +596,15 @@ class VGGasto(VGAuditoria):
     gastos_views._registrar_abono_gasto). Un gasto pagado en efectivo se
     descuenta del efectivo esperado del cuadre de caja del dia
     (reportes.efectivo_esperado_dia).
+
+    monto usa 6 decimales (no 2), igual que VGPago.monto — un gasto se puede
+    cargar en bolivares (ver gastos_views.admin_gastos_view), y con la tasa
+    BCV actual (por encima de Bs 800/$) redondear a centavos de dolar perdia
+    varios bolivares al reconvertir para mostrarlo (un gasto de Bs 20.000 se
+    guardaba como $24.58 y, al reconvertir, salia Bs 20.001,63 en vez de
+    Bs 20.000,00 exactos — reportado 2026-09). Con 6 decimales el redondeo es
+    indetectable en bolivares. saldo_pendiente se queda en 2 decimales a
+    proposito (un gasto siempre se debe en un monto "limpio" en dolares).
     """
     ESTADOS_PAGO = [
         ("pendiente", "Pendiente"),
@@ -610,7 +619,7 @@ class VGGasto(VGAuditoria):
         max_length=150, blank=True, help_text="A quien se le paga este gasto (opcional).",
     )
     numero_comprobante = models.CharField(max_length=100, blank=True)
-    monto = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    monto = models.DecimalField(max_digits=14, decimal_places=6, validators=[MinValueValidator(0)])
     saldo_pendiente = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")
     fecha_gasto = models.DateField(
@@ -634,9 +643,13 @@ class VGAbonoGasto(models.Model):
     Pago del restaurante hacia un gasto operativo (egreso). Modelo aparte de
     VGPago por la misma razon que VGAbonoCompra: VGPago alimenta el cuadre de
     caja como dinero que ENTRA, mezclar egresos ahi lo contaminaria.
+
+    monto usa 6 decimales, igual que VGGasto.monto (ver ese docstring) — un
+    gasto pagado de una vez completo crea su abono por el mismo monto exacto
+    del gasto, asi que necesita la misma precision para no perderla al guardarlo.
     """
     gasto = models.ForeignKey(VGGasto, on_delete=models.PROTECT, related_name="abonos")
-    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    monto = models.DecimalField(max_digits=14, decimal_places=6)
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="abonos_gasto")
     referencia = models.CharField(max_length=100, blank=True)
     fecha_pago = models.DateTimeField(auto_now_add=True)

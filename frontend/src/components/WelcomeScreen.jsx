@@ -1002,6 +1002,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <EstadoResultadosPage
             isMobile={isMobile}
             onBack={goBackView}
+            onNavigate={handleAnalystNavigation}
           />
         ) : activeView === 'admin-datos-fiscales' ? (
           <AnalystDatosFiscalesPage

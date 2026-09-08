@@ -42,7 +42,7 @@ const PRESETS = [
   { label: 'Este año', get: () => ({ desde: startOfYearIso(), hasta: todayIso() }) },
 ];
 
-function EstadoResultadosPage({ isMobile, onBack }) {
+function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
   const tasaCambio = useExchangeRate();
   const [desde, setDesde] = useState(startOfMonthIso());
   const [hasta, setHasta] = useState(todayIso());
@@ -153,7 +153,19 @@ function EstadoResultadosPage({ isMobile, onBack }) {
             </div>
 
             <div style={lineRowStyle}>
-              <span style={lineLabelStyle}>(−) Gastos operativos</span>
+              <span style={lineLabelStyle}>
+                (−) Gastos operativos
+                {onNavigate ? (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('gastos-operativos')}
+                    style={verDetalleGastosButtonStyle}
+                    className="no-print"
+                  >
+                    Ver detalle →
+                  </button>
+                ) : null}
+              </span>
               <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
                 −${formatMonto(data.gastos_total)}
                 <BsAmount amountUsd={data.gastos_total} bs={data.gastos_total_bs} tasa={tasaCambio} />
@@ -212,6 +224,7 @@ const finalRowStyle = (positive) => ({
 });
 
 const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const verDetalleGastosButtonStyle = { marginLeft: 10, border: 'none', background: 'transparent', color: '#ff9d9d', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0, textDecoration: 'underline' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default EstadoResultadosPage;

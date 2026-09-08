@@ -15,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .auth_helpers import _auth_response, _is_admin_user
 from .models import VGAbonoGasto, VGCategoriaGasto, VGGasto, VGMetodoPago
-from .tasa_cambio import tasa_cambio_para_registro
+from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
 
 def _serialize_categoria_gasto(categoria):
@@ -72,7 +72,15 @@ def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator):
         gasto=gasto, monto=monto, metodo_pago=metodo_pago, referencia=referencia, creado_por=operator,
         tasa_cambio_referencia=tasa_cambio_para_registro(),
     )
-    gasto.saldo_pendiente = gasto.saldo_pendiente - monto
+    # Redondeado a 2 decimales (y nunca negativo): monto puede traer 6
+    # decimales de precision (ver VGGasto.monto) pero saldo_pendiente siempre
+    # es un monto "limpio" en dolares — sin este redondeo, pagar un gasto
+    # completo con un monto convertido de bolivares podia dejar un saldo
+    # como "0.000007" en vez de un 0.00 exacto.
+    gasto.saldo_pendiente = max(
+        (gasto.saldo_pendiente - monto).quantize(Decimal('0.01')),
+        Decimal('0.00'),
+    )
     gasto.estado_pago = 'pagado' if gasto.saldo_pendiente <= 0 else 'abonada_parcial'
     gasto.actualizado_por = operator
     gasto.save(update_fields=['saldo_pendiente', 'estado_pago', 'actualizado_por', 'fecha_actualizacion'])
@@ -193,12 +201,54 @@ def admin_gastos_view(request):
     if not descripcion:
         return _auth_response({'ok': False, 'message': 'La descripcion es obligatoria.'}, status=400)
 
-    try:
-        monto = Decimal(str(data.get('monto', '')))
-    except InvalidOperation:
-        return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
-    if monto <= 0:
-        return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+    # El gasto se ingresa en UNA sola moneda — en dolares (`monto`) o en
+    # bolivares (`monto_bs`), nunca las dos a la vez, para no dejar ambiguo
+    # cual de los dos numeros es el que de verdad se gasto.
+    monto_raw = data.get('monto')
+    monto_bs_raw = data.get('monto_bs')
+    tiene_monto = monto_raw not in (None, '')
+    tiene_monto_bs = monto_bs_raw not in (None, '')
+    if tiene_monto and tiene_monto_bs:
+        return _auth_response({
+            'ok': False,
+            'message': 'Ingresa el monto solo en dólares o solo en bolívares, no en los dos.',
+        }, status=400)
+    if not tiene_monto and not tiene_monto_bs:
+        return _auth_response({'ok': False, 'message': 'Indica el monto del gasto.'}, status=400)
+
+    tasa_gasto = None
+    if tiene_monto_bs:
+        try:
+            monto_bs = Decimal(str(monto_bs_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
+        if monto_bs <= 0:
+            return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
+
+        # Tasa BCV de HOY, congelada en el momento en que se registra el gasto —
+        # el mismo criterio que el resto del sistema (ver
+        # _tasa_conversion_vigente en facturacion_views.py): un gasto se
+        # registra y convierte en el mismo instante, así que no hay "cotizado
+        # antes, pagado después" que pueda desfasarse por un refresco del
+        # cache del BCV — lo que se convierte es exactamente lo que se contó.
+        tasa_actual = obtener_tasa_actual()
+        tasa_gasto = tasa_actual.tasa if tasa_actual else None
+        if not tasa_gasto or tasa_gasto <= 0:
+            return _auth_response({
+                'ok': False,
+                'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.',
+            }, status=400)
+        # 6 decimales, no 2 (ver el docstring de VGGasto.monto): con la tasa
+        # BCV actual, redondear a centavos de dolar aca perdia varios
+        # bolivares al reconvertir el monto para mostrarlo despues.
+        monto = (monto_bs / tasa_gasto).quantize(Decimal('0.000001'))
+    else:
+        try:
+            monto = Decimal(str(monto_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+        if monto <= 0:
+            return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
 
     fecha_gasto = _parse_fecha(data.get('fecha_gasto'), default=date.today())
 
@@ -217,11 +267,15 @@ def admin_gastos_view(request):
             proveedor_nombre=str(data.get('proveedor_nombre', '') or '').strip(),
             numero_comprobante=str(data.get('numero_comprobante', '') or '').strip(),
             monto=monto,
-            saldo_pendiente=monto,
+            saldo_pendiente=monto.quantize(Decimal('0.01')),
             estado_pago='pendiente',
             fecha_gasto=fecha_gasto,
             notas=str(data.get('notas', '') or '').strip(),
-            tasa_cambio_referencia=tasa_cambio_para_registro(data.get('tasa_cambio_referencia')),
+            # Si se ingreso en bolivares, la tasa que de verdad se uso para
+            # convertirlo (ver arriba) — asi el monto en bolivares que se
+            # muestre despues siempre reconstruye exactamente lo que se
+            # contó, sin importar que el BCV cambie más tarde.
+            tasa_cambio_referencia=tasa_gasto if tiene_monto_bs else tasa_cambio_para_registro(data.get('tasa_cambio_referencia')),
             creado_por=request.user,
             actualizado_por=request.user,
         )

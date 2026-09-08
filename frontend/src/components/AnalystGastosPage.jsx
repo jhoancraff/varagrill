@@ -45,6 +45,7 @@ const emptyForm = {
   categoria_id: '',
   descripcion: '',
   monto: '',
+  monto_bs: '',
   fecha_gasto: todayIso(),
   proveedor_nombre: '',
   numero_comprobante: '',
@@ -171,8 +172,19 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
     if (!form.descripcion.trim()) {
       showError('Escribe una descripcion del gasto.'); return;
     }
-    if (!form.monto || Number(form.monto) <= 0) {
+    const tieneMonto = form.monto !== '' && form.monto !== null;
+    const tieneMontoBs = form.monto_bs !== '' && form.monto_bs !== null;
+    if (tieneMonto && tieneMontoBs) {
+      showError('Ingresa el monto solo en dólares o solo en bolívares, no en los dos.'); return;
+    }
+    if (!tieneMonto && !tieneMontoBs) {
+      showError('Indica el monto del gasto.'); return;
+    }
+    if (tieneMonto && Number(form.monto) <= 0) {
       showError('Indica un monto valido.'); return;
+    }
+    if (tieneMontoBs && Number(form.monto_bs) <= 0) {
+      showError('Indica un monto en bolívares válido.'); return;
     }
     const metodoPagoId = form.metodo_pago_id || (metodosPago[0] && metodosPago[0].id);
     if (form.pagado && !metodoPagoId) {
@@ -188,7 +200,8 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
         body: JSON.stringify({
           categoria_id: form.categoria_id,
           descripcion: form.descripcion,
-          monto: form.monto,
+          monto: tieneMonto ? form.monto : undefined,
+          monto_bs: tieneMontoBs ? form.monto_bs : undefined,
           fecha_gasto: form.fecha_gasto,
           proveedor_nombre: form.proveedor_nombre,
           numero_comprobante: form.numero_comprobante,
@@ -361,8 +374,23 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
           </label>
 
           <label style={fieldStyle}>
-            <span style={labelStyle}>Monto</span>
-            <input type="number" min="0" step="0.01" value={form.monto} onChange={(e) => setForm((c) => ({ ...c, monto: e.target.value }))} style={inputStyle} />
+            <span style={labelStyle}>Monto ($)</span>
+            <input
+              type="number" min="0" step="0.01" value={form.monto}
+              onChange={(e) => setForm((c) => ({ ...c, monto: e.target.value, monto_bs: e.target.value ? '' : c.monto_bs }))}
+              style={inputStyle}
+              placeholder="Deja vacío si lo vas a cargar en Bs"
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Monto (Bs)</span>
+            <input
+              type="number" min="0" step="0.01" value={form.monto_bs}
+              onChange={(e) => setForm((c) => ({ ...c, monto_bs: e.target.value, monto: e.target.value ? '' : c.monto }))}
+              style={inputStyle}
+              placeholder="Se convierte a $ con la tasa BCV de hoy"
+            />
           </label>
 
           <label style={fieldStyle}>

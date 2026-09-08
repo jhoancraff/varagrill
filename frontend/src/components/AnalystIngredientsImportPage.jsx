@@ -349,6 +349,11 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
               <span style={countBadgeStyle(ACCION_LABELS.error)}>{summary.errores.length} con error</span>
             ) : null}
           </div>
+          {summary.compra_total ? (
+            <div style={{ color: '#ffcf7d', fontWeight: 800, fontSize: 16 }}>
+              Total de la factura a pagar: ${Number(summary.compra_total).toFixed(2)}
+            </div>
+          ) : null}
           {summary.errores && summary.errores.length > 0 ? (
             <div style={{ display: 'grid', gap: 4 }}>
               {summary.errores.map((error, index) => (

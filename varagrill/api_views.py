@@ -3015,23 +3015,51 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 update_fields = ['actualizado_por', 'fecha_actualizacion']
 
                 # costo_linea_factura es el costo por unidad NOMINAL comprada (lo que se
-                # suma a stock_actual), para que la factura (VGDetalleCompra/VGCompra.total)
-                # refleje exactamente lo pagado. Es distinto de ingrediente.costo_unitario,
-                # que para el trío se calcula por unidad ÚTIL (peso_real, con merma) porque
-                # ese es el que se usa para costear recetas — usar ese acá infla la factura
-                # cuando peso_real < contenido_envase.
+                # suma a stock_actual), para que la factura (VGDetalleCompra) refleje
+                # exactamente lo pagado. Es distinto de ingrediente.costo_unitario, que
+                # para el trío se calcula por unidad ÚTIL (peso_real, con merma) porque
+                # ese es el que se usa para costear recetas — usar ese acá infla la
+                # factura cuando peso_real < contenido_envase.
+                #
+                # Para un ingrediente medido "por unidad" (ej. una botella de agua
+                # entera, sin merma posible), el trío peso neto/peso real no aplica —
+                # "peso_real" ahí termina siendo el contenido en ml/g de UN envase
+                # (ej. 350), una unidad totalmente distinta a "unidad" con la que se
+                # mide `cantidad`, y dividir precio_compra entre eso da un costo por
+                # unidad absurdamente chico (reportado 2026-09: 24 unidades a $1.08
+                # c/u con peso_real=350 daba total $0.07 en vez de $25.92). Para
+                # "unidad" el precio de compra YA es el precio por unidad — se usa
+                # tal cual, sin dividir entre nada.
                 costo_linea_factura = None
+                monto_linea_factura = None
                 if trio:
                     ingrediente.contenido_envase = trio['contenido_envase']
                     ingrediente.peso_real = trio['peso_real']
                     ingrediente.precio_compra = trio['precio_compra']
-                    ingrediente.costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
+                    if ingrediente.unidad_medida == 'unidad':
+                        ingrediente.costo_unitario = trio['precio_compra']
+                        costo_linea_factura = trio['precio_compra']
+                    else:
+                        ingrediente.costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
+                        costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
                     update_fields += ['contenido_envase', 'peso_real', 'precio_compra', 'costo_unitario']
-                    costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
+                    if ingrediente.unidad_medida == 'unidad':
+                        # precio_compra ya es el precio por unidad exacta — sin dividir
+                        # entre nada, así que cantidad * precio_compra es exacto siempre.
+                        monto_linea_factura = delta * trio['precio_compra']
+                    elif delta == trio['contenido_envase']:
+                        # Esta entrega es justo un envase completo: el monto exacto es
+                        # precio_compra tal cual, sin pasar por el costo unitario redondeado.
+                        monto_linea_factura = trio['precio_compra']
+                    else:
+                        # La cantidad no calza con un envase entero — no hay otra forma
+                        # que reconstruir multiplicando por el costo unitario redondeado.
+                        monto_linea_factura = delta * costo_linea_factura
                 elif delta > 0 and precio_total is not None:
                     ingrediente.costo_unitario = _costo_unitario_por_compra(precio_total, delta, ingrediente)
                     update_fields.append('costo_unitario')
                     costo_linea_factura = (precio_total / delta).quantize(Decimal('0.000001'))
+                    monto_linea_factura = precio_total
 
                 if cambia_stock:
                     ingrediente.stock_actual = stock_anterior + cantidad
@@ -3044,10 +3072,11 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 if delta > 0:
                     lote = _obtener_compra()
                     costo_linea = costo_linea_factura if costo_linea_factura is not None else Decimal('0')
+                    monto_linea = monto_linea_factura if monto_linea_factura is not None else Decimal('0')
                     VGDetalleCompra.objects.create(
                         compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
                     )
-                    lote.total = lote.total + (delta * costo_linea)
+                    lote.total = lote.total + monto_linea
                     lote.save(update_fields=['total'])
                     movimiento_compra = lote
 
@@ -3072,8 +3101,16 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 if not trio:
                     errores.append(f'{nombre}: faltan el peso neto, el peso real y el precio de compra para crearlo.')
                     continue
-                costo_inicial = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
-                costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
+                # Ver el comentario equivalente arriba (ingrediente existente con trío):
+                # para "unidad" el precio de compra ya es por unidad exacta, sin dividir
+                # entre el peso neto/peso real (que ahí no representa lo mismo que
+                # `cantidad` — ver el caso reportado del agua con envase en ml).
+                if unidad_normalizada == 'unidad':
+                    costo_inicial = trio['precio_compra']
+                    costo_linea_factura = trio['precio_compra']
+                else:
+                    costo_inicial = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
+                    costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
                 nuevo = VGIngrediente.objects.create(
                     nombre=nombre,
                     unidad_medida=unidad_normalizada,
@@ -3090,7 +3127,16 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 VGDetalleCompra.objects.create(
                     compra=lote, ingrediente=nuevo, cantidad=cantidad, costo_unitario=costo_linea_factura,
                 )
-                lote.total = lote.total + (cantidad * costo_linea_factura)
+                # Ver el comentario equivalente arriba: si esta carga inicial es justo
+                # un envase completo (o el ingrediente es "por unidad"), el monto exacto
+                # es precio_compra tal cual, no la reconstruccion redondeada.
+                if unidad_normalizada == 'unidad':
+                    monto_linea_factura = cantidad * trio['precio_compra']
+                elif cantidad == trio['contenido_envase']:
+                    monto_linea_factura = trio['precio_compra']
+                else:
+                    monto_linea_factura = cantidad * costo_linea_factura
+                lote.total = lote.total + monto_linea_factura
                 lote.save(update_fields=['total'])
                 VGMovimientoInventario.objects.create(
                     ingrediente=nuevo,
@@ -3108,6 +3154,7 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
     return {
         'creados': creados, 'actualizados': actualizados, 'ignorados': ignorados, 'errores': errores,
         'compra_id': compra.id if compra else None,
+        'compra_total': str(compra.total) if compra else None,
     }
 
 

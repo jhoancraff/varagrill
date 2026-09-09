@@ -36,6 +36,26 @@ def _serialize_abono_gasto(abono):
 
 
 def _serialize_gasto(gasto, incluir_detalle=False):
+    # saldo_pendiente se guarda con solo 2 decimales (ver docstring de VGGasto),
+    # asi que reconvertirlo a bolivares pierde los centimos de monto (6
+    # decimales) frente al total en bs del reporte de gastos, mostrando un
+    # monto distinto para la misma deuda en cuentas por pagar. Para que
+    # coincidan, el saldo en bs se calcula desde monto con toda su precision
+    # menos lo realmente abonado (abono.monto tambien usa 6 decimales), en vez
+    # de partir del saldo_pendiente ya redondeado.
+    saldo_preciso = gasto.monto - sum((abono.monto for abono in gasto.abonos.all()), Decimal('0'))
+
+    # Un gasto registrado en bolivares queda fijo en ese monto de bs (siempre
+    # se reconstruye con la tasa del dia que se registro, tasa_cambio_referencia)
+    # sin importar que el BCV cambie despues. Uno registrado en dolares, en
+    # cambio, debe mostrar su equivalente en bs actualizado con la tasa ACTUAL
+    # mientras siga pendiente, para reflejar lo que realmente costaria saldarlo hoy.
+    if gasto.moneda_origen == 'VES':
+        tasa_para_bs = gasto.tasa_cambio_referencia
+    else:
+        tasa_actual = obtener_tasa_actual()
+        tasa_para_bs = tasa_actual.tasa if tasa_actual else gasto.tasa_cambio_referencia
+
     data = {
         'id': gasto.id,
         'categoria_id': gasto.categoria_id,
@@ -49,8 +69,10 @@ def _serialize_gasto(gasto, incluir_detalle=False):
         'fecha_gasto': gasto.fecha_gasto.isoformat(),
         'fecha_creacion': gasto.fecha_creacion.isoformat(),
         'notas': gasto.notas,
+        'moneda_origen': gasto.moneda_origen,
         'tasa_cambio_referencia': str(gasto.tasa_cambio_referencia) if gasto.tasa_cambio_referencia is not None else None,
-        'total_bs': str((gasto.monto * gasto.tasa_cambio_referencia).quantize(Decimal('0.01'))) if gasto.tasa_cambio_referencia is not None else None,
+        'total_bs': str((gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))) if tasa_para_bs else None,
+        'saldo_pendiente_bs': str((saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))) if tasa_para_bs else None,
         'creado_por': (gasto.creado_por.get_full_name() or gasto.creado_por.username) if gasto.creado_por else '',
     }
     if incluir_detalle:
@@ -276,6 +298,7 @@ def admin_gastos_view(request):
             # muestre despues siempre reconstruye exactamente lo que se
             # contó, sin importar que el BCV cambie más tarde.
             tasa_cambio_referencia=tasa_gasto if tiene_monto_bs else tasa_cambio_para_registro(data.get('tasa_cambio_referencia')),
+            moneda_origen='VES' if tiene_monto_bs else 'USD',
             creado_por=request.user,
             actualizado_por=request.user,
         )

@@ -21,12 +21,14 @@ from .api_views import (
     _serialize_compra,
 )
 from .auth_helpers import _auth_response, _is_admin_user
+from .gastos_views import _serialize_gasto
 from .models import (
     VGAbonoCompra,
     VGCompra,
     VGCompraBorrador,
     VGDetalleCompra,
     VGDetalleCompraBorrador,
+    VGGasto,
     VGIngrediente,
     VGMetodoPago,
     VGMovimientoInventario,
@@ -268,7 +270,17 @@ def cuentas_por_pagar_view(request):
         VGCompra.objects.filter(estado_pago__in=['pendiente', 'abonada_parcial'])
         .order_by('fecha_creacion')
     )
-    return _auth_response({'ok': True, 'compras': [_serialize_compra(compra) for compra in compras]})
+    gastos = (
+        VGGasto.objects.filter(estado_pago__in=['pendiente', 'abonada_parcial'])
+        .select_related('categoria', 'creado_por')
+        .order_by('fecha_creacion')
+    )
+    cuentas = [
+        {**_serialize_compra(compra), 'tipo': 'compra'} for compra in compras
+    ] + [
+        {**_serialize_gasto(gasto), 'tipo': 'gasto'} for gasto in gastos
+    ]
+    return _auth_response({'ok': True, 'compras': cuentas})
 
 
 @csrf_exempt

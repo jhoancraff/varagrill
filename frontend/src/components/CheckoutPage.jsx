@@ -29,6 +29,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const [metodoByGroup, setMetodoByGroup] = useState({});
   const [clienteByGroup, setClienteByGroup] = useState({});
   const [prefacturaByGroup, setPrefacturaByGroup] = useState({});
+  // Descuento manual opcional al cobrar (ver pedidos_cobro_view/VGNotaEntrega):
+  // se activa con un check que primero pide confirmación (por eso el estado
+  // guarda si ya está desbloqueado, no solo si el checkbox está marcado — ver
+  // handleActivarDescuento/handleDesactivarDescuento). Vacío = sin descuento,
+  // se cobra el total completo; el motivo es obligatorio si hay monto.
+  const [descuentoActivoByGroup, setDescuentoActivoByGroup] = useState({});
+  const [descuentoMontoByGroup, setDescuentoMontoByGroup] = useState({});
+  const [descuentoMotivoByGroup, setDescuentoMotivoByGroup] = useState({});
   const [metodosPago, setMetodosPago] = useState([]);
   const [ajusteModal, setAjusteModal] = useState(null); // { modo, item, pedidoId, mesaActualId }
   const [ajusteBusy, setAjusteBusy] = useState(false);
@@ -412,6 +420,21 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       delete copy[groupKey];
       return copy;
     });
+    setDescuentoActivoByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
+    setDescuentoMontoByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
+    setDescuentoMotivoByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
   };
 
   // Cancelar un pedido individual desde caja (antes de cobrarlo) — solo visible para
@@ -440,6 +463,16 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }
   };
 
+  // Suma del total de los pedidos SELECCIONADOS de un grupo — usado tanto para
+  // validar el descuento (¿el monto puesto es menor al total real?) como para
+  // mostrarlo en el modal de confirmación.
+  const computeSelectedTotal = (group) => {
+    const selectedSet = selectedByGroup[group.key] || new Set();
+    return group.pedidos
+      .filter((pedido) => selectedSet.has(pedido.id))
+      .reduce((sum, pedido) => sum + Number(pedido.total), 0);
+  };
+
   // Valida antes de abrir el modal de confirmación (no dentro de handleNotaEntrega,
   // que ya corre DESPUÉS de que el usuario confirmó) — así "0 pedidos seleccionados"
   // o "sin método de pago" avisan de una con un toast arriba a la derecha, en vez de
@@ -455,7 +488,36 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       showError('No hay métodos de pago activos configurados.');
       return;
     }
+    if (descuentoActivoByGroup[group.key]) {
+      const montoRaw = descuentoMontoByGroup[group.key];
+      if (montoRaw !== '' && montoRaw !== undefined && montoRaw !== null) {
+        const montoCobrar = Number(montoRaw);
+        const selectedTotal = computeSelectedTotal(group);
+        if (montoCobrar > selectedTotal) {
+          showError(`El monto a cobrar ($${montoCobrar.toFixed(2)}) no puede ser mayor al total de la cuenta ($${selectedTotal.toFixed(2)}).`);
+          return;
+        }
+        if (montoCobrar < selectedTotal && !(descuentoMotivoByGroup[group.key] || '').trim()) {
+          showError('Indica el motivo del descuento antes de continuar.');
+          return;
+        }
+      }
+    }
     setPendingConfirm({ action: 'nota', group });
+  };
+
+  // El check de descuento no se activa directo: primero pide confirmación
+  // (advertencia de que se va a cobrar menos del total) — ver
+  // buildConfirmContent/handleConfirmPendingAction, acción 'activar-descuento'.
+  // Recién al confirmar se desbloquean los campos de monto y motivo.
+  const handleClickActivarDescuento = (group) => {
+    setPendingConfirm({ action: 'activar-descuento', group });
+  };
+
+  const handleDesactivarDescuento = (groupKey) => {
+    setDescuentoActivoByGroup((current) => ({ ...current, [groupKey]: false }));
+    setDescuentoMontoByGroup((current) => ({ ...current, [groupKey]: '' }));
+    setDescuentoMotivoByGroup((current) => ({ ...current, [groupKey]: '' }));
   };
 
   // --- Documento 1: Nota de entrega (cobro directo e inmediato, sin IVA ni numeracion fiscal) ---
@@ -470,6 +532,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       return;
     }
 
+    // montoCobrar es el monto FINAL a cobrar (no lo que se resta) — vacío/no
+    // activo significa "sin descuento", se cobra el total completo (el
+    // backend lo interpreta igual: ver pedidos_cobro_view).
+    const descuentoActivo = descuentoActivoByGroup[group.key];
+    const montoRaw = descuentoActivo ? descuentoMontoByGroup[group.key] : '';
+    const montoCobrar = montoRaw !== '' && montoRaw !== undefined && montoRaw !== null ? montoRaw : null;
+    const descuentoMotivo = descuentoActivo ? (descuentoMotivoByGroup[group.key] || '').trim() : '';
+
     setBusyGroup(group.key);
     try {
       const response = await fetch('/api/pedidos/cobro/', {
@@ -479,7 +549,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           'X-CSRFToken': getCookie('csrftoken') || '',
         },
         credentials: 'include',
-        body: JSON.stringify({ pedido_ids: selectedIds, metodo_pago_id: metodoPagoId }),
+        body: JSON.stringify({
+          pedido_ids: selectedIds,
+          metodo_pago_id: metodoPagoId,
+          monto_cobrar: montoCobrar,
+          descuento_motivo: descuentoMotivo,
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
@@ -488,10 +563,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         return;
       }
 
+      const descuentoAplicado = Number(data.nota_entrega.descuento_monto || 0);
       showSuccess(
         `Nota de entrega ${data.nota_entrega.codigo} registrada: `
         + `${formatMontoDocumento(data.nota_entrega.total, data.nota_entrega.moneda, tasaCambio)} `
-        + `(${data.nota_entrega.pedidos.length} pedido(s)). Pendiente de cobro — `
+        + `(${data.nota_entrega.pedidos.length} pedido(s))`
+        + `${descuentoAplicado > 0 ? ` con descuento de $${descuentoAplicado.toFixed(2)}` : ''}. Pendiente de cobro — `
         + `abona desde el reporte de notas de entrega.`,
       );
       setNotasRefreshToken((current) => current + 1);
@@ -660,6 +737,16 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       };
     }
 
+    if (action === 'activar-descuento') {
+      return {
+        title: 'Aplicar descuento',
+        message: `Vas a habilitar un descuento manual para la cuenta de ${group.label}. Por defecto se cobrará el total completo; `
+          + 'si pones un monto, ese será el TOTAL que se le cobre al cliente (no lo que se resta), y vas a tener que indicar el motivo '
+          + 'si queda por debajo del total real (queda guardado para auditoría). ¿Estás de acuerdo?',
+        confirmLabel: 'Sí, habilitar descuento',
+      };
+    }
+
     if (action === 'cancelar-pedido') {
       const { pedido } = pending;
       return {
@@ -690,9 +777,20 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     const totalLabel = formatMontoDocumento(selectedTotal, metodoSeleccionado ? metodoSeleccionado.moneda : 'USD', tasaCambio);
 
     if (action === 'nota') {
+      const montoRaw = descuentoActivoByGroup[group.key] ? descuentoMontoByGroup[group.key] : '';
+      const tieneMontoCobrar = montoRaw !== '' && montoRaw !== undefined && montoRaw !== null;
+      const montoCobrar = tieneMontoCobrar ? Number(montoRaw) : selectedTotal;
+      const hayDescuento = tieneMontoCobrar && montoCobrar < selectedTotal;
+      const montoCobrarLabel = tieneMontoCobrar
+        ? formatMontoDocumento(montoCobrar, metodoSeleccionado ? metodoSeleccionado.moneda : 'USD', tasaCambio)
+        : null;
       return {
         title: 'Registrar nota de entrega',
-        message: `Vas a cobrar ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel} con una nota de entrega (sin factura fiscal). `
+        message: `Vas a cobrar ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel}`
+          + (hayDescuento
+            ? `, pero con el monto puesto se va a cobrar ${montoCobrarLabel} (descuento de $${(selectedTotal - montoCobrar).toFixed(2)})`
+            : tieneMontoCobrar ? ` (sin descuento real: el monto puesto es igual al total)` : '')
+          + ' con una nota de entrega (sin factura fiscal). '
           + 'El número de referencia del pago se registra luego, al abonarla desde el reporte de notas de entrega. ¿Confirmas?',
         confirmLabel: 'Sí, registrar',
       };
@@ -725,6 +823,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     if (action === 'advertencia-parcial') {
       setPendingConfirm(null);
       siguienteAccion();
+      return;
+    }
+    if (action === 'activar-descuento') {
+      setDescuentoActivoByGroup((current) => ({ ...current, [group.key]: true }));
+      setPendingConfirm(null);
       return;
     }
     if (action === 'nota') {
@@ -976,6 +1079,17 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </select>
                     </div>
 
+                    <DescuentoManualBlock
+                      group={selectedGroup}
+                      activo={Boolean(descuentoActivoByGroup[selectedGroup.key])}
+                      monto={descuentoMontoByGroup[selectedGroup.key] || ''}
+                      motivo={descuentoMotivoByGroup[selectedGroup.key] || ''}
+                      onActivar={() => handleClickActivarDescuento(selectedGroup)}
+                      onDesactivar={() => handleDesactivarDescuento(selectedGroup.key)}
+                      onMontoChange={(value) => setDescuentoMontoByGroup((current) => ({ ...current, [selectedGroup.key]: value }))}
+                      onMotivoChange={(value) => setDescuentoMotivoByGroup((current) => ({ ...current, [selectedGroup.key]: value }))}
+                    />
+
                     <div style={docButtonsRowStyle(isMobile)}>
                       <button
                         type="button"
@@ -1027,6 +1141,18 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     <div style={detailTotalsStyle}>
                       <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(prefactura.total, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
                     </div>
+
+                    <DescuentoManualBlock
+                      group={selectedGroup}
+                      activo={Boolean(descuentoActivoByGroup[selectedGroup.key])}
+                      monto={descuentoMontoByGroup[selectedGroup.key] || ''}
+                      motivo={descuentoMotivoByGroup[selectedGroup.key] || ''}
+                      onActivar={() => handleClickActivarDescuento(selectedGroup)}
+                      onDesactivar={() => handleDesactivarDescuento(selectedGroup.key)}
+                      onMontoChange={(value) => setDescuentoMontoByGroup((current) => ({ ...current, [selectedGroup.key]: value }))}
+                      onMotivoChange={(value) => setDescuentoMotivoByGroup((current) => ({ ...current, [selectedGroup.key]: value }))}
+                    />
+
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
                         type="button"
@@ -1153,6 +1279,49 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         />
       ) : null}
     </section>
+  );
+}
+
+// Checklist para aplicar un descuento manual al cobrar (ver
+// pedidos_cobro_view/VGNotaEntrega.descuento_monto): marcar el check pide
+// confirmación primero (ver acción 'activar-descuento' en
+// buildConfirmContent/handleConfirmPendingAction); recién al confirmar se
+// desbloquean el monto y el motivo. El monto es el TOTAL FINAL a cobrar (no
+// lo que se resta) — ej. si la cuenta da $13.90 y se pone $10, se cobran $10.
+// Vacío = sin descuento, se cobra el total completo; el motivo es
+// obligatorio solo si el monto puesto queda por debajo del total real.
+function DescuentoManualBlock({ group, activo, monto, motivo, onActivar, onDesactivar, onMontoChange, onMotivoChange }) {
+  return (
+    <div style={descuentoBlockStyle}>
+      <label style={descuentoCheckboxRowStyle}>
+        <input
+          type="checkbox"
+          checked={activo}
+          onChange={(event) => (event.target.checked ? onActivar() : onDesactivar())}
+        />
+        <span>Aplicar descuento a la cuenta de {group.label}</span>
+      </label>
+      {activo ? (
+        <div style={descuentoFieldsRowStyle}>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="Monto final a cobrar ($, vacío = cobrar el total)"
+            value={monto}
+            onChange={(event) => onMontoChange(event.target.value)}
+            style={inputStyle}
+          />
+          <input
+            type="text"
+            placeholder="Motivo del descuento (obligatorio si hay monto)"
+            value={motivo}
+            onChange={(event) => onMotivoChange(event.target.value)}
+            style={{ ...inputStyle, flex: 1 }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1747,6 +1916,29 @@ const clienteHintStyle = {
   margin: 0,
   color: '#a89999',
   fontSize: 12,
+};
+
+const descuentoBlockStyle = {
+  display: 'grid',
+  gap: 8,
+  padding: '10px 12px',
+  borderRadius: 14,
+  border: '1px solid rgba(159, 216, 255, 0.25)',
+  background: 'rgba(159, 216, 255, 0.06)',
+};
+const descuentoCheckboxRowStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  color: '#d2e9ff',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+const descuentoFieldsRowStyle = {
+  display: 'flex',
+  gap: 8,
+  flexWrap: 'wrap',
 };
 
 const inputStyle = {

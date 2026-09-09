@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
-import { formatBs } from '../utils/currency';
+import { formatBs, formatBsRaw } from '../utils/currency';
 
 function formatUsdBs(amount, tasa) {
   const usd = `$${Number(amount).toFixed(2)}`;
   const bs = formatBs(amount, tasa);
+  return bs ? `${usd} (${bs})` : usd;
+}
+
+// Para el saldo pendiente de un gasto: saldo_pendiente_bs viene precalculado
+// desde el backend con la precision completa de monto (ver _serialize_gasto),
+// asi que coincide con el total en bs que muestra el reporte de gastos — a
+// diferencia de convertir aqui saldo_pendiente (redondeado a 2 decimales),
+// que perdia centimos y mostraba un bs distinto para la misma deuda.
+function formatSaldoUsdBs(amount, tasa, saldoBsPreciso) {
+  const usd = `$${Number(amount).toFixed(2)}`;
+  const bs = saldoBsPreciso != null ? formatBsRaw(saldoBsPreciso) : formatBs(amount, tasa);
   return bs ? `${usd} (${bs})` : usd;
 }
 
@@ -15,6 +26,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const [error, setError] = useState('');
   const [metodosPago, setMetodosPago] = useState([]);
   const [selectedCompraId, setSelectedCompraId] = useState(null);
+  const [selectedTipo, setSelectedTipo] = useState(null);
   const [compraDetalle, setCompraDetalle] = useState(null);
   const [loadingDetalle, setLoadingDetalle] = useState(false);
   const [montoAbono, setMontoAbono] = useState('');
@@ -61,20 +73,21 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     loadMetodosPago();
   }, []);
 
-  const fetchCompraDetalle = useCallback(async (compraId) => {
+  const fetchCompraDetalle = useCallback(async (compraId, tipo) => {
     setLoadingDetalle(true);
+    const url = tipo === 'gasto' ? `/api/admin/gastos/${compraId}/` : `/api/admin/compras/${compraId}/`;
     try {
-      const response = await fetch(`/api/admin/compras/${compraId}/`, { credentials: 'include', cache: 'no-store' });
+      const response = await fetch(url, { credentials: 'include', cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         setFeedbackType('error');
-        setFeedback(data.message || 'No se pudo cargar el detalle de la compra.');
+        setFeedback(data.message || 'No se pudo cargar el detalle.');
         return;
       }
-      setCompraDetalle(data.compra);
+      setCompraDetalle({ ...(tipo === 'gasto' ? data.gasto : data.compra), tipo });
     } catch (requestError) {
       setFeedbackType('error');
-      setFeedback('Error de red al cargar el detalle de la compra.');
+      setFeedback('Error de red al cargar el detalle.');
     } finally {
       setLoadingDetalle(false);
     }
@@ -84,7 +97,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setFeedback('');
     setMontoAbono('');
     setSelectedCompraId(compra.id);
-    fetchCompraDetalle(compra.id);
+    setSelectedTipo(compra.tipo);
+    fetchCompraDetalle(compra.id, compra.tipo);
   };
 
   const handleRegistrarAbono = async (event) => {
@@ -102,8 +116,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setSavingAbono(true);
     setFeedback('');
     setUltimoAbonoId(null);
+    const url = selectedTipo === 'gasto'
+      ? `/api/admin/gastos/${selectedCompraId}/abonos/`
+      : `/api/admin/compras/${selectedCompraId}/abonos/`;
     try {
-      const response = await fetch(`/api/admin/compras/${selectedCompraId}/abonos/`, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -115,9 +132,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         setFeedback(data.message || 'No se pudo registrar el abono.');
         return;
       }
+      const cuentaActualizada = selectedTipo === 'gasto' ? data.gasto : data.compra;
       setFeedbackType('success');
-      setFeedback(`Abono de ${formatUsdBs(data.abono.monto, data.abono.tasa_cambio_referencia ?? tasaCambio)} registrado. Saldo pendiente: ${formatUsdBs(data.compra.saldo_pendiente, data.compra.tasa_cambio_referencia ?? tasaCambio)}.`);
-      setCompraDetalle(data.compra);
+      setFeedback(`Abono de ${formatUsdBs(data.abono.monto, data.abono.tasa_cambio_referencia ?? tasaCambio)} registrado. Saldo pendiente: ${formatSaldoUsdBs(cuentaActualizada.saldo_pendiente, cuentaActualizada.tasa_cambio_referencia ?? tasaCambio, cuentaActualizada.saldo_pendiente_bs)}.`);
+      setCompraDetalle({ ...cuentaActualizada, tipo: selectedTipo });
       setUltimoAbonoId(data.abono.id);
       setMontoAbono('');
       await fetchCompras();
@@ -136,7 +154,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
           <div style={eyebrowStyle}>Contabilidad</div>
           <h2 style={titleStyle(isMobile)}>Cuentas por pagar</h2>
           <p style={subtitleStyle}>
-            Lotes de compra a proveedores con saldo pendiente. Selecciona uno para registrar los abonos hasta saldarlo.
+            Lotes de compra a proveedores y gastos operativos con saldo pendiente. Selecciona uno para registrar los abonos hasta saldarlo.
           </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
@@ -150,7 +168,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
           {ultimoAbonoId && onVerComprobante ? (
             <button
               type="button"
-              onClick={() => onVerComprobante('compra', selectedCompraId, ultimoAbonoId)}
+              onClick={() => onVerComprobante(selectedTipo, selectedCompraId, ultimoAbonoId)}
               style={comprobanteLinkStyle}
             >
               Ver comprobante de pago
@@ -162,7 +180,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       {loading ? <div style={emptyStateStyle}>Cargando cuentas por pagar...</div> : null}
       {!loading && error ? <div style={errorStyle}>{error}</div> : null}
       {!loading && !error && compras.length === 0 ? (
-        <div style={emptyStateStyle}>No hay deudas pendientes con proveedores en este momento.</div>
+        <div style={emptyStateStyle}>No hay deudas pendientes con proveedores ni gastos por saldar en este momento.</div>
       ) : null}
 
       {!loading && !error && compras.length > 0 ? (
@@ -176,14 +194,17 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 style={compraCardStyle(selectedCompraId === compra.id)}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ color: '#fff', fontWeight: 700 }}>Lote #{compra.id}</span>
+                  <span style={{ color: '#fff', fontWeight: 700 }}>
+                    {compra.tipo === 'gasto' ? `Gasto #${compra.id}` : `Lote #${compra.id}`}
+                  </span>
                   <span style={estadoBadgeStyle(compra.estado_pago)}>{estadoLabel(compra.estado_pago)}</span>
                 </div>
                 <div style={{ color: '#d2c4c4', fontSize: 13 }}>
-                  {compra.proveedor_nombre}
+                  {compra.tipo === 'gasto' ? (compra.categoria_nombre || compra.descripcion) : compra.proveedor_nombre}
                   {compra.numero_factura_proveedor ? ` · Factura ${compra.numero_factura_proveedor}` : ''}
+                  {compra.numero_comprobante ? ` · Comp. ${compra.numero_comprobante}` : ''}
                 </div>
-                <div style={{ color: '#ffcf7d', fontWeight: 700 }}>Saldo: {formatUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio)}</div>
+                <div style={{ color: '#ffcf7d', fontWeight: 700 }}>Saldo: {formatSaldoUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio, compra.saldo_pendiente_bs)}</div>
               </button>
             ))}
           </div>
@@ -196,25 +217,31 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
             ) : (
               <>
                 <div style={{ color: '#ffb0b0', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Lote #{compraDetalle.id} · {compraDetalle.proveedor_nombre}
+                  {compraDetalle.tipo === 'gasto'
+                    ? `Gasto #${compraDetalle.id} · ${compraDetalle.categoria_nombre}`
+                    : `Lote #${compraDetalle.id} · ${compraDetalle.proveedor_nombre}`}
                 </div>
                 <div style={{ color: '#d2c4c4', fontSize: 13 }}>
                   {compraDetalle.numero_factura_proveedor ? `Factura ${compraDetalle.numero_factura_proveedor} · ` : ''}
+                  {compraDetalle.numero_comprobante ? `Comprobante ${compraDetalle.numero_comprobante} · ` : ''}
+                  {compraDetalle.tipo === 'gasto' && compraDetalle.descripcion ? `${compraDetalle.descripcion} · ` : ''}
                   Cargado el {new Date(compraDetalle.fecha_creacion).toLocaleDateString('es-VE')}
                 </div>
 
-                <div style={{ display: 'grid', gap: 4 }}>
-                  {compraDetalle.detalles.map((detalle) => (
-                    <div key={detalle.id} style={lineaRowStyle}>
-                      <span>{detalle.cantidad} {detalle.unidad_medida} — {detalle.ingrediente_nombre}</span>
-                      <span>{formatUsdBs(detalle.subtotal, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
-                    </div>
-                  ))}
-                </div>
+                {compraDetalle.tipo !== 'gasto' ? (
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    {compraDetalle.detalles.map((detalle) => (
+                      <div key={detalle.id} style={lineaRowStyle}>
+                        <span>{detalle.cantidad} {detalle.unidad_medida} — {detalle.ingrediente_nombre}</span>
+                        <span>{formatUsdBs(detalle.subtotal, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div style={detailTotalsStyle}>
-                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
-                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatSaldoUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.saldo_pendiente_bs)}</span>
                 </div>
 
                 {compraDetalle.abonos.length > 0 ? (
@@ -226,7 +253,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           {formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio)}
                           {onVerComprobante ? (
-                            <button type="button" onClick={() => onVerComprobante('compra', compraDetalle.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">
+                            <button type="button" onClick={() => onVerComprobante(compraDetalle.tipo, compraDetalle.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">
                               🖨
                             </button>
                           ) : null}
@@ -236,7 +263,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                   </div>
                 ) : null}
 
-                {compraDetalle.estado_pago !== 'pagada' ? (
+                {!esEstadoSaldado(compraDetalle.estado_pago) ? (
                   <form onSubmit={handleRegistrarAbono} style={abonoFormStyle(isMobile)}>
                     <input
                       type="number"
@@ -277,8 +304,12 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 function estadoLabel(estado) {
   if (estado === 'pendiente') return 'Pendiente';
   if (estado === 'abonada_parcial') return 'Abonada';
-  if (estado === 'pagada') return 'Pagada';
+  if (estado === 'pagada' || estado === 'pagado') return 'Pagada';
   return estado;
+}
+
+function esEstadoSaldado(estado) {
+  return estado === 'pagada' || estado === 'pagado';
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 4 : 8 });

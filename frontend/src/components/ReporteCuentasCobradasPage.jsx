@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
-import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -24,6 +24,9 @@ function getCookie(name) {
 }
 
 function ReporteCuentasCobradasPage({ isMobile, onBack }) {
+  // Ver el mismo comentario en ReporteVentasDiaPage: si viene de un cuadre por
+  // rango, esta pantalla consulta desde/hasta en vez de un solo dia.
+  const [rango] = useState(() => getRangoSeleccionado());
   const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -37,27 +40,30 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch(`/api/admin/reportes/cuentas-cobradas-dia/?fecha=${fechaConsultada}`, {
+      const query = rango ? `desde=${rango.desde}&hasta=${rango.hasta}` : `fecha=${fechaConsultada}`;
+      const response = await fetch(`/api/admin/reportes/cuentas-cobradas-dia/?${query}`, {
         credentials: 'include',
         cache: 'no-store',
       });
       const json = await response.json();
       if (!response.ok || !json.ok) {
-        throw new Error(json.message || 'No se pudo cargar las cuentas cobradas hoy.');
+        throw new Error(json.message || 'No se pudo cargar las cuentas cobradas.');
       }
       setData(json);
     } catch (error) {
-      setMessage(error.message || 'No se pudo cargar las cuentas cobradas hoy.');
+      setMessage(error.message || 'No se pudo cargar las cuentas cobradas.');
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rango]);
 
   useEffect(() => {
     loadReport(fecha);
-    setFechaSeleccionada(fecha);
-  }, [fecha, loadReport]);
+    if (!rango) {
+      setFechaSeleccionada(fecha);
+    }
+  }, [fecha, loadReport, rango]);
 
   const abrirDetalleNota = async (notaId) => {
     setNotaSeleccionadaId(notaId);
@@ -87,7 +93,7 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver a Cuadre de caja
+          ← Volver a Cuadre de caja{rango ? ' por rango' : ''}
         </button>
         <button type="button" onClick={() => window.print()} style={printButtonStyle}>
           Imprimir / Guardar PDF
@@ -96,23 +102,27 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
 
       <div style={headerRowStyle(isMobile)}>
         <div>
-          <h2 style={titleStyle(isMobile)}>Cuentas cobradas hoy</h2>
+          <h2 style={titleStyle(isMobile)}>Cuentas cobradas{rango ? '' : ' hoy'}</h2>
           <p style={subtitleStyle}>
-            Fiados de días anteriores que se cobraron hoy. El monto en dólares es siempre el mismo (la deuda no
-            cambia), pero el bolívar se devalúa mientras está pendiente — acá se ve cuánto más había que cobrar
-            en bolívares hoy frente a lo que hubiera sido el día que se emitió la nota.
+            Fiados de fechas anteriores que se cobraron en el período. El monto en dólares es siempre el mismo (la
+            deuda no cambia), pero el bolívar se devalúa mientras está pendiente — acá se ve cuánto más había que
+            cobrar en bolívares frente a lo que hubiera sido el día que se emitió la nota.
           </p>
         </div>
-        <label className="no-print" style={dateLabelStyle}>
-          Fecha
-          <input
-            type="date"
-            value={fecha}
-            max={todayIso()}
-            onChange={(event) => setFecha(event.target.value)}
-            style={dateInputStyle}
-          />
-        </label>
+        {rango ? (
+          <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
+        ) : (
+          <label className="no-print" style={dateLabelStyle}>
+            Fecha
+            <input
+              type="date"
+              value={fecha}
+              max={todayIso()}
+              onChange={(event) => setFecha(event.target.value)}
+              style={dateInputStyle}
+            />
+          </label>
+        )}
       </div>
 
       {message ? <div style={noticeStyle} className="no-print">{message}</div> : null}
@@ -121,10 +131,10 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
 
       {!loading && data ? (
         <section style={panelStyle}>
-          <div style={sectionTitleStyle}>Cobrado hoy de días anteriores — {fecha}</div>
+          <div style={sectionTitleStyle}>Cobrado de fechas anteriores — {rango ? `${rango.desde} al ${rango.hasta}` : fecha}</div>
 
           {pagos.length === 0 ? (
-            <div style={emptyStyle}>Hoy no se cobró ninguna cuenta pendiente de un día anterior.</div>
+            <div style={emptyStyle}>No se cobró ninguna cuenta pendiente de una fecha anterior en este período.</div>
           ) : (
             <div style={tableWrapStyle}>
               <div style={cobradasTableStyle}>

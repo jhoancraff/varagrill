@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
-import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -30,6 +30,11 @@ const ESTADO_LABEL = {
 };
 
 function ReporteVentasDiaPage({ isMobile, onBack }) {
+  // El rango se lee una sola vez al montar (viene del cuadre por rango, ver
+  // ReporteCuadreCajaRangoPage) — si esta presente, esta pantalla opera en
+  // "modo rango": consulta desde/hasta en vez de un solo dia y no permite
+  // corregir la cuenta de un pago (esa correccion necesita un dia puntual).
+  const [rango] = useState(() => getRangoSeleccionado());
   const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +53,8 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch(`/api/admin/reportes/ventas-dia/?fecha=${fechaConsultada}`, {
+      const query = rango ? `desde=${rango.desde}&hasta=${rango.hasta}` : `fecha=${fechaConsultada}`;
+      const response = await fetch(`/api/admin/reportes/ventas-dia/?${query}`, {
         credentials: 'include',
         cache: 'no-store',
       });
@@ -63,12 +69,14 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rango]);
 
   useEffect(() => {
     loadReport(fecha);
-    setFechaSeleccionada(fecha);
-  }, [fecha, loadReport]);
+    if (!rango) {
+      setFechaSeleccionada(fecha);
+    }
+  }, [fecha, loadReport, rango]);
 
   const abrirDetalleNota = async (notaId) => {
     setNotaSeleccionadaId(notaId);
@@ -151,7 +159,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver a Cuadre de caja
+          ← Volver a Cuadre de caja{rango ? ' por rango' : ''}
         </button>
         <button type="button" onClick={() => window.print()} style={printButtonStyle}>
           Imprimir / Guardar PDF
@@ -160,19 +168,23 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
 
       <div style={headerRowStyle(isMobile)}>
         <div>
-          <h2 style={titleStyle(isMobile)}>Ventas del día — detalle</h2>
-          <p style={subtitleStyle}>Cada nota de entrega emitida este día, con lo que se cobró: dólares, bolívares, método, banco y referencia.</p>
+          <h2 style={titleStyle(isMobile)}>Ventas {rango ? 'del rango' : 'del día'} — detalle</h2>
+          <p style={subtitleStyle}>Cada nota de entrega emitida en el período, con lo que se cobró: dólares, bolívares, método, banco y referencia.</p>
         </div>
-        <label className="no-print" style={dateLabelStyle}>
-          Fecha
-          <input
-            type="date"
-            value={fecha}
-            max={todayIso()}
-            onChange={(event) => setFecha(event.target.value)}
-            style={dateInputStyle}
-          />
-        </label>
+        {rango ? (
+          <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
+        ) : (
+          <label className="no-print" style={dateLabelStyle}>
+            Fecha
+            <input
+              type="date"
+              value={fecha}
+              max={todayIso()}
+              onChange={(event) => setFecha(event.target.value)}
+              style={dateInputStyle}
+            />
+          </label>
+        )}
       </div>
 
       {message ? <div style={noticeStyle} className="no-print">{message}</div> : null}
@@ -181,13 +193,13 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
 
       {!loading && data ? (
         <section style={panelStyle}>
-          <div style={sectionTitleStyle}>Notas de entrega — {fecha}</div>
+          <div style={sectionTitleStyle}>Notas de entrega — {rango ? `${rango.desde} al ${rango.hasta}` : fecha}</div>
 
           {notas.length === 0 ? (
-            <div style={emptyStyle}>No se emitió ninguna nota de entrega este día.</div>
+            <div style={emptyStyle}>No se emitió ninguna nota de entrega en este período.</div>
           ) : (
             <div style={tableWrapStyle}>
-              <div style={ventasTableStyle}>
+              <div style={ventasTableStyle(rango)}>
                 <div style={headStyle}>Nota</div>
                 <div style={headStyle}>Cliente</div>
                 <div style={headStyle}>Monto ($)</div>
@@ -196,7 +208,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                 <div style={headStyle}>Banco</div>
                 <div style={headStyle}>Referencia</div>
                 <div style={headStyle}>Estado</div>
-                <div style={headStyle} className="no-print">Cuenta</div>
+                {!rango ? <div style={headStyle} className="no-print">Cuenta</div> : null}
                 {notas.map((nota) => {
                   const pagos = nota.pagos.length > 0 ? nota.pagos : [null];
                   return pagos.map((pago, index) => (
@@ -223,14 +235,16 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                       <div style={cellStyle}>{pago && pago.cuenta_bancaria ? pago.cuenta_bancaria : '—'}</div>
                       <div style={cellStyle}>{pago ? pago.referencia : '—'}</div>
                       <div style={cellStyle}>{index === 0 ? (ESTADO_LABEL[nota.estado] || nota.estado) : '—'}</div>
-                      <div style={cellStyle} className="no-print">
-                        {pago ? (
-                          <button type="button" onClick={() => empezarCambioMetodo(pago)} style={cambiarCuentaButtonStyle}>
-                            Cambiar
-                          </button>
-                        ) : '—'}
-                      </div>
-                      {pago && editandoPagoId === pago.id ? (
+                      {!rango ? (
+                        <div style={cellStyle} className="no-print">
+                          {pago ? (
+                            <button type="button" onClick={() => empezarCambioMetodo(pago)} style={cambiarCuentaButtonStyle}>
+                              Cambiar
+                            </button>
+                          ) : '—'}
+                        </div>
+                      ) : null}
+                      {!rango && pago && editandoPagoId === pago.id ? (
                         <div style={editRowWrapStyle} className="no-print">
                           <span style={{ color: '#d2c3c3', fontSize: 13 }}>
                             Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta —
@@ -388,7 +402,14 @@ const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, bo
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const ventasTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr) minmax(100px,0.6fr)', minWidth: 1120, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const ventasTableStyle = (rango) => ({
+  display: 'grid',
+  gridTemplateColumns: rango
+    ? 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr)'
+    : 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr) minmax(100px,0.6fr)',
+  minWidth: rango ? 1020 : 1120,
+  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden',
+});
 const cambiarCuentaButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '5px 12px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 const editRowWrapStyle = { gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,157,157,0.06)' };
 const editSelectStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.16)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13 };

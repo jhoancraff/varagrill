@@ -5729,6 +5729,25 @@ def pedidos_cobro_view(request):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # Descuento manual opcional (ej. cliente frecuente, cortesía, negociación en
+    # dólares) — `monto_cobrar` es el monto FINAL que se le va a cobrar al
+    # cliente (no lo que se resta): si la cuenta da $13.90 y se pone $10, se
+    # cobran $10, así de directo. Vacío/ausente = sin descuento, se cobra el
+    # total completo de los pedidos. El motivo es obligatorio si el monto
+    # puesto termina siendo menor al total: es lo único que deja constancia
+    # de POR QUÉ se cobró menos de lo que sumaban los pedidos, para auditoría.
+    monto_cobrar_raw = data.get('monto_cobrar')
+    monto_cobrar = None
+    if monto_cobrar_raw not in (None, ''):
+        try:
+            monto_cobrar = Decimal(str(monto_cobrar_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El monto a cobrar no es válido.'}, status=400)
+        if monto_cobrar < 0:
+            return _auth_response({'ok': False, 'message': 'El monto a cobrar no puede ser negativo.'}, status=400)
+
+    descuento_motivo = str(data.get('descuento_motivo', '') or '').strip()
+
     # A esta altura la nota de entrega todavia no tiene un cobro real: metodo_pago
     # es solo el metodo declarado al emitirla (define en que moneda se imprime),
     # el dinero se registra aparte en uno o varios abonos — ver
@@ -5810,20 +5829,37 @@ def pedidos_cobro_view(request):
                         creado_por=request.user,
                     )
 
+        if monto_cobrar is not None and monto_cobrar > total_cobrado:
+            return _auth_response({
+                'ok': False,
+                'message': f'El monto a cobrar (${monto_cobrar}) no puede ser mayor al total de la cuenta (${total_cobrado}).',
+            }, status=400)
+
+        total_con_descuento = monto_cobrar if monto_cobrar is not None else total_cobrado
+        descuento_monto = (total_cobrado - total_con_descuento) if monto_cobrar is not None else Decimal('0')
+        if descuento_monto > 0 and not descuento_motivo:
+            return _auth_response({'ok': False, 'message': 'Indica el motivo del descuento.'}, status=400)
+
         # El cobro directo (mesero o cajera) siempre genera una nota de entrega —
         # el recibo de venta sin efecto fiscal que hoy reemplaza a la factura
         # mientras el SENIAT termina de homologar el sistema (ver VGNotaEntrega).
         # Igual que una factura, nace con saldo pendiente por el total: el
         # dinero se registra aparte como uno o varios abonos
-        # (nota_entrega_abono_view), no en el momento de la emisión.
+        # (nota_entrega_abono_view), no en el momento de la emisión. El total
+        # ya sale con el descuento aplicado (si hay); descuento_monto/_motivo
+        # quedan guardados aparte para que quede constancia de cuánto se
+        # descontó y por qué (auditoría) sin perder el total original de los
+        # pedidos, que sigue viviendo en cada VGPedido.total.
         nota_entrega = VGNotaEntrega.objects.create(
             metodo_pago=metodo_pago,
-            total=total_cobrado,
-            saldo_pendiente=total_cobrado,
+            total=total_con_descuento,
+            saldo_pendiente=total_con_descuento,
             estado='pendiente_pago',
             moneda=metodo_pago.moneda,
             tasa_cambio_referencia=tasa_cambio_pago,
             referencia=referencia,
+            descuento_monto=descuento_monto,
+            descuento_motivo=descuento_motivo,
             creado_por=request.user,
             actualizado_por=request.user,
         )
@@ -5841,10 +5877,12 @@ def pedidos_cobro_view(request):
             'id': nota_entrega.id,
             'codigo': nota_entrega.codigo,
             'referencia': referencia,
-            'total': str(total_cobrado),
+            'total': str(total_con_descuento),
             'saldo_pendiente': str(nota_entrega.saldo_pendiente),
             'estado': nota_entrega.estado,
             'moneda': metodo_pago.moneda,
+            'descuento_monto': str(descuento_monto),
+            'descuento_motivo': descuento_motivo,
             'pedidos': [pedido.id for pedido in pedidos],
         },
     }, status=201)

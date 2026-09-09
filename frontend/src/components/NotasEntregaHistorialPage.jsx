@@ -348,6 +348,12 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                   <div style={{ color: '#ffcf7d', fontWeight: 700 }}>
                     Total: {formatMontoDocumento(nota.total, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
                   </div>
+                  {Number(nota.descuento_monto) > 0 ? (
+                    <div style={{ color: '#9fd8ff', fontSize: 12.5 }} title={nota.descuento_motivo}>
+                      Descuento aplicado: -${Number(nota.descuento_monto).toFixed(2)} — {nota.descuento_motivo}
+                      {nota.creado_por ? ` (${nota.creado_por})` : ''}
+                    </div>
+                  ) : null}
                   {!['pagada', 'anulada'].includes(nota.estado) ? (
                     <div style={{ color: '#ff9b9b', fontWeight: 700 }}>
                       Saldo: {formatMontoDocumento(nota.saldo_pendiente, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}

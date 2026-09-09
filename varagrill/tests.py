@@ -1321,9 +1321,14 @@ class TasaCambioAutoAssignTests(TestCase):
 class TasaCambioInmutabilidadFinancieraTests(TestCase):
     """
     Un registro ya creado no debe cambiar de valor en bolívares cuando la tasa
-    BCV vigente cambia después — tasa_cambio_referencia (y total_bs, derivado
-    de ella) quedan congelados a la tasa que estaba activa al momento de
-    crearlo.
+    BCV vigente cambia después — tasa_cambio_referencia queda congelada a la
+    tasa que estaba activa al momento de crearlo. La única excepción
+    deliberada es el bolívar EQUIVALENTE de un gasto en dólares mientras sigue
+    pendiente (ver moneda_origen y _serialize_gasto en gastos_views.py): como
+    esa deuda aun no se pagó, su equivalente en bs debe reflejar lo que
+    costaría saldarla HOY, no lo que costaba el día que se registró — a
+    diferencia de un gasto registrado directamente en bolívares, que sí queda
+    fijo en ese monto (reportado 2026-09).
     """
 
     def setUp(self):
@@ -1335,7 +1340,7 @@ class TasaCambioInmutabilidadFinancieraTests(TestCase):
         self.client.force_login(self.admin)
         self.categoria_gasto = VGCategoriaGasto.objects.create(nombre='Alquiler test')
 
-    def test_gasto_conserva_su_tasa_original_tras_cambiar_la_tasa_actual(self):
+    def test_gasto_en_usd_recalcula_su_bs_a_la_tasa_actual_mientras_este_pendiente(self):
         tasa_x = _set_tasa_actual('750.0000')
 
         response = self.client.post(
@@ -1359,13 +1364,42 @@ class TasaCambioInmutabilidadFinancieraTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         gasto_payload = detail_response.json()['gasto']
 
-        esperado_bs = (Decimal('200.00') * tasa_x.tasa).quantize(Decimal('0.01'))
+        # tasa_cambio_referencia (la que se congeló al registrar el gasto) no
+        # cambia nunca — eso sigue siendo inmutable.
         self.assertEqual(gasto_payload['tasa_cambio_referencia'], str(tasa_x.tasa))
-        self.assertEqual(gasto_payload['total_bs'], str(esperado_bs))
 
-        # Y explícitamente NO el valor que daría recalcular con la tasa nueva.
+        # Pero total_bs/saldo_pendiente_bs de un gasto en USD SI se recalculan
+        # con la tasa vigente mientras siga pendiente.
         bs_con_tasa_nueva = (Decimal('200.00') * tasa_y.tasa).quantize(Decimal('0.01'))
-        self.assertNotEqual(gasto_payload['total_bs'], str(bs_con_tasa_nueva))
+        self.assertEqual(gasto_payload['total_bs'], str(bs_con_tasa_nueva))
+        self.assertEqual(gasto_payload['saldo_pendiente_bs'], str(bs_con_tasa_nueva))
+
+    def test_gasto_en_bs_mantiene_su_monto_en_bolivares_fijo(self):
+        tasa_x = _set_tasa_actual('750.0000')
+
+        response = self.client.post(
+            '/api/admin/gastos/',
+            data=json.dumps({
+                'categoria_id': self.categoria_gasto.id,
+                'descripcion': 'Jabón',
+                'monto_bs': '2000.00',
+                'fecha_gasto': timezone.localdate().isoformat(),
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        gasto_id = response.json()['gasto']['id']
+
+        _set_tasa_actual('900.0000')
+
+        detail_response = self.client.get(f'/api/admin/gastos/{gasto_id}/')
+        self.assertEqual(detail_response.status_code, 200)
+        gasto_payload = detail_response.json()['gasto']
+
+        self.assertEqual(gasto_payload['moneda_origen'], 'VES')
+        self.assertEqual(gasto_payload['tasa_cambio_referencia'], str(tasa_x.tasa))
+        self.assertEqual(gasto_payload['total_bs'], '2000.00')
+        self.assertEqual(gasto_payload['saldo_pendiente_bs'], '2000.00')
 
 
 class EstadoResultadosHistoricoAcumuladoTests(TestCase):

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
-import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -30,6 +30,9 @@ const ESTADO_LABEL = {
 };
 
 function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
+  // Ver el mismo comentario en ReporteVentasDiaPage: si viene de un cuadre por
+  // rango, esta pantalla consulta desde/hasta en vez de un solo dia.
+  const [rango] = useState(() => getRangoSeleccionado());
   const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -43,7 +46,8 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch(`/api/admin/reportes/cuentas-por-cobrar/?fecha=${fechaConsultada}`, {
+      const query = rango ? `desde=${rango.desde}&hasta=${rango.hasta}` : `fecha=${fechaConsultada}`;
+      const response = await fetch(`/api/admin/reportes/cuentas-por-cobrar/?${query}`, {
         credentials: 'include',
         cache: 'no-store',
       });
@@ -58,12 +62,14 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rango]);
 
   useEffect(() => {
     loadReport(fecha);
-    setFechaSeleccionada(fecha);
-  }, [fecha, loadReport]);
+    if (!rango) {
+      setFechaSeleccionada(fecha);
+    }
+  }, [fecha, loadReport, rango]);
 
   const abrirDetalleNota = async (notaId) => {
     setNotaSeleccionadaId(notaId);
@@ -93,7 +99,7 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver a Cuadre de caja
+          ← Volver a Cuadre de caja{rango ? ' por rango' : ''}
         </button>
         <button type="button" onClick={() => window.print()} style={printButtonStyle}>
           Imprimir / Guardar PDF
@@ -104,19 +110,23 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
         <div>
           <h2 style={titleStyle(isMobile)}>Cuentas por cobrar — detalle</h2>
           <p style={subtitleStyle}>
-            Notas de entrega emitidas este día que todavía tienen saldo pendiente.
+            Notas de entrega emitidas en el período que todavía tienen saldo pendiente.
           </p>
         </div>
-        <label className="no-print" style={dateLabelStyle}>
-          Fecha
-          <input
-            type="date"
-            value={fecha}
-            max={todayIso()}
-            onChange={(event) => setFecha(event.target.value)}
-            style={dateInputStyle}
-          />
-        </label>
+        {rango ? (
+          <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
+        ) : (
+          <label className="no-print" style={dateLabelStyle}>
+            Fecha
+            <input
+              type="date"
+              value={fecha}
+              max={todayIso()}
+              onChange={(event) => setFecha(event.target.value)}
+              style={dateInputStyle}
+            />
+          </label>
+        )}
       </div>
 
       {message ? <div style={noticeStyle} className="no-print">{message}</div> : null}
@@ -125,7 +135,7 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
 
       {!loading && data ? (
         <section style={panelStyle}>
-          <div style={sectionTitleStyle}>Pendientes al {fecha}</div>
+          <div style={sectionTitleStyle}>Pendientes {rango ? `entre ${rango.desde} y ${rango.hasta}` : `al ${fecha}`}</div>
 
           {notas.length === 0 ? (
             <div style={emptyStyle}>No hay ninguna cuenta pendiente por cobrar.</div>

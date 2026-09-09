@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
-import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
 function todayIso() {
   const now = new Date();
@@ -15,6 +15,13 @@ function formatMonto(value) {
 }
 
 function ReportePropinasPage({ isMobile, onBack }) {
+  // Ver el mismo comentario en ReporteVentasDiaPage: si viene de un cuadre por
+  // rango, esta pantalla consulta el rango completo — reusando directamente
+  // el endpoint de cuadre-caja-rango (que ya trae ingresos_extra_rango) en
+  // vez del de cuadre-caja de un solo dia. Como es de solo lectura por rango,
+  // tampoco se permite corregir la cuenta de un registro aca (esa correccion
+  // necesita un dia puntual, ver reporte_cuadre_caja_view).
+  const [rango] = useState(() => getRangoSeleccionado());
   const [fecha, setFecha] = useState(() => getFechaSeleccionada(todayIso()));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +33,10 @@ function ReportePropinasPage({ isMobile, onBack }) {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch(`/api/admin/reportes/cuadre-caja/?fecha=${fechaConsultada}`, {
+      const url = rango
+        ? `/api/admin/reportes/cuadre-caja-rango/?desde=${rango.desde}&hasta=${rango.hasta}`
+        : `/api/admin/reportes/cuadre-caja/?fecha=${fechaConsultada}`;
+      const response = await fetch(url, {
         credentials: 'include',
         cache: 'no-store',
       });
@@ -41,12 +51,14 @@ function ReportePropinasPage({ isMobile, onBack }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rango]);
 
   useEffect(() => {
     loadReport(fecha);
-    setFechaSeleccionada(fecha);
-  }, [fecha, loadReport]);
+    if (!rango) {
+      setFechaSeleccionada(fecha);
+    }
+  }, [fecha, loadReport, rango]);
 
   // Igual que en ReporteVentasDiaPage: no se aplica directo desde el <select>,
   // abre un modal que pide el motivo (obligatorio, queda en la auditoria —
@@ -84,13 +96,14 @@ function ReportePropinasPage({ isMobile, onBack }) {
   };
 
   const metodosPago = data?.metodos_pago || [];
-  const ingresosExtra = data?.ingresos_extra_dia || [];
+  const ingresosExtra = rango ? (data?.ingresos_extra_rango || []) : (data?.ingresos_extra_dia || []);
+  const totalIngresosExtra = rango ? data?.total_ingresos_extra_rango : data?.total_ingresos_extra_dia;
 
   return (
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver a Cuadre de caja
+          ← Volver a Cuadre de caja{rango ? ' por rango' : ''}
         </button>
         <button type="button" onClick={() => window.print()} style={printButtonStyle}>
           Imprimir / Guardar PDF
@@ -102,19 +115,24 @@ function ReportePropinasPage({ isMobile, onBack }) {
           <h2 style={titleStyle(isMobile)}>Propinas y excedentes</h2>
           <p style={subtitleStyle}>
             Dinero que entró junto con un cobro pero que no es venta: propinas para meseros y el vuelto que el
-            cliente no pidió de vuelta. Si la cajera lo registró en la cuenta equivocada, la cambias acá.
+            cliente no pidió de vuelta.
+            {rango ? '' : ' Si la cajera lo registró en la cuenta equivocada, la cambias acá.'}
           </p>
         </div>
-        <label className="no-print" style={dateLabelStyle}>
-          Fecha
-          <input
-            type="date"
-            value={fecha}
-            max={todayIso()}
-            onChange={(event) => setFecha(event.target.value)}
-            style={dateInputStyle}
-          />
-        </label>
+        {rango ? (
+          <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
+        ) : (
+          <label className="no-print" style={dateLabelStyle}>
+            Fecha
+            <input
+              type="date"
+              value={fecha}
+              max={todayIso()}
+              onChange={(event) => setFecha(event.target.value)}
+              style={dateInputStyle}
+            />
+          </label>
+        )}
       </div>
 
       {message ? <div style={noticeStyle} className="no-print">{message}</div> : null}
@@ -123,18 +141,18 @@ function ReportePropinasPage({ isMobile, onBack }) {
 
       {!loading && data ? (
         <section style={panelStyle}>
-          <div style={sectionTitleStyle}>Propinas y pagos extra — {fecha}</div>
+          <div style={sectionTitleStyle}>Propinas y pagos extra — {rango ? `${rango.desde} al ${rango.hasta}` : fecha}</div>
 
           {ingresosExtra.length === 0 ? (
-            <div style={emptyStyle}>Aún no se registró ninguna propina ni pago extra este día.</div>
+            <div style={emptyStyle}>No se registró ninguna propina ni pago extra en este período.</div>
           ) : (
             <div style={tableWrapStyle}>
-              <div style={ingresoExtraTableStyle}>
+              <div style={ingresoExtraTableStyle(rango)}>
                 <div style={headStyle}>Tipo</div>
                 <div style={headStyle}>Monto</div>
-                <div style={headStyle}>Cuenta</div>
+                {!rango ? <div style={headStyle}>Cuenta</div> : <div style={headStyle}>Método</div>}
                 <div style={headStyle}>Registrado por</div>
-                <div style={headStyle}>Hora</div>
+                <div style={headStyle}>{rango ? 'Fecha' : 'Hora'}</div>
                 <div style={headStyle}>Descripción</div>
                 {ingresosExtra.map((item) => (
                   <Fragment key={item.id}>
@@ -152,27 +170,35 @@ function ReportePropinasPage({ isMobile, onBack }) {
                         <>${formatMonto(item.monto)}</>
                       )}
                     </div>
-                    <div style={cellStyle}>
-                      <select
-                        value={item.metodo_pago_id}
-                        onChange={(event) => {
-                          const nuevoId = Number(event.target.value);
-                          const nuevo = metodosPago.find((m) => m.id === nuevoId);
-                          if (!nuevo || nuevoId === item.metodo_pago_id) return;
-                          abrirCambioMetodo(item.id, item.metodo_pago_id, item.metodo_pago_nombre, nuevoId, nuevo.nombre);
-                        }}
-                        style={cuentaSelectStyle}
-                        className="admin-dark-select"
-                      >
-                        {metodosPago.map((metodo) => (
-                          <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-                        ))}
-                      </select>
-                    </div>
+                    {!rango ? (
+                      <div style={cellStyle}>
+                        <select
+                          value={item.metodo_pago_id}
+                          onChange={(event) => {
+                            const nuevoId = Number(event.target.value);
+                            const nuevo = metodosPago.find((m) => m.id === nuevoId);
+                            if (!nuevo || nuevoId === item.metodo_pago_id) return;
+                            abrirCambioMetodo(item.id, item.metodo_pago_id, item.metodo_pago_nombre, nuevoId, nuevo.nombre);
+                          }}
+                          style={cuentaSelectStyle}
+                          className="admin-dark-select"
+                        >
+                          {metodosPago.map((metodo) => (
+                            <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div style={cellStyle}>{item.metodo_pago_nombre}</div>
+                    )}
                     <div style={cellStyle}>{item.registrado_por || '—'}</div>
-                    <div style={cellStyle}>{new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}</div>
+                    <div style={cellStyle}>
+                      {rango
+                        ? new Date(item.fecha_creacion).toLocaleDateString('es-VE')
+                        : new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}
+                    </div>
                     <div style={cellStyle}>{item.descripcion || '—'}</div>
-                    {item.ultima_correccion ? (
+                    {!rango && item.ultima_correccion ? (
                       <div style={correccionNotaStyle}>
                         ✎ Corregido de {item.ultima_correccion.metodo_anterior} a {item.ultima_correccion.metodo_nuevo} por{' '}
                         {item.ultima_correccion.corregido_por || '—'}: “{item.ultima_correccion.motivo}”
@@ -185,7 +211,7 @@ function ReportePropinasPage({ isMobile, onBack }) {
           )}
 
           <div style={{ fontWeight: 700, color: '#fff' }}>
-            Total propinas/extra: ${formatMonto(data.total_ingresos_extra_dia)}
+            Total propinas/extra: ${formatMonto(totalIngresosExtra)}
           </div>
         </section>
       ) : null}
@@ -254,7 +280,12 @@ const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, bo
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const ingresoExtraTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(100px,0.7fr) minmax(90px,0.6fr) minmax(170px,1fr) minmax(140px,0.9fr) minmax(90px,0.6fr) minmax(160px,1.2fr)', minWidth: 880, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const ingresoExtraTableStyle = (rango) => ({
+  display: 'grid',
+  gridTemplateColumns: 'minmax(100px,0.7fr) minmax(90px,0.6fr) minmax(170px,1fr) minmax(140px,0.9fr) minmax(90px,0.6fr) minmax(160px,1.2fr)',
+  minWidth: rango ? 820 : 880,
+  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden',
+});
 const cuentaSelectStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', padding: '6px 8px', fontSize: 13, width: '100%' };
 const correccionNotaStyle = { gridColumn: '1 / -1', padding: '2px 14px 10px', fontSize: 11.5, color: '#ffcf85', fontStyle: 'italic' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import { setRangoSeleccionado } from '../utils/fechaContabilidad';
 
 function toIso(date) {
   const offset = date.getTimezoneOffset();
@@ -41,7 +42,7 @@ const PRESETS = [
   { label: 'Este mes', get: () => ({ desde: startOfMonthIso(), hasta: todayIso() }) },
 ];
 
-function ReporteCuadreCajaRangoPage({ isMobile, onBack }) {
+function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
   const [desde, setDesde] = useState(startOfWeekIso());
   const [hasta, setHasta] = useState(todayIso());
   const [data, setData] = useState(null);
@@ -71,6 +72,11 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack }) {
 
   useEffect(() => {
     loadReport(desde, hasta);
+    // Igual que la fecha del cuadre diario (ver fechaContabilidad.js): al
+    // entrar a uno de los 4 reportes de detalle desde aca, deben consultar
+    // este mismo rango, y al volver aca (boton Volver) el rango elegido
+    // debe seguir siendo el mismo en vez de reiniciar a la semana actual.
+    setRangoSeleccionado(desde, hasta);
   }, [desde, hasta, loadReport]);
 
   const applyPreset = (preset) => {
@@ -127,6 +133,62 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack }) {
 
       {!loading && !error && data ? (
         <>
+          <section style={panelStyle}>
+            <div style={sectionTitleStyle}>Ventas del rango — {desde} al {hasta}</div>
+            <div style={ventasGridStyle(isMobile)}>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Facturado</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_vendido)}</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-ventas-dia')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Pendiente por cobrar</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_pendiente)}</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-cuentas-por-cobrar-detalle')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Cuentas cobradas</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.cuentas_cobradas_hoy)}</div>
+                <div style={desgloseSecondaryStyle}>De fechas anteriores al rango</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-cuentas-cobradas-dia')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Propinas / excedentes</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_propinas_excedentes)}</div>
+                <div style={desgloseSecondaryStyle}>No cuenta como venta</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-propinas-dia')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
+            </div>
+          </section>
+
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>
               {desde === hasta ? `Resumen del ${desde}` : `Resumen del ${desde} al ${hasta}`} ({dias.length} día{dias.length === 1 ? '' : 's'})
@@ -309,6 +371,8 @@ const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', 
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
 const desgloseGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
+const ventasGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
+const verDetalleLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
 const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
 const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
 const desgloseValueStyle = { color: '#fff', fontSize: 20, fontWeight: 800 };

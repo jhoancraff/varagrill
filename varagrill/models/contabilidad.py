@@ -549,6 +549,15 @@ class VGNotaEntrega(VGAuditoria):
     moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS, default="USD")
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     referencia = models.CharField(max_length=100, blank=True)
+    descuento_monto = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+        help_text="Descuento manual en dólares aplicado al cobrar (ej. cliente frecuente, cortesía). "
+                   "0 = sin descuento, se cobra el total completo de los pedidos.",
+    )
+    descuento_motivo = models.CharField(
+        max_length=255, blank=True,
+        help_text="Por qué se aplicó el descuento — obligatorio si descuento_monto > 0, para auditoría.",
+    )
 
     class Meta:
         db_table = "vg_notas_entrega"
@@ -627,6 +636,17 @@ class VGGasto(VGAuditoria):
     )
     notas = models.TextField(blank=True)
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    MONEDAS_ORIGEN = [("USD", "Dólares"), ("VES", "Bolívares")]
+    moneda_origen = models.CharField(
+        max_length=3, choices=MONEDAS_ORIGEN, default="USD",
+        help_text=(
+            "En que moneda se ingreso el gasto originalmente. Un gasto en VES "
+            "queda fijo en ese monto de bolivares (se reconstruye siempre con "
+            "tasa_cambio_referencia, la tasa del dia que se registro); uno en "
+            "USD se muestra en bolivares con la tasa ACTUAL, para que la deuda "
+            "en bs se actualice si el BCV cambia mientras sigue pendiente."
+        ),
+    )
 
     class Meta:
         db_table = "vg_gastos"

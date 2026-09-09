@@ -30,3 +30,40 @@ export function limpiarFechaSeleccionada() {
     // ver comentario en setFechaSeleccionada.
   }
 }
+
+// Mismo mecanismo que la fecha de arriba, pero para el cuadre de caja POR
+// RANGO y sus mismos 4 reportes de detalle: cuando el rango esta guardado,
+// esas 4 pantallas de detalle deben consultar el rango completo (desde/hasta)
+// en vez de un solo dia. Es un objeto {desde, hasta} en vez de un string
+// porque hacen falta las dos fechas juntas o ninguna.
+const RANGO_KEY = 'contabilidad_rango_seleccionado';
+
+export function getRangoSeleccionado() {
+  try {
+    const raw = sessionStorage.getItem(RANGO_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.desde && parsed.hasta) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function setRangoSeleccionado(desde, hasta) {
+  try {
+    sessionStorage.setItem(RANGO_KEY, JSON.stringify({ desde, hasta }));
+  } catch {
+    // ver comentario en setFechaSeleccionada.
+  }
+}
+
+export function limpiarRangoSeleccionado() {
+  try {
+    sessionStorage.removeItem(RANGO_KEY);
+  } catch {
+    // ver comentario en setFechaSeleccionada.
+  }
+}

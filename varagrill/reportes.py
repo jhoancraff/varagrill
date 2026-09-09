@@ -136,52 +136,57 @@ def totales_pagos_por_metodo(fecha):
     return sorted(metodos_por_id.values(), key=lambda item: item['nombre'])
 
 
-def resumen_ventas_dia(fecha):
+def resumen_ventas_rango(desde, hasta):
     """
-    Total vendido del dia (Notas de Entrega emitidas en `fecha`, pendientes y
-    pagadas por igual) frente a lo que de verdad entro al banco (ver
-    totales_pagos_por_metodo) — para poder explicar la diferencia:
+    Total vendido del rango (Notas de Entrega emitidas entre `desde` y
+    `hasta` inclusive, pendientes y pagadas por igual) frente a lo que de
+    verdad entro al banco (ver totales_pagos_por_metodo) — para poder
+    explicar la diferencia. Generaliza lo que antes era resumen_ventas_dia
+    (un dia es sencillamente el caso desde == hasta) para que el cuadre de
+    caja diario y el cuadre por rango compartan la misma logica.
 
-    - `total_pendiente` es el fiado de HOY nomás: notas emitidas en `fecha`
-      que todavia no se terminan de cobrar (no arrastra el pendiente de dias
-      anteriores — ver detalle_cuentas_por_cobrar). Si el banco subio MENOS
-      que `total_vendido`, la explicacion mas probable es que parte de la
-      venta de hoy quedo fiada.
-    - `cuentas_cobradas_hoy` es el recaudo de HOY de notas emitidas en un dia
-      ANTERIOR (el pendiente de ayer que se cobro hoy) — ese monto sale del
-      acumulado de `total_pendiente` (porque su saldo_pendiente ya bajo) y se
-      reporta aca en vez de sumarse a `total_vendido`: esa venta ya se conto
-      el dia que se emitio la nota, contarla otra vez hoy la duplicaria.
-    - `total_propinas_excedentes` es dinero que SI entro al banco hoy (via
-      VGIngresoExtra) pero que NO es venta — si el banco subio MAS que
+    - `total_pendiente` es el fiado generado DENTRO del rango nomás: notas
+      emitidas en [desde, hasta] que todavia no se terminan de cobrar (no
+      arrastra el pendiente de fechas anteriores al rango — ver
+      detalle_cuentas_por_cobrar_rango). Si el banco subio MENOS que
+      `total_vendido`, la explicacion mas probable es que parte de esa venta
+      quedo fiada.
+    - `cuentas_cobradas_hoy` es el recaudo DENTRO del rango de notas emitidas
+      en una fecha ANTERIOR al rango (el pendiente de antes que se cobro
+      ahora) — ese monto sale del acumulado de `total_pendiente` de su propio
+      periodo (porque su saldo_pendiente ya bajo) y se reporta aca en vez de
+      sumarse a `total_vendido`: esa venta ya se conto el dia que se emitio
+      la nota, contarla otra vez aca la duplicaria.
+    - `total_propinas_excedentes` es dinero que SI entro al banco en el rango
+      (via VGIngresoExtra) pero que NO es venta — si el banco subio MAS que
       `total_vendido`, esta es la explicacion mas probable. Nunca se suma a
       `total_vendido` a proposito, para no inflar la venta real.
     """
     total_vendido = (
         VGNotaEntrega.objects
-        .filter(fecha_emision__date=fecha)
+        .filter(fecha_emision__date__gte=desde, fecha_emision__date__lte=hasta)
         .aggregate(total=Sum('total'))
         .get('total')
     ) or Decimal('0')
 
     total_pendiente = (
         VGNotaEntrega.objects
-        .filter(fecha_emision__date=fecha)
+        .filter(fecha_emision__date__gte=desde, fecha_emision__date__lte=hasta)
         .aggregate(total=Sum('saldo_pendiente'))
         .get('total')
     ) or Decimal('0')
 
     total_propinas_excedentes = (
         VGIngresoExtra.objects
-        .filter(fecha_creacion__date=fecha)
+        .filter(fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta)
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
 
     cuentas_cobradas_hoy = (
         VGPago.objects
-        .filter(fecha_pago__date=fecha, estado='completado', nota_entrega__isnull=False)
-        .exclude(nota_entrega__fecha_emision__date=fecha)
+        .filter(fecha_pago__date__gte=desde, fecha_pago__date__lte=hasta, estado='completado', nota_entrega__isnull=False)
+        .exclude(nota_entrega__fecha_emision__date__gte=desde, nota_entrega__fecha_emision__date__lte=hasta)
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
@@ -194,22 +199,23 @@ def resumen_ventas_dia(fecha):
     }
 
 
-def detalle_ventas_dia(fecha):
+def detalle_ventas_rango(desde, hasta):
     """
-    Detalle fila por fila de cada Nota de Entrega emitida en `fecha` — el
-    desglose de "Total vendido hoy" (ver resumen_ventas_dia): para saber
-    exactamente que notas se hicieron, cuanto es en dolares, cuanto se pago
-    en bolivares (si aplica), con que metodo, en que banco (VGMetodoPago.
-    cuenta_bancaria) y con que referencia.
+    Detalle fila por fila de cada Nota de Entrega emitida entre `desde` y
+    `hasta` inclusive — el desglose de "Total vendido" (ver
+    resumen_ventas_rango): para saber exactamente que notas se hicieron,
+    cuanto es en dolares, cuanto se pago en bolivares (si aplica), con que
+    metodo, en que banco (VGMetodoPago.cuenta_bancaria) y con que
+    referencia. Un dia individual es sencillamente el caso desde == hasta.
 
     Una nota puede tener varios pagos (abonos parciales) o ninguno todavia
     (pendiente); se listan todos los pagos completados de esa nota, sin
-    importar el dia en que se cobraron (una nota de hoy solo puede tener
-    pagos de hoy en adelante, nunca de antes).
+    importar el dia en que se cobraron (una nota del rango solo puede tener
+    pagos de esa fecha en adelante, nunca de antes).
     """
     notas = (
         VGNotaEntrega.objects
-        .filter(fecha_emision__date=fecha)
+        .filter(fecha_emision__date__gte=desde, fecha_emision__date__lte=hasta)
         .select_related('cliente')
         .prefetch_related('pagos__metodo_pago')
         .order_by('fecha_emision')
@@ -250,16 +256,17 @@ def detalle_ventas_dia(fecha):
     return resultado
 
 
-def detalle_cuentas_por_cobrar(fecha):
+def detalle_cuentas_por_cobrar_rango(desde, hasta):
     """
-    Detalle fila por fila de "Pendiente por cobrar" (ver resumen_ventas_dia):
-    las Notas de Entrega emitidas en `fecha` que todavia tienen saldo
-    pendiente — solo el fiado de ese dia, no lo arrastrado de dias
-    anteriores.
+    Detalle fila por fila de "Pendiente por cobrar" (ver
+    resumen_ventas_rango): las Notas de Entrega emitidas entre `desde` y
+    `hasta` inclusive que todavia tienen saldo pendiente — solo el fiado
+    generado dentro del rango, no lo arrastrado de fechas anteriores. Un dia
+    individual es sencillamente el caso desde == hasta.
 
-    Este reporte es un registro HISTORICO de lo que se generó ese día, no una
-    proyección de cuánto habría que cobrar hoy — `tasa_cambio_referencia` es
-    la tasa BCV que se congeló al EMITIR cada nota (la misma que se le
+    Este reporte es un registro HISTORICO de lo que se generó en el periodo,
+    no una proyección de cuánto habría que cobrar hoy — `tasa_cambio_referencia`
+    es la tasa BCV que se congeló al EMITIR cada nota (la misma que se le
     cotizó al cliente ese día), no la de hoy. El recálculo a la tasa vigente
     (para saber cuánto cobrar de verdad si el fiado sigue pendiente) sólo
     corresponde en el momento de cobrar — ver
@@ -267,7 +274,7 @@ def detalle_cuentas_por_cobrar(fecha):
     """
     notas = (
         VGNotaEntrega.objects
-        .filter(fecha_emision__date=fecha, saldo_pendiente__gt=0)
+        .filter(fecha_emision__date__gte=desde, fecha_emision__date__lte=hasta, saldo_pendiente__gt=0)
         .select_related('cliente')
         .order_by('fecha_emision')
     )
@@ -287,25 +294,27 @@ def detalle_cuentas_por_cobrar(fecha):
     ]
 
 
-def detalle_cuentas_cobradas_dia(fecha):
+def detalle_cuentas_cobradas_rango(desde, hasta):
     """
-    Detalle fila por fila de "Cuentas cobradas hoy" (ver resumen_ventas_dia):
-    pagos de `fecha` contra una Nota de Entrega emitida en un dia ANTERIOR —
-    el pendiente de un dia anterior que se cobro hoy.
+    Detalle fila por fila de "Cuentas cobradas" (ver resumen_ventas_rango):
+    pagos entre `desde` y `hasta` inclusive contra una Nota de Entrega
+    emitida en una fecha ANTERIOR al rango — el pendiente de antes que se
+    cobro ahora. Un dia individual es sencillamente el caso desde == hasta.
 
     Para una nota en bolivares, muestra la diferencia entre lo que hubiera
     sido en bolivares a la tasa del dia en que se emitio (`bs_a_tasa_emision`)
-    y lo que realmente se cobro hoy a la tasa vigente (`bs_a_tasa_cobro`) —
-    la plata sigue siendo el mismo monto en dolares (la deuda nunca cambia),
-    pero como el bolivar se devalua mientras el fiado esta pendiente, el
-    monto en bolivares que hay que cobrar sube (ver nota_entrega_abono_view).
-    Para una nota pagada directo en dolares no aplica ninguna tasa (las
-    claves `*_bs`/`tasa_*`/`diferencia_bs` quedan en None).
+    y lo que realmente se cobro a la tasa vigente al momento del pago
+    (`bs_a_tasa_cobro`) — la plata sigue siendo el mismo monto en dolares (la
+    deuda nunca cambia), pero como el bolivar se devalua mientras el fiado
+    esta pendiente, el monto en bolivares que hay que cobrar sube (ver
+    nota_entrega_abono_view). Para una nota pagada directo en dolares no
+    aplica ninguna tasa (las claves `*_bs`/`tasa_*`/`diferencia_bs` quedan en
+    None).
     """
     pagos = (
         VGPago.objects
-        .filter(fecha_pago__date=fecha, estado='completado', nota_entrega__isnull=False)
-        .exclude(nota_entrega__fecha_emision__date=fecha)
+        .filter(fecha_pago__date__gte=desde, fecha_pago__date__lte=hasta, estado='completado', nota_entrega__isnull=False)
+        .exclude(nota_entrega__fecha_emision__date__gte=desde, nota_entrega__fecha_emision__date__lte=hasta)
         .select_related('nota_entrega__cliente', 'metodo_pago')
         .order_by('fecha_pago')
     )
@@ -577,7 +586,10 @@ def disponibilidad_por_cuenta(fecha):
     metodo debajo. Un metodo sin cuenta_bancaria se agrupa solo, bajo su
     propio nombre.
     """
-    metodos = list(VGMetodoPago.objects.all().order_by('nombre'))
+    # Los metodos desactivados no deben aparecer en la disponibilidad de
+    # cuentas: si un banco/metodo esta deshabilitado, el usuario no quiere
+    # verlo en este reporte (aunque tenga movimientos historicos).
+    metodos = list(VGMetodoPago.objects.filter(activo=True).order_by('nombre'))
 
     def _totales_por_metodo(queryset):
         filas = queryset.values('metodo_pago_id').annotate(total=Sum('monto'))

@@ -22,6 +22,18 @@ function formatUsdBsPrecomputed(usdAmount, bsAmount) {
   return bs ? `${usd} (${bs})` : usd;
 }
 
+// Saldo pendiente de un gasto: usa saldo_pendiente_bs, precalculado por el
+// backend (_serialize_gasto) — un gasto en VES lo reconstruye con la tasa
+// congelada al registrarlo (se queda fijo, ej. 2000 Bs), uno en USD lo
+// recalcula con la tasa ACTUAL mientras siga pendiente, para reflejar lo que
+// costaria saldarlo hoy. Recalcularlo aqui con tasaDeRegistro perdia esa
+// distincion.
+function formatSaldoUsdBs(gasto) {
+  const usd = `$${Number(gasto.saldo_pendiente).toFixed(2)}`;
+  const bs = gasto.saldo_pendiente_bs != null ? formatBsRaw(gasto.saldo_pendiente_bs) : '';
+  return bs ? `${usd} (${bs})` : usd;
+}
+
 // Bs. de un solo gasto/abono, priorizando su propia tasa congelada al momento de
 // registrarlo sobre la tasa en vivo — así reimprimir/reconsultar un registro viejo
 // no cambia su equivalente en bolívares con el paso del tiempo.
@@ -518,7 +530,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
                     <div key={`monto-${gasto.id}`} style={cellStyle}>
                       {formatUsdBs(gasto.monto, tasaDeRegistro(gasto, tasaCambio))}
                       {gasto.estado_pago !== 'pagado' ? (
-                        <div style={{ fontSize: 11, color: '#ffcf7d' }}>Saldo: {formatUsdBs(gasto.saldo_pendiente, tasaDeRegistro(gasto, tasaCambio))}</div>
+                        <div style={{ fontSize: 11, color: '#ffcf7d' }}>Saldo: {formatSaldoUsdBs(gasto)}</div>
                       ) : null}
                     </div>
                     <div key={`estado-${gasto.id}`} style={cellStyle}>

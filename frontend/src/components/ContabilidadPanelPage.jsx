@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { limpiarFechaSeleccionada } from '../utils/fechaContabilidad';
+import { limpiarFechaSeleccionada, limpiarRangoSeleccionado } from '../utils/fechaContabilidad';
 
 const iconProps = {
   viewBox: '0 0 24 24',
@@ -133,7 +133,7 @@ const reportSections = [
   },
   {
     id: 'contabilidad-disponibilidad-cuentas',
-    title: 'Disponibilidad por cuenta',
+    title: 'Disponibilidad diaria',
     description: 'Saldo acumulado de cada método de pago (efectivo, bancos, Binance, Zelle...) hasta el día que elijas.',
     icon: AvailabilityIcon,
   },
@@ -148,6 +148,7 @@ const reportSections = [
     title: 'Cuentas por cobrar',
     description: 'Facturas emitidas con saldo pendiente: registra los abonos de cada cliente hasta saldarlas.',
     icon: ReceivablesIcon,
+    badgeKey: 'cuentasPorCobrar',
   },
   {
     id: 'cuentas-pagar',
@@ -196,6 +197,7 @@ const reportSections = [
 
 function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
   const [cuentasPorPagarCount, setCuentasPorPagarCount] = useState(0);
+  const [cuentasPorCobrarCount, setCuentasPorCobrarCount] = useState(0);
 
   useEffect(() => {
     // La cajera (onlyCardIds restringido a cuadre de caja + cuentas por cobrar) no tiene
@@ -217,7 +219,22 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
     loadCount();
   }, [onlyCardIds]);
 
-  const badgeCounts = { cuentasPorPagar: cuentasPorPagarCount };
+  useEffect(() => {
+    const loadCount = async () => {
+      try {
+        const response = await fetch('/api/cuentas-por-cobrar/', { credentials: 'include', cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.ok) {
+          setCuentasPorCobrarCount(Array.isArray(data.ordenes_cobro) ? data.ordenes_cobro.length : 0);
+        }
+      } catch (error) {
+        // El badge simplemente no aparece si falla.
+      }
+    };
+    loadCount();
+  }, []);
+
+  const badgeCounts = { cuentasPorPagar: cuentasPorPagarCount, cuentasPorCobrar: cuentasPorCobrarCount };
   const visibleSections = onlyCardIds ? reportSections.filter((section) => onlyCardIds.includes(section.id)) : reportSections;
 
   return (
@@ -245,7 +262,18 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
                   // guardada de una visita anterior a algún reporte de
                   // detalle. Esa fecha guardada solo debe sobrevivir cuando
                   // se vuelve AL cuadre DESDE un detalle (botón Volver), lo
-                  // cual no pasa por acá.
+                  // cual no pasa por acá. Tambien se limpia el rango
+                  // guardado, para que esos mismos 4 reportes de detalle no
+                  // se queden en "modo rango" de una visita anterior al
+                  // cuadre por rango.
+                  limpiarFechaSeleccionada();
+                  limpiarRangoSeleccionado();
+                } else if (section.id === 'contabilidad-cuadre-caja-rango') {
+                  // Mismo razonamiento que arriba pero al reves: arrancar de
+                  // nuevo el cuadre por rango no debe arrastrar un rango
+                  // viejo, y los 4 reportes de detalle no deben quedarse en
+                  // "modo dia" de una visita anterior al cuadre diario.
+                  limpiarRangoSeleccionado();
                   limpiarFechaSeleccionada();
                 }
                 onNavigate(section.id);

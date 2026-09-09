@@ -29,14 +29,14 @@ from .models import (
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
     desglose_caja_por_moneda,
-    detalle_cuentas_cobradas_dia,
-    detalle_cuentas_por_cobrar,
-    detalle_ventas_dia,
+    detalle_cuentas_cobradas_rango,
+    detalle_cuentas_por_cobrar_rango,
+    detalle_ventas_rango,
     disponibilidad_por_cuenta,
     efectivo_esperado_dia,
     gastos_efectivo_dia,
     resumen_cuadre_caja_rango,
-    resumen_ventas_dia,
+    resumen_ventas_rango,
     tasa_para_fecha,
     total_consignado,
     totales_pagos_por_metodo,
@@ -251,6 +251,34 @@ def _parse_fecha_reporte(raw_value):
         return None
 
 
+def _parse_rango_o_fecha_reporte(request):
+    """
+    Los reportes de detalle del cuadre de caja (ventas, cuentas por cobrar,
+    cuentas cobradas) se piden con un solo `fecha` desde el cuadre diario, o
+    con `desde`/`hasta` cuando se entra desde el cuadre por rango — mismo
+    endpoint para los dos casos, reusando toda la logica de reportes.py
+    (que ya trabaja en terminos de un rango, siendo un dia solo el caso
+    desde == hasta). Devuelve (desde, hasta) o (None, None) si algo es
+    invalido.
+    """
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    if desde_raw or hasta_raw:
+        try:
+            desde = date.fromisoformat(str(desde_raw))
+            hasta = date.fromisoformat(str(hasta_raw))
+        except (TypeError, ValueError):
+            return None, None
+        if desde > hasta or (hasta - desde).days + 1 > MAX_DIAS_RANGO_CUADRE_CAJA:
+            return None, None
+        return desde, hasta
+
+    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
+    if fecha is None:
+        return None, None
+    return fecha, fecha
+
+
 def _serialize_consignacion(consignacion):
     return {
         'id': consignacion.id,
@@ -412,7 +440,7 @@ def reporte_cuadre_caja_view(request):
             ],
             'total_general': str(sum(item['total'] for item in totales)),
             'resumen_ventas': {
-                key: str(value) for key, value in resumen_ventas_dia(fecha).items()
+                key: str(value) for key, value in resumen_ventas_rango(fecha, fecha).items()
             },
             'desglose_caja': _serialize_desglose_caja(desglose_caja_por_moneda(fecha)),
             'consignaciones': [_serialize_consignacion(item) for item in consignaciones],
@@ -620,6 +648,9 @@ def reporte_cuadre_caja_rango_view(request):
         'ok': True,
         'desde': desde.isoformat(),
         'hasta': hasta.isoformat(),
+        'resumen_ventas': {
+            key: str(value) for key, value in resumen_ventas_rango(desde, hasta).items()
+        },
         'ingresos_extra_rango': [_serialize_ingreso_extra(item) for item in ingresos_extra_rango],
         'total_ingresos_extra_rango': str(sum((item.monto for item in ingresos_extra_rango), Decimal('0'))),
         'dias': [
@@ -767,9 +798,11 @@ def reporte_venta_nota_detalle_view(request, nota_id):
 
 def reporte_ventas_dia_view(request):
     """
-    Detalle fila por fila de cada Nota de Entrega emitida en un dia — el
-    desglose de "Total vendido hoy" del cuadre de caja (ver
-    detalle_ventas_dia en reportes.py). De solo lectura.
+    Detalle fila por fila de cada Nota de Entrega emitida en un dia o en un
+    rango — el desglose de "Total vendido" del cuadre de caja (ver
+    detalle_ventas_rango en reportes.py). De solo lectura. Acepta `fecha`
+    (un dia, uso normal desde el cuadre diario) o `desde`/`hasta` (uso desde
+    el cuadre por rango) — ver _parse_rango_o_fecha_reporte.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -777,18 +810,20 @@ def reporte_ventas_dia_view(request):
     if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
 
-    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
-    if fecha is None:
+    desde, hasta = _parse_rango_o_fecha_reporte(request)
+    if desde is None:
         return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
 
-    notas = detalle_ventas_dia(fecha)
+    notas = detalle_ventas_rango(desde, hasta)
 
     todos_los_pago_ids = [pago['id'] for nota in notas for pago in nota['pagos']]
     correcciones_pago = _ultimas_correcciones_por_registro('pago', todos_los_pago_ids)
 
     return _auth_response({
         'ok': True,
-        'fecha': fecha.isoformat(),
+        'fecha': hasta.isoformat(),
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
         'notas': [
             {
                 'id': nota['id'],
@@ -813,18 +848,19 @@ def reporte_ventas_dia_view(request):
 def reporte_cuentas_por_cobrar_view(request):
     """
     Detalle fila por fila de "Pendiente por cobrar" del cuadre de caja (ver
-    detalle_cuentas_por_cobrar en reportes.py): las notas de entrega emitidas
-    en `fecha` que todavia tienen saldo pendiente. De solo lectura — cobrar
-    de verdad se sigue haciendo desde Cuentas por Cobrar.
+    detalle_cuentas_por_cobrar_rango en reportes.py): las notas de entrega
+    emitidas en `fecha`, o en un rango `desde`/`hasta`, que todavia tienen
+    saldo pendiente. De solo lectura — cobrar de verdad se sigue haciendo
+    desde Cuentas por Cobrar.
 
-    Este es un reporte HISTORICO de lo que se generó ese día: `saldo_pendiente_bs`
-    se calcula con la tasa que se congeló al EMITIR cada nota
-    (nota.tasa_cambio_referencia), no con la tasa BCV de hoy — reportado
-    2026-09: mostrar esto "a valor de hoy" hacía que el mismo día pasado se
-    viera distinto cada vez que se refrescaba el cache del BCV, aunque nada
-    hubiera cambiado de verdad. El recálculo a la tasa vigente (para saber
-    cuánto cobrarle de verdad a un fiado viejo) sólo corresponde en el
-    momento de cobrar, no acá — ver nota_entrega_abono_view.
+    Este es un reporte HISTORICO de lo que se generó en el periodo:
+    `saldo_pendiente_bs` se calcula con la tasa que se congeló al EMITIR
+    cada nota (nota.tasa_cambio_referencia), no con la tasa BCV de hoy —
+    reportado 2026-09: mostrar esto "a valor de hoy" hacía que el mismo
+    período pasado se viera distinto cada vez que se refrescaba el cache
+    del BCV, aunque nada hubiera cambiado de verdad. El recálculo a la tasa
+    vigente (para saber cuánto cobrarle de verdad a un fiado viejo) sólo
+    corresponde en el momento de cobrar, no acá — ver nota_entrega_abono_view.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -832,15 +868,17 @@ def reporte_cuentas_por_cobrar_view(request):
     if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
 
-    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
-    if fecha is None:
+    desde, hasta = _parse_rango_o_fecha_reporte(request)
+    if desde is None:
         return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
 
-    notas = detalle_cuentas_por_cobrar(fecha)
+    notas = detalle_cuentas_por_cobrar_rango(desde, hasta)
 
     return _auth_response({
         'ok': True,
-        'fecha': fecha.isoformat(),
+        'fecha': hasta.isoformat(),
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
         'notas': [
             {
                 'id': nota['id'],
@@ -867,10 +905,11 @@ def reporte_cuentas_por_cobrar_view(request):
 
 def reporte_cuentas_cobradas_dia_view(request):
     """
-    Detalle fila por fila de "Cuentas cobradas hoy" del cuadre de caja (ver
-    detalle_cuentas_cobradas_dia en reportes.py): pagos de hoy contra un
-    fiado de un dia anterior, con la diferencia en bolivares entre la tasa
-    del dia de emision y la tasa de hoy. De solo lectura.
+    Detalle fila por fila de "Cuentas cobradas" del cuadre de caja (ver
+    detalle_cuentas_cobradas_rango en reportes.py): pagos de `fecha` (o del
+    rango `desde`/`hasta`) contra un fiado de una fecha anterior, con la
+    diferencia en bolivares entre la tasa del dia de emision y la tasa de
+    cobro. De solo lectura.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -878,18 +917,20 @@ def reporte_cuentas_cobradas_dia_view(request):
     if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para ver este reporte.'}, status=401)
 
-    fecha = _parse_fecha_reporte(request.GET.get('fecha'))
-    if fecha is None:
+    desde, hasta = _parse_rango_o_fecha_reporte(request)
+    if desde is None:
         return _auth_response({'ok': False, 'message': 'Fecha invalida.'}, status=400)
 
-    filas = detalle_cuentas_cobradas_dia(fecha)
+    filas = detalle_cuentas_cobradas_rango(desde, hasta)
 
     def _str_or_none(value):
         return str(value) if value is not None else None
 
     return _auth_response({
         'ok': True,
-        'fecha': fecha.isoformat(),
+        'fecha': hasta.isoformat(),
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
         'pagos': [
             {
                 'pago_id': fila['pago_id'],

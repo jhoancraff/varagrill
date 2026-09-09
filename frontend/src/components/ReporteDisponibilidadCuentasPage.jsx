@@ -59,7 +59,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
 
       <div style={headerRowStyle(isMobile)}>
         <div>
-          <h2 style={titleStyle(isMobile)}>Disponibilidad por cuenta</h2>
+          <h2 style={titleStyle(isMobile)}>Disponibilidad diaria</h2>
           <p style={subtitleStyle}>
             Saldo acumulado de cada método de pago hasta la fecha elegida: todo lo cobrado con esa cuenta
             menos lo pagado con ella a gastos y proveedores — como un estado de cuenta que puedes consultar

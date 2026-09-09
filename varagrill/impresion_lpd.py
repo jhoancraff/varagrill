@@ -152,7 +152,10 @@ def _render_recibo_item(detalle, moneda, tasa):
     return bytes(out)
 
 
-def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None):
+def _build_recibo_bytes(
+    pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None,
+    descuento_manual=None, descuento_manual_motivo='',
+):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
     metodo_label = metodo_pago.nombre
     moneda = metodo_pago.moneda
@@ -206,6 +209,14 @@ def _build_recibo_bytes(pedidos, metodo_pago, referencia, total, tasa, titulo='R
         out += _text(f'Impuesto: {_monto_texto(impuesto_total, moneda, tasa)}') + FEED
     if descuento_total > 0:
         out += _text(f'Descuento: -{_monto_texto(descuento_total, moneda, tasa)}') + FEED
+    if descuento_manual:
+        # Descuento manual aplicado al cobrar (ver VGNotaEntrega.descuento_monto),
+        # distinto del descuento por pedido de arriba — se imprime con su
+        # motivo para que quede constancia en el ticket físico, no solo en la
+        # base de datos (auditoría, ver pedidos_cobro_view).
+        out += _text(f'Descuento aplicado: -{_monto_texto(descuento_manual, moneda, tasa)}') + FEED
+        if descuento_manual_motivo:
+            out += _text(f'Motivo: {descuento_manual_motivo}') + FEED
     if propina_total > 0:
         out += _text(f'Propina: {_monto_texto(propina_total, moneda, tasa)}') + FEED
     out += BOLD_ON
@@ -256,6 +267,7 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
         ticket = _build_recibo_bytes(
             pedidos, nota.metodo_pago, nota.referencia, nota.total, nota.tasa_cambio_referencia,
             titulo=titulo, codigo=nota.codigo,
+            descuento_manual=nota.descuento_monto, descuento_manual_motivo=nota.descuento_motivo,
         )
         logger.info('Enviando nota de entrega %s a %s (%s bytes)', nota.codigo, destino, len(ticket))
         enviar_trabajo_lpd(

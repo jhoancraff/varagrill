@@ -1015,6 +1015,9 @@ def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
         'metodo_pago': nota.metodo_pago.nombre,
         'metodo_pago_id': nota.metodo_pago_id,
         'referencia': nota.referencia,
+        'descuento_monto': str(nota.descuento_monto),
+        'descuento_motivo': nota.descuento_motivo,
+        'creado_por': (nota.creado_por.get_full_name() or nota.creado_por.username) if nota.creado_por else '',
         'pedidos': [pedido.id for pedido in nota.pedidos.all()],
     }
     if nota.estado != 'pagada':

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { limpiarFechaSeleccionada } from '../utils/fechaContabilidad';
+import { limpiarFechaSeleccionada, limpiarRangoSeleccionado } from '../utils/fechaContabilidad';
 import AdminPanelPage from './AdminPanelPage';
 import ContabilidadPanelPage from './ContabilidadPanelPage';
 import ReporteCuadreCajaPage from './ReporteCuadreCajaPage';
@@ -525,13 +525,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           background: 'linear-gradient(180deg, rgba(22, 8, 8, 0.98) 0%, rgba(8, 8, 8, 0.98) 100%)',
           borderRight: '1px solid rgba(255, 89, 89, 0.34)',
           boxShadow: '12px 0 26px rgba(0, 0, 0, 0.38)',
-          padding: '72px 12px 20px',
           boxSizing: 'border-box',
-          overflowY: 'auto',
-          overflowX: 'hidden',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
         }}
       >
         <button
@@ -556,6 +553,22 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <span style={{ fontSize: 20, lineHeight: 1 }}>×</span>
         </button>
 
+        {/* Solo esta parte hace scroll (el resto del menu de accesos) — la
+            tarjeta de usuario/cerrar sesion queda fija abajo (ver footer mas
+            abajo), para no tener que bajar buscándola en una tablet donde el
+            menu completo no entra de una vez en la pantalla. */}
+        <div style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          padding: '72px 12px 12px',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}>
         <div style={{
           padding: '0 4px 12px',
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
@@ -653,6 +666,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             type="button"
             onClick={() => {
               limpiarFechaSeleccionada();
+              limpiarRangoSeleccionado();
               goToView('contabilidad-cuadre-caja');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
@@ -718,13 +732,16 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           </button>
         ) : null}
 
-        <div style={{ flex: 1 }} />
+        </div>
 
         <div style={{
+          flexShrink: 0,
+          margin: '0 12px 16px',
           borderRadius: 22,
           padding: 16,
           background: 'linear-gradient(180deg, rgba(191, 31, 31, 0.18) 0%, rgba(255, 255, 255, 0.03) 100%)',
           border: '1px solid rgba(255, 102, 102, 0.2)',
+          boxShadow: '0 -8px 20px rgba(0, 0, 0, 0.25)',
         }}>
           <button
             type="button"
@@ -1061,6 +1078,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <ReporteCuadreCajaRangoPage
             isMobile={isMobile}
             onBack={goBackView}
+            onNavigate={handleAnalystNavigation}
           />
         ) : activeView === 'contabilidad-disponibilidad-cuentas' ? (
           <ReporteDisponibilidadCuentasPage

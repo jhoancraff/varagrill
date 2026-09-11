@@ -12,6 +12,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [borrador, setBorrador] = useState({ id: null, detalles: [], total: '0' });
   const [loading, setLoading] = useState(true);
   const [itemForm, setItemForm] = useState(emptyItemForm);
+  const [monedaItem, setMonedaItem] = useState('USD');
   const [isNameFocused, setIsNameFocused] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [lote, setLote] = useState(emptyLote);
@@ -79,9 +80,12 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
 
     setAddingItem(true);
     try {
+      const precioField = monedaItem === 'VES'
+        ? { precio_total_bs: itemForm.precio_total }
+        : { precio_total: itemForm.precio_total };
       const body = exactMatch
-        ? { ingrediente_id: exactMatch.id, cantidad: itemForm.cantidad, precio_total: itemForm.precio_total }
-        : { nombre: itemForm.nombre, unidad: itemForm.unidad, cantidad: itemForm.cantidad, precio_total: itemForm.precio_total };
+        ? { ingrediente_id: exactMatch.id, cantidad: itemForm.cantidad, ...precioField }
+        : { nombre: itemForm.nombre, unidad: itemForm.unidad, cantidad: itemForm.cantidad, ...precioField };
 
       const response = await fetch('/api/admin/compras/borrador/agregar/', {
         method: 'POST',
@@ -259,10 +263,23 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                 <input type="number" step="0.01" min="0" value={itemForm.cantidad} onChange={(e) => setItemForm((c) => ({ ...c, cantidad: e.target.value }))} style={inputStyle} required />
               </label>
 
-              <label style={fieldStyle}>
+              <div style={fieldStyle}>
                 <span style={labelStyle}>Precio total pagado</span>
-                <input type="number" step="0.01" min="0" value={itemForm.precio_total} onChange={(e) => setItemForm((c) => ({ ...c, precio_total: e.target.value }))} style={inputStyle} required />
-              </label>
+                <div style={monedaToggleStyle}>
+                  <button type="button" onClick={() => setMonedaItem('USD')} style={monedaToggleButtonStyle(monedaItem === 'USD')}>$</button>
+                  <button type="button" onClick={() => setMonedaItem('VES')} style={monedaToggleButtonStyle(monedaItem === 'VES')}>Bs</button>
+                </div>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={itemForm.precio_total}
+                  onChange={(e) => setItemForm((c) => ({ ...c, precio_total: e.target.value }))}
+                  style={inputStyle}
+                  placeholder={monedaItem === 'VES' ? 'Precio total en Bs' : 'Precio total en $'}
+                  required
+                />
+              </div>
 
               <button type="submit" style={primaryButtonStyle} disabled={addingItem}>
                 {addingItem ? 'Agregando...' : 'Agregar al borrador'}
@@ -288,7 +305,12 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                         <div key={`name-${detalle.id}`} style={cellPrimaryStyle}>{detalle.ingrediente_nombre}</div>
                         <div key={`qty-${detalle.id}`} style={cellStyle}>{detalle.cantidad} {detalle.unidad_medida}</div>
                         <div key={`cost-${detalle.id}`} style={cellStyle}>${detalle.costo_unitario}</div>
-                        <div key={`total-${detalle.id}`} style={cellStyle}>${detalle.precio_total}</div>
+                        <div key={`total-${detalle.id}`} style={cellStyle}>
+                          ${Number(detalle.precio_total).toFixed(2)}
+                          {detalle.precio_total_bs ? (
+                            <div style={{ color: '#c8bbbb', fontSize: 11.5 }}>Bs. {detalle.precio_total_bs}</div>
+                          ) : null}
+                        </div>
                         <div key={`actions-${detalle.id}`} style={cellStyle}>
                           <button type="button" onClick={() => handleRemoveItem(detalle.id)} style={dangerButtonStyle}>Quitar</button>
                         </div>
@@ -356,6 +378,13 @@ const itemFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isM
 const fieldStyle = { display: 'grid', gap: 6 };
 const labelStyle = { color: '#f0b4b4', fontSize: 12.5, fontWeight: 700 };
 const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '9px 10px', color: '#fff', fontSize: 13 };
+const monedaToggleStyle = { display: 'flex', gap: 6 };
+const monedaToggleButtonStyle = (activo) => ({
+  flex: 1, border: activo ? 'none' : '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '6px 8px',
+  fontSize: 12, fontWeight: 800, cursor: 'pointer',
+  background: activo ? 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)' : 'rgba(255,255,255,0.04)',
+  color: activo ? '#04140a' : '#d2c4c4',
+});
 const hintStyle = { margin: 0, color: '#a89999', fontSize: 12 };
 
 const suggestionsPanelStyle = { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 5, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(10, 8, 8, 0.98)', boxShadow: '0 12px 30px rgba(0,0,0,0.4)', padding: 8, display: 'grid', gap: 4, maxHeight: 220, overflowY: 'auto' };

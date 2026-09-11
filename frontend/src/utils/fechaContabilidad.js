@@ -67,3 +67,35 @@ export function limpiarRangoSeleccionado() {
     // ver comentario en setFechaSeleccionada.
   }
 }
+
+// Intento de navegación de un solo uso: desde el estado de resultados, el
+// chip "Compras a proveedores (pagadas)" necesita abrir Cuentas por pagar
+// directo en la pestaña "Facturas pagadas" con el MISMO rango de fechas que
+// se estaba viendo — para poder rastrear de dónde sale ese monto en vez de
+// que quede como una caja negra. Se consume (lee y borra) al llegar, así que
+// si el usuario vuelve a entrar a Cuentas por pagar por su cuenta después,
+// no se queda pegado en la pestaña de pagadas para siempre.
+const ABRIR_PAGADAS_KEY = 'cuentas_por_pagar_abrir_en_pagadas';
+
+export function setAbrirCuentasPorPagarEnPagadas(desde, hasta) {
+  try {
+    sessionStorage.setItem(ABRIR_PAGADAS_KEY, JSON.stringify({ desde, hasta }));
+  } catch {
+    // ver comentario en setFechaSeleccionada.
+  }
+}
+
+export function consumirAperturaCuentasPorPagarPagadas() {
+  try {
+    const raw = sessionStorage.getItem(ABRIR_PAGADAS_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(ABRIR_PAGADAS_KEY);
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.desde && parsed.hasta) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

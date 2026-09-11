@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
+import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
 
 function formatUsdBs(amount, tasa) {
   const usd = `$${Number(amount).toFixed(2)}`;
@@ -19,8 +20,30 @@ function formatSaldoUsdBs(amount, tasa, saldoBsPreciso) {
   return bs ? `${usd} (${bs})` : usd;
 }
 
+function todayIso() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const local = new Date(now.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function startOfMonthIso() {
+  const today = todayIso();
+  return `${today.slice(0, 7)}-01`;
+}
+
 function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const tasaCambio = useExchangeRate();
+  // 'pendientes' es el comportamiento de siempre (lotes/gastos sin saldar);
+  // 'pagadas' es el historial nuevo de facturas ya saldadas, filtrable por
+  // fecha — "las facturas que pagué". Si se llega desde el chip "Compras a
+  // proveedores" del estado de resultados (ver setAbrirCuentasPorPagarEnPagadas),
+  // arranca directo en esa pestaña con el mismo rango que se estaba viendo, para
+  // poder rastrear de dónde sale ese monto.
+  const [aperturaInicial] = useState(() => consumirAperturaCuentasPorPagarPagadas());
+  const [vista, setVista] = useState(aperturaInicial ? 'pagadas' : 'pendientes');
+  const [historialDesde, setHistorialDesde] = useState(aperturaInicial ? aperturaInicial.desde : startOfMonthIso());
+  const [historialHasta, setHistorialHasta] = useState(aperturaInicial ? aperturaInicial.hasta : todayIso());
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -30,6 +53,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const [compraDetalle, setCompraDetalle] = useState(null);
   const [loadingDetalle, setLoadingDetalle] = useState(false);
   const [montoAbono, setMontoAbono] = useState('');
+  const [monedaAbono, setMonedaAbono] = useState('USD');
   const [metodoAbono, setMetodoAbono] = useState('');
   const [savingAbono, setSavingAbono] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -38,7 +62,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 
   const fetchCompras = useCallback(async () => {
     try {
-      const response = await fetch('/api/cuentas-por-pagar/', { credentials: 'include', cache: 'no-store' });
+      const query = vista === 'pagadas'
+        ? `?estado=pagadas&desde=${historialDesde}&hasta=${historialHasta}`
+        : '';
+      const response = await fetch(`/api/cuentas-por-pagar/${query}`, { credentials: 'include', cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         setError(data.message || 'No se pudieron cargar las cuentas por pagar.');
@@ -51,12 +78,19 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [vista, historialDesde, historialHasta]);
 
   useEffect(() => {
     setLoading(true);
+    setSelectedCompraId(null);
+    setCompraDetalle(null);
     fetchCompras();
   }, [fetchCompras]);
+
+  const cambiarVista = (nuevaVista) => {
+    setVista(nuevaVista);
+    setFeedback('');
+  };
 
   useEffect(() => {
     const loadMetodosPago = async () => {
@@ -96,6 +130,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const handleSelectCompra = (compra) => {
     setFeedback('');
     setMontoAbono('');
+    setMonedaAbono('USD');
     setSelectedCompraId(compra.id);
     setSelectedTipo(compra.tipo);
     fetchCompraDetalle(compra.id, compra.tipo);
@@ -124,7 +159,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ monto: montoAbono, metodo_pago_id: metodoPagoId }),
+        body: JSON.stringify({
+          ...(monedaAbono === 'VES' ? { monto_bs: montoAbono } : { monto: montoAbono }),
+          metodo_pago_id: metodoPagoId,
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
@@ -154,13 +192,49 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
           <div style={eyebrowStyle}>Contabilidad</div>
           <h2 style={titleStyle(isMobile)}>Cuentas por pagar</h2>
           <p style={subtitleStyle}>
-            Lotes de compra a proveedores y gastos operativos con saldo pendiente. Selecciona uno para registrar los abonos hasta saldarlo.
+            {vista === 'pendientes'
+              ? 'Lotes de compra a proveedores y gastos operativos con saldo pendiente. Selecciona uno para registrar los abonos hasta saldarlo.'
+              : 'Facturas y gastos que ya quedaron saldados, filtrados por cuándo se terminaron de pagar.'}
           </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
           Volver
         </button>
       </div>
+
+      <div style={tabsRowStyle}>
+        <button type="button" onClick={() => cambiarVista('pendientes')} style={tabButtonStyle(vista === 'pendientes')}>
+          Pendientes
+        </button>
+        <button type="button" onClick={() => cambiarVista('pagadas')} style={tabButtonStyle(vista === 'pagadas')}>
+          Facturas pagadas
+        </button>
+      </div>
+
+      {vista === 'pagadas' ? (
+        <div style={historialFiltrosStyle(isMobile)}>
+          <label style={dateLabelStyle}>
+            Desde
+            <input
+              type="date"
+              value={historialDesde}
+              max={historialHasta}
+              onChange={(event) => setHistorialDesde(event.target.value)}
+              style={dateInputStyle}
+            />
+          </label>
+          <label style={dateLabelStyle}>
+            Hasta
+            <input
+              type="date"
+              value={historialHasta}
+              max={todayIso()}
+              onChange={(event) => setHistorialHasta(event.target.value)}
+              style={dateInputStyle}
+            />
+          </label>
+        </div>
+      ) : null}
 
       {feedback ? (
         <div style={feedbackStyle(feedbackType)}>
@@ -180,7 +254,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       {loading ? <div style={emptyStateStyle}>Cargando cuentas por pagar...</div> : null}
       {!loading && error ? <div style={errorStyle}>{error}</div> : null}
       {!loading && !error && compras.length === 0 ? (
-        <div style={emptyStateStyle}>No hay deudas pendientes con proveedores ni gastos por saldar en este momento.</div>
+        <div style={emptyStateStyle}>
+          {vista === 'pendientes'
+            ? 'No hay deudas pendientes con proveedores ni gastos por saldar en este momento.'
+            : 'No se pagó ninguna factura ni gasto en este período.'}
+        </div>
       ) : null}
 
       {!loading && !error && compras.length > 0 ? (
@@ -204,7 +282,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                   {compra.numero_factura_proveedor ? ` · Factura ${compra.numero_factura_proveedor}` : ''}
                   {compra.numero_comprobante ? ` · Comp. ${compra.numero_comprobante}` : ''}
                 </div>
-                <div style={{ color: '#ffcf7d', fontWeight: 700 }}>Saldo: {formatSaldoUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio, compra.saldo_pendiente_bs)}</div>
+                <div style={{ color: vista === 'pagadas' ? '#9fe3b0' : '#ffcf7d', fontWeight: 700 }}>
+                  {vista === 'pagadas'
+                    ? `Total pagado: ${formatUsdBs(compra.tipo === 'gasto' ? compra.monto : compra.total, compra.tasa_cambio_referencia ?? tasaCambio)}`
+                    : `Saldo: ${formatSaldoUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio, compra.saldo_pendiente_bs)}`}
+                </div>
               </button>
             ))}
           </div>
@@ -265,11 +347,27 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 
                 {!esEstadoSaldado(compraDetalle.estado_pago) ? (
                   <form onSubmit={handleRegistrarAbono} style={abonoFormStyle(isMobile)}>
+                    <div style={monedaToggleStyle}>
+                      <button
+                        type="button"
+                        onClick={() => setMonedaAbono('USD')}
+                        style={monedaToggleButtonStyle(monedaAbono === 'USD')}
+                      >
+                        Dólares ($)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMonedaAbono('VES')}
+                        style={monedaToggleButtonStyle(monedaAbono === 'VES')}
+                      >
+                        Bolívares (Bs)
+                      </button>
+                    </div>
                     <input
                       type="number"
                       min="0.01"
                       step="0.01"
-                      placeholder="Monto del abono"
+                      placeholder={monedaAbono === 'VES' ? 'Monto del abono en Bs' : 'Monto del abono en $'}
                       value={montoAbono}
                       onChange={(event) => setMontoAbono(event.target.value)}
                       style={inputStyle}
@@ -346,11 +444,29 @@ const estadoBadgeStyle = (estado) => ({
 const detailPanelStyle = { display: 'grid', gap: 12, padding: '18px 18px', borderRadius: 20, background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)', border: '1px solid rgba(255, 255, 255, 0.1)', boxShadow: '0 12px 28px rgba(0,0,0,0.24)', minHeight: 200 };
 const lineaRowStyle = { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#e8dede' };
 const detailTotalsStyle = { display: 'flex', flexWrap: 'wrap', gap: 14, paddingTop: 8, borderTop: '1px solid rgba(255, 255, 255, 0.06)', color: '#d2c4c4', fontSize: 13 };
-const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto', gap: 8, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.08)' });
+const abonoFormStyle = () => ({ display: 'grid', gap: 10, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.08)' });
 const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255, 255, 255, 0.14)', background: '#161010', padding: '9px 10px', color: '#fff4f4', fontSize: 13 };
 const selectStyle = { ...inputStyle, appearance: 'auto', colorScheme: 'dark', cursor: 'pointer' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)', color: '#04140a', fontWeight: 800, cursor: 'pointer' };
 const comprobanteLinkStyle = { display: 'block', marginTop: 8, border: 'none', background: 'transparent', color: 'inherit', textDecoration: 'underline', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 13 };
 const miniPrintButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
+
+const tabsRowStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
+const tabButtonStyle = (activo) => ({
+  border: activo ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.14)',
+  borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+  background: activo ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+  color: activo ? '#ffb0b0' : '#d2c4c4',
+});
+const historialFiltrosStyle = (isMobile) => ({ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row' });
+const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
+const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
+const monedaToggleStyle = { display: 'flex', gap: 8 };
+const monedaToggleButtonStyle = (activo) => ({
+  flex: 1, border: activo ? 'none' : '1px solid rgba(255,255,255,0.14)', borderRadius: 12, padding: '9px 10px',
+  fontSize: 13, fontWeight: 800, cursor: 'pointer',
+  background: activo ? 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)' : 'rgba(255,255,255,0.04)',
+  color: activo ? '#04140a' : '#d2c4c4',
+});
 
 export default CuentasPorPagarPage;

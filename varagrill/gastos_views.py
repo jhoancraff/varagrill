@@ -82,7 +82,7 @@ def _serialize_gasto(gasto, incluir_detalle=False):
     return data
 
 
-def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator):
+def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator, tasa_cambio_referencia=None):
     """
     Aplica un abono a un gasto: crea el VGAbonoGasto y deja saldo_pendiente/estado_pago
     consistentes. Usado tanto por gasto_abono_view (abono suelto) como por
@@ -92,7 +92,7 @@ def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator):
     """
     abono = VGAbonoGasto.objects.create(
         gasto=gasto, monto=monto, metodo_pago=metodo_pago, referencia=referencia, creado_por=operator,
-        tasa_cambio_referencia=tasa_cambio_para_registro(),
+        tasa_cambio_referencia=tasa_cambio_referencia if tasa_cambio_referencia is not None else tasa_cambio_para_registro(),
     )
     # Redondeado a 2 decimales (y nunca negativo): monto puede traer 6
     # decimales de precision (ver VGGasto.monto) pero saldo_pendiente siempre
@@ -340,12 +340,49 @@ def gasto_abono_view(request, gasto_id):
     except json.JSONDecodeError:
         return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
 
-    try:
-        monto = Decimal(str(data.get('monto', '')))
-    except InvalidOperation:
-        return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
-    if monto <= 0:
-        return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+    # Mismo criterio que admin_gastos_view al crear el gasto: el abono se paga
+    # en UNA sola moneda — en dolares (`monto`) o en bolivares (`monto_bs`),
+    # nunca las dos a la vez. Pagado en bolivares, ese es el monto EXACTO que
+    # se registra (se congela con la tasa BCV de hoy y nunca se recalcula
+    # despues); pagado en dolares, el bolivar que se muestre despues se deriva
+    # de esa misma tasa congelada.
+    monto_raw = data.get('monto')
+    monto_bs_raw = data.get('monto_bs')
+    tiene_monto = monto_raw not in (None, '')
+    tiene_monto_bs = monto_bs_raw not in (None, '')
+    if tiene_monto and tiene_monto_bs:
+        return _auth_response({
+            'ok': False,
+            'message': 'Ingresa el monto solo en dólares o solo en bolívares, no en los dos.',
+        }, status=400)
+    if not tiene_monto and not tiene_monto_bs:
+        return _auth_response({'ok': False, 'message': 'Indica el monto del abono.'}, status=400)
+
+    tasa_abono = None
+    if tiene_monto_bs:
+        try:
+            monto_bs = Decimal(str(monto_bs_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
+        if monto_bs <= 0:
+            return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
+
+        tasa_actual = obtener_tasa_actual()
+        tasa_abono = tasa_actual.tasa if tasa_actual else None
+        if not tasa_abono or tasa_abono <= 0:
+            return _auth_response({
+                'ok': False,
+                'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.',
+            }, status=400)
+        monto = (monto_bs / tasa_abono).quantize(Decimal('0.000001'))
+    else:
+        try:
+            monto = Decimal(str(monto_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+        if monto <= 0:
+            return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+        tasa_abono = tasa_cambio_para_registro()
 
     try:
         metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
@@ -361,14 +398,19 @@ def gasto_abono_view(request, gasto_id):
         if gasto.estado_pago == 'pagado':
             return _auth_response({'ok': False, 'message': 'Este gasto ya esta saldado.'}, status=409)
 
-        if monto > gasto.saldo_pendiente:
+        # Misma tolerancia que TOLERANCIA_REDONDEO_ABONO en facturacion_views.py:
+        # un pago que salda el gasto COMPLETO convertido de bolivares puede
+        # traer 6 decimales de precision que redondean una fraccion de
+        # centavo por ENCIMA del saldo (2 decimales) — sin esta tolerancia,
+        # ese pago legitimo por el total exacto se rechazaba con este error.
+        if monto > gasto.saldo_pendiente + Decimal('0.00001'):
             return _auth_response({
                 'ok': False,
                 'message': f'El monto excede el saldo pendiente (${gasto.saldo_pendiente}).',
             }, status=400)
 
         referencia = str(data.get('referencia', '') or '').strip()
-        abono = _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, request.user)
+        abono = _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, request.user, tasa_cambio_referencia=tasa_abono)
 
     return _auth_response({
         'ok': True,

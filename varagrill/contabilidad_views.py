@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .api_views import _calcular_margen_periodo, _serialize_detalle_adicionales, _serialize_detalle_opciones
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import (
+    VGAbonoCompra,
     VGCierreCaja,
     VGConciliacionBancaria,
     VGConsignacionCaja,
@@ -1206,6 +1207,14 @@ def reporte_estado_resultados_view(request):
     margen por plato) para "ventas" y "costo de ingredientes", y suma VGGasto
     por fecha_gasto (no por fecha de pago: un gasto cuenta para el periodo en
     que se incurrio, se haya pagado ya o no) para los gastos operativos.
+
+    Las facturas de compra a proveedores (VGCompra, inventario subido por Excel)
+    tambien se suman aca como si fueran un gasto mas — a diferencia de VGGasto,
+    por fecha_pago de cada VGAbonoCompra (cuando de verdad se abono/pago, no
+    cuando se cargo la factura): asi decidio el usuario tratarlas (2026-09),
+    aceptando que un ingrediente ya vendido se cuenta dos veces (una vez aca al
+    pagarlo, otra vez en costo_ingredientes_total via el costeo por receta) —
+    ver la decision registrada en la conversacion de esa fecha.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1245,6 +1254,27 @@ def reporte_estado_resultados_view(request):
             monto_bs = gasto.monto * gasto.tasa_cambio_referencia
             gastos_total_bs += monto_bs
             entry['total_bs'] += monto_bs
+    # Abonos a compras de proveedores pagados DENTRO del rango (por fecha_pago,
+    # no por cuándo se cargó la factura) — se agrupan bajo una categoría
+    # sintética para que aparezcan en el mismo desglose que los gastos.
+    abonos_compra = VGAbonoCompra.objects.filter(
+        fecha_pago__date__gte=desde, fecha_pago__date__lte=hasta,
+    ).select_related('compra')
+    compras_pagadas_total = Decimal('0')
+    compras_pagadas_total_bs = Decimal('0')
+    for abono in abonos_compra:
+        compras_pagadas_total += abono.monto
+        if abono.tasa_cambio_referencia:
+            compras_pagadas_total_bs += abono.monto * abono.tasa_cambio_referencia
+    if compras_pagadas_total > 0:
+        gastos_total += compras_pagadas_total
+        gastos_total_bs += compras_pagadas_total_bs
+        totales_por_categoria['__compras_proveedores'] = {
+            'categoria_nombre': 'Compras a proveedores (pagadas)',
+            'total': compras_pagadas_total,
+            'total_bs': compras_pagadas_total_bs,
+        }
+
     gastos_por_categoria = sorted(
         [
             {

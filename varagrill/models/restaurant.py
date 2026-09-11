@@ -564,10 +564,19 @@ class VGDetalleCompraBorrador(models.Model):
         VGIngrediente, on_delete=models.PROTECT, related_name="detalles_compra_borrador",
     )
     cantidad = models.DecimalField(max_digits=10, decimal_places=2)
+    # 6 decimales, no 2 (igual que VGAbonoCompra.monto/VGGasto.monto) — esta
+    # linea se puede cargar en bolivares (ver admin_compra_borrador_agregar_view)
+    # y convertir con la tasa BCV del dia; con 2 decimales el redondeo perdia
+    # bolivares al reconvertir para mostrarla despues.
     precio_total = models.DecimalField(
-        max_digits=12, decimal_places=2,
+        max_digits=14, decimal_places=6,
         help_text="Lo pagado por esa cantidad de ese ingrediente, según la factura del proveedor.",
     )
+    # Tasa BCV congelada al momento de AGREGAR esta linea al borrador (no al
+    # confirmar el lote completo): si se cargo en bolivares, esta es la tasa
+    # que reconstruye exactamente ese monto en bs sin importar que el BCV
+    # cambie despues, incluso entre lineas agregadas en dias distintos.
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
@@ -591,7 +600,11 @@ class VGAbonoCompra(models.Model):
     cuadre de caja diario (reportes.py); mezclar egresos ahí contaminaría ese reporte.
     """
     compra = models.ForeignKey(VGCompra, on_delete=models.PROTECT, related_name="abonos")
-    monto = models.DecimalField(max_digits=10, decimal_places=2)
+    # 6 decimales, no 2 (igual que VGGasto.monto/VGAbonoGasto.monto) — un abono
+    # se puede pagar en bolivares y convertir a dolares con la tasa BCV del dia
+    # (ver compra_abono_view); con 2 decimales el redondeo perdia bolivares al
+    # reconvertir para mostrarlo despues (mismo bug reportado 2026-09 para gastos).
+    monto = models.DecimalField(max_digits=14, decimal_places=6)
     metodo_pago = models.ForeignKey(
         VGMetodoPago, on_delete=models.PROTECT, related_name="abonos_compra",
     )

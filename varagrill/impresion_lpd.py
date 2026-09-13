@@ -152,6 +152,17 @@ def _render_recibo_item(detalle, moneda, tasa):
     return bytes(out)
 
 
+def _metodo_pago_para_impresion(nota):
+    pagos = list(
+        nota.pagos.filter(estado='completado')
+        .select_related('metodo_pago')
+        .order_by('-fecha_pago', '-id')
+    )
+    if pagos and len({pago.metodo_pago.moneda for pago in pagos}) == 1:
+        return pagos[0].metodo_pago
+    return nota.metodo_pago
+
+
 def _build_recibo_bytes(
     pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None,
     descuento_manual=None, descuento_manual_motivo='',
@@ -255,6 +266,7 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
         logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la nota de entrega.')
         return False, 'La impresora de caja no tiene IP o cola configurada.'
 
+    metodo_pago = _metodo_pago_para_impresion(nota)
     pedidos = list(
         nota.pedidos.select_related('mesa')
         .prefetch_related('detalles__producto', 'detalles__opciones', 'detalles__adicionales__preparacion')
@@ -265,7 +277,7 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
         ticket = _build_recibo_bytes(
-            pedidos, nota.metodo_pago, nota.referencia, nota.total, nota.tasa_cambio_referencia,
+            pedidos, metodo_pago, nota.referencia, nota.total, nota.tasa_cambio_referencia,
             titulo=titulo, codigo=nota.codigo,
             descuento_manual=nota.descuento_monto, descuento_manual_motivo=nota.descuento_motivo,
         )

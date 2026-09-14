@@ -71,6 +71,8 @@ const ESTADO_LABELS = {
   pagado: { label: 'Pagado', color: '#9fe3b0', background: 'rgba(80, 200, 130, 0.18)' },
 };
 
+const FILAS_POR_PAGINA = 50;
+
 function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const tasaCambio = useExchangeRate();
   const [categorias, setCategorias] = useState([]);
@@ -101,6 +103,20 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [verAbonosId, setVerAbonosId] = useState(null);
   const [abonosDetalle, setAbonosDetalle] = useState([]);
   const [loadingAbonosDetalle, setLoadingAbonosDetalle] = useState(false);
+
+  const [pagina, setPagina] = useState(0);
+
+  const [editandoGastoId, setEditandoGastoId] = useState(null);
+  const [editDetalle, setEditDetalle] = useState(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editMonto, setEditMonto] = useState('');
+  const [editFecha, setEditFecha] = useState('');
+  const [editMetodoPagoId, setEditMetodoPagoId] = useState('');
+  const [editError, setEditError] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [pidiendoMotivo, setPidiendoMotivo] = useState(false);
+  const [motivoEdicion, setMotivoEdicion] = useState('');
+  const [motivoError, setMotivoError] = useState('');
 
   const loadCategorias = useCallback(async () => {
     try {
@@ -140,6 +156,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       setGastos(Array.isArray(data.gastos) ? data.gastos : []);
       setTotalesPorCategoria(Array.isArray(data.totales_por_categoria) ? data.totales_por_categoria : []);
       setTotalGeneral(data.total_general || '0');
+      setPagina(0);
     } catch (error) {
       showError(error.message || 'No se pudieron cargar los gastos.');
     } finally {
@@ -175,6 +192,13 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       return suma + Number(gasto.monto) * tasa;
     }, 0)
   ), [gastos, tasaCambio]);
+
+  // Los totales de arriba (bsTotalGeneral, totalesPorCategoria) siguen
+  // calculandose sobre `gastos` completo — solo la tabla se pagina, para que
+  // el total del periodo no cambie segun que pagina este viendo el usuario.
+  const totalPaginas = Math.max(1, Math.ceil(gastos.length / FILAS_POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas - 1);
+  const gastosPagina = gastos.slice(paginaActual * FILAS_POR_PAGINA, (paginaActual + 1) * FILAS_POR_PAGINA);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -306,6 +330,105 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       setAbonosDetalle([]);
     } finally {
       setLoadingAbonosDetalle(false);
+    }
+  };
+
+  const handleAbrirEdicion = async (gasto) => {
+    setEditandoGastoId(gasto.id);
+    setEditDetalle(null);
+    setEditError('');
+    setPidiendoMotivo(false);
+    setMotivoEdicion('');
+    setMotivoError('');
+    setEditLoading(true);
+    try {
+      const response = await fetch(`/api/admin/gastos/${gasto.id}/`, { credentials: 'include', cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo cargar el gasto.');
+      }
+      const abonos = Array.isArray(data.gasto.abonos) ? data.gasto.abonos : [];
+      setEditDetalle(data.gasto);
+      setEditMonto(data.gasto.monto);
+      setEditFecha(data.gasto.fecha_gasto);
+      setEditMetodoPagoId(abonos.length === 1 ? String(abonos[0].metodo_pago_id) : '');
+    } catch (error) {
+      setEditError(error.message || 'No se pudo cargar el gasto.');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const cerrarEdicion = () => {
+    if (editSaving) return;
+    setEditandoGastoId(null);
+    setEditDetalle(null);
+    setPidiendoMotivo(false);
+    setMotivoEdicion('');
+    setMotivoError('');
+  };
+
+  const abonoUnicoEdicion = editDetalle && Array.isArray(editDetalle.abonos) && editDetalle.abonos.length === 1
+    ? editDetalle.abonos[0]
+    : null;
+
+  const handlePedirMotivo = (event) => {
+    event.preventDefault();
+    setEditError('');
+    if (!editMonto || Number(editMonto) <= 0) {
+      setEditError('Indica un monto valido.'); return;
+    }
+    if (!editFecha) {
+      setEditError('Indica la fecha del gasto.'); return;
+    }
+    const hayCambios = (
+      Number(editMonto) !== Number(editDetalle.monto)
+      || editFecha !== editDetalle.fecha_gasto
+      || (abonoUnicoEdicion && String(editMetodoPagoId) !== String(abonoUnicoEdicion.metodo_pago_id))
+    );
+    if (!hayCambios) {
+      setEditError('No hay cambios que guardar.'); return;
+    }
+    setMotivoEdicion('');
+    setMotivoError('');
+    setPidiendoMotivo(true);
+  };
+
+  const handleConfirmarEdicion = async () => {
+    if (!motivoEdicion.trim()) {
+      setMotivoError('La descripcion para auditoria es obligatoria.');
+      return;
+    }
+    setEditSaving(true);
+    setMotivoError('');
+    try {
+      const body = { action: 'editar', motivo: motivoEdicion.trim() };
+      if (Number(editMonto) !== Number(editDetalle.monto)) body.monto = editMonto;
+      if (editFecha !== editDetalle.fecha_gasto) body.fecha_gasto = editFecha;
+      if (abonoUnicoEdicion && String(editMetodoPagoId) !== String(abonoUnicoEdicion.metodo_pago_id)) {
+        body.metodo_pago_id = editMetodoPagoId;
+      }
+
+      const response = await fetch(`/api/admin/gastos/${editandoGastoId}/`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo guardar el gasto.');
+      }
+      showSuccess(data.message || 'Gasto actualizado.');
+      setEditandoGastoId(null);
+      setEditDetalle(null);
+      setPidiendoMotivo(false);
+      setMotivoEdicion('');
+      loadGastos();
+    } catch (error) {
+      setMotivoError(error.message || 'No se pudo guardar el gasto.');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -510,6 +633,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
         {!loadingGastos && gastos.length > 0 ? (
           <div style={tableWrapStyle}>
             <div style={tableStyle}>
+              <div style={headStyle}>ID</div>
               <div style={headStyle}>Fecha</div>
               <div style={headStyle}>Categoría</div>
               <div style={headStyle}>Descripción</div>
@@ -517,15 +641,25 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
               <div style={headStyle}>Estado</div>
               <div style={headStyle}></div>
 
-              {gastos.map((gasto) => {
+              {gastosPagina.map((gasto) => {
                 const badge = ESTADO_LABELS[gasto.estado_pago];
                 return (
                   <>
+                    <div key={`id-${gasto.id}`} style={cellStyle}>
+                      <button type="button" onClick={() => handleAbrirEdicion(gasto)} style={idLinkStyle}>
+                        #{gasto.id}
+                      </button>
+                    </div>
                     <div key={`fecha-${gasto.id}`} style={cellStyle}>{gasto.fecha_gasto}</div>
                     <div key={`cat-${gasto.id}`} style={cellStyle}>{gasto.categoria_nombre}</div>
                     <div key={`desc-${gasto.id}`} style={cellPrimaryStyle}>
                       <div>{gasto.descripcion}</div>
                       {gasto.proveedor_nombre ? <div style={{ fontSize: 11, color: '#a89999' }}>{gasto.proveedor_nombre}</div> : null}
+                      {gasto.ultima_correccion ? (
+                        <div style={{ fontSize: 11, color: '#a89999' }} title={gasto.ultima_correccion.motivo}>
+                          Editado por {gasto.ultima_correccion.corregido_por || '—'}
+                        </div>
+                      ) : null}
                     </div>
                     <div key={`monto-${gasto.id}`} style={cellStyle}>
                       {formatUsdBs(gasto.monto, tasaDeRegistro(gasto, tasaCambio))}
@@ -585,8 +719,150 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
             </div>
           </div>
         ) : null}
+
+        {gastos.length > FILAS_POR_PAGINA ? (
+          <div style={paginacionRowStyle(isMobile)}>
+            <div style={paginacionInfoStyle}>
+              Mostrando {paginaActual * FILAS_POR_PAGINA + 1}–{Math.min((paginaActual + 1) * FILAS_POR_PAGINA, gastos.length)} de {gastos.length} gasto(s)
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                disabled={paginaActual === 0}
+                style={paginacionButtonStyle(paginaActual === 0)}
+              >
+                ← Anteriores
+              </button>
+              <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+              <button
+                type="button"
+                onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+                disabled={paginaActual >= totalPaginas - 1}
+                style={paginacionButtonStyle(paginaActual >= totalPaginas - 1)}
+              >
+                Siguientes →
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
+
+      {editandoGastoId ? (
+        <EditarGastoModal
+          loading={editLoading}
+          error={editError}
+          detalle={editDetalle}
+          monto={editMonto}
+          setMonto={setEditMonto}
+          fecha={editFecha}
+          setFecha={setEditFecha}
+          metodoPagoId={editMetodoPagoId}
+          setMetodoPagoId={setEditMetodoPagoId}
+          metodosPago={metodosPago}
+          pidiendoMotivo={pidiendoMotivo}
+          motivo={motivoEdicion}
+          setMotivo={setMotivoEdicion}
+          motivoError={motivoError}
+          saving={editSaving}
+          onPedirMotivo={handlePedirMotivo}
+          onCancelarMotivo={() => setPidiendoMotivo(false)}
+          onConfirmar={handleConfirmarEdicion}
+          onClose={cerrarEdicion}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function EditarGastoModal({
+  loading, error, detalle, monto, setMonto, fecha, setFecha,
+  metodoPagoId, setMetodoPagoId, metodosPago, pidiendoMotivo,
+  motivo, setMotivo, motivoError, saving, onPedirMotivo, onCancelarMotivo, onConfirmar, onClose,
+}) {
+  const abonos = detalle && Array.isArray(detalle.abonos) ? detalle.abonos : [];
+  const abonoUnico = abonos.length === 1 ? abonos[0] : null;
+  const tieneVariosAbonos = abonos.length > 1;
+
+  return (
+    <div style={modalBackdropStyle} onClick={pidiendoMotivo || saving ? undefined : onClose}>
+      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={modalHeaderStyle}>
+          <div style={modalTitleStyle}>
+            {pidiendoMotivo ? 'Motivo del cambio' : `Editar gasto ${detalle ? `#${detalle.id}` : ''}`}
+          </div>
+          <button type="button" onClick={onClose} style={modalCloseButtonStyle} disabled={saving}>✕</button>
+        </div>
+
+        {loading ? <div style={emptyStyle}>Cargando gasto...</div> : null}
+
+        {!loading && detalle && !pidiendoMotivo ? (
+          <form onSubmit={onPedirMotivo} style={{ display: 'grid', gap: 12 }}>
+            <div style={{ fontSize: 13, color: '#c8bbbb' }}>
+              {detalle.categoria_nombre} — {detalle.descripcion}
+            </div>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Monto ($)</span>
+              <input type="number" min="0.01" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} style={inputStyle} required />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Fecha del gasto</span>
+              <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={inputStyle} required />
+            </label>
+            <div style={fieldStyle}>
+              <span style={labelStyle}>Método de pago</span>
+              {abonoUnico ? (
+                <>
+                  <select value={metodoPagoId} onChange={(e) => setMetodoPagoId(e.target.value)} style={inputStyle} className="admin-dark-select">
+                    {metodosPago.map((m) => (
+                      <option key={m.id} value={m.id}>{m.nombre} ({m.moneda === 'VES' ? 'Bs' : '$'})</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11.5, color: '#a89999', marginTop: 4 }}>
+                    Si cambias a una cuenta en otra moneda, el monto se muestra convertido con la tasa vigente — no se pierde ni se duplica.
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: '#a89999' }}>
+                  {tieneVariosAbonos
+                    ? 'Este gasto tiene varios abonos — el método de pago no se puede cambiar aquí.'
+                    : 'Este gasto aún no tiene un abono registrado — el método de pago se define al pagarlo.'}
+                </div>
+              )}
+            </div>
+
+            {error ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{error}</div> : null}
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={onClose} style={secondaryButtonStyle}>Cancelar</button>
+              <button type="submit" style={primaryButtonStyle}>Guardar cambios</button>
+            </div>
+          </form>
+        ) : null}
+
+        {pidiendoMotivo ? (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ fontSize: 13, color: '#c8bbbb' }}>
+              Para auditoría, indica por qué se corrige este gasto. Es obligatorio.
+            </div>
+            <textarea
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
+              placeholder="Ej: El monto real de la factura era distinto al registrado."
+              autoFocus
+            />
+            {motivoError ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{motivoError}</div> : null}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={onCancelarMotivo} style={secondaryButtonStyle} disabled={saving}>Volver</button>
+              <button type="button" onClick={onConfirmar} style={primaryButtonStyle} disabled={saving}>
+                {saving ? 'Guardando...' : 'Confirmar y guardar'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -622,7 +898,24 @@ const categoriaTotalChipStyle = { display: 'inline-flex', padding: '5px 12px', b
 
 const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: '100px 140px minmax(180px,1.4fr) minmax(140px,1fr) 110px 170px', gap: '10px 12px', alignItems: 'center', minWidth: 900 };
+const tableStyle = { display: 'grid', gridTemplateColumns: '70px 100px 140px minmax(180px,1.4fr) minmax(140px,1fr) 110px 170px', gap: '10px 12px', alignItems: 'center', minWidth: 960 };
+const idLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
+
+const paginacionRowStyle = (isMobile) => ({
+  display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
+});
+const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionButtonStyle = (disabled) => ({
+  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
+  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
+  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
+});
+
+const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
+const modalCardStyle = { width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 14 };
+const modalHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
+const modalCloseButtonStyle = { border: 'none', background: 'rgba(255,255,255,0.08)', color: '#fff', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
 const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
 const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
 const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };

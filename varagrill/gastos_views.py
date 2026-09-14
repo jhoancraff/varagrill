@@ -14,7 +14,7 @@ from django.db.models import Sum
 from django.views.decorators.csrf import csrf_exempt
 
 from .auth_helpers import _auth_response, _is_admin_user
-from .models import VGAbonoGasto, VGCategoriaGasto, VGGasto, VGMetodoPago
+from .models import VGAbonoGasto, VGCategoriaGasto, VGCorreccionGasto, VGGasto, VGMetodoPago
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
 
@@ -35,7 +35,43 @@ def _serialize_abono_gasto(abono):
     }
 
 
-def _serialize_gasto(gasto, incluir_detalle=False):
+def _serialize_correccion_gasto(correccion):
+    return {
+        'motivo': correccion.motivo,
+        'monto_anterior': str(correccion.monto_anterior) if correccion.monto_anterior is not None else None,
+        'monto_nuevo': str(correccion.monto_nuevo) if correccion.monto_nuevo is not None else None,
+        'fecha_gasto_anterior': correccion.fecha_gasto_anterior.isoformat() if correccion.fecha_gasto_anterior else None,
+        'fecha_gasto_nueva': correccion.fecha_gasto_nueva.isoformat() if correccion.fecha_gasto_nueva else None,
+        'metodo_anterior': correccion.metodo_anterior.nombre if correccion.metodo_anterior else None,
+        'metodo_nuevo': correccion.metodo_nuevo.nombre if correccion.metodo_nuevo else None,
+        'corregido_por': (correccion.creado_por.get_full_name() or correccion.creado_por.username) if correccion.creado_por else '',
+        'fecha_creacion': correccion.fecha_creacion.isoformat(),
+    }
+
+
+def _ultimas_correcciones_gasto(gasto_ids):
+    """
+    Ultima VGCorreccionGasto de cada gasto — para mostrar junto a la fila del
+    reporte de gastos el motivo de la ultima edicion manual (monto, metodo
+    de pago o fecha), igual que _ultimas_correcciones_por_registro hace para
+    los pagos del cuadre de caja (ver contabilidad_views.py).
+    """
+    if not gasto_ids:
+        return {}
+    correcciones = (
+        VGCorreccionGasto.objects
+        .filter(gasto_id__in=gasto_ids)
+        .select_related('metodo_anterior', 'metodo_nuevo', 'creado_por')
+        .order_by('gasto_id', '-fecha_creacion')
+    )
+    resultado = {}
+    for correccion in correcciones:
+        if correccion.gasto_id not in resultado:
+            resultado[correccion.gasto_id] = _serialize_correccion_gasto(correccion)
+    return resultado
+
+
+def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None):
     # saldo_pendiente se guarda con solo 2 decimales (ver docstring de VGGasto),
     # asi que reconvertirlo a bolivares pierde los centimos de monto (6
     # decimales) frente al total en bs del reporte de gastos, mostrando un
@@ -74,6 +110,7 @@ def _serialize_gasto(gasto, incluir_detalle=False):
         'total_bs': str((gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))) if tasa_para_bs else None,
         'saldo_pendiente_bs': str((saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))) if tasa_para_bs else None,
         'creado_por': (gasto.creado_por.get_full_name() or gasto.creado_por.username) if gasto.creado_por else '',
+        'ultima_correccion': ultima_correccion,
     }
     if incluir_detalle:
         data['abonos'] = [
@@ -190,6 +227,7 @@ def admin_gastos_view(request):
             gastos = gastos.filter(estado_pago=estado_pago)
 
         gastos = list(gastos.order_by('-fecha_gasto', '-fecha_creacion'))
+        correcciones = _ultimas_correcciones_gasto([gasto.id for gasto in gastos])
 
         totales_por_categoria = {}
         for gasto in gastos:
@@ -202,7 +240,7 @@ def admin_gastos_view(request):
             'ok': True,
             'fecha_desde': fecha_desde.isoformat(),
             'fecha_hasta': fecha_hasta.isoformat(),
-            'gastos': [_serialize_gasto(gasto) for gasto in gastos],
+            'gastos': [_serialize_gasto(gasto, ultima_correccion=correcciones.get(gasto.id)) for gasto in gastos],
             'total_general': str(sum((gasto.monto for gasto in gastos), Decimal('0'))),
             'totales_por_categoria': [
                 {**entry, 'total': str(entry['total'])} for entry in sorted(totales_por_categoria.values(), key=lambda e: e['categoria_nombre'])
@@ -312,19 +350,170 @@ def admin_gastos_view(request):
     }, status=201)
 
 
+@csrf_exempt
 def gasto_detail_view(request, gasto_id):
-    if request.method != 'GET':
+    """
+    GET devuelve el detalle completo de un gasto (con sus abonos). POST edita
+    manualmente monto, metodo de pago (solo si el gasto tiene un unico abono,
+    ver mas abajo) y/o fecha del gasto ya registrado — usado desde el modal
+    de edicion del reporte de gastos operativos. El motivo es obligatorio a
+    proposito (ver VGCorreccionGasto): deja un rastro auditable de por que se
+    corrigio el gasto, no solo que se corrigio.
+    """
+    if request.method not in ('GET', 'POST'):
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
     if not _is_admin_user(request.user):
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
 
-    try:
-        gasto = VGGasto.objects.select_related('categoria').get(pk=gasto_id)
-    except VGGasto.DoesNotExist:
-        return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
+    if request.method == 'GET':
+        try:
+            gasto = VGGasto.objects.select_related('categoria').get(pk=gasto_id)
+        except VGGasto.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
+        ultima_correccion = _ultimas_correcciones_gasto([gasto.id]).get(gasto.id)
+        return _auth_response({'ok': True, 'gasto': _serialize_gasto(gasto, incluir_detalle=True, ultima_correccion=ultima_correccion)})
 
-    return _auth_response({'ok': True, 'gasto': _serialize_gasto(gasto, incluir_detalle=True)})
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    if str(data.get('action', '')).strip().lower() != 'editar':
+        return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+
+    # Obligatorio a proposito, igual que 'cambiar_metodo_pago' en
+    # contabilidad_views.py: es lo que deja un rastro auditable de POR QUE se
+    # corrigio el gasto, no solo que se corrigio.
+    motivo = str(data.get('motivo', '') or '').strip()
+    if not motivo:
+        return _auth_response({'ok': False, 'message': 'La descripcion para auditoria es obligatoria.'}, status=400)
+
+    with transaction.atomic():
+        try:
+            gasto = VGGasto.objects.select_for_update().select_related('categoria').get(pk=gasto_id)
+        except VGGasto.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
+
+        abonos = list(gasto.abonos.select_related('metodo_pago').order_by('fecha_pago'))
+        # El metodo de pago vive en el VGAbonoGasto, no en el VGGasto (ver su
+        # docstring) — solo tiene sentido "cambiar el metodo de pago de un
+        # gasto" cuando hay exactamente un abono (el caso comun de "pagado de
+        # una vez"); con varios abonos o ninguno, a cual moverle la plata es
+        # ambiguo, asi que esa edicion se rechaza mas abajo.
+        abono_unico = abonos[0] if len(abonos) == 1 else None
+        # Se decide ANTES de tocar nada: si el unico abono ya cubria el gasto
+        # completo (estado 'pagado'), el monto editado representa "cuanto se
+        # pago de verdad" y el abono se resincroniza para que se quede
+        # pagado — evaluar esto DESPUES de recalcular saldo_pendiente con el
+        # monto nuevo (comparando contra 0) fallaba: con un abono aun con su
+        # monto viejo, esa comparacion casi siempre da un saldo > 0 y dejaba
+        # el gasto en 'abonada_parcial' con un saldo fantasma en vez de
+        # mantenerlo pagado.
+        abono_cubria_completo = abono_unico is not None and gasto.estado_pago == 'pagado'
+
+        correccion_kwargs = {}
+        gasto_update_fields = []
+        cambios = []
+
+        monto_raw = data.get('monto')
+        if monto_raw not in (None, ''):
+            try:
+                monto_nuevo = Decimal(str(monto_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+            if monto_nuevo <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+
+            monto_abonado = sum((a.monto for a in abonos), Decimal('0'))
+            # Si el unico abono cubria el gasto completo se va a resincronizar
+            # con el monto nuevo (ver abajo), asi que no hay "abonado" que
+            # actue como piso — sin este salto, bajar el monto de un gasto ya
+            # pagado por debajo de su abono viejo se rechazaba aunque el
+            # abono estuviera a punto de ajustarse exactamente a ese mismo monto.
+            if not abono_cubria_completo and monto_nuevo < monto_abonado:
+                return _auth_response({
+                    'ok': False,
+                    'message': f'El nuevo monto (${monto_nuevo}) es menor a lo ya abonado (${monto_abonado}).',
+                }, status=400)
+
+            if monto_nuevo != gasto.monto:
+                correccion_kwargs['monto_anterior'] = gasto.monto
+                correccion_kwargs['monto_nuevo'] = monto_nuevo
+                gasto.monto = monto_nuevo
+                gasto_update_fields += ['monto', 'saldo_pendiente', 'estado_pago']
+                if abono_cubria_completo:
+                    # El unico abono representaba "todo lo que se pago" — se
+                    # resincroniza con el nuevo monto para que el gasto se
+                    # quede pagado, en vez de recalcular un saldo contra su
+                    # monto viejo.
+                    abono_unico.monto = monto_nuevo
+                    abono_unico.save(update_fields=['monto'])
+                    gasto.saldo_pendiente = Decimal('0.00')
+                    gasto.estado_pago = 'pagado'
+                else:
+                    gasto.saldo_pendiente = (monto_nuevo - monto_abonado).quantize(Decimal('0.01'))
+                    gasto.estado_pago = (
+                        'pagado' if gasto.saldo_pendiente <= 0 else ('abonada_parcial' if abonos else 'pendiente')
+                    )
+                cambios.append('el monto')
+
+        fecha_raw = data.get('fecha_gasto')
+        if fecha_raw not in (None, ''):
+            fecha_nueva = _parse_fecha(fecha_raw)
+            if fecha_nueva is None:
+                return _auth_response({'ok': False, 'message': 'La fecha del gasto no es valida.'}, status=400)
+            if fecha_nueva != gasto.fecha_gasto:
+                correccion_kwargs['fecha_gasto_anterior'] = gasto.fecha_gasto
+                correccion_kwargs['fecha_gasto_nueva'] = fecha_nueva
+                gasto.fecha_gasto = fecha_nueva
+                gasto_update_fields.append('fecha_gasto')
+                cambios.append('la fecha')
+
+        metodo_pago_id = data.get('metodo_pago_id')
+        if metodo_pago_id not in (None, ''):
+            if abono_unico is None:
+                return _auth_response({
+                    'ok': False,
+                    'message': 'Solo se puede cambiar el metodo de pago de un gasto con un unico abono.',
+                }, status=400)
+            try:
+                metodo_nuevo = VGMetodoPago.objects.get(pk=int(metodo_pago_id), activo=True)
+            except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+                return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
+
+            if metodo_nuevo.id != abono_unico.metodo_pago_id:
+                correccion_kwargs['metodo_anterior'] = abono_unico.metodo_pago
+                correccion_kwargs['metodo_nuevo'] = metodo_nuevo
+                abono_unico.metodo_pago = metodo_nuevo
+                abono_update_fields = ['metodo_pago']
+                # Mismo criterio que 'cambiar_metodo_pago' en
+                # contabilidad_views.py: si pasa a una cuenta en bolivares y
+                # el abono no tenia tasa congelada, se congela la de ahora —
+                # sin esto no habria con que mostrar su equivalente en bs.
+                if metodo_nuevo.moneda == 'VES' and not abono_unico.tasa_cambio_referencia:
+                    tasa_nueva = tasa_cambio_para_registro()
+                    if tasa_nueva:
+                        abono_unico.tasa_cambio_referencia = tasa_nueva
+                        abono_update_fields.append('tasa_cambio_referencia')
+                abono_unico.save(update_fields=abono_update_fields)
+                cambios.append('el metodo de pago')
+
+        if not correccion_kwargs:
+            return _auth_response({'ok': False, 'message': 'No hay cambios que guardar.'}, status=400)
+
+        gasto.actualizado_por = request.user
+        gasto.save(update_fields=[*gasto_update_fields, 'actualizado_por', 'fecha_actualizacion'])
+
+        correccion = VGCorreccionGasto.objects.create(
+            gasto=gasto, motivo=motivo, creado_por=request.user, actualizado_por=request.user, **correccion_kwargs,
+        )
+
+    return _auth_response({
+        'ok': True,
+        'message': f'Se actualizó {" y ".join(cambios)} del gasto.',
+        'gasto': _serialize_gasto(gasto, incluir_detalle=True, ultima_correccion=_serialize_correccion_gasto(correccion)),
+    })
 
 
 @csrf_exempt

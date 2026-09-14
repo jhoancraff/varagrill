@@ -683,3 +683,37 @@ class VGAbonoGasto(models.Model):
 
     def __str__(self):
         return f"Abono {self.monto} — Gasto #{self.gasto_id}"
+
+
+class VGCorreccionGasto(VGAuditoria):
+    """
+    Auditoría de una edición manual a un gasto ya registrado (monto, método
+    de pago de su abono, o fecha del gasto) — hecha desde el reporte de
+    gastos operativos cuando hay que corregir un dato después de guardado.
+    El motivo es obligatorio a propósito, igual que VGCorreccionMetodoPago:
+    deja un rastro auditable de POR QUÉ se corrigió el gasto, no solo que se
+    corrigió. Cada campo _anterior/_nuevo queda en null si ese campo no
+    cambió en esta edición en particular (una edición puede tocar uno, dos o
+    los tres campos a la vez).
+    """
+    gasto = models.ForeignKey(VGGasto, on_delete=models.CASCADE, related_name="correcciones")
+    monto_anterior = models.DecimalField(max_digits=14, decimal_places=6, null=True, blank=True)
+    monto_nuevo = models.DecimalField(max_digits=14, decimal_places=6, null=True, blank=True)
+    fecha_gasto_anterior = models.DateField(null=True, blank=True)
+    fecha_gasto_nueva = models.DateField(null=True, blank=True)
+    metodo_anterior = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, null=True, blank=True, related_name="correcciones_gasto_desde",
+    )
+    metodo_nuevo = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, null=True, blank=True, related_name="correcciones_gasto_hacia",
+    )
+    motivo = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "vg_correcciones_gasto"
+        verbose_name = "Corrección de gasto"
+        verbose_name_plural = "Correcciones de gasto"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"Corrección gasto #{self.gasto_id}: {self.motivo[:40]}"

@@ -40,19 +40,39 @@ from .models import VGDatosFiscalesEmisor, VGImpresoraCaja, VGTasaCambio
 logger = logging.getLogger(__name__)
 
 LPD_ORIGIN_HOST = 'varagrill'
-LPD_CONNECT_TIMEOUT_SECONDS = 5
+# Windows puede tardar varios segundos en despertar el spooler LPD y confirmar
+# cada archivo del trabajo; el límite aplica a conexión y a cada confirmación.
+LPD_CONNECT_TIMEOUT_SECONDS = 15
 
 
 class LpdError(Exception):
     """La impresora/servidor LPD rechazó o cortó la transferencia del trabajo."""
 
 
-def _recv_ack(sock):
-    ack = sock.recv(1)
+def _recv_ack(sock, etapa):
+    try:
+        ack = sock.recv(1)
+    except socket.timeout as exc:
+        raise LpdError(f'Tiempo de espera agotado esperando confirmación en la etapa "{etapa}".') from exc
+    except OSError as exc:
+        raise LpdError(f'Error de red en la etapa "{etapa}": {exc}.') from exc
     if not ack:
-        raise LpdError('La impresora cerró la conexión sin responder.')
+        raise LpdError(f'El servidor LPD cerró la conexión sin responder en la etapa "{etapa}".')
     if ack != b'\x00':
-        raise LpdError(f'La impresora rechazó la operación (código {ack[0]}).')
+        raise LpdError(
+            f'El servidor LPD rechazó la etapa "{etapa}" con código {ack[0]} '
+            f'(0x{ack[0]:02x}).'
+        )
+
+
+def _enviar_y_confirmar(sock, payload, etapa):
+    try:
+        sock.sendall(payload)
+    except socket.timeout as exc:
+        raise LpdError(f'Tiempo de espera agotado enviando la etapa "{etapa}".') from exc
+    except OSError as exc:
+        raise LpdError(f'Error de red enviando la etapa "{etapa}": {exc}.') from exc
+    _recv_ack(sock, etapa)
 
 
 def enviar_trabajo_lpd(host, puerto, cola, datos, job_id=1, usuario='varagrill', nombre_trabajo='Recibo'):
@@ -74,21 +94,41 @@ def enviar_trabajo_lpd(host, puerto, cola, datos, job_id=1, usuario='varagrill',
         f'N{nombre_trabajo}\n'
     ).encode('ascii', errors='replace')
 
-    with socket.create_connection((host, puerto), timeout=LPD_CONNECT_TIMEOUT_SECONDS) as sock:
+    try:
+        sock_context = socket.create_connection((host, puerto), timeout=LPD_CONNECT_TIMEOUT_SECONDS)
+    except socket.timeout as exc:
+        raise LpdError(
+            f'Tiempo de espera agotado conectando al servidor LPD {host}:{puerto} '
+            f'(cola "{cola}").'
+        ) from exc
+    except OSError as exc:
+        raise LpdError(
+            f'No se pudo conectar al servidor LPD {host}:{puerto} '
+            f'(cola "{cola}"): {exc}.'
+        ) from exc
+
+    with sock_context as sock:
         sock.settimeout(LPD_CONNECT_TIMEOUT_SECONDS)
 
-        sock.sendall(b'\x02' + cola.encode('ascii', errors='replace') + b'\n')
-        _recv_ack(sock)
+        _enviar_y_confirmar(
+            sock,
+            b'\x02' + cola.encode('ascii', errors='replace') + b'\n',
+            'seleccionar cola',
+        )
 
-        sock.sendall(f'\x02{len(control_file)} {control_filename}\n'.encode('ascii'))
-        _recv_ack(sock)
-        sock.sendall(control_file + b'\x00')
-        _recv_ack(sock)
+        _enviar_y_confirmar(
+            sock,
+            f'\x02{len(control_file)} {control_filename}\n'.encode('ascii'),
+            'anunciar archivo de control',
+        )
+        _enviar_y_confirmar(sock, control_file + b'\x00', 'enviar archivo de control')
 
-        sock.sendall(f'\x03{len(datos)} {data_filename}\n'.encode('ascii'))
-        _recv_ack(sock)
-        sock.sendall(datos + b'\x00')
-        _recv_ack(sock)
+        _enviar_y_confirmar(
+            sock,
+            f'\x03{len(datos)} {data_filename}\n'.encode('ascii'),
+            'anunciar archivo de datos',
+        )
+        _enviar_y_confirmar(sock, datos + b'\x00', 'enviar archivo de datos')
 
 
 def _formatear_bs(monto):

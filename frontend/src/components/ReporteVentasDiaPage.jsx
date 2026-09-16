@@ -297,6 +297,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
             <div style={tableWrapStyle}>
               <div style={ventasTableStyle(rango)}>
                 <div style={headStyle}>Nota</div>
+                <div style={headStyle}>Fecha</div>
                 <div style={headStyle}>Cliente</div>
                 <div style={headStyle}>Monto ($)</div>
                 <div style={headStyle}>Bs pagado</div>
@@ -316,6 +317,14 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                           </button>
                         ) : nota.codigo}
                         {nota.pagos.length > 1 ? <div style={secondaryAmountStyle}>Abono {index + 1} de {nota.pagos.length}</div> : null}
+                      </div>
+                      <div style={cellStyle}>
+                        {index === 0 ? (
+                          <>
+                            {new Date(nota.fecha_emision).toLocaleDateString('es-VE')}
+                            <div style={secondaryAmountStyle}>{new Date(nota.fecha_emision).toLocaleTimeString('es-VE')}</div>
+                          </>
+                        ) : '—'}
                       </div>
                       <div style={cellStyle}>{nota.cliente || '—'}</div>
                       <div style={cellStyle}>{index === 0 ? `$${formatMonto(nota.total)}` : '—'}</div>
@@ -542,9 +551,9 @@ const tableWrapStyle = { overflowX: 'auto' };
 const ventasTableStyle = (rango) => ({
   display: 'grid',
   gridTemplateColumns: rango
-    ? 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr)'
-    : 'minmax(110px,0.8fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr) minmax(100px,0.6fr)',
-  minWidth: rango ? 1020 : 1120,
+    ? 'minmax(110px,0.8fr) minmax(110px,0.7fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr)'
+    : 'minmax(110px,0.8fr) minmax(110px,0.7fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr) minmax(100px,0.6fr)',
+  minWidth: rango ? 1150 : 1250,
   border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden',
 });
 const cambiarCuentaButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '5px 12px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 12 };

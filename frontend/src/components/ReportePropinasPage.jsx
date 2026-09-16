@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
@@ -14,6 +14,8 @@ function formatMonto(value) {
   return number.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+const FILAS_POR_PAGINA = 50;
+
 function ReportePropinasPage({ isMobile, onBack }) {
   // Ver el mismo comentario en ReporteVentasDiaPage: si viene de un cuadre por
   // rango, esta pantalla consulta el rango completo — reusando directamente
@@ -28,6 +30,9 @@ function ReportePropinasPage({ isMobile, onBack }) {
   const [message, setMessage] = useState('');
   const [cambioMetodoModal, setCambioMetodoModal] = useState(null);
   const [cambiandoMetodo, setCambiandoMetodo] = useState(false);
+  const [filtroTipo, setFiltroTipo] = useState('');
+  const [filtroMetodo, setFiltroMetodo] = useState('');
+  const [pagina, setPagina] = useState(0);
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -99,6 +104,36 @@ function ReportePropinasPage({ isMobile, onBack }) {
   const ingresosExtra = rango ? (data?.ingresos_extra_rango || []) : (data?.ingresos_extra_dia || []);
   const totalIngresosExtra = rango ? data?.total_ingresos_extra_rango : data?.total_ingresos_extra_dia;
 
+  const metodosDisponibles = useMemo(() => (
+    Array.from(new Set(ingresosExtra.map((item) => item.metodo_pago_nombre).filter(Boolean))).sort()
+  ), [ingresosExtra]);
+
+  const ingresosFiltrados = useMemo(() => {
+    if (!filtroTipo && !filtroMetodo) {
+      return ingresosExtra;
+    }
+    return ingresosExtra.filter((item) => {
+      if (filtroTipo && item.tipo !== filtroTipo) {
+        return false;
+      }
+      if (filtroMetodo && item.metodo_pago_nombre !== filtroMetodo) {
+        return false;
+      }
+      return true;
+    });
+  }, [ingresosExtra, filtroTipo, filtroMetodo]);
+
+  const totalPaginas = Math.max(1, Math.ceil(ingresosFiltrados.length / FILAS_POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas - 1);
+  const ingresosPagina = ingresosFiltrados.slice(paginaActual * FILAS_POR_PAGINA, (paginaActual + 1) * FILAS_POR_PAGINA);
+  const hayFiltrosActivos = Boolean(filtroTipo || filtroMetodo);
+
+  const limpiarFiltros = () => {
+    setFiltroTipo('');
+    setFiltroMetodo('');
+    setPagina(0);
+  };
+
   return (
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -143,8 +178,45 @@ function ReportePropinasPage({ isMobile, onBack }) {
         <section style={panelStyle}>
           <div style={sectionTitleStyle}>Propinas y pagos extra — {rango ? `${rango.desde} al ${rango.hasta}` : fecha}</div>
 
+          {ingresosExtra.length > 0 ? (
+            <div className="no-print" style={filtrosRowStyle(isMobile)}>
+              <label style={dateLabelStyle}>
+                Tipo
+                <select
+                  value={filtroTipo}
+                  onChange={(event) => { setFiltroTipo(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                >
+                  <option value="">Todos</option>
+                  <option value="propina">Propina</option>
+                  <option value="pago_extra">Pago extra</option>
+                </select>
+              </label>
+              <label style={dateLabelStyle}>
+                Método de pago
+                <select
+                  value={filtroMetodo}
+                  onChange={(event) => { setFiltroMetodo(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                >
+                  <option value="">Todos</option>
+                  {metodosDisponibles.map((nombre) => (
+                    <option key={nombre} value={nombre}>{nombre}</option>
+                  ))}
+                </select>
+              </label>
+              {hayFiltrosActivos ? (
+                <button type="button" onClick={limpiarFiltros} style={limpiarFiltrosButtonStyle}>
+                  Limpiar filtros
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           {ingresosExtra.length === 0 ? (
             <div style={emptyStyle}>No se registró ninguna propina ni pago extra en este período.</div>
+          ) : ingresosFiltrados.length === 0 ? (
+            <div style={emptyStyle}>Ningún registro coincide con los filtros aplicados.</div>
           ) : (
             <div style={tableWrapStyle}>
               <div style={ingresoExtraTableStyle(rango)}>
@@ -154,7 +226,7 @@ function ReportePropinasPage({ isMobile, onBack }) {
                 <div style={headStyle}>Registrado por</div>
                 <div style={headStyle}>{rango ? 'Fecha' : 'Hora'}</div>
                 <div style={headStyle}>Descripción</div>
-                {ingresosExtra.map((item) => (
+                {ingresosPagina.map((item) => (
                   <Fragment key={item.id}>
                     <div style={cellStyle}>{item.tipo_label}</div>
                     <div style={cellStyle}>
@@ -209,6 +281,33 @@ function ReportePropinasPage({ isMobile, onBack }) {
               </div>
             </div>
           )}
+
+          {ingresosFiltrados.length > FILAS_POR_PAGINA ? (
+            <div className="no-print" style={paginacionRowStyle(isMobile)}>
+              <div style={paginacionInfoStyle}>
+                Mostrando {paginaActual * FILAS_POR_PAGINA + 1}–{Math.min((paginaActual + 1) * FILAS_POR_PAGINA, ingresosFiltrados.length)} de {ingresosFiltrados.length} registro(s)
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  disabled={paginaActual === 0}
+                  style={paginacionButtonStyle(paginaActual === 0)}
+                >
+                  ← Anteriores
+                </button>
+                <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+                  disabled={paginaActual >= totalPaginas - 1}
+                  style={paginacionButtonStyle(paginaActual >= totalPaginas - 1)}
+                >
+                  Siguientes →
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div style={{ fontWeight: 700, color: '#fff' }}>
             Total propinas/extra: ${formatMonto(totalIngresosExtra)}
@@ -276,6 +375,20 @@ const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile
 const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 640 };
 const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
 const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
+const filtrosRowStyle = (isMobile) => ({
+  display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
+});
+const filtroInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', minWidth: 180 };
+const limpiarFiltrosButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
+const paginacionRowStyle = (isMobile) => ({
+  display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
+});
+const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionButtonStyle = (disabled) => ({
+  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
+  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
+  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
+});
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };

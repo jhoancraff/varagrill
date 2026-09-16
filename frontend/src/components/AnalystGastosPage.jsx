@@ -650,7 +650,12 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
                         #{gasto.id}
                       </button>
                     </div>
-                    <div key={`fecha-${gasto.id}`} style={cellStyle}>{gasto.fecha_gasto}</div>
+                    <div key={`fecha-${gasto.id}`} style={cellStyle}>
+                      {gasto.fecha_gasto}
+                      <div style={{ fontSize: 11, color: '#a89999' }}>
+                        Creado: {new Date(gasto.fecha_creacion).toLocaleDateString('es-VE')}
+                      </div>
+                    </div>
                     <div key={`cat-${gasto.id}`} style={cellStyle}>{gasto.categoria_nombre}</div>
                     <div key={`desc-${gasto.id}`} style={cellPrimaryStyle}>
                       <div>{gasto.descripcion}</div>

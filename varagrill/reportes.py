@@ -252,6 +252,7 @@ def detalle_ventas_rango(desde, hasta):
             'moneda': nota.moneda,
             'estado': nota.estado,
             'saldo_pendiente': nota.saldo_pendiente,
+            'fecha_emision': nota.fecha_emision,
             'pagos': pagos,
         })
     return resultado

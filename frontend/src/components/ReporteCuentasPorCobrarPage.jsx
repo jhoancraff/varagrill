@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
@@ -29,6 +29,8 @@ const ESTADO_LABEL = {
   pagada: 'Pagada',
 };
 
+const FILAS_POR_PAGINA = 50;
+
 function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
   // Ver el mismo comentario en ReporteVentasDiaPage: si viene de un cuadre por
   // rango, esta pantalla consulta desde/hasta en vez de un solo dia.
@@ -41,6 +43,10 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
   const [notaDetalle, setNotaDetalle] = useState(null);
   const [notaDetalleLoading, setNotaDetalleLoading] = useState(false);
   const [notaDetalleError, setNotaDetalleError] = useState('');
+  const [filtroNota, setFiltroNota] = useState('');
+  const [filtroCliente, setFiltroCliente] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('');
+  const [pagina, setPagina] = useState(0);
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -95,6 +101,38 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
 
   const notas = data?.notas || [];
 
+  const notasFiltradas = useMemo(() => {
+    const numeroNota = filtroNota.trim().toLowerCase();
+    const cliente = filtroCliente.trim().toLowerCase();
+    if (!numeroNota && !cliente && !filtroEstado) {
+      return notas;
+    }
+    return notas.filter((nota) => {
+      if (numeroNota && !(nota.codigo || '').toLowerCase().includes(numeroNota)) {
+        return false;
+      }
+      if (cliente && !(nota.cliente || '').toLowerCase().includes(cliente)) {
+        return false;
+      }
+      if (filtroEstado && nota.estado !== filtroEstado) {
+        return false;
+      }
+      return true;
+    });
+  }, [notas, filtroNota, filtroCliente, filtroEstado]);
+
+  const totalPaginas = Math.max(1, Math.ceil(notasFiltradas.length / FILAS_POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas - 1);
+  const notasPagina = notasFiltradas.slice(paginaActual * FILAS_POR_PAGINA, (paginaActual + 1) * FILAS_POR_PAGINA);
+  const hayFiltrosActivos = Boolean(filtroNota || filtroCliente || filtroEstado);
+
+  const limpiarFiltros = () => {
+    setFiltroNota('');
+    setFiltroCliente('');
+    setFiltroEstado('');
+    setPagina(0);
+  };
+
   return (
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -137,8 +175,53 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
         <section style={panelStyle}>
           <div style={sectionTitleStyle}>Pendientes {rango ? `entre ${rango.desde} y ${rango.hasta}` : `al ${fecha}`}</div>
 
+          {notas.length > 0 ? (
+            <div className="no-print" style={filtrosRowStyle(isMobile)}>
+              <label style={dateLabelStyle}>
+                Número de nota
+                <input
+                  type="text"
+                  placeholder="Ej. NE-0001"
+                  value={filtroNota}
+                  onChange={(event) => { setFiltroNota(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                />
+              </label>
+              <label style={dateLabelStyle}>
+                Cliente
+                <input
+                  type="text"
+                  placeholder="Nombre del cliente"
+                  value={filtroCliente}
+                  onChange={(event) => { setFiltroCliente(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                />
+              </label>
+              <label style={dateLabelStyle}>
+                Estado
+                <select
+                  value={filtroEstado}
+                  onChange={(event) => { setFiltroEstado(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                >
+                  <option value="">Todos</option>
+                  <option value="pendiente_pago">Pendiente</option>
+                  <option value="abonada_parcial">Abonada parcial</option>
+                  <option value="pagada">Pagada</option>
+                </select>
+              </label>
+              {hayFiltrosActivos ? (
+                <button type="button" onClick={limpiarFiltros} style={limpiarFiltrosButtonStyle}>
+                  Limpiar filtros
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           {notas.length === 0 ? (
             <div style={emptyStyle}>No hay ninguna cuenta pendiente por cobrar.</div>
+          ) : notasFiltradas.length === 0 ? (
+            <div style={emptyStyle}>Ninguna nota coincide con los filtros aplicados.</div>
           ) : (
             <div style={tableWrapStyle}>
               <div style={cxcTableStyle}>
@@ -148,7 +231,7 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
                 <div style={headStyle}>Total</div>
                 <div style={headStyle}>Saldo pendiente</div>
                 <div style={headStyle}>Estado</div>
-                {notas.map((nota) => (
+                {notasPagina.map((nota) => (
                   <Fragment key={nota.id}>
                     <div style={cellStyle}>
                       <button type="button" onClick={() => abrirDetalleNota(nota.id)} style={notaLinkStyle}>
@@ -173,6 +256,33 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
               </div>
             </div>
           )}
+
+          {notasFiltradas.length > FILAS_POR_PAGINA ? (
+            <div className="no-print" style={paginacionRowStyle(isMobile)}>
+              <div style={paginacionInfoStyle}>
+                Mostrando {paginaActual * FILAS_POR_PAGINA + 1}–{Math.min((paginaActual + 1) * FILAS_POR_PAGINA, notasFiltradas.length)} de {notasFiltradas.length} nota(s)
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  disabled={paginaActual === 0}
+                  style={paginacionButtonStyle(paginaActual === 0)}
+                >
+                  ← Anteriores
+                </button>
+                <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+                  disabled={paginaActual >= totalPaginas - 1}
+                  style={paginacionButtonStyle(paginaActual >= totalPaginas - 1)}
+                >
+                  Siguientes →
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div style={{ fontWeight: 700, color: '#fff' }}>
             Total pendiente: ${formatMonto(data.total_pendiente)}
@@ -281,6 +391,20 @@ const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile
 const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 640 };
 const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
 const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
+const filtrosRowStyle = (isMobile) => ({
+  display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
+});
+const filtroInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', minWidth: 180 };
+const limpiarFiltrosButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
+const paginacionRowStyle = (isMobile) => ({
+  display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
+});
+const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionButtonStyle = (disabled) => ({
+  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
+  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
+  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
+});
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };

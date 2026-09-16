@@ -835,6 +835,7 @@ def reporte_ventas_dia_view(request):
                 'moneda': nota['moneda'],
                 'estado': nota['estado'],
                 'saldo_pendiente': str(nota['saldo_pendiente']),
+                'fecha_emision': nota['fecha_emision'].isoformat(),
                 'pagos': [
                     {**_serialize_pago_venta(pago), 'ultima_correccion': correcciones_pago.get(pago['id'])}
                     for pago in nota['pagos']

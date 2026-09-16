@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 
@@ -23,6 +23,8 @@ function getCookie(name) {
   return '';
 }
 
+const FILAS_POR_PAGINA = 50;
+
 function ReporteCuentasCobradasPage({ isMobile, onBack }) {
   // Ver el mismo comentario en ReporteVentasDiaPage: si viene de un cuadre por
   // rango, esta pantalla consulta desde/hasta en vez de un solo dia.
@@ -35,6 +37,10 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
   const [notaDetalle, setNotaDetalle] = useState(null);
   const [notaDetalleLoading, setNotaDetalleLoading] = useState(false);
   const [notaDetalleError, setNotaDetalleError] = useState('');
+  const [filtroMetodo, setFiltroMetodo] = useState('');
+  const [filtroNota, setFiltroNota] = useState('');
+  const [filtroReferencia, setFiltroReferencia] = useState('');
+  const [pagina, setPagina] = useState(0);
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -89,6 +95,46 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
 
   const pagos = data?.pagos || [];
 
+  // El endpoint no trae el catalogo de metodos de pago (a diferencia de
+  // ventas-dia) — se arma la lista de opciones a partir de los que
+  // realmente aparecen en los pagos cargados.
+  const metodosDisponibles = useMemo(() => (
+    Array.from(new Set(pagos.map((pago) => pago.metodo_pago_nombre).filter(Boolean))).sort()
+  ), [pagos]);
+
+  const pagosFiltrados = useMemo(() => {
+    const metodo = filtroMetodo.trim().toLowerCase();
+    const numeroNota = filtroNota.trim().toLowerCase();
+    const referencia = filtroReferencia.trim().toLowerCase();
+    if (!metodo && !numeroNota && !referencia) {
+      return pagos;
+    }
+    return pagos.filter((pago) => {
+      if (numeroNota && !(pago.nota_codigo || '').toLowerCase().includes(numeroNota)) {
+        return false;
+      }
+      if (metodo && (pago.metodo_pago_nombre || '').toLowerCase() !== metodo) {
+        return false;
+      }
+      if (referencia && !(pago.referencia || '').toLowerCase().includes(referencia)) {
+        return false;
+      }
+      return true;
+    });
+  }, [pagos, filtroMetodo, filtroNota, filtroReferencia]);
+
+  const totalPaginas = Math.max(1, Math.ceil(pagosFiltrados.length / FILAS_POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas - 1);
+  const pagosPagina = pagosFiltrados.slice(paginaActual * FILAS_POR_PAGINA, (paginaActual + 1) * FILAS_POR_PAGINA);
+  const hayFiltrosActivos = Boolean(filtroMetodo || filtroNota || filtroReferencia);
+
+  const limpiarFiltros = () => {
+    setFiltroMetodo('');
+    setFiltroNota('');
+    setFiltroReferencia('');
+    setPagina(0);
+  };
+
   return (
     <section style={containerStyle(isMobile)}>
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -133,8 +179,53 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
         <section style={panelStyle}>
           <div style={sectionTitleStyle}>Cobrado de fechas anteriores — {rango ? `${rango.desde} al ${rango.hasta}` : fecha}</div>
 
+          {pagos.length > 0 ? (
+            <div className="no-print" style={filtrosRowStyle(isMobile)}>
+              <label style={dateLabelStyle}>
+                Método de pago
+                <select
+                  value={filtroMetodo}
+                  onChange={(event) => { setFiltroMetodo(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                >
+                  <option value="">Todos</option>
+                  {metodosDisponibles.map((nombre) => (
+                    <option key={nombre} value={nombre}>{nombre}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={dateLabelStyle}>
+                Número de nota
+                <input
+                  type="text"
+                  placeholder="Ej. NE-0001"
+                  value={filtroNota}
+                  onChange={(event) => { setFiltroNota(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                />
+              </label>
+              <label style={dateLabelStyle}>
+                Número de referencia
+                <input
+                  type="text"
+                  placeholder="Referencia de pago"
+                  value={filtroReferencia}
+                  onChange={(event) => { setFiltroReferencia(event.target.value); setPagina(0); }}
+                  style={filtroInputStyle}
+                />
+              </label>
+              {hayFiltrosActivos ? (
+                <button type="button" onClick={limpiarFiltros} style={limpiarFiltrosButtonStyle}>
+                  Limpiar filtros
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           {pagos.length === 0 ? (
             <div style={emptyStyle}>No se cobró ninguna cuenta pendiente de una fecha anterior en este período.</div>
+          ) : pagosFiltrados.length === 0 ? (
+            <div style={emptyStyle}>Ningún pago coincide con los filtros aplicados.</div>
           ) : (
             <div style={tableWrapStyle}>
               <div style={cobradasTableStyle}>
@@ -147,7 +238,7 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
                 <div style={headStyle}>Método</div>
                 <div style={headStyle}>Banco</div>
                 <div style={headStyle}>Referencia</div>
-                {pagos.map((pago) => (
+                {pagosPagina.map((pago) => (
                   <Fragment key={pago.pago_id}>
                     <div style={cellStyle}>
                       <button type="button" onClick={() => abrirDetalleNota(pago.nota_id)} style={notaLinkStyle}>
@@ -191,6 +282,33 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
               </div>
             </div>
           )}
+
+          {pagosFiltrados.length > FILAS_POR_PAGINA ? (
+            <div className="no-print" style={paginacionRowStyle(isMobile)}>
+              <div style={paginacionInfoStyle}>
+                Mostrando {paginaActual * FILAS_POR_PAGINA + 1}–{Math.min((paginaActual + 1) * FILAS_POR_PAGINA, pagosFiltrados.length)} de {pagosFiltrados.length} pago(s)
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  disabled={paginaActual === 0}
+                  style={paginacionButtonStyle(paginaActual === 0)}
+                >
+                  ← Anteriores
+                </button>
+                <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+                  disabled={paginaActual >= totalPaginas - 1}
+                  style={paginacionButtonStyle(paginaActual >= totalPaginas - 1)}
+                >
+                  Siguientes →
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 700, color: '#fff' }}>
@@ -310,6 +428,20 @@ const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile
 const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 680, lineHeight: 1.6 };
 const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
 const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
+const filtrosRowStyle = (isMobile) => ({
+  display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
+});
+const filtroInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', minWidth: 180 };
+const limpiarFiltrosButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
+const paginacionRowStyle = (isMobile) => ({
+  display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
+});
+const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionButtonStyle = (disabled) => ({
+  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
+  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
+  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
+});
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };

@@ -689,6 +689,7 @@ def _serialize_pago_venta(pago):
         'monto_bs': str(pago['monto_bs']) if pago['monto_bs'] is not None else None,
         'metodo_pago_id': pago['metodo_pago_id'],
         'metodo_pago_nombre': pago['metodo_pago_nombre'],
+        'metodo_pago_moneda': pago['metodo_pago_moneda'],
         'cuenta_bancaria': pago['cuenta_bancaria'],
         'referencia': pago['referencia'],
         'fecha_pago': pago['fecha_pago'].isoformat(),

@@ -239,6 +239,7 @@ def detalle_ventas_rango(desde, hasta):
                 'monto_bs': monto_bs,
                 'metodo_pago_id': metodo.id,
                 'metodo_pago_nombre': metodo.nombre,
+                'metodo_pago_moneda': metodo.moneda,
                 'cuenta_bancaria': metodo.cuenta_bancaria,
                 'referencia': pago.referencia,
                 'fecha_pago': pago.fecha_pago,

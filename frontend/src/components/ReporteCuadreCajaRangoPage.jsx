@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { setRangoSeleccionado } from '../utils/fechaContabilidad';
 
 function toIso(date) {
@@ -36,6 +36,11 @@ function formatMonto(value) {
   return number.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function formatFechaVisible(value) {
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
 const PRESETS = [
   { label: 'Últimos 7 días', get: () => ({ desde: sevenDaysAgoIso(), hasta: todayIso() }) },
   { label: 'Esta semana', get: () => ({ desde: startOfWeekIso(), hasta: todayIso() }) },
@@ -48,8 +53,13 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const requestIdRef = useRef(0);
+  const desdeInputRef = useRef(null);
+  const hastaInputRef = useRef(null);
 
   const loadReport = useCallback(async (desdeConsultado, hastaConsultado) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError('');
     try {
@@ -61,16 +71,19 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
       if (!response.ok || !json.ok) {
         throw new Error(json.message || 'No se pudo cargar el cuadre de caja del rango.');
       }
+      if (requestId !== requestIdRef.current) return;
       setData(json);
     } catch (requestError) {
+      if (requestId !== requestIdRef.current) return;
       setError(requestError.message || 'No se pudo cargar el cuadre de caja del rango.');
       setData(null);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    if (desde > hasta) return;
     loadReport(desde, hasta);
     // Igual que la fecha del cuadre diario (ver fechaContabilidad.js): al
     // entrar a uno de los 4 reportes de detalle desde aca, deben consultar
@@ -83,6 +96,37 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
     const range = preset.get();
     setDesde(range.desde);
     setHasta(range.hasta);
+  };
+
+  const handleDesdeChange = (event) => {
+    const nuevaDesde = event.target.value;
+    setDesde(nuevaDesde);
+    if (nuevaDesde > hasta) {
+      setHasta(nuevaDesde);
+    }
+  };
+
+  const handleHastaChange = (event) => {
+    const nuevoHasta = event.target.value;
+    setHasta(nuevoHasta);
+    if (nuevoHasta < desde) {
+      setDesde(nuevoHasta);
+    }
+  };
+
+  const abrirCalendario = (inputRef) => {
+    const input = inputRef.current;
+    if (!input) return;
+    try {
+      if (typeof input.showPicker === 'function') {
+        input.showPicker();
+        return;
+      }
+    } catch {
+    }
+    if (typeof input.click === 'function') {
+      input.click();
+    }
   };
 
   const dias = data?.dias || [];
@@ -113,11 +157,42 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
       <div className="no-print" style={filtersRowStyle(isMobile)}>
         <label style={dateLabelStyle}>
           Desde
-          <input type="date" value={desde} max={hasta} onChange={(event) => setDesde(event.target.value)} style={dateInputStyle} />
+          <button type="button" onClick={() => abrirCalendario(desdeInputRef)} style={calendarButtonStyle} aria-label={`Abrir calendario para Desde, ${formatFechaVisible(desde)}`}>
+            <span aria-hidden="true" style={calendarIconStyle}>📅</span>
+            <span>{formatFechaVisible(desde)}</span>
+          </button>
+          <input
+            ref={desdeInputRef}
+            type="date"
+            value={desde}
+            max={todayIso()}
+            onChange={handleDesdeChange}
+            onKeyDown={(event) => event.preventDefault()}
+            onBeforeInput={(event) => event.preventDefault()}
+            tabIndex={-1}
+            aria-hidden="true"
+            style={hiddenDateInputStyle}
+          />
         </label>
         <label style={dateLabelStyle}>
           Hasta
-          <input type="date" value={hasta} max={todayIso()} onChange={(event) => setHasta(event.target.value)} style={dateInputStyle} />
+          <button type="button" onClick={() => abrirCalendario(hastaInputRef)} style={calendarButtonStyle} aria-label={`Abrir calendario para Hasta, ${formatFechaVisible(hasta)}`}>
+            <span aria-hidden="true" style={calendarIconStyle}>📅</span>
+            <span>{formatFechaVisible(hasta)}</span>
+          </button>
+          <input
+            ref={hastaInputRef}
+            type="date"
+            value={hasta}
+            min={desde}
+            max={todayIso()}
+            onChange={handleHastaChange}
+            onKeyDown={(event) => event.preventDefault()}
+            onBeforeInput={(event) => event.preventDefault()}
+            tabIndex={-1}
+            aria-hidden="true"
+            style={hiddenDateInputStyle}
+          />
         </label>
         <div style={presetsWrapStyle}>
           {PRESETS.map((preset) => (
@@ -348,7 +423,9 @@ const filtersRowStyle = (isMobile) => ({
   display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
 });
 const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
+const hiddenDateInputStyle = { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' };
+const calendarButtonStyle = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10, minWidth: 184, minHeight: 58, borderRadius: 14, border: '1px solid rgba(255,255,255,0.2)', background: '#161010', padding: '10px 16px', color: '#fff', fontSize: 18, fontWeight: 800, cursor: 'pointer' };
+const calendarIconStyle = { display: 'inline-grid', placeItems: 'center', width: 30, height: 30, borderRadius: 7, background: '#3b82f6', color: '#fff', fontSize: 22, lineHeight: 1 };
 const presetsWrapStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
 const presetButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '9px 14px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };

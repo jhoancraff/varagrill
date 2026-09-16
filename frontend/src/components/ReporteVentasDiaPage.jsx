@@ -114,24 +114,30 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
   // un dia o un rango no lo justifica y evita otro roundtrip por cada letra
   // que el usuario escribe en los filtros.
   const notasFiltradas = useMemo(() => {
-    const metodo = filtroMetodo.trim().toLowerCase();
+    const metodoId = filtroMetodo;
     const numeroNota = filtroNota.trim().toLowerCase();
     const referencia = filtroReferencia.trim().toLowerCase();
-    if (!metodo && !numeroNota && !referencia) {
-      return notas;
-    }
-    return notas.filter((nota) => {
+    const filtrarPagos = Boolean(metodoId || referencia);
+
+    return notas.reduce((resultado, nota) => {
       if (numeroNota && !(nota.codigo || '').toLowerCase().includes(numeroNota)) {
-        return false;
+        return resultado;
       }
-      if (metodo && !nota.pagos.some((pago) => (pago.metodo_pago_nombre || '').toLowerCase().includes(metodo))) {
-        return false;
+
+      const pagosVisibles = filtrarPagos
+        ? nota.pagos.filter((pago) => (
+          (!metodoId || String(pago.metodo_pago_id) === metodoId)
+          && (!referencia || (pago.referencia || '').toLowerCase().includes(referencia))
+        ))
+        : nota.pagos;
+
+      if (filtrarPagos && pagosVisibles.length === 0) {
+        return resultado;
       }
-      if (referencia && !nota.pagos.some((pago) => (pago.referencia || '').toLowerCase().includes(referencia))) {
-        return false;
-      }
-      return true;
-    });
+
+      resultado.push(filtrarPagos ? { ...nota, pagos: pagosVisibles } : nota);
+      return resultado;
+    }, []);
   }, [notas, filtroMetodo, filtroNota, filtroReferencia]);
 
   const totalPaginas = Math.max(1, Math.ceil(notasFiltradas.length / FILAS_POR_PAGINA));
@@ -249,7 +255,9 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                 >
                   <option value="">Todos</option>
                   {metodosPago.map((metodo) => (
-                    <option key={metodo.id} value={metodo.nombre}>{metodo.nombre}</option>
+                    <option key={metodo.id} value={String(metodo.id)}>
+                      {metodo.nombre} ({metodo.moneda === 'VES' ? 'Bs' : '$'})
+                    </option>
                   ))}
                 </select>
               </label>
@@ -313,7 +321,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                       <div style={cellStyle}>{index === 0 ? `$${formatMonto(nota.total)}` : '—'}</div>
                       <div style={cellStyle}>{pago && pago.monto_bs !== null ? `Bs. ${formatMonto(pago.monto_bs)}` : '—'}</div>
                       <div style={cellStyle}>
-                        {pago ? pago.metodo_pago_nombre : '—'}
+                        {pago ? `${pago.metodo_pago_nombre} (${pago.metodo_pago_moneda === 'VES' ? 'Bs' : '$'})` : '—'}
                         {pago && pago.ultima_correccion ? (
                           <div style={secondaryAmountStyle} title={pago.ultima_correccion.motivo}>
                             Corregido: {pago.ultima_correccion.metodo_anterior} → {pago.ultima_correccion.metodo_nuevo}

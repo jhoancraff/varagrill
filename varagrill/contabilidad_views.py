@@ -1003,7 +1003,7 @@ def reporte_disponibilidad_cuentas_view(request):
             'compras_acumuladas': str(cuenta['compras_acumuladas']),
             'consignado_acumulado': str(cuenta['consignado_acumulado']),
             'saldo_disponible': str(cuenta['saldo_disponible']),
-            'saldo_disponible_bs': _saldo_bs(cuenta['saldo_disponible'], cuenta['moneda']),
+            'saldo_disponible_bs': str(cuenta['saldo_disponible_bs'].quantize(Decimal('0.01'))) if cuenta['saldo_disponible_bs'] is not None else None,
         }
 
     return _auth_response({
@@ -1018,7 +1018,7 @@ def reporte_disponibilidad_cuentas_view(request):
                 'moneda': banco['moneda'],
                 'moneda_mixta': banco.get('moneda_mixta', False),
                 'saldo_disponible': str(banco['saldo_disponible']),
-                'saldo_disponible_bs': _saldo_bs(banco['saldo_disponible'], banco['moneda']),
+                'saldo_disponible_bs': str(banco['saldo_disponible_bs'].quantize(Decimal('0.01'))) if banco['saldo_disponible_bs'] is not None else None,
                 'metodos': [_serialize_cuenta(cuenta) for cuenta in banco['metodos']],
             }
             for banco in bancos

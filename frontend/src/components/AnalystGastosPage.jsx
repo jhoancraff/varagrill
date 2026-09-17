@@ -86,6 +86,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [fechaHasta, setFechaHasta] = useState(todayIso());
   const [filtroCategoriaId, setFiltroCategoriaId] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('');
+  const [filtroMetodoPagoId, setFiltroMetodoPagoId] = useState('');
   const [gastos, setGastos] = useState([]);
   const [totalesPorCategoria, setTotalesPorCategoria] = useState([]);
   const [totalGeneral, setTotalGeneral] = useState('0');
@@ -148,6 +149,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       const params = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
       if (filtroCategoriaId) params.set('categoria_id', filtroCategoriaId);
       if (filtroEstado) params.set('estado_pago', filtroEstado);
+      if (filtroMetodoPagoId) params.set('metodo_pago_id', filtroMetodoPagoId);
       const response = await fetch(`/api/admin/gastos/?${params.toString()}`, { credentials: 'include', cache: 'no-store' });
       const data = await response.json();
       if (!response.ok || !data.ok) {
@@ -162,7 +164,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
     } finally {
       setLoadingGastos(false);
     }
-  }, [fechaDesde, fechaHasta, filtroCategoriaId, filtroEstado]);
+  }, [fechaDesde, fechaHasta, filtroCategoriaId, filtroEstado, filtroMetodoPagoId]);
 
   useEffect(() => { loadCategorias(); loadMetodosPago(); }, [loadCategorias, loadMetodosPago]);
   useEffect(() => { loadGastos(); }, [loadGastos]);
@@ -612,6 +614,15 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
               <option value="pendiente">Pendiente</option>
               <option value="abonada_parcial">Abonado parcial</option>
               <option value="pagado">Pagado</option>
+            </select>
+          </label>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Método de pago</span>
+            <select value={filtroMetodoPagoId} onChange={(e) => setFiltroMetodoPagoId(e.target.value)} style={inputStyle} className="admin-dark-select">
+              <option value="">Todos</option>
+              {metodosPago.map((metodo) => (
+                <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+              ))}
             </select>
           </label>
         </div>

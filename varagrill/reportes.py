@@ -597,6 +597,56 @@ def disponibilidad_por_cuenta(fecha):
         filas = queryset.values('metodo_pago_id').annotate(total=Sum('monto'))
         return {fila['metodo_pago_id']: fila['total'] for fila in filas}
 
+    def _monto_bs(monto, tasa):
+        return monto * tasa if tasa is not None else None
+
+    saldo_bs_por_metodo = {}
+    movimientos_bs = (
+        VGPago.objects.filter(fecha_pago__date__lte=fecha, estado='completado')
+        .select_related('metodo_pago', 'nota_entrega', 'factura')
+    )
+    for pago in movimientos_bs:
+        if pago.metodo_pago.moneda != 'VES':
+            continue
+        tasa = pago.tasa_cambio_referencia
+        if tasa is None and pago.nota_entrega_id:
+            tasa = pago.nota_entrega.tasa_cambio_referencia
+        if tasa is None and pago.factura_id:
+            tasa = pago.factura.tasa_cambio_referencia
+        if tasa is None:
+            tasa = tasa_para_fecha(pago.fecha_pago.date())
+        if tasa is not None:
+            saldo_bs_por_metodo[pago.metodo_pago_id] = saldo_bs_por_metodo.get(pago.metodo_pago_id, Decimal('0')) + _monto_bs(pago.monto, tasa)
+
+    for ingreso in VGIngresoExtra.objects.filter(fecha_creacion__date__lte=fecha).select_related('metodo_pago'):
+        if ingreso.metodo_pago.moneda != 'VES':
+            continue
+        tasa = ingreso.tasa_cambio_referencia or tasa_para_fecha(ingreso.fecha_creacion.date())
+        if tasa is not None:
+            saldo_bs_por_metodo[ingreso.metodo_pago_id] = saldo_bs_por_metodo.get(ingreso.metodo_pago_id, Decimal('0')) + _monto_bs(ingreso.monto, tasa)
+
+    for abono in VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha).select_related('metodo_pago'):
+        if abono.metodo_pago.moneda != 'VES':
+            continue
+        tasa = abono.tasa_cambio_referencia or tasa_para_fecha(abono.fecha_pago.date())
+        if tasa is not None:
+            saldo_bs_por_metodo[abono.metodo_pago_id] = saldo_bs_por_metodo.get(abono.metodo_pago_id, Decimal('0')) - _monto_bs(abono.monto, tasa)
+
+    for abono in VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha).select_related('metodo_pago'):
+        if abono.metodo_pago.moneda != 'VES':
+            continue
+        tasa = abono.tasa_cambio_referencia or tasa_para_fecha(abono.fecha_pago.date())
+        if tasa is not None:
+            saldo_bs_por_metodo[abono.metodo_pago_id] = saldo_bs_por_metodo.get(abono.metodo_pago_id, Decimal('0')) - _monto_bs(abono.monto, tasa)
+
+    primer_efectivo_id = next((metodo.id for metodo in metodos if metodo.es_efectivo), None)
+    for consignacion in VGConsignacionCaja.objects.filter(fecha__lte=fecha):
+        if primer_efectivo_id is None:
+            break
+        tasa = tasa_para_fecha(consignacion.fecha)
+        if tasa is not None:
+            saldo_bs_por_metodo[primer_efectivo_id] = saldo_bs_por_metodo.get(primer_efectivo_id, Decimal('0')) - _monto_bs(consignacion.monto, tasa)
+
     ingresos_por_metodo = _totales_por_metodo(
         VGPago.objects.filter(fecha_pago__date__lte=fecha, estado='completado')
     )
@@ -615,8 +665,6 @@ def disponibilidad_por_cuenta(fecha):
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
-
-    primer_efectivo_id = next((metodo.id for metodo in metodos if metodo.es_efectivo), None)
 
     resultado = []
     for metodo in metodos:
@@ -638,6 +686,7 @@ def disponibilidad_por_cuenta(fecha):
             'compras_acumuladas': compras,
             'consignado_acumulado': consignado,
             'saldo_disponible': ingresos + ingresos_extra - gastos - compras - consignado,
+            'saldo_disponible_bs': saldo_bs_por_metodo.get(metodo.id) if metodo.moneda == 'VES' else None,
         })
 
     # Agrupa por cuenta_bancaria — varias filas de `resultado` con el mismo
@@ -659,6 +708,7 @@ def disponibilidad_por_cuenta(fecha):
                 'compras_acumuladas': Decimal('0'),
                 'consignado_acumulado': Decimal('0'),
                 'saldo_disponible': Decimal('0'),
+                'saldo_disponible_bs': Decimal('0') if cuenta['moneda'] == 'VES' else None,
             }
             orden_claves.append(clave)
         banco = bancos_por_clave[clave]
@@ -669,6 +719,10 @@ def disponibilidad_por_cuenta(fecha):
         banco['compras_acumuladas'] += cuenta['compras_acumuladas']
         banco['consignado_acumulado'] += cuenta['consignado_acumulado']
         banco['saldo_disponible'] += cuenta['saldo_disponible']
+        if banco['saldo_disponible_bs'] is not None and cuenta['saldo_disponible_bs'] is not None:
+            banco['saldo_disponible_bs'] += cuenta['saldo_disponible_bs']
+        elif banco['saldo_disponible_bs'] is not None:
+            banco['saldo_disponible_bs'] = None
         # Un banco agrupado con monedas mixtas no deberia pasar en la
         # practica (una cuenta bancaria real tiene una sola moneda) — se dej
         # a la del primer metodo, y se marca la inconsistencia si aparece.

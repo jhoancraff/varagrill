@@ -214,6 +214,7 @@ def admin_gastos_view(request):
         fecha_hasta = _parse_fecha(request.GET.get('fecha_hasta'), default=hoy)
         categoria_id = request.GET.get('categoria_id')
         estado_pago = str(request.GET.get('estado_pago', '') or '').strip().lower()
+        metodo_pago_id = request.GET.get('metodo_pago_id')
 
         gastos = VGGasto.objects.select_related('categoria').filter(
             fecha_gasto__gte=fecha_desde, fecha_gasto__lte=fecha_hasta,
@@ -225,6 +226,11 @@ def admin_gastos_view(request):
                 pass
         if estado_pago in {'pendiente', 'abonada_parcial', 'pagado'}:
             gastos = gastos.filter(estado_pago=estado_pago)
+        if metodo_pago_id:
+            try:
+                gastos = gastos.filter(abonos__metodo_pago_id=int(metodo_pago_id)).distinct()
+            except (ValueError, TypeError):
+                pass
 
         gastos = list(gastos.order_by('-fecha_gasto', '-fecha_creacion'))
         correcciones = _ultimas_correcciones_gasto([gasto.id for gasto in gastos])

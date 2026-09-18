@@ -5418,6 +5418,98 @@ def mesas_atendidas_view(request):
     })
 
 
+def pedidos_delivery_view(request):
+    """
+    Equivalente a mesas_atendidas_view pero para pedidos 'llevar'/'delivery' —
+    estos no tienen mesa (ver NewOrderPage.jsx), así que mesas_atendidas_view
+    (mesa__isnull=False) los deja invisibles: sin esta vista no había forma de
+    verlos para agregarles una ronda si el cliente pide algo más antes de que
+    salga el pedido. Se agrupan por cliente (en vez de por mesa) porque es lo
+    unico estable que comparten varios pedidos de un mismo cliente — ver
+    _resolve_or_create_cliente, que ya reutiliza el mismo VGCliente cuando se
+    repite la cedula (o el nombre exacto, sin cedula).
+
+    Reservada a cajera/admin/contador (_is_admin_user ya cubre contador, ver su
+    docstring en auth_helpers.py) — un mesero no gestiona pedidos para llevar
+    o delivery, solo los de su propia mesa.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver esta seccion.'}, status=401)
+
+    _avanzar_pedidos_en_preparacion_vencidos(request.user)
+    _avanzar_pedidos_listos_vencidos(request.user)
+    _cancelar_pedidos_vacios(request.user)
+
+    hoy = timezone.localdate()
+    pedidos = (
+        VGPedido.objects.filter(
+            mesa__isnull=True, tipo_pedido__in=['llevar', 'delivery'],
+            fecha_creacion__date=hoy, estado__in=MESA_ABIERTA_ORDER_STATES,
+        )
+        .select_related('cliente', 'usuario')
+        .prefetch_related(
+            'detalles__producto', 'detalles__adicionales__preparacion',
+            'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo',
+        )
+        .order_by('cliente_id', 'fecha_creacion')
+    )
+
+    grupos_por_cliente = {}
+    for pedido in pedidos:
+        entry = grupos_por_cliente.setdefault(pedido.cliente_id, {
+            'cliente_id': pedido.cliente_id,
+            'cliente_nombre': pedido.cliente.nombre if pedido.cliente else '',
+            'cliente_telefono': pedido.cliente.telefono if pedido.cliente else '',
+            'cliente_cedula': pedido.cliente.numero_documento if pedido.cliente else '',
+            # Un mismo cliente no debería mezclar llevar y delivery el mismo día,
+            # pero si pasa, el tipo del pedido mas reciente (ultimo en la lista,
+            # ver order_by arriba) es el que manda para la tarjeta del grupo.
+            'tipo_pedido': pedido.tipo_pedido,
+            'pedidos': [],
+        })
+        entry['tipo_pedido'] = pedido.tipo_pedido
+        entry['pedidos'].append(pedido)
+
+    grupos_payload = []
+    for entry in grupos_por_cliente.values():
+        pedidos_grupo = entry['pedidos']
+        total = sum((p.total for p in pedidos_grupo), Decimal('0.00'))
+        grupos_payload.append({
+            'cliente_id': entry['cliente_id'],
+            'cliente_nombre': entry['cliente_nombre'],
+            'cliente_telefono': entry['cliente_telefono'],
+            'cliente_cedula': entry['cliente_cedula'],
+            'tipo_pedido': entry['tipo_pedido'],
+            'total': str(total),
+            'primer_pedido_en': min(p.fecha_creacion for p in pedidos_grupo).isoformat(),
+            'pedidos': [
+                {
+                    'id': p.id,
+                    'tipo_pedido': p.tipo_pedido,
+                    'estado': p.estado,
+                    'total': str(p.total),
+                    'notas': p.notas,
+                    'creado_en': p.fecha_creacion.isoformat(),
+                    'mesero': p.usuario.get_full_name() or p.usuario.username,
+                    'impreso': p.fecha_inicio_preparacion is not None,
+                    'detalles': _serialize_order_items(p),
+                }
+                for p in pedidos_grupo
+            ],
+        })
+
+    grupos_payload.sort(key=lambda g: g['primer_pedido_en'])
+
+    return _auth_response({
+        'ok': True,
+        'server_time': timezone.now().isoformat(),
+        'pedidos_delivery': grupos_payload,
+    })
+
+
 def mesas_ocupadas_view(request):
     """
     Mesas con un pedido todavía abierto de OTRO MESERO (nunca las propias, nunca

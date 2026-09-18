@@ -18,6 +18,8 @@ function isHiddenMenuCategory(categoriaNombre) {
   return HIDDEN_MENU_CATEGORIES.includes((categoriaNombre || '').trim().toLowerCase());
 }
 
+const TIPO_PEDIDO_LABEL = { llevar: 'Para llevar', delivery: 'Delivery' };
+
 function NewOrderPage({
   isMobile,
   mesas,
@@ -28,17 +30,23 @@ function NewOrderPage({
   onBack,
   initialMesaId,
   initialCliente,
+  initialTipoPedido,
+  initialClienteCedula,
+  initialClienteTelefono,
   onSubmitSuccess,
   checkMesasOcupadas = false,
 }) {
   const tasaCambio = useExchangeRate();
-  const isAddingRound = Boolean(initialMesaId);
+  // Una ronda nueva llega con mesa (ver MesasAtendidasPage) o, para pedidos sin
+  // mesa, con un tipo precargado (ver DeliveryPage/handleAddRoundToDelivery en
+  // WelcomeScreen) — cualquiera de los dos cuenta como "agregando ronda".
+  const isAddingRound = Boolean(initialMesaId) || Boolean(initialTipoPedido);
   const [orderHeader, setOrderHeader] = useState({
     mesaId: initialMesaId ? String(initialMesaId) : '',
-    tipoPedido: 'local',
+    tipoPedido: initialTipoPedido || 'local',
     cliente: initialCliente || '',
-    clienteCedula: '',
-    clienteTelefono: '',
+    clienteCedula: initialClienteCedula || '',
+    clienteTelefono: initialClienteTelefono || '',
     notas: '',
   });
   const [cartItems, setCartItems] = useState([]);
@@ -583,7 +591,7 @@ function NewOrderPage({
       markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
 
       if (onSubmitSuccess) {
-        onSubmitSuccess(data.pedido.id, selectedMesa?.id);
+        onSubmitSuccess(data.pedido.id, selectedMesa?.id, orderHeader.tipoPedido);
       }
     } catch (error) {
       if (!navigator.onLine) {
@@ -756,9 +764,19 @@ function NewOrderPage({
 
       {isAddingRound ? (
         <div style={addRoundBannerStyle}>
-          Agregando una ronda nueva a {selectedMesa ? `Mesa ${selectedMesa.numero}` : 'la mesa seleccionada'}.
-          El cliente se rellenó con <strong>{initialCliente || 'el cliente actual'}</strong> — si es una cuenta
-          separada en la misma mesa, cambia el nombre antes de registrar.
+          {initialMesaId ? (
+            <>
+              Agregando una ronda nueva a {selectedMesa ? `Mesa ${selectedMesa.numero}` : 'la mesa seleccionada'}.
+              El cliente se rellenó con <strong>{initialCliente || 'el cliente actual'}</strong> — si es una cuenta
+              separada en la misma mesa, cambia el nombre antes de registrar.
+            </>
+          ) : (
+            <>
+              Agregando una ronda nueva al pedido de <strong>{initialCliente || 'el cliente actual'}</strong>
+              {' '}({TIPO_PEDIDO_LABEL[initialTipoPedido] || initialTipoPedido}). Se rellenaron sus datos —
+              agrega solo lo que se le olvidó pedir y registra.
+            </>
+          )}
         </div>
       ) : null}
 
@@ -772,32 +790,45 @@ function NewOrderPage({
               mensaje propio (showError/Toast). El `required` nativo del navegador intercepta
               el submit ANTES de que ese handler llegue a correr, así que el aviso propio nunca
               se ve y solo queda un tooltip nativo fácil de pasar por alto. */}
-          <label style={fieldWrapStyle}>
-            <span style={labelStyle}>Mesa</span>
-            <select
-              value={orderHeader.mesaId}
-              onChange={(event) => setOrderHeader((current) => ({ ...current, mesaId: event.target.value }))}
-              style={inputStyle(isCompact)}
-            >
-              <option value="">Seleccionar mesa</option>
-              {mesas.map((mesa) => {
-                const ocupada = mesasOcupadasPorId[mesa.id];
-                return (
-                  <option key={mesa.id} value={mesa.id} disabled={Boolean(ocupada)}>
-                    {ocupada
-                      ? `Mesa ${mesa.numero} — Ocupada (${ocupada.mesero})`
-                      : `Mesa ${mesa.numero} - ${mesa.estado}`}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
+          {orderHeader.tipoPedido === 'local' ? (
+            <label style={fieldWrapStyle}>
+              <span style={labelStyle}>Mesa</span>
+              <select
+                value={orderHeader.mesaId}
+                onChange={(event) => setOrderHeader((current) => ({ ...current, mesaId: event.target.value }))}
+                style={inputStyle(isCompact)}
+              >
+                <option value="">Seleccionar mesa</option>
+                {mesas.map((mesa) => {
+                  const ocupada = mesasOcupadasPorId[mesa.id];
+                  return (
+                    <option key={mesa.id} value={mesa.id} disabled={Boolean(ocupada)}>
+                      {ocupada
+                        ? `Mesa ${mesa.numero} — Ocupada (${ocupada.mesero})`
+                        : `Mesa ${mesa.numero} - ${mesa.estado}`}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+          ) : (
+            <div style={fieldWrapStyle}>
+              <span style={labelStyle}>Mesa</span>
+              <div style={noAplicaMesaStyle(isCompact)}>No aplica para este tipo de pedido</div>
+            </div>
+          )}
 
           <label style={fieldWrapStyle}>
             <span style={labelStyle}>Tipo</span>
             <select
               value={orderHeader.tipoPedido}
-              onChange={(event) => setOrderHeader((current) => ({ ...current, tipoPedido: event.target.value }))}
+              onChange={(event) => {
+                const tipoPedido = event.target.value;
+                // Sin mesa a propósito: un pedido para llevar/delivery no ocupa
+                // ninguna mesa, y arrastrar una mesa elegida antes de cambiar de
+                // tipo dejaría esa mesa marcada como ocupada sin necesidad.
+                setOrderHeader((current) => ({ ...current, tipoPedido, mesaId: tipoPedido === 'local' ? current.mesaId : '' }));
+              }}
               style={inputStyle(isCompact)}
             >
               <option value="local">Local</option>
@@ -1466,6 +1497,19 @@ const labelStyle = {
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
 };
+
+const noAplicaMesaStyle = (isCompact) => ({
+  borderRadius: 12,
+  border: '1px dashed rgba(255,255,255,0.14)',
+  background: 'rgba(255,255,255,0.02)',
+  color: '#a89999',
+  padding: isCompact ? '12px 12px' : '10px 12px',
+  fontSize: isCompact ? 15 : 13.5,
+  minHeight: isCompact ? 46 : 40,
+  boxSizing: 'border-box',
+  display: 'flex',
+  alignItems: 'center',
+});
 
 const inputStyle = (isCompact) => ({
   width: '100%',

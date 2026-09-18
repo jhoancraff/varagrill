@@ -56,6 +56,8 @@ import AnalystConfiguracionCosteoPage from './AnalystConfiguracionCosteoPage';
 import EditOrderPage from './EditOrderPage';
 import MesasAtendidasPage from './MesasAtendidasPage';
 import NewOrderPage from './NewOrderPage';
+import DeliveryPage from './DeliveryPage';
+import PedidoConfirmacionPage from './PedidoConfirmacionPage';
 import PromotionsPage from './PromotionsPage';
 import useKitchenSocket from '../hooks/useKitchenSocket';
 import useKitchenAlerts from './useKitchenAlerts';
@@ -66,7 +68,7 @@ import useViewHistory from '../hooks/useViewHistory';
 // (no solo las suyas, ver mesas_atendidas_view) y a registrarle una ronda a un
 // mesero desbordado que le pide ayuda — "Agregar ronda a esta mesa" navega a
 // 'orders' con la mesa/cliente precargados (ver handleAddRoundToTable).
-const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad', 'contabilidad-cuadre-caja', 'cuentas-cobrar', 'mesas-atendidas', 'orders'];
+const CAJERA_ALLOWED_VIEWS = ['checkout', 'contabilidad', 'contabilidad-cuadre-caja', 'cuentas-cobrar', 'mesas-atendidas', 'orders', 'pedidos-delivery'];
 // Mismas 3 tarjetas que AdminPanelPage oculta (CARTAS_RESTRINGIDAS) — reservadas al
 // dueño real del negocio o al Contador, nunca a un Administrador de rol común.
 const RESTRICTED_ADMIN_VIEWS = ['admin-printers', 'admin-datos-fiscales', 'admin-compras'];
@@ -128,12 +130,31 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     }
   };
 
+  // Igual que handleAddRoundToTable, pero sin mesaId — un pedido para llevar/
+  // delivery no tiene mesa (ver NewOrderPage), así que la ronda nueva se
+  // precarga con el mismo cliente y tipo en vez de una mesa.
+  const handleAddRoundToDelivery = ({ tipoPedido, cliente, clienteCedula, clienteTelefono }) => {
+    setNewOrderPreset({ tipoPedido, cliente, clienteCedula, clienteTelefono, token: Date.now() });
+    goToView('orders');
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
+  };
+
   // Cocina ya no tiene tablero propio (KitchenOrdersPage, eliminado — cocina
   // no mira pantalla): tras crear o editar un pedido, el mesero aterriza
   // directo en la mesa que lo originó, dentro de Mesas Atendidas. El `token`
   // fuerza la reapertura aunque sea la misma mesaId de la vez anterior (mismo
   // patrón que newOrderPreset, arriba).
-  const handleOrderCreated = (pedidoId, mesaId) => {
+  const handleOrderCreated = (pedidoId, mesaId, tipoPedido) => {
+    // Para llevar/delivery no tienen mesa (ver NewOrderPage): mandarlos a Mesas
+    // atendidas los dejaría invisibles, esa vista solo lista pedidos con mesa
+    // (ver mesas_atendidas_view). Van en cambio a una pantalla de confirmación
+    // propia donde la cajera revisa, manda a imprimir y de ahí pasa a Caja.
+    if (tipoPedido && tipoPedido !== 'local') {
+      goToView(`pedido-confirmacion:${pedidoId}`);
+      return;
+    }
     setMesaAutoAbrir({ mesaId, token: Date.now(), flashMessage: `Pedido #${pedidoId} registrado con éxito.` });
     goToView('mesas-atendidas');
   };
@@ -642,6 +663,32 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <button
             type="button"
             onClick={() => {
+              goToView('pedidos-delivery');
+              if (isSidebarOverlayMode) {
+                setIsSidebarOpen(false);
+              }
+            }}
+            style={sidebarButtonStyle(activeView === 'pedidos-delivery')}
+          >
+            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7h13l3 5v5h-3" />
+                <path d="M3 7v10h2" />
+                <circle cx="7.5" cy="17.5" r="1.5" />
+                <circle cx="16.5" cy="17.5" r="1.5" />
+              </svg>
+            </span>
+            {/* Reservada a cajera/admin/contador (isAdmin ya cubre contador, ver
+                _is_admin_user en el backend) — un mesero no gestiona pedidos para
+                llevar/delivery, solo los de su propia mesa (ver pedidos_delivery_view). */}
+            <span style={{ flex: 1, textAlign: 'left' }}>Delivery / Para llevar</span>
+          </button>
+        ) : null}
+
+        {(isCajera || isAdmin) ? (
+          <button
+            type="button"
+            onClick={() => {
               goToView('checkout');
               if (isSidebarOverlayMode) {
                 setIsSidebarOpen(false);
@@ -934,9 +981,19 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             waiterName={displayName}
             initialMesaId={newOrderPreset?.mesaId}
             initialCliente={newOrderPreset?.cliente}
+            initialTipoPedido={newOrderPreset?.tipoPedido}
+            initialClienteCedula={newOrderPreset?.clienteCedula}
+            initialClienteTelefono={newOrderPreset?.clienteTelefono}
             onBack={goBackView}
             onSubmitSuccess={handleOrderCreated}
             checkMesasOcupadas={isMesero}
+          />
+        ) : activeView.startsWith('pedido-confirmacion:') ? (
+          <PedidoConfirmacionPage
+            isMobile={isMobile}
+            pedidoId={activeView.split(':')[1] || ''}
+            onBack={goBackView}
+            onIrACaja={() => goToView('checkout')}
           />
         ) : activeView === 'mesas-atendidas' ? (
           <MesasAtendidasPage
@@ -949,6 +1006,15 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onAutoAbrirConsumido={() => setMesaAutoAbrir(null)}
             mesasCatalogo={mesas}
             canGestionarItems={isAdmin || isCajera}
+            sidebarOffset={desktopContentOffset}
+          />
+        ) : activeView === 'pedidos-delivery' ? (
+          <DeliveryPage
+            isMobile={isMobile}
+            onBack={goBackView}
+            onAddRoundToDelivery={handleAddRoundToDelivery}
+            onNuevoPedido={handleNuevoPedido}
+            onEditOrder={(orderId) => goToView(`orders-edit:${orderId}`)}
             sidebarOffset={desktopContentOffset}
           />
         ) : activeView.startsWith('orders-edit:') ? (

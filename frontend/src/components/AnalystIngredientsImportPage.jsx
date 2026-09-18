@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
+import BsAmount from './BsAmount';
 import Toast from './Toast';
+import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 
 const ACCION_LABELS = {
@@ -14,7 +16,56 @@ const SELECTABLE_ACCIONES = new Set(['nuevo', 'actualizar']);
 
 const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '', fecha_factura: '' };
 
+function toNumeroOrNull(value) {
+  if (value === '' || value === null || value === undefined) {
+    return null;
+  }
+  const numero = Number(String(value).replace(',', '.'));
+  return Number.isFinite(numero) ? numero : null;
+}
+
+// Estima cuánto va a sumar esta fila a la factura del lote — mismo criterio que
+// _importar_ingredientes en el backend (ver admin_ingredientes_import_view),
+// para que el total que se ve ACÁ, antes de confirmar, coincida con
+// "compra_total" que se ve DESPUÉS de confirmar. Se recalcula en el navegador
+// (no se le pide al backend) porque las filas son editables en esta misma
+// pantalla — el total tiene que reaccionar al toque a cada cambio, no solo a
+// la previsualización inicial.
+function calcularMontoLinea(row) {
+  const cantidad = toNumeroOrNull(row.cantidad) || 0;
+  const precioTotal = toNumeroOrNull(row.precio_total);
+  const contenidoEnvase = toNumeroOrNull(row.contenido_envase);
+  const pesoReal = toNumeroOrNull(row.peso_real);
+  const precioCompra = toNumeroOrNull(row.precio_compra);
+  const tieneTrio = contenidoEnvase !== null && pesoReal !== null && precioCompra !== null;
+  const unidad = (row.unidad || row.unidad_actual || '').trim().toLowerCase();
+
+  if (tieneTrio) {
+    if (unidad === 'unidad') {
+      return cantidad * precioCompra;
+    }
+    if (cantidad === contenidoEnvase) {
+      return precioCompra;
+    }
+    if (contenidoEnvase > 0) {
+      return cantidad * (precioCompra / contenidoEnvase);
+    }
+    return 0;
+  }
+
+  // Sin trío, solo un ingrediente YA existente puede recibir esta entrega
+  // usando "precio total" directo — uno nuevo necesita el trío para poder
+  // crearse (ver _importar_ingredientes), así que sin él no hay monto que
+  // estimar todavía.
+  if (row.ingrediente_id && cantidad > 0 && precioTotal !== null) {
+    return precioTotal;
+  }
+
+  return 0;
+}
+
 function AnalystIngredientsImportPage({ isMobile, onBack }) {
+  const tasaCambio = useExchangeRate();
   const fileInputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [rows, setRows] = useState(null);
@@ -36,6 +87,11 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
 
   const selectedCount = useMemo(
     () => (rows || []).filter((row) => row.selected).length,
+    [rows],
+  );
+
+  const totalEstimado = useMemo(
+    () => (rows || []).filter((row) => row.selected).reduce((total, row) => total + calcularMontoLinea(row), 0),
     [rows],
   );
 
@@ -329,6 +385,19 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
             </div>
           </div>
 
+          <div style={totalEstimadoBoxStyle}>
+            <div style={{ color: '#c8bbbb', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
+              Total estimado a pagar por esta carga
+            </div>
+            <div style={{ color: '#ffcf7d', fontWeight: 800, fontSize: 22 }}>
+              ${totalEstimado.toFixed(2)}
+              <BsAmount amountUsd={totalEstimado} tasa={tasaCambio} style={{ fontSize: '0.55em' }} />
+            </div>
+            <div style={{ color: '#a89999', fontSize: 12 }}>
+              Revísalo contra la factura del proveedor antes de confirmar — se recalcula solo al editar cantidades o precios.
+            </div>
+          </div>
+
           <div style={confirmRowStyle(isMobile)}>
             <div style={{ color: '#c8bbbb', fontSize: 13 }}>{selectedCount} fila(s) seleccionada(s) para importar</div>
             <button type="button" onClick={handleConfirm} style={primaryButtonStyle} disabled={confirming || selectedCount === 0}>
@@ -397,6 +466,7 @@ const cellPrimaryStyle = { ...cellStyle };
 const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '6px 8px', color: '#fff', fontSize: 13 };
 
 const confirmRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
+const totalEstimadoBoxStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255, 176, 59, 0.35)', background: 'rgba(255, 176, 59, 0.08)' };
 
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

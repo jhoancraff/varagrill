@@ -13,6 +13,15 @@ const unidadOptions = [
   { value: 'unidad', label: 'Unidad' },
 ];
 
+const resolveIngredientCosto = (ingredient) => {
+  const precioCompra = Number(ingredient?.precio_compra);
+  const pesoReal = Number(ingredient?.peso_real);
+  if (Number.isFinite(precioCompra) && Number.isFinite(pesoReal) && pesoReal > 0) {
+    return precioCompra / pesoReal;
+  }
+  return Number(ingredient?.costo_unitario || 0);
+};
+
 function AnalystNewPreparationPage({ isMobile, onBack }) {
   const ingredientPickerRef = useRef(null);
   const preparationPickerRef = useRef(null);
@@ -113,7 +122,7 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
       return;
     }
 
-    const costoUnitario = isIngredient ? (selected.costo_unitario || 0) : (selected.costo_unitario_calculado || 0);
+    const costoUnitario = isIngredient ? resolveIngredientCosto(selected) : (selected.costo_unitario_calculado || 0);
     const unidad = isIngredient ? selected.unidad_medida : selected.rendimiento_unidad;
 
     setComponents((current) => ([

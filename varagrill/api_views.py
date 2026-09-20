@@ -469,7 +469,10 @@ def _load_preparation_structure():
 def _load_preparation_cost_map():
     """Consulta VGRecetaPreparacion/VGIngrediente/VGPreparacion y devuelve el costo calculado de cada subreceta."""
     components_by_preparation, yields_by_preparation = _load_preparation_structure()
-    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+    ingredient_costs = {
+        row['id']: _costo_unitario_efectivo(row['costo_unitario'], row['precio_compra'], row['peso_real'])
+        for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
+    }
     return _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
 
 
@@ -622,7 +625,11 @@ def _compute_product_recipe_cost(product, preparation_cost_map, config=None):
     total = Decimal('0')
     for component in product.receta.all():
         if component.ingrediente_id:
-            ingredient_cost = component.ingrediente.costo_unitario if component.ingrediente else Decimal('0')
+            ingredient_cost = _costo_unitario_efectivo(
+                component.ingrediente.costo_unitario,
+                component.ingrediente.precio_compra,
+                component.ingrediente.peso_real,
+            ) if component.ingrediente else Decimal('0')
             total += component.cantidad_requerida * ingredient_cost
         elif component.preparacion_id:
             costs = preparation_cost_map.get(component.preparacion_id, {'costo_unitario': Decimal('0')})
@@ -779,7 +786,10 @@ def _calcular_margen_periodo(desde, hasta):
 
     tasas_por_pedido = _tasas_venta_por_pedido({detalle.pedido_id for detalle in detalles})
 
-    ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+    ingredient_costs = {
+        row['id']: _costo_unitario_efectivo(row['costo_unitario'], row['precio_compra'], row['peso_real'])
+        for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
+    }
     preparation_cost_map = _load_preparation_cost_map()
     config_costeo = VGConfiguracionCosteo.obtener_config()
     unit_cost_cache = {}
@@ -1993,6 +2003,13 @@ def _costo_unitario_desde_precio(precio_compra, peso_real):
     return (precio_compra / peso_real).quantize(Decimal('0.000001'))
 
 
+def _costo_unitario_efectivo(costo_unitario, precio_compra, peso_real):
+    """Usa el costo derivable del envase aunque el campo histórico esté desincronizado."""
+    if precio_compra is not None and peso_real is not None and peso_real > 0:
+        return _costo_unitario_desde_precio(precio_compra, peso_real)
+    return costo_unitario or Decimal('0')
+
+
 def _validar_envase_peso_precio(contenido_envase, peso_real, precio_compra):
     """
     Valida el trío contenido_envase/peso_real/precio_compra ya parseado a Decimal (no
@@ -2046,6 +2063,10 @@ def admin_catalog_view(request):
                 'ingrediente_crudo_equivalente', 'rendimiento_ingrediente_crudo',
             )
         )
+        for ingredient in inventory:
+            ingredient['costo_unitario'] = _costo_unitario_efectivo(
+                ingredient['costo_unitario'], ingredient['precio_compra'], ingredient['peso_real'],
+            )
         preparation_cost_map = _load_preparation_cost_map()
         recipes = []
         for preparation in VGPreparacion.objects.order_by('-fecha_creacion', 'nombre').values(
@@ -5882,7 +5903,10 @@ def pedidos_cobro_view(request):
             )
 
         components_by_preparation, yields_by_preparation = _load_preparation_structure()
-        ingredient_costs = dict(VGIngrediente.objects.values_list('id', 'costo_unitario'))
+        ingredient_costs = {
+            row['id']: _costo_unitario_efectivo(row['costo_unitario'], row['precio_compra'], row['peso_real'])
+            for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
+        }
         preparation_cost_map = _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
         unit_cost_cache = {}
 

@@ -29,7 +29,7 @@ from varagrill.models import (
     VGTasaCambio,
     VGUsuario,
 )
-from varagrill.api_views import _importar_ingredientes, _preview_ingrediente_row
+from varagrill.api_views import _importar_ingredientes, _load_preparation_cost_map, _preview_ingrediente_row
 from varagrill.unit_rescale import rescale_legacy_units
 
 
@@ -225,6 +225,28 @@ class AdminCatalogApiTests(TestCase):
         self.assertTrue(any(item['nombre'] == 'Tomate' for item in payload['inventory']))
         self.assertTrue(any(item['nombre'] == 'Salsa roja' for item in payload['recipes']))
         self.assertTrue(any(item['nombre'] == 'Jugo de naranja' for item in payload['beverages']))
+
+    def test_subrecipe_cost_uses_price_fields_when_ingredient_cost_is_stale_zero(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Queso con costo desincronizado', unidad_medida='g', costo_unitario='0',
+            contenido_envase='1000', peso_real='800', precio_compra='400',
+        )
+        preparation = VGPreparacion.objects.create(
+            nombre='Salsa con queso desincronizado', rendimiento_cantidad='1000', rendimiento_unidad='g',
+        )
+        VGRecetaPreparacion.objects.create(
+            preparacion=preparation, ingrediente=ingredient, cantidad_requerida='200',
+        )
+
+        costs = _load_preparation_cost_map()[preparation.id]
+
+        self.assertEqual(costs['costo_total'], Decimal('100.000000'))
+        self.assertEqual(costs['costo_unitario'], Decimal('0.100000'))
+
+        response = self.client.get('/api/admin/catalogo/')
+        self.assertEqual(response.status_code, 200)
+        inventory_item = next(item for item in response.json()['inventory'] if item['id'] == ingredient.id)
+        self.assertEqual(Decimal(inventory_item['costo_unitario']), Decimal('0.500000'))
 
     def test_admin_catalog_endpoint_updates_existing_records(self):
         ingredient = VGIngrediente.objects.create(

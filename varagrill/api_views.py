@@ -1382,6 +1382,20 @@ def pedido_create_view(request):
     cliente_telefono = str(data.get('cliente_telefono', '') or '').strip()
     cliente = _resolve_or_create_cliente(cliente_nombre, cliente_cedula, cliente_telefono)
 
+    # Ancla esta ronda al pedido original del mismo delivery/para-llevar (ver
+    # DeliveryPage "Agregar ronda"), en vez de agrupar por cliente (nombre/cédula
+    # pueden repetirse entre clientes distintos). Si el pedido enviado como ancla
+    # ya era a su vez una ronda, se apunta directo a SU ancla para no encadenar
+    # rondas de rondas.
+    grupo_pedido = None
+    grupo_pedido_id_raw = data.get('grupo_pedido_id')
+    if grupo_pedido_id_raw not in (None, ''):
+        try:
+            pedido_ancla = VGPedido.objects.get(pk=int(grupo_pedido_id_raw))
+        except (TypeError, ValueError, VGPedido.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El pedido original de esta ronda ya no existe.'}, status=400)
+        grupo_pedido = pedido_ancla.grupo_pedido or pedido_ancla
+
     notas = str(data.get('notas', '') or '').strip()
 
     with transaction.atomic():
@@ -1399,6 +1413,7 @@ def pedido_create_view(request):
             mesa=parsed['mesa'],
             usuario=request.user,
             cliente=cliente,
+            grupo_pedido=grupo_pedido,
             tipo_pedido=parsed['tipo_pedido'],
             estado=estado_inicial,
             notas=notas,
@@ -5454,19 +5469,26 @@ def pedidos_delivery_view(request):
             'detalles__producto', 'detalles__adicionales__preparacion',
             'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo',
         )
-        .order_by('cliente_id', 'fecha_creacion')
+        .order_by('fecha_creacion')
     )
 
-    grupos_por_cliente = {}
+    # Se agrupa por grupo_pedido_id (el ancla explícita que arma "Agregar ronda",
+    # ver pedido_create_view) y no por cliente: dos clientes distintos pueden
+    # compartir nombre (y no siempre traen cédula), lo que antes podía mezclar
+    # sus pedidos en un mismo grupo. Un pedido sin rondas es su propia ancla
+    # (grupo_pedido_id vacío → usa su propio id).
+    grupos_por_ancla = {}
     for pedido in pedidos:
-        entry = grupos_por_cliente.setdefault(pedido.cliente_id, {
+        grupo_id = pedido.grupo_pedido_id or pedido.id
+        entry = grupos_por_ancla.setdefault(grupo_id, {
+            'grupo_id': grupo_id,
             'cliente_id': pedido.cliente_id,
             'cliente_nombre': pedido.cliente.nombre if pedido.cliente else '',
             'cliente_telefono': pedido.cliente.telefono if pedido.cliente else '',
             'cliente_cedula': pedido.cliente.numero_documento if pedido.cliente else '',
-            # Un mismo cliente no debería mezclar llevar y delivery el mismo día,
-            # pero si pasa, el tipo del pedido mas reciente (ultimo en la lista,
-            # ver order_by arriba) es el que manda para la tarjeta del grupo.
+            # Un mismo grupo no debería mezclar llevar y delivery, pero si pasa,
+            # el tipo del pedido mas reciente (ultimo en la lista, ver order_by
+            # arriba) es el que manda para la tarjeta del grupo.
             'tipo_pedido': pedido.tipo_pedido,
             'pedidos': [],
         })
@@ -5474,10 +5496,11 @@ def pedidos_delivery_view(request):
         entry['pedidos'].append(pedido)
 
     grupos_payload = []
-    for entry in grupos_por_cliente.values():
+    for entry in grupos_por_ancla.values():
         pedidos_grupo = entry['pedidos']
         total = sum((p.total for p in pedidos_grupo), Decimal('0.00'))
         grupos_payload.append({
+            'grupo_id': entry['grupo_id'],
             'cliente_id': entry['cliente_id'],
             'cliente_nombre': entry['cliente_nombre'],
             'cliente_telefono': entry['cliente_telefono'],
@@ -5772,6 +5795,8 @@ def pedidos_cobro_view(request):
                     'mesa': pedido.mesa.numero if pedido.mesa else None,
                     'tipo_pedido': pedido.tipo_pedido,
                     'estado': pedido.estado,
+                    'grupo_id': pedido.grupo_pedido_id or pedido.id,
+                    'cliente_id': pedido.cliente_id,
                     'cliente': pedido.cliente.nombre if pedido.cliente else '',
                     'mesero': pedido.usuario.username,
                     'notas': pedido.notas,

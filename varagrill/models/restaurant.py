@@ -671,6 +671,10 @@ class VGPedido(VGAuditoria):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pedidos_atendidos",
     )
     cliente = models.ForeignKey(VGCliente, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos")
+    grupo_pedido = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="rondas",
+        help_text="Ancla las rondas de un mismo delivery/para llevar al pedido original, para que Caja las cobre juntas sin depender de que coincida el cliente (nombre/cédula). Vacío = este pedido es su propia ancla (pedido.id).",
+    )
     tipo_pedido = models.CharField(max_length=10, choices=TIPOS, default="local")
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     fecha_inicio_preparacion = models.DateTimeField(

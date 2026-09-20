@@ -40,7 +40,7 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [selectedClienteId, setSelectedClienteId] = useState(null);
+  const [selectedGrupoId, setSelectedGrupoId] = useState(null);
   const [flashMessage, setFlashMessage] = useState('');
   const [prepBusyMap, setPrepBusyMap] = useState({});
   const [reprintBusyMap, setReprintBusyMap] = useState({});
@@ -99,17 +99,22 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
     return () => window.clearTimeout(timeoutId);
   }, [flashMessage]);
 
+  // Se selecciona por grupo_id (el ancla de "Agregar ronda", ver
+  // pedidos_delivery_view), no por cliente_id: dos clientes distintos pueden
+  // compartir nombre sin cédula y terminar con el mismo cliente_id, pero cada
+  // uno con su propio pedido/grupo — usar cliente_id acá abriría el grupo
+  // equivocado.
   const selectedGrupo = useMemo(
-    () => grupos.find((grupo) => grupo.cliente_id === selectedClienteId) || null,
-    [grupos, selectedClienteId],
+    () => grupos.find((grupo) => grupo.grupo_id === selectedGrupoId) || null,
+    [grupos, selectedGrupoId],
   );
 
-  const handleOpenGrupo = (clienteId) => {
-    setSelectedClienteId(clienteId);
+  const handleOpenGrupo = (grupoId) => {
+    setSelectedGrupoId(grupoId);
   };
 
   const handleCloseGrupo = () => {
-    setSelectedClienteId(null);
+    setSelectedGrupoId(null);
   };
 
   const abrirAjuste = (pedidoId, item) => {
@@ -210,6 +215,7 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
       cliente: selectedGrupo.cliente_nombre || '',
       clienteCedula: selectedGrupo.cliente_cedula || '',
       clienteTelefono: selectedGrupo.cliente_telefono || '',
+      grupoPedidoId: selectedGrupo.grupo_id,
     });
   };
 
@@ -423,9 +429,9 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
         <div style={mesasGridStyle(isMobile)}>
           {grupos.map((grupo) => (
             <button
-              key={grupo.cliente_id}
+              key={grupo.grupo_id}
               type="button"
-              onClick={() => handleOpenGrupo(grupo.cliente_id)}
+              onClick={() => handleOpenGrupo(grupo.grupo_id)}
               style={grupoCardStyle}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>

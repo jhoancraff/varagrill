@@ -133,8 +133,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   // Igual que handleAddRoundToTable, pero sin mesaId — un pedido para llevar/
   // delivery no tiene mesa (ver NewOrderPage), así que la ronda nueva se
   // precarga con el mismo cliente y tipo en vez de una mesa.
-  const handleAddRoundToDelivery = ({ tipoPedido, cliente, clienteCedula, clienteTelefono }) => {
-    setNewOrderPreset({ tipoPedido, cliente, clienteCedula, clienteTelefono, token: Date.now() });
+  const handleAddRoundToDelivery = ({ tipoPedido, cliente, clienteCedula, clienteTelefono, grupoPedidoId }) => {
+    setNewOrderPreset({ tipoPedido, cliente, clienteCedula, clienteTelefono, grupoPedidoId, token: Date.now() });
     goToView('orders');
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
@@ -984,6 +984,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             initialTipoPedido={newOrderPreset?.tipoPedido}
             initialClienteCedula={newOrderPreset?.clienteCedula}
             initialClienteTelefono={newOrderPreset?.clienteTelefono}
+            initialGrupoPedidoId={newOrderPreset?.grupoPedidoId}
             onBack={goBackView}
             onSubmitSuccess={handleOrderCreated}
             checkMesasOcupadas={isMesero}

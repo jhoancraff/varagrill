@@ -286,14 +286,24 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }
   };
 
+  // Las mesas agrupan por número de mesa (varias rondas de la misma mesa ya
+  // caían solas en el mismo grupo). Delivery/para-llevar no tenían ese ancla:
+  // cada ronda nueva creaba un pedido con su propio id, y cada una aparecía
+  // como una cuenta aparte — la cajera terminaba cobrando dos veces y sumando
+  // a mano. Se agrupa por `grupo_id` (grupo_pedido_id o, si el pedido es su
+  // propia ancla, su propio id — ver pedido_create_view/pedidos_cobro_view),
+  // el mismo ancla explícita que arma "Agregar ronda" en DeliveryPage. A
+  // propósito NO se agrupa por cliente: dos clientes distintos pueden
+  // compartir nombre (y no siempre traen cédula), lo que mezclaría sus
+  // pedidos en una sola cuenta.
   const groups = useMemo(() => {
     const map = new Map();
     pedidos.forEach((pedido) => {
-      const key = pedido.mesa ? `mesa-${pedido.mesa}` : `pedido-${pedido.id}`;
-      const label = pedido.mesa
-        ? `Mesa ${pedido.mesa}`
-        : `${pedido.tipo_pedido === 'delivery' ? 'Delivery' : 'Para llevar'} · Pedido #${pedido.id}`;
+      const key = pedido.mesa ? `mesa-${pedido.mesa}` : `grupo-${pedido.grupo_id}`;
       if (!map.has(key)) {
+        const label = pedido.mesa
+          ? `Mesa ${pedido.mesa}`
+          : `${pedido.tipo_pedido === 'delivery' ? 'Delivery' : 'Para llevar'} · ${pedido.cliente || `Pedido #${pedido.id}`}`;
         map.set(key, { key, label, pedidos: [] });
       }
       map.get(key).pedidos.push(pedido);

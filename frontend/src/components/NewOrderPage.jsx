@@ -33,6 +33,7 @@ function NewOrderPage({
   initialTipoPedido,
   initialClienteCedula,
   initialClienteTelefono,
+  initialGrupoPedidoId,
   onSubmitSuccess,
   checkMesasOcupadas = false,
 }) {
@@ -506,6 +507,10 @@ function NewOrderPage({
     cliente_nombre: orderHeader.cliente,
     cliente_cedula: orderHeader.clienteCedula,
     cliente_telefono: orderHeader.clienteTelefono,
+    // Ancla esta ronda al pedido original del delivery/para-llevar (ver
+    // DeliveryPage "Agregar ronda" → WelcomeScreen.handleAddRoundToDelivery),
+    // para que Caja las cobre juntas sin depender de que el cliente coincida.
+    grupo_pedido_id: initialGrupoPedidoId || null,
     notas: orderHeader.notas,
     items: cartItems.map((item) => ({
       product_id: Number(item.productId),

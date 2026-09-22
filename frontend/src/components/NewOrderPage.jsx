@@ -34,6 +34,7 @@ function NewOrderPage({
   initialClienteCedula,
   initialClienteTelefono,
   initialGrupoPedidoId,
+  initialNotaCreditoId,
   onSubmitSuccess,
   checkMesasOcupadas = false,
 }) {
@@ -511,6 +512,11 @@ function NewOrderPage({
     // DeliveryPage "Agregar ronda" → WelcomeScreen.handleAddRoundToDelivery),
     // para que Caja las cobre juntas sin depender de que el cliente coincida.
     grupo_pedido_id: initialGrupoPedidoId || null,
+    // Este pedido es el reemplazo de un canje (ver VGNotaCredito.TIPOS_RESOLUCION
+    // en devoluciones_views.py): pedido_create_view lo liga a la NC, lo fuerza
+    // sin mesa y pedidos_cobro_view/pedidos_delivery_view lo excluyen de cobro
+    // porque ya está pagado con el dinero del documento que esa NC anuló.
+    nota_credito_id: initialNotaCreditoId || null,
     notas: orderHeader.notas,
     items: cartItems.map((item) => ({
       product_id: Number(item.productId),

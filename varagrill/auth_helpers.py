@@ -67,3 +67,15 @@ def _is_admin_user(user):
     if role_name in ('administrador', 'contador'):
         return True
     return bool(getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False))
+
+
+def _is_gerente_user(user):
+    """
+    'Gerente/Supervisor' para efectos de autorizar una devolución (ver
+    devoluciones_views.py): el catálogo de roles no tiene un rol 'Gerente'
+    propio, así que se equipara a quien ya puede gestionar contabilidad
+    (Administrador/Contador) o tiene acceso de dueño — mismo criterio que
+    _is_admin_user, con nombre propio para que la intención quede clara en
+    el código de devoluciones.
+    """
+    return _is_admin_user(user)

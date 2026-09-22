@@ -7,6 +7,7 @@ import ReporteVentasDiaPage from './ReporteVentasDiaPage';
 import ReporteCuentasPorCobrarPage from './ReporteCuentasPorCobrarPage';
 import ReporteCuentasCobradasPage from './ReporteCuentasCobradasPage';
 import ReportePropinasPage from './ReportePropinasPage';
+import ReporteDevolucionesPage from './ReporteDevolucionesPage';
 import ReporteCuadreCajaRangoPage from './ReporteCuadreCajaRangoPage';
 import ReporteDisponibilidadCuentasPage from './ReporteDisponibilidadCuentasPage';
 import ReporteConciliacionBancariaPage from './ReporteConciliacionBancariaPage';
@@ -135,6 +136,18 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
   // precarga con el mismo cliente y tipo en vez de una mesa.
   const handleAddRoundToDelivery = ({ tipoPedido, cliente, clienteCedula, clienteTelefono, grupoPedidoId }) => {
     setNewOrderPreset({ tipoPedido, cliente, clienteCedula, clienteTelefono, grupoPedidoId, token: Date.now() });
+    goToView('orders');
+    if (isSidebarOverlayMode) {
+      setIsSidebarOpen(false);
+    }
+  };
+
+  // Tras un canje (ver NotasEntregaHistorialPage/ReporteDevolucionesPage), la
+  // cajera arma acá el plato de reemplazo como un pedido normal — sin mesa, porque
+  // ya está pagado con el dinero del documento que la nota de crédito anuló
+  // (ver initialNotaCreditoId en NewOrderPage → pedido_create_view).
+  const handleArmarCanje = ({ notaCreditoId, cliente }) => {
+    setNewOrderPreset({ tipoPedido: 'llevar', cliente, notaCreditoId, token: Date.now() });
     goToView('orders');
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);
@@ -985,6 +998,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             initialClienteCedula={newOrderPreset?.clienteCedula}
             initialClienteTelefono={newOrderPreset?.clienteTelefono}
             initialGrupoPedidoId={newOrderPreset?.grupoPedidoId}
+            initialNotaCreditoId={newOrderPreset?.notaCreditoId}
             onBack={goBackView}
             onSubmitSuccess={handleOrderCreated}
             checkMesasOcupadas={isMesero}
@@ -1038,6 +1052,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             canCancelarPedidos={canCancelarPedidosDesdeCaja}
             canGestionarItems={isAdmin || isCajera}
             mesasCatalogo={mesas}
+            onArmarCanje={handleArmarCanje}
           />
         ) : activeView === 'cuentas-cobrar' ? (
           <CuentasPorCobrarPage
@@ -1140,6 +1155,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <ReportePropinasPage
             isMobile={isMobile}
             onBack={goBackView}
+          />
+        ) : activeView === 'contabilidad-devoluciones' ? (
+          <ReporteDevolucionesPage
+            isMobile={isMobile}
+            onBack={goBackView}
+            onArmarCanje={handleArmarCanje}
           />
         ) : activeView === 'contabilidad-cuadre-caja-rango' ? (
           <ReporteCuadreCajaRangoPage

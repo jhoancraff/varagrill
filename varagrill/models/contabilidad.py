@@ -429,8 +429,15 @@ class VGFactura(VGAuditoria):
     subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_iva = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     descuento = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    saldo_pendiente = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # 6 decimales, no 2 (igual que VGPago.monto) — total/saldo_pendiente tienen
+    # que poder guardar EXACTO lo que un abono en bolivares convierte a dolares
+    # (ver nota_entrega_abono_view/factura_abono_view): con 2 decimales, restar
+    # un abono redondeaba el saldo a centavos de dolar, lo que al reconvertir a
+    # bolivares para mostrarlo dejaba un residuo de varios bolivares frente a
+    # lo que el cliente de verdad pago (reportado 2026-09, ver aplicar_ajuste_parcial
+    # en devoluciones_views.py, donde el problema se volvio visible por primera vez).
+    total = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    saldo_pendiente = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     moneda = models.CharField(
         max_length=3, choices=VGMetodoPago.MONEDAS, default="USD",
         help_text="Moneda en la que se muestra esta factura (tomada del método de pago elegido al emitirla). Los montos siempre se calculan en USD por dentro; esto solo controla en qué moneda se despliega/imprime.",
@@ -486,8 +493,10 @@ class VGOrdenCobro(VGAuditoria):
         ("anulada", "Anulada"),
     ]
     factura = models.OneToOneField(VGFactura, on_delete=models.CASCADE, related_name="orden_cobro")
-    monto_total = models.DecimalField(max_digits=12, decimal_places=2)
-    saldo_pendiente = models.DecimalField(max_digits=12, decimal_places=2)
+    # 6 decimales — mismo motivo que VGFactura.total/saldo_pendiente, ya que
+    # esta orden siempre se mantiene en espejo con esos dos campos.
+    monto_total = models.DecimalField(max_digits=14, decimal_places=6)
+    saldo_pendiente = models.DecimalField(max_digits=14, decimal_places=6)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     fecha_limite = models.DateField(null=True, blank=True)
     responsable = models.ForeignKey(
@@ -543,8 +552,9 @@ class VGNotaEntrega(VGAuditoria):
     pedidos = models.ManyToManyField("varagrill.VGPedido", related_name="notas_entrega")
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="notas_entrega")
     fecha_emision = models.DateTimeField(auto_now_add=True)
-    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    saldo_pendiente = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # 6 decimales — ver el mismo comentario en VGFactura.total/saldo_pendiente.
+    total = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    saldo_pendiente = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente_pago")
     moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS, default="USD")
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
@@ -557,6 +567,10 @@ class VGNotaEntrega(VGAuditoria):
     descuento_motivo = models.CharField(
         max_length=255, blank=True,
         help_text="Por qué se aplicó el descuento — obligatorio si descuento_monto > 0, para auditoría.",
+    )
+    motivo_anulacion = models.CharField(
+        max_length=255, blank=True,
+        help_text="Por qué se anuló esta nota — se llena al revertirla (ver VGNotaCredito) o al anularla manualmente.",
     )
 
     class Meta:
@@ -571,6 +585,185 @@ class VGNotaEntrega(VGAuditoria):
 
     def __str__(self):
         return f"Nota de entrega {self.codigo}"
+
+
+# ---------------------------------------------------------------------------
+# Devoluciones — anulación de un documento ya cobrado y reapertura del pedido
+# ---------------------------------------------------------------------------
+class VGNotaCredito(VGAuditoria):
+    """
+    Reversión (total o parcial) de una VGNotaEntrega o VGFactura que YA fue
+    cobrada total o parcialmente — ver tipo_resolucion para el detalle de
+    cada caso, resuelto en revertir_y_reabrir_pedido en devoluciones_views.py:
+      - 'reembolso'/'canje'/'credito_futuro' anulan el documento original al
+        100% (nunca se reutiliza),
+      - 'ajuste_parcial' NO anula nada: solo baja el total/saldo_pendiente
+        del documento por `monto` — para cuando parte del pedido tuvo un
+        problema (ej. medio pollo dañado) y se cobró de menos, pero el
+        cliente ya se fue y no hay nada que reabrir ni reembolsar.
+    numero se genera con VGCorrelativoFiscal.siguiente('NOTA_CREDITO'), igual
+    que numero_factura/numero_control en VGFactura: nunca se reutiliza.
+    """
+    DOCUMENTO_TIPOS = [
+        ("nota_entrega", "Nota de entrega"),
+        ("factura", "Factura"),
+    ]
+    MOTIVOS = [
+        ("calidad_plato", "Calidad del plato"),
+        ("error_mesero", "Error de mesero / toma de pedido"),
+        ("cliente_cambio", "Cliente cambió de opinión"),
+        ("error_cobro", "Error en el cobro"),
+        ("otro", "Otro"),
+    ]
+    # motivo responde "por qué se anuló"; tipo_resolucion responde "qué pasó con
+    # el dinero" — son preguntas independientes. La anulación fiscal (esta
+    # tabla) SIEMPRE se emite, pero solo 'reembolso' saca plata del banco/caja
+    # de verdad (ver VGPago.anulado_por_nota_credito en revertir_y_reabrir_pedido):
+    # si el cliente se lleva otro plato o un crédito, la plata nunca salió del
+    # negocio y no debe descontarse del cuadre de caja.
+    TIPOS_RESOLUCION = [
+        ("reembolso", "Reembolso — se devuelve el dinero al cliente"),
+        ("canje", "Canje — el cliente se lleva otro plato del mismo valor"),
+        ("credito_futuro", "Crédito — queda a favor del cliente para una próxima compra"),
+        ("ajuste_parcial", "Ajuste parcial — se baja el monto del documento sin anularlo"),
+        ("canje_item", "Canje de un ítem — solo se cambia un plato, el resto de la nota sigue igual"),
+    ]
+
+    numero = models.PositiveIntegerField(unique=True)
+    documento_tipo = models.CharField(max_length=15, choices=DOCUMENTO_TIPOS)
+    nota_entrega = models.ForeignKey(
+        VGNotaEntrega, on_delete=models.PROTECT, null=True, blank=True, related_name="notas_credito",
+    )
+    factura = models.ForeignKey(
+        "varagrill.VGFactura", on_delete=models.PROTECT, null=True, blank=True, related_name="notas_credito",
+    )
+    # 6 decimales — mismo motivo que VGNotaEntrega/VGFactura.total: este monto
+    # sale de restar un pago exacto (VGPago.monto, 6 decimales) del total, y
+    # necesita la misma precision para no perder fracciones de centavo al
+    # reconvertir a bolivares.
+    monto = models.DecimalField(max_digits=14, decimal_places=6)
+    moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS)
+    motivo = models.CharField(max_length=20, choices=MOTIVOS)
+    motivo_detalle = models.TextField(
+        blank=True, help_text="Explicación libre de la cajera/mesero sobre lo ocurrido.",
+    )
+    tipo_resolucion = models.CharField(
+        max_length=20, choices=TIPOS_RESOLUCION,
+        help_text="Qué pasa con el dinero — determina si se descuenta o no del banco/caja (ver docstring de la clase).",
+    )
+    autorizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="notas_credito_autorizadas",
+        help_text="Gerente/Supervisor que re-autenticó la anulación (segundo factor, vía usuario y contraseña).",
+    )
+    numero_control_referenciado = models.CharField(
+        max_length=50, blank=True,
+        help_text="numero_control de la VGFactura original, o el código de la VGNotaEntrega original.",
+    )
+    detalle_pedido_origen = models.ForeignKey(
+        "varagrill.VGDetallePedido", on_delete=models.SET_NULL, null=True, blank=True, related_name="notas_credito",
+        help_text="Solo para tipo_resolucion='canje_item': la línea puntual del pedido original que se cambió — el resto de la nota/pedido no se toca.",
+    )
+    pedido_nuevo = models.ForeignKey(
+        "varagrill.VGPedido", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+        help_text="Primer pedido reabierto en Cobro por esta devolución (ver VGPedido.nota_credito_origen para todos).",
+    )
+    fecha_emision = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vg_notas_credito"
+        verbose_name = "Nota de crédito"
+        verbose_name_plural = "Notas de crédito"
+        ordering = ["-fecha_emision"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(documento_tipo="nota_entrega", nota_entrega__isnull=False, factura__isnull=True)
+                    | models.Q(documento_tipo="factura", factura__isnull=False, nota_entrega__isnull=True)
+                ),
+                name="nota_credito_un_solo_documento_origen",
+            ),
+        ]
+
+    @property
+    def codigo(self):
+        return f"NC-{self.numero:06d}"
+
+    @property
+    def documento_original(self):
+        return self.nota_entrega if self.documento_tipo == "nota_entrega" else self.factura
+
+    def __str__(self):
+        return f"Nota de crédito {self.codigo}"
+
+
+class VGMerma(models.Model):
+    """
+    Plato devuelto que NO vuelve al inventario de insumos: cuando se cobró
+    el pedido original, sus ingredientes ya se descontaron de stock (ver
+    VGMovimientoInventario en pedidos_cobro_view) — reingresarlos sería
+    reingresar comida ya preparada/potencialmente dañada. Esta tabla solo
+    deja constancia de qué se botó y por qué, para el reporte de mermas.
+    """
+    MOTIVOS = [
+        ("devolucion_cliente", "Devolución del cliente"),
+        ("dano_calidad", "Daño / calidad"),
+        ("otro", "Otro"),
+    ]
+    nota_credito = models.ForeignKey(VGNotaCredito, on_delete=models.CASCADE, related_name="mermas")
+    producto = models.ForeignKey("varagrill.VGProducto", on_delete=models.PROTECT, related_name="mermas")
+    cantidad = models.PositiveSmallIntegerField()
+    motivo = models.CharField(max_length=20, choices=MOTIVOS, default="devolucion_cliente")
+    registrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+    fecha_registro = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vg_mermas"
+        verbose_name = "Merma"
+        verbose_name_plural = "Mermas"
+        ordering = ["-fecha_registro"]
+
+    def __str__(self):
+        return f"Merma — {self.producto} x {self.cantidad}"
+
+
+class VGCreditoCliente(VGAuditoria):
+    """
+    Saldo a favor de un cliente generado por una VGNotaCredito con
+    tipo_resolucion='credito_futuro': el dinero de la venta original NO se
+    devuelve ni se descuenta del banco/caja (nunca salió del negocio), pero
+    tampoco se aplica a nada todavía — queda aquí, disponible para descontarse
+    de una futura nota de entrega/factura de ese mismo cliente.
+
+    OneToOne con VGNotaCredito porque cada devolución de este tipo genera
+    exactamente un crédito. saldo_disponible arranca igual a monto y baja a
+    medida que se consume (la vista que aplique el crédito en un cobro futuro
+    es el siguiente paso — todavía no existe, este modelo solo lleva el
+    saldo para que no se pierda el rastro de que existe).
+    """
+    ESTADOS = [
+        ("vigente", "Vigente"),
+        ("usado", "Usado por completo"),
+        ("vencido", "Vencido"),
+    ]
+    nota_credito = models.OneToOneField(VGNotaCredito, on_delete=models.PROTECT, related_name="credito_generado")
+    cliente = models.ForeignKey("varagrill.VGCliente", on_delete=models.PROTECT, related_name="creditos")
+    # 6 decimales — mismo motivo que VGNotaCredito.monto, del que sale este valor.
+    monto = models.DecimalField(max_digits=14, decimal_places=6)
+    saldo_disponible = models.DecimalField(max_digits=14, decimal_places=6)
+    moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="vigente")
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "vg_creditos_cliente"
+        verbose_name = "Crédito de cliente"
+        verbose_name_plural = "Créditos de cliente"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"Crédito {self.cliente} — ${self.saldo_disponible}"
 
 
 # ---------------------------------------------------------------------------

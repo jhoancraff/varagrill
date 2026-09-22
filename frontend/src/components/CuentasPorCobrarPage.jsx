@@ -126,7 +126,7 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
         return;
       }
       setFeedbackType('success');
-      setFeedback(`Abono de $${data.pago.monto} registrado. Saldo pendiente: $${data.factura.saldo_pendiente}.`);
+      setFeedback(`Abono de $${Number(data.pago.monto).toFixed(2)} registrado. Saldo pendiente: $${Number(data.factura.saldo_pendiente).toFixed(2)}.`);
       setFacturaDetalle(data.factura);
       setMontoAbono('');
       await fetchOrdenes();

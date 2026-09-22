@@ -675,6 +675,10 @@ class VGPedido(VGAuditoria):
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="rondas",
         help_text="Ancla las rondas de un mismo delivery/para llevar al pedido original, para que Caja las cobre juntas sin depender de que coincida el cliente (nombre/cédula). Vacío = este pedido es su propia ancla (pedido.id).",
     )
+    nota_credito_origen = models.ForeignKey(
+        "varagrill.VGNotaCredito", on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos_reabiertos",
+        help_text="Si no es None, este pedido nació de una devolución (ver devoluciones_views.revertir_y_reabrir_pedido): no debe pedir mesa y Cobro debe mostrarlo con una insignia de devolución en vez de un número de mesa.",
+    )
     tipo_pedido = models.CharField(max_length=10, choices=TIPOS, default="local")
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     fecha_inicio_preparacion = models.DateTimeField(
@@ -998,6 +1002,10 @@ class VGPago(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    anulado_por_nota_credito = models.ForeignKey(
+        "varagrill.VGNotaCredito", on_delete=models.SET_NULL, null=True, blank=True, related_name="pagos_revertidos",
+        help_text="Si no es None, este pago quedó en estado 'anulado' porque una devolución revirtió el documento al que pertenecía — así el cuadre de caja (reportes.py) deja de contarlo automáticamente al filtrar estado='completado', sin perder de qué cuenta/método salió originalmente.",
+    )
 
     class Meta:
         db_table = "vg_pagos"

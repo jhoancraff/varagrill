@@ -95,6 +95,11 @@ from varagrill.gastos_views import (
     gasto_abono_view,
     gasto_detail_view,
 )
+from varagrill.devoluciones_views import (
+    devolucion_crear_view,
+    nota_credito_detail_view,
+    notas_credito_view,
+)
 from varagrill.facturacion_views import (
     clientes_buscar_view,
     cuentas_por_cobrar_view,
@@ -206,6 +211,9 @@ urlpatterns = [
     path('api/notas-entrega/<int:nota_id>/abonos/', nota_entrega_abono_view, name='nota-entrega-abono'),
     path('api/notas-entrega/<int:nota_id>/reimprimir/', nota_entrega_reimprimir_view, name='nota-entrega-reimprimir'),
     path('api/cuentas-por-cobrar/', cuentas_por_cobrar_view, name='cuentas-por-cobrar'),
+    path('api/devoluciones/', devolucion_crear_view, name='devolucion-crear'),
+    path('api/notas-credito/', notas_credito_view, name='notas-credito'),
+    path('api/notas-credito/<int:nota_credito_id>/', nota_credito_detail_view, name='nota-credito-detail'),
     path('api/auth/login/', LoginView.as_view(), name='login'),
     path('api/auth/status/', SessionStatusView.as_view(), name='session-status'),
     path('api/auth/logout/', LogoutView.as_view(), name='logout'),

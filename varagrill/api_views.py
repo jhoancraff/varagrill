@@ -37,6 +37,7 @@ from .models import (
     VGMesa,
     VGMetodoPago,
     VGMovimientoInventario,
+    VGNotaCredito,
     VGNotaEntrega,
     VGOpcionProducto,
     VGPedido,
@@ -1406,6 +1407,24 @@ def pedido_create_view(request):
             return _auth_response({'ok': False, 'message': 'El pedido original de esta ronda ya no existe.'}, status=400)
         grupo_pedido = pedido_ancla.grupo_pedido or pedido_ancla
 
+    # Pedido de reemplazo de un canje (ver VGNotaCredito.TIPOS_RESOLUCION en
+    # devoluciones_views.py): la cajera lo arma acá como un pedido normal en
+    # vez de que el sistema adivine qué plato nuevo quiere el cliente. Nunca
+    # ocupa mesa (el original ya se devolvió) y pedidos_cobro_view/
+    # pedidos_delivery_view lo excluyen de la lista de cobro porque ya está
+    # pagado con el dinero del documento que esta NC anuló.
+    nota_credito = None
+    nota_credito_id_raw = data.get('nota_credito_id')
+    if nota_credito_id_raw not in (None, ''):
+        try:
+            nota_credito = VGNotaCredito.objects.get(pk=int(nota_credito_id_raw))
+        except (TypeError, ValueError, VGNotaCredito.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La nota de crédito de este canje ya no existe.'}, status=400)
+        if nota_credito.tipo_resolucion not in ('canje', 'canje_item'):
+            return _auth_response({'ok': False, 'message': 'Esta nota de crédito no admite un pedido de reemplazo.'}, status=400)
+        if VGPedido.objects.filter(nota_credito_origen_id=nota_credito.id).exists():
+            return _auth_response({'ok': False, 'message': 'Este canje ya tiene un pedido de reemplazo armado.'}, status=409)
+
     notas = str(data.get('notas', '') or '').strip()
 
     with transaction.atomic():
@@ -1420,10 +1439,11 @@ def pedido_create_view(request):
         estado_inicial = 'pendiente' if requiere_cocina else 'entregado'
 
         pedido = VGPedido.objects.create(
-            mesa=parsed['mesa'],
+            mesa=parsed['mesa'] if nota_credito is None else None,
             usuario=request.user,
             cliente=cliente,
             grupo_pedido=grupo_pedido,
+            nota_credito_origen=nota_credito,
             tipo_pedido=parsed['tipo_pedido'],
             estado=estado_inicial,
             notas=notas,
@@ -1467,6 +1487,10 @@ def pedido_create_view(request):
         pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
         pedido.save(update_fields=['subtotal', 'total', 'actualizado_por'])
+
+        if nota_credito is not None:
+            nota_credito.pedido_nuevo = pedido
+            nota_credito.save(update_fields=['pedido_nuevo'])
 
     _notify_cocina_event('NUEVA_COMANDAS', pedido, request.user)
 
@@ -5484,6 +5508,7 @@ def pedidos_delivery_view(request):
         VGPedido.objects.filter(
             mesa__isnull=True, tipo_pedido__in=['llevar', 'delivery'],
             fecha_creacion__date=hoy, estado__in=MESA_ABIERTA_ORDER_STATES,
+            nota_credito_origen__isnull=True,  # ya pagado por la devolución que lo originó — ver pedido_create_view
         )
         .select_related('cliente', 'usuario')
         .prefetch_related(
@@ -5802,7 +5827,7 @@ def pedidos_cobro_view(request):
         _cancelar_pedidos_vacios(request.user)
 
         pedidos = (
-            VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES)
+            VGPedido.objects.filter(estado__in=BILLABLE_ORDER_STATES, nota_credito_origen__isnull=True)
             .select_related('mesa', 'cliente', 'usuario')
             .prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo')
             .order_by('mesa__numero', 'fecha_creacion')

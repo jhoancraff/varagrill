@@ -862,14 +862,15 @@ def factura_abono_view(request, factura_id):
             creado_por=request.user,
         )
 
-        # Se redondea a 2 decimales (y nunca se deja negativo) apenas se resta:
-        # monto tiene 6 decimales de precision (ver VGPago.monto) pero el saldo
-        # de una factura siempre es un monto "limpio" en dolares — sin este
-        # redondeo, un pago exacto por Bs podia dejar un residuo de fracciones
-        # de centavo que nunca llegaba a estado 'pagada'.
+        # Se redondea a 6 decimales (mismos que VGPago.monto), no a 2 — con 2
+        # decimales, un abono exacto por Bs dejaba un residuo de varios
+        # bolivares frente a lo que el cliente de verdad pago al reconvertir
+        # el saldo para mostrarlo (reportado 2026-09; ver el comentario en
+        # VGFactura.total/saldo_pendiente sobre por que esos campos ahora
+        # tienen 6 decimales). Nunca se deja negativo.
         factura.saldo_pendiente = max(
-            (factura.saldo_pendiente - monto).quantize(Decimal('0.01')),
-            Decimal('0.00'),
+            (factura.saldo_pendiente - monto).quantize(Decimal('0.000001')),
+            Decimal('0'),
         )
         factura.estado = 'pagada' if factura.saldo_pendiente <= 0 else 'abonada_parcial'
         factura.actualizado_por = request.user
@@ -1017,6 +1018,7 @@ def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
         'referencia': nota.referencia,
         'descuento_monto': str(nota.descuento_monto),
         'descuento_motivo': nota.descuento_motivo,
+        'motivo_anulacion': nota.motivo_anulacion,
         'creado_por': (nota.creado_por.get_full_name() or nota.creado_por.username) if nota.creado_por else '',
         'pedidos': [pedido.id for pedido in nota.pedidos.all()],
     }
@@ -1040,6 +1042,21 @@ def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
     if incluir_detalle:
         data['pagos'] = [
             _serialize_pago(pago) for pago in nota.pagos.filter(estado='completado').order_by('fecha_pago')
+        ]
+        # Para poder elegir UN item puntual a cambiar sin anular toda la nota
+        # (ver aplicar_canje_item en devoluciones_views.py) — cada fila trae
+        # el id del VGDetallePedido, no solo del pedido, porque el canje de
+        # item apunta exactamente a esa linea.
+        data['items'] = [
+            {
+                'detalle_id': detalle.id,
+                'pedido_id': detalle.pedido_id,
+                'producto': detalle.producto.nombre,
+                'cantidad': detalle.cantidad,
+                'subtotal': str(detalle.subtotal),
+            }
+            for pedido in nota.pedidos.prefetch_related('detalles__producto').all()
+            for detalle in pedido.detalles.all()
         ]
     return data
 
@@ -1226,13 +1243,13 @@ def nota_entrega_abono_view(request, nota_id):
             creado_por=request.user,
         )
 
-        # Ver el comentario equivalente en factura_abono_view: se redondea a 2
-        # decimales (y nunca se deja negativo) para que un pago con precision
-        # de 6 decimales nunca deje un residuo de fracciones de centavo que
-        # impida llegar a estado 'pagada'.
+        # Ver el comentario equivalente en factura_abono_view: se redondea a 6
+        # decimales (mismos que VGPago.monto), no a 2, para no perder
+        # fracciones de centavo frente a lo que el cliente de verdad pago en
+        # bolivares. Nunca se deja negativo.
         nota.saldo_pendiente = max(
-            (nota.saldo_pendiente - monto).quantize(Decimal('0.01')),
-            Decimal('0.00'),
+            (nota.saldo_pendiente - monto).quantize(Decimal('0.000001')),
+            Decimal('0'),
         )
         nota.estado = 'pagada' if nota.saldo_pendiente <= 0 else 'abonada_parcial'
         nota.actualizado_por = request.user

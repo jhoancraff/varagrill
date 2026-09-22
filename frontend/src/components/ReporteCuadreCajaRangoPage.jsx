@@ -261,6 +261,19 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
                   Ver detalle →
                 </button>
               </div>
+              <div style={desgloseTileStyle}>
+                <div style={desgloseLabelStyle}>Devoluciones</div>
+                <div style={desgloseValueStyle}>${formatMonto(data.resumen_ventas?.total_devuelto)}</div>
+                <div style={desgloseSecondaryStyle}>Notas de crédito emitidas</div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('contabilidad-devoluciones')}
+                  style={verDetalleLinkStyle}
+                  className="no-print"
+                >
+                  Ver detalle →
+                </button>
+              </div>
             </div>
           </section>
 

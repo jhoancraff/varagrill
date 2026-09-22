@@ -20,7 +20,7 @@ const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
 // solo queda oculto detras de esta bandera.
 const FACTURACION_HABILITADA = false;
 
-function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos = false, canGestionarItems = false, mesasCatalogo = [] }) {
+function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos = false, canGestionarItems = false, mesasCatalogo = [], onArmarCanje }) {
   const tasaCambio = useExchangeRate();
   const [pedidos, setPedidos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1199,7 +1199,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       ) : null}
 
       <div style={cuentasPorCobrarWrapStyle}>
-        <NotasEntregaHistorialPage isMobile={isMobile} embedded refreshToken={notasRefreshToken} />
+        <NotasEntregaHistorialPage isMobile={isMobile} embedded refreshToken={notasRefreshToken} onArmarCanje={onArmarCanje} />
       </div>
 
       <div style={cuentasPorCobrarWrapStyle}>

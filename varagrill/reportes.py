@@ -15,6 +15,7 @@ from .models import (
     VGConsignacionCaja,
     VGIngresoExtra,
     VGMetodoPago,
+    VGNotaCredito,
     VGNotaEntrega,
     VGPago,
     VGTasaCambio,
@@ -161,6 +162,13 @@ def resumen_ventas_rango(desde, hasta):
       (via VGIngresoExtra) pero que NO es venta — si el banco subio MAS que
       `total_vendido`, esta es la explicacion mas probable. Nunca se suma a
       `total_vendido` a proposito, para no inflar la venta real.
+    - `total_devuelto` suma el `monto` de toda VGNotaCredito emitida en el
+      rango, sin importar tipo_resolucion — es informativo (cuanto se
+      devolvio/ajusto en total), no se resta de `total_vendido` ni de ningun
+      otro campo de aqui: cada tipo_resolucion ya decide por su cuenta si
+      afecta el banco/caja (ver VGPago.anulado_por_nota_credito en
+      devoluciones_views.py) o el propio total_vendido (ajuste_parcial baja
+      el total de la VGNotaEntrega directamente, asi que ya se refleja solo).
     """
     total_vendido = (
         VGNotaEntrega.objects
@@ -191,11 +199,19 @@ def resumen_ventas_rango(desde, hasta):
         .get('total')
     ) or Decimal('0')
 
+    total_devuelto = (
+        VGNotaCredito.objects
+        .filter(fecha_emision__date__gte=desde, fecha_emision__date__lte=hasta)
+        .aggregate(total=Sum('monto'))
+        .get('total')
+    ) or Decimal('0')
+
     return {
         'total_vendido': total_vendido,
         'total_pendiente': total_pendiente,
         'total_propinas_excedentes': total_propinas_excedentes,
         'cuentas_cobradas_hoy': cuentas_cobradas_hoy,
+        'total_devuelto': total_devuelto,
     }
 
 

@@ -78,6 +78,8 @@ from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
 logger = logging.getLogger(__name__)
 
+HIDDEN_INGREDIENT_IDS = {285, 288, 312, 337, 381, 487, 488, 366, 371, 372}
+
 
 def _serialize_role(role):
     return {
@@ -2096,7 +2098,7 @@ def admin_catalog_view(request):
                 })
 
         inventory = list(
-            VGIngrediente.objects.order_by('-fecha_creacion', 'nombre').values(
+            VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS).order_by('-fecha_creacion', 'nombre').values(
                 'id', 'nombre', 'stock_actual', 'unidad_medida', 'ultimo_proveedor', 'costo_unitario',
                 'stock_minimo', 'contenido_envase', 'peso_real', 'precio_compra',
                 'ingrediente_crudo_equivalente', 'rendimiento_ingrediente_crudo',
@@ -4192,7 +4194,7 @@ def admin_products_view(request):
         preparation_cost_map = _load_preparation_cost_map()
         config_costeo = VGConfiguracionCosteo.obtener_config()
         ingredients = list(
-            VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
+            VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS).order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
         )
         recetas = [
             {
@@ -4485,7 +4487,7 @@ def admin_recipes_view(request):
     if request.method == 'GET':
         recipes = VGProducto.objects.filter(categoria__nombre__iexact='Recetas').select_related('categoria').prefetch_related('receta__ingrediente', 'receta__preparacion').order_by('nombre')
         inventory = list(
-            VGIngrediente.objects.order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
+            VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS).order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
         )
         preparation_cost_map = _load_preparation_cost_map()
         config_costeo = VGConfiguracionCosteo.obtener_config()

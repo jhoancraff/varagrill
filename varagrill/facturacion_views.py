@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 # centavo real, asi que solo absorbe el redondeo de la conversion, nunca un
 # sobrepago genuino (que siempre es de centavos completos para arriba).
 TOLERANCIA_REDONDEO_ABONO = Decimal('0.00001')
+TOLERANCIA_CIERRE_ABONO = Decimal('0.01')
 
 
 def _tasa_conversion_vigente(moneda, fecha_emision, tasa_cambio_referencia, tasa_pago_actual):
@@ -868,9 +869,12 @@ def factura_abono_view(request, factura_id):
         # el saldo para mostrarlo (reportado 2026-09; ver el comentario en
         # VGFactura.total/saldo_pendiente sobre por que esos campos ahora
         # tienen 6 decimales). Nunca se deja negativo.
-        factura.saldo_pendiente = max(
+        saldo_restante = max(
             (factura.saldo_pendiente - monto).quantize(Decimal('0.000001')),
             Decimal('0'),
+        )
+        factura.saldo_pendiente = (
+            Decimal('0') if saldo_restante <= TOLERANCIA_CIERRE_ABONO else saldo_restante
         )
         factura.estado = 'pagada' if factura.saldo_pendiente <= 0 else 'abonada_parcial'
         factura.actualizado_por = request.user
@@ -1246,10 +1250,14 @@ def nota_entrega_abono_view(request, nota_id):
         # Ver el comentario equivalente en factura_abono_view: se redondea a 6
         # decimales (mismos que VGPago.monto), no a 2, para no perder
         # fracciones de centavo frente a lo que el cliente de verdad pago en
-        # bolivares. Nunca se deja negativo.
-        nota.saldo_pendiente = max(
+        # bolivares. Un residuo de hasta un centavo se absorbe como redondeo
+        # para que el total mostrado no quede como abonado parcial.
+        saldo_restante = max(
             (nota.saldo_pendiente - monto).quantize(Decimal('0.000001')),
             Decimal('0'),
+        )
+        nota.saldo_pendiente = (
+            Decimal('0') if saldo_restante <= TOLERANCIA_CIERRE_ABONO else saldo_restante
         )
         nota.estado = 'pagada' if nota.saldo_pendiente <= 0 else 'abonada_parcial'
         nota.actualizado_por = request.user

@@ -18,6 +18,9 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [lote, setLote] = useState(emptyLote);
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [summary, setSummary] = useState(null);
   // El borrador en sí ya queda guardado en el servidor apenas se agrega cada
@@ -125,6 +128,39 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       setBorrador(data.borrador);
     } catch (error) {
       showError(error.message || 'No se pudo quitar esa fila.');
+    }
+  };
+
+  const handleStartEdit = (detalle) => {
+    setEditingId(detalle.id);
+    setEditValue(detalle.precio_total_bs || '');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const handleSaveEdit = async (detalleId) => {
+    setSavingEdit(true);
+    try {
+      const response = await fetch('/api/admin/compras/borrador/editar/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ detalle_id: detalleId, precio_total_bs: editValue }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo actualizar el monto en bolivares.');
+      }
+      setBorrador(data.borrador);
+      setEditingId(null);
+      setEditValue('');
+    } catch (error) {
+      showError(error.message || 'No se pudo actualizar el monto en bolivares.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -308,10 +344,37 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                         <div key={`total-${detalle.id}`} style={cellStyle}>
                           ${Number(detalle.precio_total).toFixed(2)}
                           {detalle.precio_total_bs ? (
-                            <div style={{ color: '#c8bbbb', fontSize: 11.5 }}>Bs. {detalle.precio_total_bs}</div>
+                            editingId === detalle.id ? (
+                              <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
+                                <span style={{ color: '#c8bbbb', fontSize: 11.5 }}>Bs.</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  style={{ ...inputStyle, padding: '4px 6px', fontSize: 12, width: 90 }}
+                                  autoFocus
+                                />
+                              </div>
+                            ) : (
+                              <div style={{ color: '#c8bbbb', fontSize: 11.5 }}>Bs. {detalle.precio_total_bs}</div>
+                            )
                           ) : null}
                         </div>
-                        <div key={`actions-${detalle.id}`} style={cellStyle}>
+                        <div key={`actions-${detalle.id}`} style={{ ...cellStyle, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {detalle.precio_total_bs ? (
+                            editingId === detalle.id ? (
+                              <>
+                                <button type="button" onClick={() => handleSaveEdit(detalle.id)} style={smallActionButtonStyle} disabled={savingEdit}>
+                                  {savingEdit ? '...' : 'Guardar'}
+                                </button>
+                                <button type="button" onClick={handleCancelEdit} style={smallSecondaryButtonStyle} disabled={savingEdit}>Cancelar</button>
+                              </>
+                            ) : (
+                              <button type="button" onClick={() => handleStartEdit(detalle)} style={smallSecondaryButtonStyle}>Editar Bs</button>
+                            )
+                          ) : null}
                           <button type="button" onClick={() => handleRemoveItem(detalle.id)} style={dangerButtonStyle}>Quitar</button>
                         </div>
                       </>
@@ -392,7 +455,7 @@ const suggestionsHintStyle = { color: '#e8bcbc', fontSize: 11, fontWeight: 700, 
 const suggestionRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', textAlign: 'left' };
 
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.4fr) 130px 130px 110px 90px', gap: '10px 12px', alignItems: 'center', minWidth: 700 };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.4fr) 130px 130px 130px minmax(160px,auto)', gap: '10px 12px', alignItems: 'center', minWidth: 780 };
 const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
 const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
 const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };
@@ -402,5 +465,7 @@ const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isM
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const smallActionButtonStyle = { border: 'none', borderRadius: 999, padding: '6px 12px', background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)', color: '#04140a', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const smallSecondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '6px 12px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
 export default AnalystComprasBorradorPage;

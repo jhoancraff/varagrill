@@ -2991,7 +2991,10 @@ def _preview_ingrediente_row(row):
     return resultado
 
 
-def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_proveedor='', fecha_factura=None):
+def _importar_ingredientes(
+    items, operator, proveedor_nombre='', numero_factura_proveedor='', fecha_factura=None,
+    factura_total_bs=None,
+):
     """
     Aplica la carga de ingredientes ya revisada/editada por el analista (ver
     _preview_ingrediente_row): por cada fila, si el ingrediente existe se SUMA "cantidad"
@@ -3021,6 +3024,16 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
     contenido_envase. Si ninguna fila aumenta stock, no se crea ningún VGCompra. Una
     cantidad NEGATIVA en un ingrediente existente resta del stock (ej. una merma) y se
     registra como 'ajuste', nunca como compra.
+
+    `factura_total_bs`, si viene, es lo que la factura del proveedor dice en bolívares
+    para TODA la carga — el analista lo escribe cuando el total en dólares que salió de
+    sumar cada línea no coincide con el proveedor (usan una tasa distinta a la del
+    sistema). Cuando viene, reemplaza compra.total (y por lo tanto compra.saldo_pendiente,
+    la deuda real con el proveedor) por factura_total_bs / compra.tasa_cambio_referencia —
+    la MISMA tasa que ya quedó fija en ese lote — sin tocar costo_unitario de ningún
+    ingrediente ni los VGDetalleCompra ya creados: el costeo de recetas sigue basado en lo
+    que cada línea trajo, solo la cuenta por pagar se corrige a lo que realmente se le debe
+    al proveedor.
     """
     creados, actualizados, ignorados = 0, 0, 0
     errores = []
@@ -3211,6 +3224,16 @@ def _importar_ingredientes(items, operator, proveedor_nombre='', numero_factura_
                 creados += 1
 
         if compra is not None:
+            if factura_total_bs is not None:
+                if not compra.tasa_cambio_referencia or compra.tasa_cambio_referencia <= 0:
+                    errores.append(
+                        'No se pudo ajustar el total a lo que dice la factura en bolívares: '
+                        'este lote no quedó con una tasa de cambio de referencia.'
+                    )
+                else:
+                    compra.total = (factura_total_bs / compra.tasa_cambio_referencia).quantize(Decimal('0.01'))
+                    compra.total_bs_factura = factura_total_bs.quantize(Decimal('0.01'))
+                    compra.save(update_fields=['total', 'total_bs_factura'])
             _finalizar_estado_pago_compra(compra)
 
     return {
@@ -3271,11 +3294,22 @@ def admin_ingredientes_import_view(request):
             except ValueError:
                 return _auth_response({'ok': False, 'message': 'La fecha de la factura no es valida.'}, status=400)
 
+        factura_total_bs_raw = data.get('factura_total_bs')
+        factura_total_bs = None
+        if factura_total_bs_raw not in (None, ''):
+            try:
+                factura_total_bs = Decimal(str(factura_total_bs_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto de la factura en bolívares no es válido.'}, status=400)
+            if factura_total_bs < 0:
+                return _auth_response({'ok': False, 'message': 'El monto de la factura en bolívares no puede ser negativo.'}, status=400)
+
         resumen = _importar_ingredientes(
             items, request.user,
             proveedor_nombre=proveedor_nombre,
             numero_factura_proveedor=numero_factura_proveedor,
             fecha_factura=fecha_factura,
+            factura_total_bs=factura_total_bs,
         )
         return _auth_response({'ok': True, **resumen})
 
@@ -3427,6 +3461,25 @@ def _serialize_abono_compra(abono):
 
 
 def _serialize_compra(compra, incluir_detalle=False):
+    # Si esta compra tiene un total_bs_factura (el analista escribió el monto
+    # EXACTO de la factura en bolívares al confirmar, ver _importar_ingredientes),
+    # ese es el que se muestra tal cual — reconvertir total*tasa perdía varios
+    # bolívares por el redondeo de `total` a 2 decimales (mismo bug que
+    # _serialize_gasto ya resuelve para VGGasto con saldo_pendiente_bs). El saldo
+    # se resta con la precisión completa de cada abono (6 decimales) y SU propia
+    # tasa congelada, nunca desde saldo_pendiente ya redondeado.
+    if compra.total_bs_factura is not None:
+        total_bs = compra.total_bs_factura
+        abonado_bs = sum(
+            (abono.monto * abono.tasa_cambio_referencia for abono in compra.abonos.all() if abono.tasa_cambio_referencia),
+            Decimal('0'),
+        )
+        saldo_pendiente_bs = (total_bs - abonado_bs).quantize(Decimal('0.01'))
+    else:
+        tasa_para_bs = compra.tasa_cambio_referencia
+        total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
+        saldo_pendiente_bs = (compra.saldo_pendiente * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
+
     data = {
         'id': compra.id,
         'proveedor_nombre': compra.proveedor_nombre,
@@ -3434,8 +3487,10 @@ def _serialize_compra(compra, incluir_detalle=False):
         'fecha_factura': compra.fecha_factura.isoformat() if compra.fecha_factura else None,
         'fecha_creacion': compra.fecha_creacion.isoformat(),
         'total': str(compra.total),
+        'total_bs': str(total_bs) if total_bs is not None else None,
         'estado': compra.estado,
         'saldo_pendiente': str(compra.saldo_pendiente),
+        'saldo_pendiente_bs': str(saldo_pendiente_bs) if saldo_pendiente_bs is not None else None,
         'estado_pago': compra.estado_pago,
         'tasa_cambio_referencia': str(compra.tasa_cambio_referencia) if compra.tasa_cambio_referencia is not None else None,
         'creado_por': (compra.creado_por.get_full_name() or compra.creado_por.username) if compra.creado_por else '',

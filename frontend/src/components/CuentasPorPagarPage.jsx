@@ -3,9 +3,13 @@ import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
 
-function formatUsdBs(amount, tasa) {
+// `bsPreciso`, cuando viene, es el total_bs que ya calculó el backend (para
+// una compra con total_bs_factura, es el monto EXACTO que el analista
+// escribió — ver _serialize_compra) en vez de recalcular amount*tasa aquí,
+// que perdía bolívares por el redondeo de `amount` a 2 decimales.
+function formatUsdBs(amount, tasa, bsPreciso) {
   const usd = `$${Number(amount).toFixed(2)}`;
-  const bs = formatBs(amount, tasa);
+  const bs = bsPreciso != null ? formatBsRaw(bsPreciso) : formatBs(amount, tasa);
   return bs ? `${usd} (${bs})` : usd;
 }
 
@@ -284,7 +288,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 </div>
                 <div style={{ color: vista === 'pagadas' ? '#9fe3b0' : '#ffcf7d', fontWeight: 700 }}>
                   {vista === 'pagadas'
-                    ? `Total pagado: ${formatUsdBs(compra.tipo === 'gasto' ? compra.monto : compra.total, compra.tasa_cambio_referencia ?? tasaCambio)}`
+                    ? `Total pagado: ${formatUsdBs(compra.tipo === 'gasto' ? compra.monto : compra.total, compra.tasa_cambio_referencia ?? tasaCambio, compra.total_bs)}`
                     : `Saldo: ${formatSaldoUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio, compra.saldo_pendiente_bs)}`}
                 </div>
               </button>
@@ -322,7 +326,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 ) : null}
 
                 <div style={detailTotalsStyle}>
-                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}</span>
+                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.total_bs)}</span>
                   <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatSaldoUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.saldo_pendiente_bs)}</span>
                 </div>
 

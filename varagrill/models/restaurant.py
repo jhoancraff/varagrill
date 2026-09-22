@@ -514,6 +514,15 @@ class VGCompra(VGAuditoria):
     )
     estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    # El monto EXACTO en bolívares que el analista escribió al confirmar (ver
+    # _importar_ingredientes / factura_total_bs), cuando el total en dólares que
+    # salió de sumar cada línea no coincidía con lo que el proveedor cobró. Se
+    # guarda aparte de `total` (que sigue en USD, redondeado a centavos, y es lo
+    # que de verdad mueve la deuda/abonos) porque reconvertir `total * tasa` para
+    # volver a mostrarlo en bolívares perdía varios bolívares por el redondeo a
+    # 2 decimales — con este campo, `_serialize_compra` muestra el monto tal
+    # cual se escribió, sin ese vaivén de conversión.
+    total_bs_factura = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     class Meta:
         db_table = "vg_compras"

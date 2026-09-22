@@ -197,6 +197,57 @@ def admin_compra_borrador_agregar_view(request):
 
 
 @csrf_exempt
+def admin_compra_borrador_editar_view(request):
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    borrador = _get_borrador_abierto()
+    if borrador is None:
+        return _auth_response({'ok': False, 'message': 'No hay ningun borrador abierto.'}, status=400)
+
+    try:
+        detalle = borrador.detalles.get(pk=int(data.get('detalle_id')))
+    except (ValueError, TypeError, VGDetalleCompraBorrador.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'Esa fila del borrador no existe.'}, status=400)
+
+    # Solo se permite corregir el monto en bolívares de una línea ya cargada
+    # en bolívares, y siempre con la MISMA tasa que quedó congelada al
+    # agregarla — así toda la factura mantiene una sola tasa, sin importar
+    # cuánto tiempo pase entre agregar y confirmar.
+    if not detalle.tasa_cambio_referencia:
+        return _auth_response({
+            'ok': False,
+            'message': 'Esta línea no se cargó en bolívares, no se puede editar el monto en Bs.',
+        }, status=400)
+
+    precio_total_bs_raw = data.get('precio_total_bs')
+    if precio_total_bs_raw in (None, ''):
+        return _auth_response({'ok': False, 'message': 'Indica el nuevo monto en bolívares.'}, status=400)
+    try:
+        precio_total_bs = Decimal(str(precio_total_bs_raw))
+    except InvalidOperation:
+        return _auth_response({'ok': False, 'message': 'El precio en bolívares no es válido.'}, status=400)
+    if precio_total_bs < 0:
+        return _auth_response({'ok': False, 'message': 'El precio en bolívares no puede ser negativo.'}, status=400)
+
+    tasa_linea = detalle.tasa_cambio_referencia
+    precio_total = (precio_total_bs / tasa_linea).quantize(Decimal('0.000001'))
+
+    detalle.precio_total = precio_total
+    detalle.save(update_fields=['precio_total'])
+
+    return _auth_response({'ok': True, 'borrador': _serialize_borrador(borrador)})
+
+
+@csrf_exempt
 def admin_compra_borrador_quitar_view(request):
     if request.method != 'POST':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)

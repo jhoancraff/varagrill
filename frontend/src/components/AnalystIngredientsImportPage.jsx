@@ -74,6 +74,12 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const [confirming, setConfirming] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [summary, setSummary] = useState(null);
+  // Monto que el analista escribe a mano al comparar contra la factura en
+  // papel del proveedor — puramente informativo (ver totalRealBs abajo): NO
+  // toca ninguna fila ni lo que se manda al confirmar, solo ayuda a ver de
+  // un vistazo si el total calculado cuadra con lo que el proveedor cobró en
+  // bolívares, que a veces usa una tasa distinta a la que tiene el sistema.
+  const [totalRealBs, setTotalRealBs] = useState('');
 
   const counts = useMemo(() => {
     if (!rows) {
@@ -95,11 +101,16 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     [rows],
   );
 
+  const totalRealBsNum = toNumeroOrNull(totalRealBs);
+  const totalRealUsd = totalRealBsNum !== null && tasaCambio > 0 ? totalRealBsNum / tasaCambio : null;
+  const diferenciaUsd = totalRealUsd !== null ? totalRealUsd - totalEstimado : null;
+
   const handleFileChange = (event) => {
     const selected = event.target.files && event.target.files[0] ? event.target.files[0] : null;
     setFile(selected);
     setRows(null);
     setSummary(null);
+    setTotalRealBs('');
   };
 
   const handlePreview = async () => {
@@ -169,6 +180,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           proveedor_nombre: lote.proveedor_nombre,
           numero_factura_proveedor: lote.numero_factura_proveedor,
           fecha_factura: lote.fecha_factura,
+          factura_total_bs: totalRealBs,
         }),
       });
       const data = await response.json();
@@ -189,6 +201,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     setFile(null);
     setRows(null);
     setSummary(null);
+    setTotalRealBs('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -396,6 +409,36 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
             <div style={{ color: '#a89999', fontSize: 12 }}>
               Revísalo contra la factura del proveedor antes de confirmar — se recalcula solo al editar cantidades o precios.
             </div>
+
+            <div style={compararBsRowStyle(isMobile)}>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span style={{ color: '#f0b4b4', fontSize: 12, fontWeight: 700 }}>
+                  ¿La factura del proveedor dice otro monto en Bs? Escríbelo aquí — esto es lo que quedará
+                  como deuda con el proveedor (cuenta por pagar) al confirmar, no el total calculado arriba:
+                </span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={totalRealBs}
+                  onChange={(event) => setTotalRealBs(event.target.value)}
+                  style={{ ...editInputStyle, maxWidth: 220 }}
+                  placeholder="Monto real en Bs"
+                />
+              </label>
+              {totalRealBsNum !== null ? (
+                <div style={{ display: 'grid', gap: 2 }}>
+                  <div style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>
+                    {totalRealUsd !== null ? `≈ $${totalRealUsd.toFixed(2)} a la tasa de hoy — este será el total de la cuenta por pagar` : 'Sin tasa disponible para convertir'}
+                  </div>
+                  {diferenciaUsd !== null && Math.abs(diferenciaUsd) > 0.01 ? (
+                    <div style={{ color: diferenciaUsd > 0 ? '#ffb0b0' : '#8fffb0', fontSize: 12.5, fontWeight: 700 }}>
+                      {diferenciaUsd > 0 ? 'Falta cargar' : 'Sobra'} ${Math.abs(diferenciaUsd).toFixed(2)} frente al total calculado por líneas.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div style={confirmRowStyle(isMobile)}>
@@ -467,6 +510,7 @@ const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8
 
 const confirmRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
 const totalEstimadoBoxStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255, 176, 59, 0.35)', background: 'rgba(255, 176, 59, 0.08)' };
+const compararBsRowStyle = (isMobile) => ({ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 16, marginTop: 8, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,0.12)', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'flex-end' });
 
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

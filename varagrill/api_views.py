@@ -3475,6 +3475,8 @@ def _serialize_compra(compra, incluir_detalle=False):
             Decimal('0'),
         )
         saldo_pendiente_bs = (total_bs - abonado_bs).quantize(Decimal('0.01'))
+        if saldo_pendiente_bs <= Decimal('0.00'):
+            saldo_pendiente_bs = Decimal('0.00')
     else:
         tasa_para_bs = compra.tasa_cambio_referencia
         total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None

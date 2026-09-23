@@ -527,6 +527,18 @@ def compra_abono_view(request, compra_id):
             (compra.saldo_pendiente - monto).quantize(Decimal('0.01')),
             Decimal('0.00'),
         )
+        if compra.total_bs_factura is not None:
+            abonado_bs = sum(
+                (
+                    abono.monto * abono.tasa_cambio_referencia
+                    for abono in compra.abonos.all()
+                    if abono.tasa_cambio_referencia is not None
+                ),
+                Decimal('0'),
+            )
+            saldo_bs = (compra.total_bs_factura - abonado_bs).quantize(Decimal('0.01'))
+            if saldo_bs <= Decimal('0.00'):
+                compra.saldo_pendiente = Decimal('0.00')
         compra.estado_pago = 'pagada' if compra.saldo_pendiente <= 0 else 'abonada_parcial'
         compra.actualizado_por = request.user
         compra.save(update_fields=['saldo_pendiente', 'estado_pago', 'actualizado_por', 'fecha_actualizacion'])

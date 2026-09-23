@@ -805,8 +805,14 @@ class VGGasto(VGAuditoria):
     varios bolivares al reconvertir para mostrarlo (un gasto de Bs 20.000 se
     guardaba como $24.58 y, al reconvertir, salia Bs 20.001,63 en vez de
     Bs 20.000,00 exactos — reportado 2026-09). Con 6 decimales el redondeo es
-    indetectable en bolivares. saldo_pendiente se queda en 2 decimales a
-    proposito (un gasto siempre se debe en un monto "limpio" en dolares).
+    indetectable en bolivares. saldo_pendiente tambien va en 6 decimales
+    (antes se quedaba a proposito en 2, asumiendo que un gasto siempre se
+    debe en un monto "limpio" en dolares — pero eso NO es cierto para un
+    gasto cargado en bolivares, cuyo monto real en dolares ya viene con 6
+    decimales; redondearlo a centavos desde el arranque, y de nuevo en cada
+    abono parcial, dejaba un residuo o rechazaba el pago final al saldar la
+    deuda exacta en bolivares — mismo bug que VGCompra.saldo_pendiente, ver
+    el comentario ahi, reportado 2026-09).
     """
     ESTADOS_PAGO = [
         ("pendiente", "Pendiente"),
@@ -822,7 +828,7 @@ class VGGasto(VGAuditoria):
     )
     numero_comprobante = models.CharField(max_length=100, blank=True)
     monto = models.DecimalField(max_digits=14, decimal_places=6, validators=[MinValueValidator(0)])
-    saldo_pendiente = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    saldo_pendiente = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")
     fecha_gasto = models.DateField(
         help_text="Fecha real del gasto/factura (puede ser distinta a cuando se registro en el sistema).",

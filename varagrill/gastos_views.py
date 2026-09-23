@@ -17,6 +17,13 @@ from .auth_helpers import _auth_response, _is_admin_user
 from .models import VGAbonoGasto, VGCategoriaGasto, VGCorreccionGasto, VGGasto, VGMetodoPago
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
+# Mismos valores y mismo motivo que en facturacion_views.py/compras_views.py:
+# TOLERANCIA_REDONDEO_ABONO absorbe el redondeo de convertir un pago en
+# bolivares a dolares; TOLERANCIA_CIERRE_ABONO perdona un residuo minusculo en
+# vez de dejar el gasto "abonada_parcial" por unos centavos.
+TOLERANCIA_REDONDEO_ABONO = Decimal('0.00001')
+TOLERANCIA_CIERRE_ABONO = Decimal('0.01')
+
 
 def _serialize_categoria_gasto(categoria):
     return {'id': categoria.id, 'nombre': categoria.nombre, 'activo': categoria.activo}
@@ -131,14 +138,16 @@ def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator, tasa
         gasto=gasto, monto=monto, metodo_pago=metodo_pago, referencia=referencia, creado_por=operator,
         tasa_cambio_referencia=tasa_cambio_referencia if tasa_cambio_referencia is not None else tasa_cambio_para_registro(),
     )
-    # Redondeado a 2 decimales (y nunca negativo): monto puede traer 6
-    # decimales de precision (ver VGGasto.monto) pero saldo_pendiente siempre
-    # es un monto "limpio" en dolares — sin este redondeo, pagar un gasto
-    # completo con un monto convertido de bolivares podia dejar un saldo
-    # como "0.000007" en vez de un 0.00 exacto.
-    gasto.saldo_pendiente = max(
-        (gasto.saldo_pendiente - monto).quantize(Decimal('0.01')),
-        Decimal('0.00'),
+    # 6 decimales, no 2 (ver el comentario en VGGasto.saldo_pendiente) —
+    # nunca negativo. TOLERANCIA_CIERRE_ABONO perdona un residuo minusculo
+    # (polvo de redondeo) en vez de dejar el gasto "abonada_parcial" por unos
+    # pocos centavos.
+    saldo_restante = max(
+        (gasto.saldo_pendiente - monto).quantize(Decimal('0.000001')),
+        Decimal('0'),
+    )
+    gasto.saldo_pendiente = (
+        Decimal('0') if saldo_restante <= TOLERANCIA_CIERRE_ABONO else saldo_restante
     )
     gasto.estado_pago = 'pagado' if gasto.saldo_pendiente <= 0 else 'abonada_parcial'
     gasto.actualizado_por = operator
@@ -333,7 +342,7 @@ def admin_gastos_view(request):
             proveedor_nombre=str(data.get('proveedor_nombre', '') or '').strip(),
             numero_comprobante=str(data.get('numero_comprobante', '') or '').strip(),
             monto=monto,
-            saldo_pendiente=monto.quantize(Decimal('0.01')),
+            saldo_pendiente=monto,
             estado_pago='pendiente',
             fecha_gasto=fecha_gasto,
             notas=str(data.get('notas', '') or '').strip(),
@@ -553,32 +562,6 @@ def gasto_abono_view(request, gasto_id):
     if not tiene_monto and not tiene_monto_bs:
         return _auth_response({'ok': False, 'message': 'Indica el monto del abono.'}, status=400)
 
-    tasa_abono = None
-    if tiene_monto_bs:
-        try:
-            monto_bs = Decimal(str(monto_bs_raw))
-        except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
-        if monto_bs <= 0:
-            return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
-
-        tasa_actual = obtener_tasa_actual()
-        tasa_abono = tasa_actual.tasa if tasa_actual else None
-        if not tasa_abono or tasa_abono <= 0:
-            return _auth_response({
-                'ok': False,
-                'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.',
-            }, status=400)
-        monto = (monto_bs / tasa_abono).quantize(Decimal('0.000001'))
-    else:
-        try:
-            monto = Decimal(str(monto_raw))
-        except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
-        if monto <= 0:
-            return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
-        tasa_abono = tasa_cambio_para_registro()
-
     try:
         metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
@@ -593,12 +576,49 @@ def gasto_abono_view(request, gasto_id):
         if gasto.estado_pago == 'pagado':
             return _auth_response({'ok': False, 'message': 'Este gasto ya esta saldado.'}, status=409)
 
-        # Misma tolerancia que TOLERANCIA_REDONDEO_ABONO en facturacion_views.py:
-        # un pago que salda el gasto COMPLETO convertido de bolivares puede
-        # traer 6 decimales de precision que redondean una fraccion de
-        # centavo por ENCIMA del saldo (2 decimales) — sin esta tolerancia,
-        # ese pago legitimo por el total exacto se rechazaba con este error.
-        if monto > gasto.saldo_pendiente + Decimal('0.00001'):
+        tasa_abono = None
+        if tiene_monto_bs:
+            try:
+                monto_bs = Decimal(str(monto_bs_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
+            if monto_bs <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
+
+            # La MISMA tasa que usa _serialize_gasto para mostrarle al
+            # analista "debes Bs. X" — para que pagar exactamente ese monto
+            # en bolívares salde la deuda completa. Un gasto en VES usa la
+            # tasa que quedó congelada al registrarlo (fija en ese monto de
+            # bolívares); uno en USD usa la tasa de HOY a propósito (la
+            # deuda real está en dólares, y el equivalente en bolívares debe
+            # reflejar lo que costaría saldarlo hoy, no lo que costaba
+            # cuando se registró). Mezclar tasas entre mostrar y pagar es lo
+            # que dejaba residuos o rechazaba el pago final (mismo bug que
+            # compra_abono_view en compras_views.py, reportado 2026-09).
+            if gasto.moneda_origen == 'VES':
+                tasa_abono = gasto.tasa_cambio_referencia
+                if not tasa_abono or tasa_abono <= 0:
+                    tasa_actual = obtener_tasa_actual()
+                    tasa_abono = tasa_actual.tasa if tasa_actual else None
+            else:
+                tasa_actual = obtener_tasa_actual()
+                tasa_abono = tasa_actual.tasa if tasa_actual else gasto.tasa_cambio_referencia
+            if not tasa_abono or tasa_abono <= 0:
+                return _auth_response({
+                    'ok': False,
+                    'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.',
+                }, status=400)
+            monto = (monto_bs / tasa_abono).quantize(Decimal('0.000001'))
+        else:
+            try:
+                monto = Decimal(str(monto_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+            if monto <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+            tasa_abono = tasa_cambio_para_registro()
+
+        if monto > gasto.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
             return _auth_response({
                 'ok': False,
                 'message': f'El monto excede el saldo pendiente (${gasto.saldo_pendiente}).',

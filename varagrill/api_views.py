@@ -3231,7 +3231,13 @@ def _importar_ingredientes(
                         'este lote no quedó con una tasa de cambio de referencia.'
                     )
                 else:
-                    compra.total = (factura_total_bs / compra.tasa_cambio_referencia).quantize(Decimal('0.01'))
+                    # 6 decimales, no 2 (ver el comentario en VGCompra.total sobre por
+                    # qué total/saldo_pendiente ahora tienen esa precisión) — redondear
+                    # a centavos aquí hacía que compra.saldo_pendiente arrancara ya
+                    # desalineado de total_bs_factura, y pagar exactamente el monto en
+                    # bolívares de la factura podía quedar rechazado o con un residuo
+                    # más adelante (reportado 2026-09).
+                    compra.total = (factura_total_bs / compra.tasa_cambio_referencia).quantize(Decimal('0.000001'))
                     compra.total_bs_factura = factura_total_bs.quantize(Decimal('0.01'))
                     compra.save(update_fields=['total', 'total_bs_factura'])
             _finalizar_estado_pago_compra(compra)

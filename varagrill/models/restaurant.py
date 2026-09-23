@@ -506,10 +506,17 @@ class VGCompra(VGAuditoria):
         help_text="Fecha real de la factura del proveedor (puede ser distinta a cuándo se cargó al sistema).",
     )
     fecha_compra = models.DateTimeField(auto_now_add=True)
-    total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # 6 decimales, no 2 (mismo motivo que VGFactura.total/saldo_pendiente,
+    # ver el comentario ahí): con 2 decimales, cada abono en bolívares
+    # redondeaba saldo_pendiente a centavos de dólar, y ese redondeo se
+    # acumulaba con cada abono parcial — un pago final que debía saldar la
+    # cuenta exacta terminaba rechazado ("el monto excede el saldo
+    # pendiente") o dejando un residuo de varios bolívares (reportado
+    # 2026-09, lote #26).
+    total = models.DecimalField(max_digits=14, decimal_places=6, default=0)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     saldo_pendiente = models.DecimalField(
-        max_digits=10, decimal_places=2, default=0,
+        max_digits=14, decimal_places=6, default=0,
         help_text="Deuda viva con el proveedor por este lote (cuenta por pagar). Baja con cada VGAbonoCompra.",
     )
     estado_pago = models.CharField(max_length=20, choices=ESTADOS_PAGO, default="pendiente")

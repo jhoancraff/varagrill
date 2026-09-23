@@ -5,7 +5,7 @@ import useToast from '../hooks/useToast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
-const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '' };
+const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '', total_a_pagar: '' };
 
 function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [inventory, setInventory] = useState([]);
@@ -407,6 +407,23 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                   {confirming ? 'Confirmando...' : 'Confirmar y generar cuenta por pagar'}
                 </button>
               </form>
+              <label style={{ ...fieldStyle, maxWidth: 320 }}>
+                <span style={labelStyle}>Total a pagar (cuenta por pagar)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={lote.total_a_pagar}
+                  onChange={(event) => setLote((c) => ({ ...c, total_a_pagar: event.target.value }))}
+                  style={inputStyle}
+                  placeholder={`Por defecto: $${borrador.total}`}
+                />
+              </label>
+              <p style={hintStyle}>
+                Por defecto se cobra la suma de las lineas (${borrador.total}). Si esta carga es una cortesia u
+                obsequio del proveedor, escribe aqui el monto real a pagar — por ejemplo 0 — sin afectar el costo
+                con el que queda valorado el inventario.
+              </p>
               <p style={hintStyle}>La fecha de la carga se registra automaticamente con la fecha de hoy.</p>
               <button type="button" onClick={handleDiscard} style={secondaryButtonStyle} disabled={discarding}>
                 {discarding ? 'Descartando...' : 'Descartar borrador'}

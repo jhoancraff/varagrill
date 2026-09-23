@@ -37,6 +37,14 @@ from .models import (
 )
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
+# Mismos valores y mismo motivo que en facturacion_views.py: TOLERANCIA_REDONDEO_ABONO
+# absorbe el redondeo de convertir un pago en bolivares a dolares (muchisimo mas chico
+# que un centavo real, nunca un sobrepago genuino); TOLERANCIA_CIERRE_ABONO decide
+# cuando un saldo restante minusculo (polvo de redondeo entre tasas distintas) se
+# perdona del todo en vez de dejar la cuenta "abonada_parcial" por unos centimos.
+TOLERANCIA_REDONDEO_ABONO = Decimal('0.00001')
+TOLERANCIA_CIERRE_ABONO = Decimal('0.01')
+
 
 def _get_borrador_abierto():
     return VGCompraBorrador.objects.filter(estado='abierto').order_by('-fecha_creacion').first()
@@ -310,6 +318,22 @@ def admin_compra_borrador_confirmar_view(request):
         return _auth_response({'ok': False, 'message': 'El proveedor es obligatorio para confirmar la carga.'}, status=400)
     numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
 
+    # El "total a pagar" se puede ajustar al confirmar, por fuera de la suma de
+    # las líneas — por ejemplo mercancía de cortesía/obsequio del proveedor,
+    # que sí debe entrar al inventario con su costo real (por eso NO se toca
+    # el costeo por línea más abajo) pero no debe generar deuda, así que el
+    # analista puede dejar la cuenta por pagar en $0 aunque las líneas sumen
+    # más. Si no se manda, se usa la suma calculada de siempre.
+    total_a_pagar_raw = data.get('total_a_pagar')
+    total_a_pagar_override = None
+    if total_a_pagar_raw not in (None, ''):
+        try:
+            total_a_pagar_override = Decimal(str(total_a_pagar_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El total a pagar no es válido.'}, status=400)
+        if total_a_pagar_override < 0:
+            return _auth_response({'ok': False, 'message': 'El total a pagar no puede ser negativo.'}, status=400)
+
     borrador = _get_borrador_abierto()
     if borrador is None or not borrador.detalles.exists():
         return _auth_response({'ok': False, 'message': 'El borrador esta vacio, agrega al menos un ingrediente.'}, status=400)
@@ -347,7 +371,13 @@ def admin_compra_borrador_confirmar_view(request):
             )
             total += detalle.precio_total
 
-        compra.total = total
+        # 6 decimales, no 2 — si `total` viene de sumar lineas cargadas en
+        # bolivares (con 6 decimales de precision cada una), redondear la
+        # suma a centavos aca de una vez perdia esa precision desde el
+        # origen, antes de que la compra tuviera oportunidad de cobrarse.
+        compra.total = (
+            total_a_pagar_override if total_a_pagar_override is not None else total
+        ).quantize(Decimal('0.000001'))
         compra.save(update_fields=['total'])
         _finalizar_estado_pago_compra(compra)
 
@@ -434,10 +464,8 @@ def compra_abono_view(request, compra_id):
 
     # El abono se puede pagar en UNA sola moneda — en dolares (`monto`) o en
     # bolivares (`monto_bs`), nunca las dos a la vez (mismo criterio que
-    # admin_gastos_view). Si se paga en bolivares, ese es el monto EXACTO que
-    # se registra (se congela con la tasa BCV de hoy, y nunca se recalcula
-    # despues); si se paga en dolares, el monto en bolivares que se muestre
-    # despues se deriva de esa misma tasa congelada.
+    # admin_gastos_view). Si se paga en dolares, el monto en bolivares que se
+    # muestre despues se deriva de la tasa congelada de la compra.
     monto_raw = data.get('monto')
     monto_bs_raw = data.get('monto_bs')
     tiene_monto = monto_raw not in (None, '')
@@ -449,34 +477,6 @@ def compra_abono_view(request, compra_id):
         }, status=400)
     if not tiene_monto and not tiene_monto_bs:
         return _auth_response({'ok': False, 'message': 'Indica el monto del abono.'}, status=400)
-
-    tasa_abono = None
-    if tiene_monto_bs:
-        try:
-            monto_bs = Decimal(str(monto_bs_raw))
-        except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
-        if monto_bs <= 0:
-            return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
-
-        tasa_actual = obtener_tasa_actual()
-        tasa_abono = tasa_actual.tasa if tasa_actual else None
-        if not tasa_abono or tasa_abono <= 0:
-            return _auth_response({
-                'ok': False,
-                'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.',
-            }, status=400)
-        # 6 decimales, no 2 — con la tasa BCV actual, redondear a centavos de
-        # dolar aca perdia varios bolivares al reconvertir el monto despues.
-        monto = (monto_bs / tasa_abono).quantize(Decimal('0.000001'))
-    else:
-        try:
-            monto = Decimal(str(monto_raw))
-        except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
-        if monto <= 0:
-            return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
-        tasa_abono = tasa_cambio_para_registro()
 
     try:
         metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
@@ -492,12 +492,47 @@ def compra_abono_view(request, compra_id):
         if compra.estado_pago == 'pagada':
             return _auth_response({'ok': False, 'message': 'Esta cuenta ya esta saldada.'}, status=409)
 
-        # Misma tolerancia que TOLERANCIA_REDONDEO_ABONO en facturacion_views.py:
-        # un pago que salda la cuenta COMPLETA convertido de bolivares puede
-        # traer 6 decimales de precision que redondean una fraccion de
-        # centavo por ENCIMA del saldo (2 decimales) — sin esta tolerancia,
-        # ese pago legitimo por el total exacto se rechazaba con este error.
-        if monto > compra.saldo_pendiente + Decimal('0.00001'):
+        tasa_abono = None
+        if tiene_monto_bs:
+            try:
+                monto_bs = Decimal(str(monto_bs_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
+            if monto_bs <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
+
+            # Se paga con la MISMA tasa que quedó congelada en la compra (la
+            # que se usa para mostrarle al analista "debes Bs. X" en cuentas
+            # por pagar) — NUNCA con la tasa de HOY. Si se pagara con la tasa
+            # del día del abono, pagar exactamente el monto en bolívares que
+            # se le muestra al analista podía dejar unos bolívares pendientes
+            # apenas el BCV se movía entre que se cargó la compra y se pagó
+            # (reportado 2026-09, lote #26: la deuda se mostraba en Bs. X con
+            # la tasa congelada, pero el pago se convertía con la tasa de hoy,
+            # más alta, así que ese mismo monto en bolívares valía menos
+            # dólares de lo esperado y quedaba un residuo).
+            tasa_abono = compra.tasa_cambio_referencia
+            if not tasa_abono or tasa_abono <= 0:
+                tasa_actual = obtener_tasa_actual()
+                tasa_abono = tasa_actual.tasa if tasa_actual else None
+            if not tasa_abono or tasa_abono <= 0:
+                return _auth_response({
+                    'ok': False,
+                    'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.',
+                }, status=400)
+            # 6 decimales, no 2 — con la tasa BCV actual, redondear a centavos de
+            # dolar aca perdia varios bolivares al reconvertir el monto despues.
+            monto = (monto_bs / tasa_abono).quantize(Decimal('0.000001'))
+        else:
+            try:
+                monto = Decimal(str(monto_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
+            if monto <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+            tasa_abono = tasa_cambio_para_registro()
+
+        if monto > compra.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
             return _auth_response({
                 'ok': False,
                 'message': f'El monto excede el saldo pendiente (${compra.saldo_pendiente}).',
@@ -514,30 +549,46 @@ def compra_abono_view(request, compra_id):
             creado_por=request.user,
         )
 
-        # Redondeado a 2 decimales (y nunca negativo) antes de decidir el
-        # estado — igual que _registrar_abono_gasto en gastos_views.py: monto
-        # puede traer 6 decimales de precision (si se pago en bolivares, ver
-        # arriba) pero saldo_pendiente siempre es un monto "limpio" en
-        # dolares. Sin este redondeo, saldar una compra completa con un monto
-        # convertido de bolivares podia dejar un residuo como "0.000002" —
-        # mayor a cero, aunque el saldo mostrado ya redondeaba a $0.00 — y la
-        # cuenta se quedaba en 'abonada_parcial' en vez de pasar a 'pagada'
-        # (reportado 2026-09).
-        compra.saldo_pendiente = max(
-            (compra.saldo_pendiente - monto).quantize(Decimal('0.01')),
-            Decimal('0.00'),
+        # 6 decimales, no 2 (mismo motivo que VGFactura.saldo_pendiente, ver
+        # el comentario en el modelo) — nunca negativo. TOLERANCIA_CIERRE_ABONO
+        # perdona un residuo minusculo (polvo de redondeo) en vez de dejar la
+        # cuenta "abonada_parcial" por unos pocos centavos.
+        saldo_restante = max(
+            (compra.saldo_pendiente - monto).quantize(Decimal('0.000001')),
+            Decimal('0'),
         )
-        if compra.total_bs_factura is not None:
+        compra.saldo_pendiente = (
+            Decimal('0') if saldo_restante <= TOLERANCIA_CIERRE_ABONO else saldo_restante
+        )
+        # Red de seguridad adicional para compras de ANTES de este arreglo:
+        # la deuda "real" en bolívares es `total_bs_factura` si se cargó así,
+        # o si no, el total en dólares valorado con la tasa que quedó
+        # congelada en la compra — la MISMA cuenta que ve el analista como
+        # "debes Bs. X". Si abonos VIEJOS quedaron convertidos con la tasa
+        # del día de cada pago en vez de la tasa de la compra (antes de que
+        # compra_abono_view empezara a usar siempre la tasa de la compra),
+        # esto perdona el residuo de esa inconsistencia histórica.
+        deuda_bs = (
+            compra.total_bs_factura
+            if compra.total_bs_factura is not None
+            else (compra.total * compra.tasa_cambio_referencia).quantize(Decimal('0.01'))
+            if compra.tasa_cambio_referencia
+            else None
+        )
+        if deuda_bs is not None and compra.tasa_cambio_referencia:
             abonado_bs = sum(
                 (
-                    abono.monto * abono.tasa_cambio_referencia
-                    for abono in compra.abonos.all()
-                    if abono.tasa_cambio_referencia is not None
+                    registro.monto * registro.tasa_cambio_referencia
+                    for registro in compra.abonos.all()
+                    if registro.tasa_cambio_referencia is not None
                 ),
                 Decimal('0'),
             )
-            saldo_bs = (compra.total_bs_factura - abonado_bs).quantize(Decimal('0.01'))
-            if saldo_bs <= Decimal('0.00'):
+            # El residuo se compara en DÓLARES (no en bolívares) para decidir
+            # si se perdona.
+            saldo_bs = deuda_bs - abonado_bs
+            saldo_equivalente_usd = saldo_bs / compra.tasa_cambio_referencia
+            if saldo_equivalente_usd <= TOLERANCIA_CIERRE_ABONO:
                 compra.saldo_pendiente = Decimal('0.00')
         compra.estado_pago = 'pagada' if compra.saldo_pendiente <= 0 else 'abonada_parcial'
         compra.actualizado_por = request.user

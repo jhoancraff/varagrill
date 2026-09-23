@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
@@ -36,6 +36,28 @@ function startOfMonthIso() {
   return `${today.slice(0, 7)}-01`;
 }
 
+const FILAS_POR_PAGINA = 20;
+
+function coincideBusqueda(compra, busqueda) {
+  if (!busqueda) return true;
+  const texto = busqueda.trim().toLowerCase();
+  if (!texto) return true;
+  const campos = [
+    String(compra.id),
+    compra.proveedor_nombre,
+    compra.categoria_nombre,
+    compra.descripcion,
+    compra.numero_factura_proveedor,
+    compra.numero_comprobante,
+  ];
+  return campos.some((campo) => (campo || '').toLowerCase().includes(texto));
+}
+
+function coincideTipo(compra, filtroTipo) {
+  if (filtroTipo === 'todos') return true;
+  return compra.tipo === filtroTipo;
+}
+
 function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const tasaCambio = useExchangeRate();
   // 'pendientes' es el comportamiento de siempre (lotes/gastos sin saldar);
@@ -63,6 +85,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
   const [ultimoAbonoId, setUltimoAbonoId] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroTipo, setFiltroTipo] = useState('todos');
+  const [pagina, setPagina] = useState(1);
+  const detailPanelRef = useRef(null);
 
   const fetchCompras = useCallback(async () => {
     try {
@@ -93,8 +119,15 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 
   const cambiarVista = (nuevaVista) => {
     setVista(nuevaVista);
+    setBusqueda('');
+    setFiltroTipo('todos');
+    setPagina(1);
     setFeedback('');
   };
+
+  useEffect(() => {
+    setPagina(1);
+  }, [busqueda, filtroTipo, vista, historialDesde, historialHasta]);
 
   useEffect(() => {
     const loadMetodosPago = async () => {
@@ -138,6 +171,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setSelectedCompraId(compra.id);
     setSelectedTipo(compra.tipo);
     fetchCompraDetalle(compra.id, compra.tipo);
+    // Al elegir una fila mas abajo en una lista larga, el detalle se ve sin
+    // tener que volver a subir con la mano hasta el principio de la pagina.
+    if (detailPanelRef.current) {
+      detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const handleRegistrarAbono = async (event) => {
@@ -188,6 +226,16 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       setSavingAbono(false);
     }
   };
+
+  const comprasFiltradas = compras.filter(
+    (compra) => coincideTipo(compra, filtroTipo) && coincideBusqueda(compra, busqueda),
+  );
+  const totalPaginas = Math.max(1, Math.ceil(comprasFiltradas.length / FILAS_POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const comprasPagina = comprasFiltradas.slice(
+    (paginaActual - 1) * FILAS_POR_PAGINA,
+    paginaActual * FILAS_POR_PAGINA,
+  );
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -240,6 +288,26 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         </div>
       ) : null}
 
+      <div style={filtrosBusquedaRowStyle(isMobile)}>
+        <input
+          type="text"
+          value={busqueda}
+          onChange={(event) => setBusqueda(event.target.value)}
+          placeholder={vista === 'pagadas' ? 'Buscar por proveedor, factura, categoría o comprobante...' : 'Buscar por proveedor, factura o categoría...'}
+          style={busquedaInputStyle}
+        />
+        <select
+          value={filtroTipo}
+          onChange={(event) => setFiltroTipo(event.target.value)}
+          style={tipoFiltroSelectStyle}
+          className="admin-dark-select"
+        >
+          <option value="todos">Todos</option>
+          <option value="compra">Lotes</option>
+          <option value="gasto">Gastos</option>
+        </select>
+      </div>
+
       {feedback ? (
         <div style={feedbackStyle(feedbackType)}>
           {feedback}
@@ -264,11 +332,19 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
             : 'No se pagó ninguna factura ni gasto en este período.'}
         </div>
       ) : null}
+      {!loading && !error && compras.length > 0 && comprasFiltradas.length === 0 ? (
+        <div style={emptyStateStyle}>
+          {busqueda
+            ? `No hay ninguna cuenta que coincida con "${busqueda}".`
+            : `No hay ${filtroTipo === 'compra' ? 'lotes' : 'gastos'} en esta vista.`}
+        </div>
+      ) : null}
 
-      {!loading && !error && compras.length > 0 ? (
+      {!loading && !error && comprasFiltradas.length > 0 ? (
         <div style={layoutStyle(isMobile)}>
-          <div style={listStyle}>
-            {compras.map((compra) => (
+          <div style={listColumnStyle}>
+            <div style={listStyle}>
+              {comprasPagina.map((compra) => (
               <button
                 key={compra.id}
                 type="button"
@@ -292,10 +368,33 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                     : `Saldo: ${formatSaldoUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio, compra.saldo_pendiente_bs)}`}
                 </div>
               </button>
-            ))}
+              ))}
+            </div>
+
+            {totalPaginas > 1 ? (
+              <div style={paginacionStyle}>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                  disabled={paginaActual <= 1}
+                  style={paginacionBotonStyle(paginaActual <= 1)}
+                >
+                  ← Anterior
+                </button>
+                <span style={paginacionTextoStyle}>Página {paginaActual} de {totalPaginas}</span>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                  disabled={paginaActual >= totalPaginas}
+                  style={paginacionBotonStyle(paginaActual >= totalPaginas)}
+                >
+                  Siguiente →
+                </button>
+              </div>
+            ) : null}
           </div>
 
-          <div style={detailPanelStyle}>
+          <div ref={detailPanelRef} style={detailPanelStyle}>
             {!selectedCompraId ? (
               <div style={emptyStateStyle}>Selecciona un lote para ver su detalle y registrar un abono.</div>
             ) : loadingDetalle || !compraDetalle ? (
@@ -433,7 +532,21 @@ const feedbackStyle = (feedbackType) => ({
 });
 
 const layoutStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(260px, 340px) 1fr', gap: 16, alignItems: 'start' });
+const listColumnStyle = { display: 'grid', gap: 10 };
 const listStyle = { display: 'grid', gap: 10 };
+const busquedaInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff4f4', fontSize: 13 };
+const filtrosBusquedaRowStyle = (isMobile) => ({ display: 'flex', gap: 10, flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' });
+const tipoFiltroSelectStyle = {
+  flexShrink: 0, minWidth: 140, boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)',
+  background: '#161010', padding: '10px 12px', color: '#fff4f4', fontSize: 13, appearance: 'auto', colorScheme: 'dark', cursor: 'pointer',
+};
+const paginacionStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 4 };
+const paginacionTextoStyle = { color: '#c8bbbb', fontSize: 12, fontWeight: 700 };
+const paginacionBotonStyle = (deshabilitado) => ({
+  border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '7px 12px', fontSize: 12, fontWeight: 700,
+  background: 'rgba(255,255,255,0.04)', color: deshabilitado ? '#6b6060' : '#fff',
+  cursor: deshabilitado ? 'not-allowed' : 'pointer', opacity: deshabilitado ? 0.6 : 1,
+});
 const compraCardStyle = (selected) => ({
   display: 'grid', gap: 6, textAlign: 'left', padding: '14px 16px', borderRadius: 16,
   border: selected ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.1)',

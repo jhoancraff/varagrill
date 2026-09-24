@@ -106,78 +106,18 @@ const CosteoConfigIcon = () => (
 );
 
 const analystSections = [
-  {
-    id: 'admin-users',
-    title: 'Gestión de Usuarios',
-    description: 'Gestiona el acceso del personal y entra al espacio de trabajo de usuarios.',
-    icon: UsersIcon,
-  },
-  {
-    id: 'admin-mesas',
-    title: 'Gestión de Mesas',
-    description: 'Registra mesas nuevas, actualiza su capacidad y estado para el flujo de pedidos.',
-    icon: TablesIcon,
-  },
-  {
-    id: 'admin-products',
-    title: 'Catálogo de Productos',
-    description: 'Crea platos y bebidas con imagen y categoría, y edítalos desde el reporte del menú.',
-    icon: ProductsIcon,
-  },
-  {
-    id: 'admin-preparations',
-    title: 'Subrecetas y Preparaciones',
-    description: 'Abre el reporte con buscador para modificar, eliminar o agregar subrecetas.',
-    icon: PreparationsIcon,
-  },
-  {
-    id: 'admin-recipes',
-    title: 'Gestión de Recetas',
-    description: 'Redirige a la página en blanco destinada a la construcción de recetas.',
-    icon: RecipesIcon,
-  },
-  {
-    id: 'admin-configuracion-costeo',
-    title: 'Configuración de costeo',
-    description: '% de rendimiento por costo (aplica a todas las recetas) y % de margen de ganancia por defecto de los productos.',
-    icon: CosteoConfigIcon,
-  },
-  {
-    id: 'admin-promotions',
-    title: 'Promociones y Descuentos',
-    description: 'Abre el reporte de productos para aplicar descuentos, uno por uno o en bloque.',
-    icon: PromotionsIcon,
-  },
-  {
-    id: 'admin-chef-recommendations',
-    title: 'Recomendaciones del Chef',
-    description: 'Abre el reporte de platos recomendados y permite agregar nuevas recomendaciones.',
-    icon: ChefHatIcon,
-  },
-  {
-    id: 'admin-printers',
-    title: 'Impresoras de cocina',
-    description: 'Asigna la IP de la impresora térmica que imprime la comanda de cada categoría de producto.',
-    icon: PrinterIcon,
-  },
-  {
-    id: 'admin-payment-methods',
-    title: 'Métodos de pago',
-    description: 'Crea los tipos de pago que se pueden usar al cobrar (efectivo, tarjeta, Binance, Zelle, etc.).',
-    icon: PaymentMethodsIcon,
-  },
-  {
-    id: 'admin-datos-fiscales',
-    title: 'Datos fiscales',
-    description: 'RIF, razón social y domicilio fiscal que aparecen en el encabezado de cada factura, y el IVA por defecto.',
-    icon: FiscalDataIcon,
-  },
-  {
-    id: 'admin-compras',
-    title: 'Historial de compras',
-    description: 'Cada lote de ingredientes cargado al inventario, de qué proveedor y factura vino, y qué costó.',
-    icon: PurchasesIcon,
-  },
+  { id: 'admin-users', title: 'Usuarios', icon: UsersIcon },
+  { id: 'admin-mesas', title: 'Mesas', icon: TablesIcon },
+  { id: 'admin-products', title: 'Productos', icon: ProductsIcon },
+  { id: 'admin-preparations', title: 'Subrecetas y Preparaciones', icon: PreparationsIcon },
+  { id: 'admin-recipes', title: 'Recetas', icon: RecipesIcon },
+  { id: 'admin-configuracion-costeo', title: 'Costeo', icon: CosteoConfigIcon },
+  { id: 'admin-promotions', title: 'Promociones', icon: PromotionsIcon },
+  { id: 'admin-chef-recommendations', title: 'Recomendaciones del Chef', icon: ChefHatIcon },
+  { id: 'admin-printers', title: 'Impresoras', icon: PrinterIcon },
+  { id: 'admin-payment-methods', title: 'Métodos de pago', icon: PaymentMethodsIcon },
+  { id: 'admin-datos-fiscales', title: 'Datos fiscales', icon: FiscalDataIcon },
+  { id: 'admin-compras', title: 'Compras', icon: PurchasesIcon },
 ];
 
 // Reservadas al dueño real del negocio (superusuario) o al Contador — un Administrador
@@ -190,45 +130,76 @@ function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas
     : analystSections.filter((section) => !CARTAS_RESTRINGIDAS.includes(section.id));
 
   return (
-    <section style={panelContainerStyle(isMobile)}>
-      <div style={heroStyle}>
-        <div style={heroBadgeStyle}>Panel del analista</div>
-        <h2 style={titleStyle(isMobile)}>Elige un área de trabajo</h2>
-        <p style={subtitleStyle}>
-          Este panel ahora funciona como punto de entrada. Cada opción redirige a una página
-          separada que dejé lista para completar después.
-        </p>
-      </div>
+    <>
+      <style>{`
+        .vg-admin-card {
+          transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+        }
+        .vg-admin-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.38) !important;
+          border-color: rgba(255, 100, 100, 0.22) !important;
+        }
+      `}</style>
+      <section style={panelContainerStyle(isMobile)}>
+        <div style={heroStyle}>
+          <div style={heroBadgeStyle}>Panel del analista</div>
+          <h2 style={titleStyle(isMobile)}>Elige un área de trabajo</h2>
+        </div>
 
-      <div style={gridStyle(isMobile)}>
-        {visibleSections.map((section) => {
-          const SectionIcon = section.icon;
-          return (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => onNavigate(section.id)}
-              style={cardButtonStyle}
-            >
-              <div style={cardHeaderStyle}>
-                <span style={cardIconWrapStyle} aria-hidden="true">
-                  <SectionIcon />
-                </span>
-                <div style={cardTitleStyle}>{section.title}</div>
-              </div>
-              <div style={cardDescriptionStyle}>{section.description}</div>
-              <span style={cardLinkStyle}>Abrir sección</span>
-            </button>
-          );
-        })}
-      </div>
+        <div style={gridStyle(isMobile)}>
+          {visibleSections.map((section) => {
+            const SectionIcon = section.icon;
+            const isRestricted = CARTAS_RESTRINGIDAS.includes(section.id);
+            return (
+              <button
+                key={section.id}
+                type="button"
+                className="vg-admin-card"
+                onClick={() => onNavigate(section.id)}
+                style={{
+                  ...cardButtonStyle,
+                  borderLeft: isRestricted ? '3px solid rgba(255, 200, 50, 0.5)' : '3px solid transparent',
+                }}
+              >
+                <div style={cardHeaderStyle}>
+                  <span style={cardIconWrapStyle} aria-hidden="true">
+                    <SectionIcon />
+                  </span>
+                  <div style={{ flex: 1 }}>
+                    <div style={cardTitleStyle}>{section.title}</div>
+                    {isRestricted && (
+                      <span style={{
+                        display: 'inline-block',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        color: '#ffd700',
+                        background: 'rgba(255, 215, 0, 0.1)',
+                        border: '1px solid rgba(255, 215, 0, 0.25)',
+                        borderRadius: 999,
+                        padding: '2px 8px',
+                        marginTop: 4,
+                      }}>
+                        Restringido
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span style={cardLinkStyle}>Abrir sección →</span>
+              </button>
+            );
+          })}
+        </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al inicio
-        </button>
-      </div>
-    </section>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onBack} style={backButtonStyle}>
+            Volver al inicio
+          </button>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -280,7 +251,9 @@ const subtitleStyle = {
 
 const gridStyle = (isMobile) => ({
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+  gridTemplateColumns: isMobile
+    ? '1fr'
+    : 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
   gap: 16,
 });
 

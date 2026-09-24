@@ -106,7 +106,6 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Reporte de recetas registradas</h2>
-          <p style={subtitleStyle}>Busca por nombre, descripción o componentes. Desde aquí puedes modificar o eliminar una receta.</p>
         </div>
         <button type="button" onClick={onCreateNewRecipe} style={primaryButtonStyle}>
           Agregar nueva receta

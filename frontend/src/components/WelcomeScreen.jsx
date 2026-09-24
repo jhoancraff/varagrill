@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { limpiarFechaSeleccionada, limpiarRangoSeleccionado } from '../utils/fechaContabilidad';
+import useExchangeRate from '../hooks/useExchangeRate';
 import AdminPanelPage from './AdminPanelPage';
 import ContabilidadPanelPage from './ContabilidadPanelPage';
 import ReporteCuadreCajaPage from './ReporteCuadreCajaPage';
@@ -385,6 +386,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     requestAlertPermission,
   } = useKitchenAlerts();
 
+  const tasaCambio = useExchangeRate();
+
   // Después de autenticar, si el navegador soporta notificaciones y el usuario
   // no ha decidido nada todavía (ni a nivel de navegador ni en un intento
   // previo dentro de la app), le preguntamos una sola vez si quiere activarlas.
@@ -477,13 +480,30 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
       boxSizing: 'border-box',
       position: 'relative',
       overflow: 'hidden',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
     }}>
       <style>
         {`@keyframes pendingPulse {
             0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 122, 122, 0.45); }
             70% { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(255, 122, 122, 0); }
             100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 122, 122, 0); }
+          }
+          @keyframes sidebarSlideIn {
+            from { opacity: 0; transform: translateX(-8px); }
+            to   { opacity: 1; transform: translateX(0); }
+          }
+          .vg-sidebar-btn {
+            transition: background 180ms ease, color 180ms ease;
+          }
+          .vg-sidebar-btn:hover {
+            background: rgba(255, 77, 77, 0.10) !important;
+          }
+          .vg-feature-card {
+            transition: transform 200ms ease, box-shadow 200ms ease;
+          }
+          .vg-feature-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38) !important;
           }
           @media print {
             .no-print { display: none !important; }
@@ -495,6 +515,19 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           {liveNotice}
         </div>
       )}
+      {activeView === 'home' && tasaCambio ? (
+        <div style={exchangeRateBadgeStyle} title="Tasa BCV vigente">
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 1l4 4-4 4" />
+              <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+              <path d="M7 23l-4-4 4-4" />
+              <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+            </svg>
+          </span>
+          <span>Bs. {tasaCambio.toFixed(2)}</span>
+        </div>
+      ) : null}
       {isSidebarOpen && isSidebarOverlayMode && (
         <button
           type="button"
@@ -603,25 +636,53 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           flexDirection: 'column',
           gap: 12,
         }}>
+        {/* ── Logo en sidebar ── */}
         <div style={{
-          padding: '0 4px 12px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 64,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 16px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+          background: 'rgba(22, 8, 8, 0.6)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 1,
         }}>
-          <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#ff8f8f', marginBottom: 8 }}>
-            Panel
+          <div style={{
+            width: 32,
+            height: 32,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #bf1f1f 0%, #7a0d0d 100%)',
+            overflow: 'hidden',
+            flexShrink: 0,
+            marginRight: 10,
+          }}>
+            <img src="/assets/varagrill-logo.jpg" alt="" aria-hidden="true" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
-          <div style={{ color: '#d1d1d1', fontSize: 14, lineHeight: 1.5 }}>
-            Accesos directos para cocina, pedidos y servicio.
+          <div style={{
+            fontSize: 15,
+            fontWeight: 800,
+            background: 'linear-gradient(90deg, #ff6b6b 0%, #ff4d4d 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            letterSpacing: '0.04em',
+          }}>
+            Varagrill
           </div>
         </div>
 
         {!isCajera ? (
           <button
             type="button"
+            className="vg-sidebar-btn"
             onClick={handleHomeClick}
             style={sidebarButtonStyle(activeView === 'home')}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView === 'home')}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 10.5L12 3l9 7.5" />
                 <path d="M5 9.5V21h14V9.5" />
@@ -635,10 +696,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
         {!isCajera ? (
           <button
             type="button"
+            className="vg-sidebar-btn"
             onClick={handleNuevoPedido}
             style={sidebarButtonStyle(activeView === 'orders')}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView === 'orders')}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 11h6" />
                 <path d="M9 15h6" />
@@ -657,9 +719,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
               setIsSidebarOpen(false);
             }
           }}
+          className="vg-sidebar-btn"
           style={sidebarButtonStyle(activeView === 'mesas-atendidas')}
         >
-          <span aria-hidden="true" style={sidebarIconWrapStyle}>
+          <span aria-hidden="true" style={sidebarIconWrapStyle(activeView === 'mesas-atendidas')}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="4" width="18" height="16" rx="2" />
               <path d="M3 10h18" />
@@ -681,9 +744,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 setIsSidebarOpen(false);
               }
             }}
+            className="vg-sidebar-btn"
             style={sidebarButtonStyle(activeView === 'pedidos-delivery')}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView === 'pedidos-delivery')}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 7h13l3 5v5h-3" />
                 <path d="M3 7v10h2" />
@@ -707,9 +771,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 setIsSidebarOpen(false);
               }
             }}
+            className="vg-sidebar-btn"
             style={sidebarButtonStyle(activeView === 'checkout')}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView === 'checkout')}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="6" width="20" height="14" rx="2" />
                 <path d="M2 10h20" />
@@ -732,9 +797,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 setIsSidebarOpen(false);
               }
             }}
+            className="vg-sidebar-btn"
             style={sidebarButtonStyle(activeView === 'contabilidad-cuadre-caja')}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView === 'contabilidad-cuadre-caja')}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="4" width="18" height="16" rx="2" />
                 <path d="M3 9h18" />
@@ -755,9 +821,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 setIsSidebarOpen(false);
               }
             }}
+            className="vg-sidebar-btn"
             style={sidebarButtonStyle(activeView.startsWith('admin'))}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView.startsWith('admin'))}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
@@ -776,9 +843,10 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 setIsSidebarOpen(false);
               }
             }}
+            className="vg-sidebar-btn"
             style={sidebarButtonStyle(activeView.startsWith('contabilidad'))}
           >
-            <span aria-hidden="true" style={sidebarIconWrapStyle}>
+            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView.startsWith('contabilidad'))}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="4" width="18" height="16" rx="2" />
                 <path d="M3 9h18" />
@@ -903,22 +971,33 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
       }}>
         {activeView === 'home' ? (
           <>
+            {/* ── Bloque de saludo ── */}
             <div style={{
               display: 'flex',
-              justifyContent: 'flex-end',
               alignItems: 'center',
-              gap: 10,
+              justifyContent: 'space-between',
               flexWrap: 'wrap',
+              gap: 12,
+              padding: '20px 22px',
+              borderRadius: 22,
+              background: 'linear-gradient(145deg, rgba(60, 15, 15, 0.7) 0%, rgba(15, 8, 8, 0.6) 100%)',
+              border: '1px solid rgba(255, 80, 80, 0.15)',
+              marginBottom: 4,
             }}>
+              <div>
+                <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: '#fff', lineHeight: 1.2 }}>
+                  Bienvenido, {displayName} 👋
+                </div>
+                <div style={{ color: '#c8a0a0', fontSize: 13, marginTop: 5 }}>
+                  {todayLabel} · Todo listo para el servicio
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  setNewOrderPreset(null);
-                  goToView('orders');
-                }}
+                onClick={() => { setNewOrderPreset(null); goToView('orders'); }}
                 style={newOrderButtonStyle}
               >
-                <span aria-hidden="true" style={sidebarIconWrapStyle}>
+                <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 5v14" />
                     <path d="M5 12h14" />
@@ -937,7 +1016,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 {
                   view: 'promotions',
                   title: 'Promociones',
-                  text: 'Consulta el catalogo de promociones vigentes para ofrecer al cliente.',
                   icon: (
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20.59 13.41 12 22l-9-9V4a1 1 0 0 1 1-1h9l8.59 8.59a2 2 0 0 1 0 2.82Z" />
@@ -948,7 +1026,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 {
                   view: 'chef-recommendations',
                   title: 'Recomendación del chef',
-                  text: 'Descubre los platos que el chef sugiere destacar durante el servicio de hoy.',
                   icon: (
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M17 21v-8a5 5 0 0 0-10 0v8" />
@@ -961,14 +1038,17 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 <button
                   key={item.view}
                   type="button"
+                  className="vg-feature-card"
                   onClick={() => goToView(item.view)}
                   style={featureCardButtonStyle}
                 >
-                  <div style={{ display: 'inline-grid', placeItems: 'center', width: 44, height: 44, borderRadius: 14, background: 'rgba(255, 88, 88, 0.12)', color: '#ff7d7d', marginBottom: 18 }}>
-                    {item.icon}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'inline-grid', placeItems: 'center', width: 44, height: 44, borderRadius: 14, background: 'rgba(255, 88, 88, 0.12)', color: '#ff7d7d', marginBottom: 18 }}>
+                      {item.icon}
+                    </div>
+                    <span style={{ color: 'rgba(255, 100, 100, 0.6)', fontSize: 20, lineHeight: 1 }} aria-hidden="true">→</span>
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 10 }}>{item.title}</div>
-                  <div style={{ color: '#c7c7c7', lineHeight: 1.6, fontSize: 14 }}>{item.text}</div>
                 </button>
               ))}
             </section>
@@ -1430,24 +1510,32 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
 const sidebarButtonStyle = (isPrimary) => ({
   width: '100%',
   border: 'none',
-  borderRadius: 16,
-  padding: '13px 12px',
-  color: '#fff',
-  background: isPrimary ? 'rgba(195, 35, 35, 0.26)' : 'rgba(255, 255, 255, 0.04)',
+  borderRadius: 14,
+  borderLeft: isPrimary ? '3px solid #ff5555' : '3px solid transparent',
+  padding: '12px 12px 12px 10px',
+  color: isPrimary ? '#ffffff' : 'rgba(255,255,255,0.78)',
+  background: isPrimary
+    ? 'linear-gradient(90deg, rgba(195, 35, 35, 0.28) 0%, rgba(195, 35, 35, 0.10) 100%)'
+    : 'rgba(255, 255, 255, 0.03)',
   display: 'flex',
   alignItems: 'center',
   gap: 10,
   cursor: 'pointer',
-  fontWeight: 700,
-  letterSpacing: '0.03em',
+  fontWeight: isPrimary ? 700 : 500,
+  letterSpacing: '0.02em',
   justifyContent: 'flex-start',
+  fontSize: 14,
 });
 
-const sidebarIconWrapStyle = {
+const sidebarIconWrapStyle = (isPrimary) => ({
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-};
+  color: isPrimary ? '#ff7d7d' : 'rgba(255,255,255,0.55)',
+  transition: 'color 180ms ease',
+  flexShrink: 0,
+  width: 20,
+});
 
 const pendingBadgeStyle = (isActive) => ({
   minWidth: 28,
@@ -1481,6 +1569,7 @@ const featureCardButtonStyle = {
   cursor: 'pointer',
   color: 'inherit',
   font: 'inherit',
+  borderTop: '2px solid rgba(255, 77, 77, 0.45)',
 };
 
 const userActionButtonStyle = {
@@ -1510,7 +1599,7 @@ const userActionIconStyle = {
 const newOrderButtonStyle = {
   border: 'none',
   borderRadius: 999,
-  padding: '11px 16px',
+  padding: '12px 20px',
   background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
   color: '#fff',
   fontWeight: 700,
@@ -1518,6 +1607,10 @@ const newOrderButtonStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 8,
+  fontSize: 15,
+  letterSpacing: '0.02em',
+  boxShadow: '0 4px 14px rgba(191, 31, 31, 0.4)',
+  flexShrink: 0,
 };
 
 const liveNoticeStyle = {
@@ -1533,6 +1626,26 @@ const liveNoticeStyle = {
   padding: '12px 14px',
   fontWeight: 700,
   boxShadow: '0 14px 30px rgba(0, 0, 0, 0.34)',
+};
+
+const exchangeRateBadgeStyle = {
+  position: 'fixed',
+  top: 18,
+  right: 18,
+  zIndex: 22,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 7,
+  borderRadius: 999,
+  border: '1px solid rgba(255, 110, 110, 0.35)',
+  background: 'rgba(30, 12, 12, 0.92)',
+  color: '#ffcccc',
+  padding: '9px 14px',
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: '0.01em',
+  boxShadow: '0 10px 24px rgba(0, 0, 0, 0.3)',
+  backdropFilter: 'blur(6px)',
 };
 
 const notificationPromptBackdropStyle = {

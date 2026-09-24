@@ -183,7 +183,6 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Ingreso administrativo de ingredientes</h2>
-          <p style={subtitleStyle}>Registra entradas de inventario alimentando ingredientes, compras y movimientos para conservar la auditoría del sistema.</p>
         </div>
       </div>
 
@@ -298,7 +297,6 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
 
             <div style={helperCardStyle}>
               <div style={helperTitleStyle}>Auditoría automática</div>
-              <div style={helperTextStyle}>Cada ingreso crea o actualiza el ingrediente y además registra una compra con su detalle y un movimiento de inventario de tipo entrada. El costo por {UNIDAD_LABELS[form.unidad] || form.unidad} se calcula solo dividiendo el precio total pagado entre la cantidad recibida — no hace falta calcularlo a mano, incluso si el paquete trae una cantidad no redonda (ej. 910 g).</div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

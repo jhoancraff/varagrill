@@ -142,7 +142,6 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
   return (
     <section style={containerStyle(isMobile)}>
       <h2 style={titleStyle(isMobile)}>Nuevo ingrediente</h2>
-      <p style={subtitleStyle}>Para el ingreso de mercancía: busca primero si el ingrediente ya existe antes de crear uno nuevo.</p>
       <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>
@@ -219,12 +218,6 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
             <span style={labelStyle}>Costo unitario (calculado)</span>
             <input type="text" disabled value={costoUnitarioCalculado !== null ? costoUnitarioCalculado.toFixed(6) : '—'} style={{ ...inputStyle, color: '#c8bbbb', cursor: 'not-allowed' }} />
           </label>
-          <p style={helpTextStyle}>
-            Cuánto trae el envase según la etiqueta, cuánto queda realmente utilizable después de pelar, deshuesar o
-            limpiar, y cuánto costó ese envase. Con esto el costo unitario se calcula solo (precio de compra ÷ peso
-            real) — igualá contenido del envase y peso real si el ingrediente no tiene ninguna merma.
-          </p>
-
           <label style={fieldStyle}>
             <span style={labelStyle}>Ingrediente crudo equivalente</span>
             <select
@@ -249,11 +242,6 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
               placeholder="Ej: 500 (500g de carne cruda por paquete)"
             />
           </label>
-          <p style={helpTextStyle}>
-            Completá esto solo si este ingrediente es un producto empacado para reventa (ej. carne al vacío,
-            patacones empacados): permite usar la acción "Reponer cocina" para abrir paquetes y sumar su
-            contenido al ingrediente crudo cuando la cocina se quede sin materia prima.
-          </p>
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

@@ -81,7 +81,6 @@ function AnalystNewMesaPage({ isMobile, isAdmin, onBack, onMesasChanged }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Registrar mesa nueva</h2>
-          <p style={subtitleStyle}>Agrega una mesa para que quede disponible al tomar pedidos. Útil cuando el local se amplía y entran más mesas.</p>
         </div>
       </div>
 

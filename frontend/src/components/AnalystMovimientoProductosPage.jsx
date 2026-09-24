@@ -137,10 +137,6 @@ function AnalystMovimientoProductosPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Movimiento de productos</h2>
-        <p style={subtitleStyle}>
-          Cuántas unidades (o kilos) de cada plato se vendieron en el rango de fechas que elijas — filtra por
-          categoría o busca un producto puntual para ver solo su movimiento.
-        </p>
       </div>
 
       <div className="no-print" style={filtersRowStyle(isMobile)}>

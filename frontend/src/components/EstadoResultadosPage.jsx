@@ -104,10 +104,6 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Estado de resultados</h2>
-        <p style={subtitleStyle}>
-          Ventas menos costo de ingredientes menos gastos operativos, para el rango de fechas que elijas —
-          el número final te dice si el negocio ganó o perdió plata en ese período.
-        </p>
       </div>
 
       <div className="no-print" style={filtersRowStyle(isMobile)}>

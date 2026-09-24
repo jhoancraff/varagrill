@@ -243,11 +243,6 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         <div>
           <div style={eyebrowStyle}>Contabilidad</div>
           <h2 style={titleStyle(isMobile)}>Cuentas por pagar</h2>
-          <p style={subtitleStyle}>
-            {vista === 'pendientes'
-              ? 'Lotes de compra a proveedores y gastos operativos con saldo pendiente. Selecciona uno para registrar los abonos hasta saldarlo.'
-              : 'Facturas y gastos que ya quedaron saldados, filtrados por cuándo se terminaron de pagar.'}
-          </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
           Volver

@@ -125,7 +125,6 @@ function AnalystEditMesaPage({ isMobile, isAdmin, mesaId, onBack, onMesasChanged
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Actualización de mesa</h2>
-          <p style={subtitleStyle}>Modifica número, capacidad, ubicación y estado de la mesa.</p>
         </div>
       </div>
 

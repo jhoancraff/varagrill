@@ -105,11 +105,6 @@ function AnalystMargenGananciaPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Margen de ganancia por plato</h2>
-        <p style={subtitleStyle}>
-          Ingreso, costo y ganancia de cada plato vendido en el rango de fechas elegido. El costo es el que
-          quedó registrado al momento de cada venta; las marcadas como <em>costo estimado</em> son de antes de
-          que existiera ese registro y usan el costo actual de la receta como aproximación.
-        </p>
       </div>
 
       <div className="no-print" style={filtersRowStyle(isMobile)}>

@@ -93,7 +93,6 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Gestión de usuarios</h2>
-          <p style={subtitleStyle}>Consulta los usuarios registrados, actualiza sus datos, cambia contraseñas y asigna roles.</p>
         </div>
         <button type="button" onClick={onCreateNewUser} style={primaryButtonStyle}>
           Agregar usuario nuevo
@@ -124,7 +123,6 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
       <section style={panelStyle}>
         <div style={reportHeaderStyle(isMobile)}>
           <div style={sectionTitleStyle}>Reporte administrativo de usuarios</div>
-          <div style={reportHintStyle}>Consulta estado, rol, identificación y acciones de control por cada cuenta.</div>
         </div>
 
         {loading ? <div style={emptyStateStyle}>Cargando usuarios...</div> : null}

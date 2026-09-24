@@ -240,10 +240,6 @@ function App() {
         isInstalled={isInstalled}
         onInstall={handleInstall}
       />
-
-      <div style={{ marginTop: 18, color: '#9a9a9a', fontSize: 13, textAlign: 'center' }}>
-        Usa las credenciales del usuario creado en Django para entrar. Si la app está instalada, se abrirá directamente en esta pantalla.
-      </div>
     </ScreenShell>
   );
 }

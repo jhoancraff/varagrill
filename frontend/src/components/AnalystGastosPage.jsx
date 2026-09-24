@@ -483,10 +483,6 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Gastos operativos</h2>
-        <p style={subtitleStyle}>
-          Registra alquiler, servicios, nómina y demás gastos del negocio — separado del inventario. Marca si ya
-          lo pagaste o si queda pendiente para abonarlo después.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
@@ -859,7 +855,7 @@ function EditarGastoModal({
         {pidiendoMotivo ? (
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ fontSize: 13, color: '#c8bbbb' }}>
-              Para auditoría, indica por qué se corrige este gasto. Es obligatorio.
+              Motivo del ajuste *
             </div>
             <textarea
               value={motivo}

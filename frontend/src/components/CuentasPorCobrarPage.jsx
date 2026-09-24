@@ -145,11 +145,6 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
           <div>
             <div style={eyebrowStyle}>Contabilidad</div>
             <h2 style={titleStyle(isMobile)}>Cuentas por cobrar</h2>
-            <p style={subtitleStyle}>
-              {tipoReporte === 'facturas'
-                ? 'Facturas emitidas con saldo pendiente. Selecciona una para registrar los abonos hasta saldarla.'
-                : 'Notas de entrega emitidas, pendientes o pagadas. Selecciona una para registrar sus abonos o reimprimirla.'}
-            </p>
           </div>
           <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
             Volver

@@ -612,11 +612,6 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
         <div>
           <div style={eyebrowStyle}>{todasLasMesas ? 'Todas las mesas' : 'Mis mesas'}</div>
           <h2 style={titleStyle(isMobile)}>Mesas atendidas hoy</h2>
-          <p style={subtitleStyle}>
-            {todasLasMesas
-              ? 'Mesas con pedidos todavía abiertos hoy, de todos los meseros — en cuanto caja cobra el último pedido de una mesa, desaparece de aquí.'
-              : 'Tus mesas con pedidos todavía abiertos hoy — en cuanto caja cobra el último pedido de una mesa, desaparece de aquí.'}
-          </p>
         </div>
         <div style={headerActionsStyle(isMobile)}>
           {onNuevoPedido ? (

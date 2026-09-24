@@ -147,9 +147,6 @@ function ReporteCuentasPorCobrarPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Cuentas por cobrar — detalle</h2>
-          <p style={subtitleStyle}>
-            Notas de entrega emitidas en el período que todavía tienen saldo pendiente.
-          </p>
         </div>
         {rango ? (
           <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>

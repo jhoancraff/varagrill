@@ -149,11 +149,6 @@ function ReporteCuentasCobradasPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Cuentas cobradas{rango ? '' : ' hoy'}</h2>
-          <p style={subtitleStyle}>
-            Fiados de fechas anteriores que se cobraron en el período. El monto en dólares es siempre el mismo (la
-            deuda no cambia), pero el bolívar se devalúa mientras está pendiente — acá se ve cuánto más había que
-            cobrar en bolívares frente a lo que hubiera sido el día que se emitió la nota.
-          </p>
         </div>
         {rango ? (
           <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>

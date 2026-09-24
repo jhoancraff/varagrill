@@ -132,7 +132,6 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Metodos de pago</h2>
-        <p style={subtitleStyle}>Agrega los tipos de pago que se pueden usar al cobrar (efectivo, tarjeta, Binance, Zelle, etc.).</p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
@@ -166,9 +165,6 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
             Agregar
           </button>
         </form>
-        <p style={hintStyle}>
-          El banco es opcional: escribe el mismo nombre de banco (ej. "Banesco") en dos métodos distintos —como Pago Móvil y Punto de Venta— para que Disponibilidad Bancaria los muestre agrupados bajo esa cuenta.
-        </p>
       </section>
 
       <section style={panelStyle}>

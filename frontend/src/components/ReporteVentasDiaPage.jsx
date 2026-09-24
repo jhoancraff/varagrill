@@ -218,7 +218,6 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Ventas {rango ? 'del rango' : 'del día'} — detalle</h2>
-          <p style={subtitleStyle}>Cada nota de entrega emitida en el período, con lo que se cobró: dólares, bolívares, método, banco y referencia.</p>
         </div>
         {rango ? (
           <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
@@ -352,8 +351,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                       {!rango && pago && editandoPagoId === pago.id ? (
                         <div style={editRowWrapStyle} className="no-print">
                           <span style={{ color: '#d2c3c3', fontSize: 13 }}>
-                            Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta —
-                            si la cuenta nueva es en bolívares, el monto se muestra convertido; si es en dólares, se muestra tal cual.
+                            Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta
                           </span>
                           <select
                             value={nuevoMetodoId}

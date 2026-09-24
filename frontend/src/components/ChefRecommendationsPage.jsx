@@ -58,7 +58,6 @@ function ChefRecommendationsPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <div style={badgeStyle}>Recomendación del chef</div>
       <h2 style={titleStyle(isMobile)}>Platos recomendados de hoy</h2>
-      <p style={subtitleStyle}>Busca un producto para saber si el chef lo recomienda hoy.</p>
 
       <input
         value={search}

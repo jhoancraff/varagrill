@@ -98,9 +98,6 @@ function FacturasHistorialPage({ isMobile, onBack, embedded = false }) {
           <div>
             <div style={eyebrowStyle}>Contabilidad</div>
             <h2 style={titleStyle(isMobile)}>Historial de facturas</h2>
-            <p style={subtitleStyle}>
-              Busca una factura ya emitida por fecha y reimprímela si el cliente necesita otra copia.
-            </p>
           </div>
           <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
             Volver

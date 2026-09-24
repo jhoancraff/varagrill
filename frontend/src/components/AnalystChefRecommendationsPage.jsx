@@ -105,7 +105,6 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Reporte de platos recomendados</h2>
-          <p style={subtitleStyle}>Consulta, busca y elimina las recomendaciones del chef registradas por fecha.</p>
         </div>
         <button type="button" onClick={onCreateNew} style={primaryButtonStyle}>
           Agregar recomendación

@@ -39,10 +39,6 @@ function AnalystComprasPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Historial de compras</h2>
-        <p style={subtitleStyle}>
-          Cada lote de ingredientes cargado al inventario — de qué proveedor y factura vino, cuándo se cargó y
-          qué ingredientes trajo, con su costo.
-        </p>
       </div>
 
       {loading ? <div style={emptyStateStyle}>Cargando compras...</div> : null}

@@ -673,9 +673,6 @@ function EditOrderPage({ isMobile, mesas, products, adicionales = [], loadingDat
           <div style={{ fontSize: isMobile ? 24 : 32, fontWeight: 700, color: '#fff' }}>
             Pedido #{orderId}
           </div>
-          <div style={{ color: '#c6c6c6', marginTop: 8, fontSize: 14 }}>
-            Solo se puede editar mientras el pedido esté pendiente.
-          </div>
         </div>
         <button type="button" onClick={() => guard(onBack)} style={ghostButtonStyle(isCompact)}>
           Volver a mesas atendidas

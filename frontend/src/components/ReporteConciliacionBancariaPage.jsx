@@ -108,11 +108,6 @@ function ReporteConciliacionBancariaPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Conciliación bancaria</h2>
-          <p style={subtitleStyle}>
-            Por cada cuenta que cae en un banco real, compara el saldo que calcula el sistema contra lo
-            que de verdad muestra el estado de cuenta — para que quede un registro de que sí coinciden,
-            o de cuánto y por qué no. El efectivo físico se cuadra aparte, desde Cuadre de Caja.
-          </p>
         </div>
         <label className="no-print" style={dateLabelStyle}>
           Fecha

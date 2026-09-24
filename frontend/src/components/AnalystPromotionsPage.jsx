@@ -144,7 +144,6 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Reporte de productos disponibles</h2>
-          <p style={subtitleStyle}>Selecciona un producto para crear una promoción con descuento.</p>
         </div>
       </div>
 

@@ -150,7 +150,6 @@ function AnalystNewChefRecommendationPage({ isMobile, isAdmin, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Registrar recomendación del chef</h2>
-          <p style={subtitleStyle}>Busca el producto, define la fecha en la que aplica y agrega un comentario del chef si quieres.</p>
         </div>
       </div>
 

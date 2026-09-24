@@ -56,7 +56,6 @@ function AnalystIngredientsCreateReportPage({ isMobile, onBack, onManualCreate, 
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Crear ingredientes</h2>
-          <p style={subtitleStyle}>Revisa qué ingredientes ya existen antes de crear uno nuevo o repetido.</p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button type="button" onClick={onBulkCreate} style={secondaryButtonStyle}>

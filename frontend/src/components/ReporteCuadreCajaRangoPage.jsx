@@ -147,11 +147,6 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Cuadre de caja por rango</h2>
-        <p style={subtitleStyle}>
-          Suma el mismo cuadre diario a lo largo de varios días — útil para revisar una semana o un mes de
-          una vez. El cierre físico de efectivo sigue siendo por día individual, así que abajo se indica
-          cuáles días del rango ya están cerrados y cuáles todavía no.
-        </p>
       </div>
 
       <div className="no-print" style={filtersRowStyle(isMobile)}>

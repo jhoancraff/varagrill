@@ -72,10 +72,6 @@ function HistorialFacturasPage({ isMobile, onBack }) {
         <div>
           <div style={eyebrowStyle}>Contabilidad</div>
           <h2 style={titleStyle(isMobile)}>Historial de facturas</h2>
-          <p style={subtitleStyle}>
-            Todas las facturas emitidas, con su estado y el detalle de los abonos que se le registraron —
-            incluidas las ya saldadas.
-          </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
           Volver

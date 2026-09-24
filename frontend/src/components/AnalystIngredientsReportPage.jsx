@@ -126,7 +126,6 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Reporte de ingredientes</h2>
-          <p style={subtitleStyle}>Busca, modifica o elimina ingredientes del inventario.</p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {onCargaPorLote ? (

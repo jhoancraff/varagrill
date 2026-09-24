@@ -133,10 +133,6 @@ function PedidoConfirmacionPage({ isMobile, pedidoId, onBack, onIrACaja }) {
             <h2 style={titleStyle(isMobile)}>
               Pedido #{pedido.id} — {TIPO_LABEL[pedido.tipo_pedido] || pedido.tipo_pedido}
             </h2>
-            <p style={subtitleStyle}>
-              Revisa los datos antes de mandar a imprimir. Confirmar el pedido es lo que lo envía a cocina
-              (si aplica) y lo hace aparecer en Caja para cobrarlo.
-            </p>
           </div>
 
           <section style={panelStyle}>

@@ -89,7 +89,6 @@ function AnalystPreparationsReportPage({ isMobile, onBack, onCreateNew, onEdit }
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Reporte de subrecetas</h2>
-          <p style={subtitleStyle}>Busca, modifica o elimina preparaciones y subrecetas.</p>
         </div>
         <button type="button" onClick={onCreateNew} style={primaryButtonStyle}>Agregar subreceta</button>
       </div>

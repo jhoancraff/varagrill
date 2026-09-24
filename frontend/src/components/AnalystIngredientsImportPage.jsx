@@ -213,10 +213,6 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Importar ingredientes desde Excel</h2>
-        <p style={subtitleStyle}>
-          Sube la ficha de conteo/pesaje, revisa qué se va a crear o actualizar, y confirma. Los ingredientes
-          con la cantidad vacía o en 0 se ignoran automáticamente.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
@@ -244,10 +240,6 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
             style={editInputStyle}
           />
         </div>
-        <p style={hintStyle}>
-          Estos datos quedan guardados en un único lote de compra para todo el archivo, así después se puede
-          rastrear de qué factura vino cada ingrediente cargado.
-        </p>
 
         <div style={uploadRowStyle(isMobile)}>
           <a href="/plantilla_ingredientes.xlsx" download style={templateLinkStyle}>
@@ -269,17 +261,6 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
             </button>
           ) : null}
         </div>
-        <p style={hintStyle}>
-          La plantilla trae las columnas Ingrediente, Unidad (g, ml o unidad) y Cantidad. Puedes usar tus
-          propios encabezados siempre que incluyan una columna "Ingrediente". Para un ingrediente que ya existe,
-          "Cantidad" se <strong>suma</strong> al stock actual (es lo que recibiste, no el total final) — si tiene
-          -5 y cargas 10, queda en 5, no en 10; una cantidad negativa resta (por ejemplo una merma). Si además
-          agregas "Peso neto", "Peso real" y "Precio de compra" (las tres juntas), el costo unitario de esa fila
-          se calcula solo (precio de compra ÷ peso real) — esas tres columnas pueden venir solas, sin tocar la
-          Cantidad, para actualizar el costeo sin sumar stock. Si en cambio solo agregas "Precio total" (lo
-          pagado por el aumento de esta carga), el sistema usa el criterio anterior — pero si una fila trae las
-          dos cosas, gana el peso neto/peso real/precio de compra.
-        </p>
       </section>
 
       {rows && rows.length > 0 ? (
@@ -400,11 +381,6 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           <div style={totalEstimadoBoxStyle}>
             <div style={{ color: '#c8bbbb', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
               Total a pagar por esta factura (obligatorio)
-            </div>
-            <div style={{ color: '#a89999', fontSize: 12 }}>
-              El sistema ya no suma esto por ti — escribe exactamente lo que dice la factura física del
-              proveedor. Si es una cortesía sin costo, escribe 0. Esto no afecta el costo con el que queda
-              valorado el inventario ni las recetas, solo la deuda con el proveedor.
             </div>
 
             <div style={compararBsRowStyle(isMobile)}>

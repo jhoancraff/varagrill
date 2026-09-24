@@ -132,7 +132,6 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Metodos de pago</h2>
-        <p style={subtitleStyle}>Agrega los tipos de pago que se pueden usar al cobrar (efectivo, tarjeta, Binance, Zelle, etc.).</p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

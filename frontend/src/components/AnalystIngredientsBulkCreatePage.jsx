@@ -134,11 +134,6 @@ function AnalystIngredientsBulkCreatePage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Cargar ingredientes desde Excel</h2>
-        <p style={subtitleStyle}>
-          Esta carga solo crea el ingrediente en el catálogo, con nombre únicamente — sin stock, sin costo y sin
-          unidad todavía. Úsala para el montaje inicial del inventario antes de abrir el restaurante. Si el
-          ingrediente ya existe, no se toca ni se duplica.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

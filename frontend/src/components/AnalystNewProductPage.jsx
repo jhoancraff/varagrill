@@ -390,7 +390,6 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Registrar producto nuevo</h2>
-          <p style={subtitleStyle}>Sube la foto del plato o bebida desde el dispositivo y asígnale una categoría del menú.</p>
         </div>
       </div>
 

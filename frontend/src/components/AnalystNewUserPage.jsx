@@ -113,7 +113,6 @@ function AnalystNewUserPage({ isMobile, isAdmin, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Crear usuario nuevo</h2>
-          <p style={subtitleStyle}>Esta página contiene solo el formulario para registrar un nuevo usuario.</p>
         </div>
       </div>
 

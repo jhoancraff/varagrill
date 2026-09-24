@@ -22,7 +22,6 @@ function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory }
 
       <div>
         <h2 style={titleStyle(isMobile)}>Inventario</h2>
-        <p style={subtitleStyle}>Elige si quieres dar de alta ingredientes o consultar el inventario actual.</p>
       </div>
 
       <div style={gridStyle(isMobile)}>

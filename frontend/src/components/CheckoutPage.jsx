@@ -858,10 +858,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         <div>
           <div style={eyebrowStyle}>Cobro</div>
           <h2 style={titleStyle(isMobile)}>Pedidos listos para cobrar</h2>
-          <p style={subtitleStyle}>
-            Busca la mesa para ver su cuenta. Por cada mesa elige el documento que convenga: una nota de
-            entrega rápida, una cuenta del cliente para que la revise antes de pagar, o la factura fiscal directa.
-          </p>
         </div>
         <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
           Volver

@@ -137,7 +137,6 @@ function AnalystEditUserPage({ isMobile, isAdmin, userId, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Actualización de usuario</h2>
-          <p style={subtitleStyle}>Modifica datos del perfil, rol, estado y contraseña desde una vista separada.</p>
         </div>
       </div>
 

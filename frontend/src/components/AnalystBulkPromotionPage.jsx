@@ -151,9 +151,6 @@ function AnalystBulkPromotionPage({ isMobile, isAdmin, productIds, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Aplicar el mismo descuento a varios productos</h2>
-          <p style={subtitleStyle}>
-            Define un solo descuento y una sola duración: se aplicará a todos los productos seleccionados de una vez.
-          </p>
         </div>
       </div>
 

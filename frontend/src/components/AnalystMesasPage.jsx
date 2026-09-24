@@ -103,7 +103,6 @@ function AnalystMesasPage({ isMobile, isAdmin, onBack, onCreateNewMesa, onEditMe
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Gestión de mesas</h2>
-          <p style={subtitleStyle}>Registra las mesas del local, actualiza su capacidad, ubicación y estado. Si el local crece, agrega aquí las mesas nuevas para que queden disponibles al tomar pedidos.</p>
         </div>
         <button type="button" onClick={onCreateNewMesa} style={primaryButtonStyle}>
           Agregar mesa nueva

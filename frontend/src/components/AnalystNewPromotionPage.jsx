@@ -192,11 +192,6 @@ function AnalystNewPromotionPage({ isMobile, isAdmin, productId, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>{isEditMode ? 'Actualizar descuento' : 'Aplicar descuento'}</h2>
-          <p style={subtitleStyle}>
-            {isEditMode
-              ? 'Modifica el descuento o la duración: el cambio aplica de inmediato para este producto.'
-              : 'Define el descuento y cuántos días estará vigente la promoción para este producto.'}
-          </p>
         </div>
       </div>
 

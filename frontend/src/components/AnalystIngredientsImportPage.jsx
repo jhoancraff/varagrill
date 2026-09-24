@@ -213,10 +213,6 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Importar ingredientes desde Excel</h2>
-        <p style={subtitleStyle}>
-          Sube la ficha de conteo/pesaje, revisa qué se va a crear o actualizar, y confirma. Los ingredientes
-          con la cantidad vacía o en 0 se ignoran automáticamente.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

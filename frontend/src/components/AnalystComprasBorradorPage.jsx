@@ -260,11 +260,6 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Cargar por lote (factura de proveedor)</h2>
-        <p style={subtitleStyle}>
-          Ve agregando cada ingrediente de la factura, uno por uno. Lo agregado queda guardado aunque cierres la
-          pagina o vuelvas otro dia — recien se aplica al inventario cuando confirmes la carga completa, y ahi se
-          genera la cuenta por pagar de ese lote.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

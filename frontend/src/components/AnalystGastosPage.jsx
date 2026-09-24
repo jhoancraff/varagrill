@@ -483,10 +483,6 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Gastos operativos</h2>
-        <p style={subtitleStyle}>
-          Registra alquiler, servicios, nómina y demás gastos del negocio — separado del inventario. Marca si ya
-          lo pagaste o si queda pendiente para abonarlo después.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

@@ -148,11 +148,6 @@ function ReportePropinasPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Propinas y excedentes</h2>
-          <p style={subtitleStyle}>
-            Dinero que entró junto con un cobro pero que no es venta: propinas para meseros y el vuelto que el
-            cliente no pidió de vuelta.
-            {rango ? '' : ' Si la cajera lo registró en la cuenta equivocada, la cambias acá.'}
-          </p>
         </div>
         {rango ? (
           <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>

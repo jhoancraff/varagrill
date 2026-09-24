@@ -199,21 +199,6 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Impresoras de cocina</h2>
-          <p style={subtitleStyle}>
-            Asigna la IP fija (y puerto, normalmente 9100) de la impresora térmica que debe imprimir la comanda de
-            cada categoría. Las categorías sin IP asignada simplemente no imprimen nada. Opcionalmente, la
-            impresora secundaria recibe además una copia reducida (solo cantidad/peso y nota, sin guarniciones ni
-            adicionales) de la misma categoría — ej: Especialidad de la Casa imprimiendo el corte en cocina y,
-            aparte, en la parrilla. "Arma plato automático" hace que, al mesero agregar un producto de esa
-            categoría, el plato se arme y cierre solo, sin usar los botones "Armar plato"/"Terminar".
-            "Prioridad en comanda" hace que esos platos salgan siempre primero en la comanda —antes que
-            cualquier otro plato del pedido— con su propio encabezado "PLATO N - CATEGORÍA" bien grande, sin
-            importar el orden en que el mesero los agregó (pensado para entradas). "No requiere cocina" hace
-            que un pedido con solo productos de esa categoría se registre directo como "entregado" — salta
-            el panel de cocina y no imprime comanda, quedando listo para cobrar de inmediato (pensado para
-            empacados para llevar: carnes al vacío, patacones, empanaditas...). Los cambios aplican al
-            siguiente pedido que se registre.
-          </p>
         </div>
       </div>
 
@@ -344,12 +329,6 @@ function AnalysPrintersPage({ isMobile, isAdmin, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Impresora de caja</h2>
-          <p style={subtitleStyle}>
-            El recibo con el detalle y el total del pedido para el cliente sale por esta impresora, distinta a las
-            de cocina: es una impresora USB conectada a la PC de caja y compartida en red vía el "LPD Print Service"
-            de Windows (puerto estándar 515), no ESC/POS directo por socket. Indica la IP de esa PC y el nombre
-            exacto de la cola tal como quedó compartida.
-          </p>
         </div>
       </div>
 

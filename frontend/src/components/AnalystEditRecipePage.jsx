@@ -302,7 +302,6 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Modificar receta</h2>
-          <p style={subtitleStyle}>Actualiza nombre, descripción y los componentes que se descontarán de ingredientes y subrecetas.</p>
         </div>
       </div>
 

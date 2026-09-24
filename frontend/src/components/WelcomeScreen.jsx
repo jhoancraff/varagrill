@@ -659,18 +659,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           </div>
         </div>
 
-        <div style={{
-          padding: '0 4px 12px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-        }}>
-          <div style={{ fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#ff8f8f', marginBottom: 8 }}>
-            Panel
-          </div>
-          <div style={{ color: '#d1d1d1', fontSize: 14, lineHeight: 1.5 }}>
-            Accesos directos para cocina, pedidos y servicio.
-          </div>
-        </div>
-
         {!isCajera ? (
           <button
             type="button"
@@ -1012,7 +1000,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 {
                   view: 'promotions',
                   title: 'Promociones',
-                  text: 'Consulta el catalogo de promociones vigentes para ofrecer al cliente.',
                   icon: (
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20.59 13.41 12 22l-9-9V4a1 1 0 0 1 1-1h9l8.59 8.59a2 2 0 0 1 0 2.82Z" />
@@ -1023,7 +1010,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                 {
                   view: 'chef-recommendations',
                   title: 'Recomendación del chef',
-                  text: 'Descubre los platos que el chef sugiere destacar durante el servicio de hoy.',
                   icon: (
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M17 21v-8a5 5 0 0 0-10 0v8" />
@@ -1047,7 +1033,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
                     <span style={{ color: 'rgba(255, 100, 100, 0.6)', fontSize: 20, lineHeight: 1 }} aria-hidden="true">→</span>
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 10 }}>{item.title}</div>
-                  <div style={{ color: '#c7c7c7', lineHeight: 1.6, fontSize: 14 }}>{item.text}</div>
                 </button>
               ))}
             </section>

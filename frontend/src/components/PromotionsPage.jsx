@@ -58,7 +58,6 @@ function PromotionsPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <div style={badgeStyle}>Promociones</div>
       <h2 style={titleStyle(isMobile)}>Catálogo de promociones</h2>
-      <p style={subtitleStyle}>Busca un producto para saber si tiene descuento vigente.</p>
 
       <input
         value={search}

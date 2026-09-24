@@ -480,7 +480,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Actualización de producto</h2>
-          <p style={subtitleStyle}>Modifica los datos del producto. Si no subes una imagen nueva, se conserva la actual.</p>
         </div>
       </div>
 

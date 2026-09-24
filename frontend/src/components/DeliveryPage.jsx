@@ -393,10 +393,6 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
         <div>
           <div style={eyebrowStyle}>Delivery / Para llevar</div>
           <h2 style={titleStyle(isMobile)}>Pedidos para llevar y delivery</h2>
-          <p style={subtitleStyle}>
-            Pedidos de hoy sin mesa asignada, agrupados por cliente — en cuanto caja cobra el último pedido
-            abierto de un cliente, desaparece de aquí.
-          </p>
         </div>
         <div style={headerActionsStyle(isMobile)}>
           {onNuevoPedido ? (

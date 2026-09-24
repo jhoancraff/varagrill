@@ -119,80 +119,22 @@ const MovementIcon = () => (
 const CONCILIACION_BANCARIA_HABILITADA = false;
 
 const reportSections = [
-  {
-    id: 'contabilidad-cuadre-caja',
-    title: 'Cuadre de caja diario',
-    description: 'Compara el efectivo esperado contra lo contado en físico, con consignaciones del turno y el cierre del día.',
-    icon: CashRegisterIcon,
-  },
-  {
-    id: 'contabilidad-cuadre-caja-rango',
-    title: 'Cuadre de caja por rango',
-    description: 'El mismo cuadre de caja, pero sumado a lo largo de varios días — para revisar una semana o un mes completo de una vez.',
-    icon: DateRangeIcon,
-  },
-  {
-    id: 'contabilidad-disponibilidad-cuentas',
-    title: 'Disponibilidad diaria',
-    description: 'Saldo acumulado de cada método de pago (efectivo, bancos, Binance, Zelle...) hasta el día que elijas.',
-    icon: AvailabilityIcon,
-  },
+  { id: 'contabilidad-cuadre-caja', title: 'Cuadre de caja diario', icon: CashRegisterIcon },
+  { id: 'contabilidad-cuadre-caja-rango', title: 'Cuadre de caja por rango', icon: DateRangeIcon },
+  { id: 'contabilidad-disponibilidad-cuentas', title: 'Disponibilidad diaria', icon: AvailabilityIcon },
   ...(CONCILIACION_BANCARIA_HABILITADA ? [{
     id: 'contabilidad-conciliacion-bancaria',
     title: 'Conciliación bancaria',
-    description: 'Compara el saldo que calcula el sistema en cada cuenta contra lo que de verdad muestra el banco, cuenta por cuenta.',
     icon: ReconciliationIcon,
   }] : []),
-  {
-    id: 'cuentas-cobrar',
-    title: 'Cuentas por cobrar',
-    description: 'Facturas emitidas con saldo pendiente: registra los abonos de cada cliente hasta saldarlas.',
-    icon: ReceivablesIcon,
-    badgeKey: 'cuentasPorCobrar',
-  },
-  {
-    id: 'cuentas-pagar',
-    title: 'Cuentas por pagar',
-    description: 'Deudas con proveedores por lotes de compra cargados al inventario: registra los abonos hasta saldarlas.',
-    icon: PayablesIcon,
-    badgeKey: 'cuentasPorPagar',
-  },
-  {
-    id: 'gastos-operativos',
-    title: 'Gastos operativos',
-    description: 'Alquiler, servicios, nómina y demás gastos del negocio — regístralos de una vez o déjalos pendientes para abonar después.',
-    icon: ExpensesIcon,
-  },
-  {
-    id: 'estado-resultados',
-    title: 'Estado de resultados',
-    description: 'Ventas menos costo de ingredientes menos gastos operativos: si el negocio ganó o perdió plata en el período que elijas.',
-    icon: ResultsIcon,
-  },
-  {
-    id: 'facturas-historial',
-    title: 'Historial de facturas',
-    description: 'Todas las facturas emitidas, incluidas las ya saldadas y anuladas, con el detalle completo de sus abonos.',
-    icon: HistoryIcon,
-  },
-  {
-    id: 'margen-ganancia',
-    title: 'Margen de ganancia por plato',
-    description: 'Cuánto entró, cuánto costó y cuánto se ganó por cada plato vendido, en el rango de fechas que elijas.',
-    icon: MarginIcon,
-  },
-  {
-    id: 'movimiento-productos',
-    title: 'Movimiento de productos',
-    description: 'Cuántas unidades o kilos de cada plato se vendieron por día, mes o rango de fechas — filtra por producto o categoría.',
-    icon: MovementIcon,
-  },
-  {
-    id: 'admin-ingredients',
-    title: 'Inventario',
-    description: 'Crea ingredientes nuevos (uno por uno o en lote por Excel) o consulta el stock y costo actual del inventario.',
-    icon: IngredientsIcon,
-  },
+  { id: 'cuentas-cobrar', title: 'Cuentas por cobrar', icon: ReceivablesIcon, badgeKey: 'cuentasPorCobrar' },
+  { id: 'cuentas-pagar', title: 'Cuentas por pagar', icon: PayablesIcon, badgeKey: 'cuentasPorPagar' },
+  { id: 'gastos-operativos', title: 'Gastos operativos', icon: ExpensesIcon },
+  { id: 'estado-resultados', title: 'Estado de resultados', icon: ResultsIcon },
+  { id: 'facturas-historial', title: 'Historial de facturas', icon: HistoryIcon },
+  { id: 'margen-ganancia', title: 'Margen de ganancia por plato', icon: MarginIcon },
+  { id: 'movimiento-productos', title: 'Movimiento de productos', icon: MovementIcon },
+  { id: 'admin-ingredients', title: 'Inventario', icon: IngredientsIcon },
 ];
 
 function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
@@ -253,9 +195,6 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
       <div style={heroStyle}>
         <div style={heroBadgeStyle}>Contabilidad</div>
         <h2 style={titleStyle(isMobile)}>Reportes contables</h2>
-        <p style={subtitleStyle}>
-          Punto de entrada para todos los reportes de cierre y contabilidad del negocio.
-        </p>
       </div>
 
       <div style={gridStyle(isMobile)}>
@@ -299,7 +238,6 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
                 </span>
                 <div style={cardTitleStyle}>{section.title}</div>
               </div>
-              <div style={cardDescriptionStyle}>{section.description}</div>
               <span style={cardLinkStyle}>Abrir reporte</span>
             </button>
           );

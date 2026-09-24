@@ -141,7 +141,6 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Cuadre de caja diario</h2>
-          <p style={subtitleStyle}>Efectivo esperado vs. contado en fisico, mas el resto de metodos como referencia.</p>
         </div>
         <label className="no-print" style={dateLabelStyle}>
           Fecha

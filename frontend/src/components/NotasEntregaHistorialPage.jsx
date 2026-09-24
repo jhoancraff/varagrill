@@ -440,9 +440,6 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
           <div>
             <div style={eyebrowStyle}>Contabilidad</div>
             <h2 style={titleStyle(isMobile)}>Historial de notas de entrega</h2>
-            <p style={subtitleStyle}>
-              Busca las notas de entrega emitidas por rango de fecha, registra sus abonos y reimprímelas si el cliente necesita otra copia.
-            </p>
           </div>
           <button type="button" onClick={onBack} style={backButtonStyle(isMobile)}>
             Volver

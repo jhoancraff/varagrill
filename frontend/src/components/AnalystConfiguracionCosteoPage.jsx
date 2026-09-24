@@ -67,10 +67,6 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Configuración de costeo</h2>
-        <p style={subtitleStyle}>
-          Estos dos porcentajes son globales: cambiarlos afecta a todas las recetas y a los productos
-          nuevos que no tengan su propio margen definido.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

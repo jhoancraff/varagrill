@@ -218,7 +218,6 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Ventas {rango ? 'del rango' : 'del día'} — detalle</h2>
-          <p style={subtitleStyle}>Cada nota de entrega emitida en el período, con lo que se cobró: dólares, bolívares, método, banco y referencia.</p>
         </div>
         {rango ? (
           <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>

@@ -155,7 +155,6 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Gestión de productos</h2>
-          <p style={subtitleStyle}>Administra los productos del menú, su precio, categoría y disponibilidad.</p>
         </div>
         <button type="button" onClick={onCreateNewProduct} style={primaryButtonStyle}>
           Agregar producto nuevo

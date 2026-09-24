@@ -279,7 +279,6 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Registrar receta</h2>
-          <p style={subtitleStyle}>Completa nombre y descripción, luego agrega los ingredientes y subrecetas que se descontarán al preparar el producto.</p>
         </div>
       </div>
 

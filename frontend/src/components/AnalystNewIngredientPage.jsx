@@ -142,7 +142,6 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
   return (
     <section style={containerStyle(isMobile)}>
       <h2 style={titleStyle(isMobile)}>Nuevo ingrediente</h2>
-      <p style={subtitleStyle}>Para el ingreso de mercancía: busca primero si el ingrediente ya existe antes de crear uno nuevo.</p>
       <Toast toast={toast} onClose={hideToast} />
 
       <form onSubmit={handleSubmit} style={panelStyle}>

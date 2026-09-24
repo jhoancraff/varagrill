@@ -183,7 +183,6 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Ingreso administrativo de ingredientes</h2>
-          <p style={subtitleStyle}>Registra entradas de inventario alimentando ingredientes, compras y movimientos para conservar la auditoría del sistema.</p>
         </div>
       </div>
 

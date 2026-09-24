@@ -83,10 +83,6 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Datos fiscales del negocio</h2>
-        <p style={subtitleStyle}>
-          Esta información se usa en el encabezado de cada factura (RIF, razón social, domicilio) y como
-          porcentaje de IVA por defecto al facturar.
-        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

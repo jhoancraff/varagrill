@@ -174,7 +174,6 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
       <div style={headerRowStyle(isMobile)}>
         <div>
           <h2 style={titleStyle(isMobile)}>Registro de subrecetas</h2>
-          <p style={subtitleStyle}>Define el nombre de la subreceta, su rendimiento y los ingredientes con la cantidad exacta que se descontará del inventario cuando esa subreceta se use.</p>
         </div>
       </div>
 

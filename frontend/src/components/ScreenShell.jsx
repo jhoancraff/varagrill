@@ -6,7 +6,7 @@ function ScreenShell({ children, maxWidth = 430, compact = false }) {
       alignItems: 'center',
       justifyContent: 'center',
       background: 'radial-gradient(circle at top, #2f0b0b 0%, #120606 45%, #050505 100%)',
-      fontFamily: 'Arial, sans-serif',
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       color: '#f5f5f5',
       padding: 24,
       boxSizing: 'border-box',

@@ -238,7 +238,18 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
   const visibleSections = onlyCardIds ? reportSections.filter((section) => onlyCardIds.includes(section.id)) : reportSections;
 
   return (
-    <section style={panelContainerStyle(isMobile)}>
+    <>
+      <style>{`
+        .vg-admin-card {
+          transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+        }
+        .vg-admin-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.38) !important;
+          border-color: rgba(255, 100, 100, 0.22) !important;
+        }
+      `}</style>
+      <section style={panelContainerStyle(isMobile)}>
       <div style={heroStyle}>
         <div style={heroBadgeStyle}>Contabilidad</div>
         <h2 style={titleStyle(isMobile)}>Reportes contables</h2>
@@ -255,6 +266,7 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
             <button
               key={section.id}
               type="button"
+              className="vg-admin-card"
               onClick={() => {
                 if (section.id === 'contabilidad-cuadre-caja') {
                   // Entrar desde esta tarjeta es un arranque nuevo del cuadre
@@ -299,7 +311,8 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
           Volver al inicio
         </button>
       </div>
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -351,7 +364,9 @@ const subtitleStyle = {
 
 const gridStyle = (isMobile) => ({
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+  gridTemplateColumns: isMobile
+    ? '1fr'
+    : 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
   gap: 16,
 });
 

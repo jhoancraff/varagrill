@@ -123,7 +123,6 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
       <section style={panelStyle}>
         <div style={reportHeaderStyle(isMobile)}>
           <div style={sectionTitleStyle}>Reporte administrativo de usuarios</div>
-          <div style={reportHintStyle}>Consulta estado, rol, identificación y acciones de control por cada cuenta.</div>
         </div>
 
         {loading ? <div style={emptyStateStyle}>Cargando usuarios...</div> : null}

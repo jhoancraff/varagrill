@@ -204,7 +204,6 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
 
             <div style={helperCardStyle}>
               <div style={helperTitleStyle}>Ingredientes que consumirá esta subreceta</div>
-              <div style={helperTextStyle}>Agrega cada ingrediente con la cantidad que se descontará del inventario para producir una tanda según el rendimiento indicado.</div>
 
               <div style={componentComposerStyle(isMobile)}>
                 <div ref={ingredientPickerRef} style={pickerWrapStyle}>

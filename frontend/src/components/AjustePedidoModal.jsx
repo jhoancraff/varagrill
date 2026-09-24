@@ -63,7 +63,7 @@ function AjustePedidoModal({
               La mesa destino debe tener ya un pedido abierto.
             </>
           )}
-          {' '}Escribe el motivo — queda guardado para auditoría.
+          {' '}Queda guardado para auditoría.
         </p>
 
         {puedeElegirCantidad ? (
@@ -106,7 +106,7 @@ function AjustePedidoModal({
         {modo === 'mover' && requiereUsuario ? (
           <>
             <p style={infoNoteStyle}>
-              Esa mesa no tiene ningún pedido abierto — se va a abrir uno nuevo ahí. Elige quién la va a atender:
+              Esa mesa no tiene ningún pedido abierto — se va a abrir uno nuevo ahí.
             </p>
             <label style={fieldLabelStyle}>
               Mesero

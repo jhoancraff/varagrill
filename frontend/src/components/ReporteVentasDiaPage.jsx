@@ -351,8 +351,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                       {!rango && pago && editandoPagoId === pago.id ? (
                         <div style={editRowWrapStyle} className="no-print">
                           <span style={{ color: '#d2c3c3', fontSize: 13 }}>
-                            Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta —
-                            si la cuenta nueva es en bolívares, el monto se muestra convertido; si es en dólares, se muestra tal cual.
+                            Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta
                           </span>
                           <select
                             value={nuevoMetodoId}

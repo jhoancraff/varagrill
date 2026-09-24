@@ -509,9 +509,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                   <BsAmount amountUsd={form.precio_venta} tasa={tasaCambio} />
                 </span>
                 <input type="number" min="0" step="0.01" value={form.precio_venta} onChange={(event) => handleChange('precio_venta', event.target.value)} style={inputStyle} />
-                {form.venta_por_peso ? (
-                  <span style={ventaPorPesoHintStyle}>El mesero indicará los gramos al pedir; el sistema calcula el subtotal y descuenta el inventario en base a ese peso.</span>
-                ) : null}
               </label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>Costo estimado</span>
@@ -529,7 +526,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                   placeholder={`Por defecto: ${configCosteo.margen_ganancia_defecto_pct}%`}
                   style={inputStyle}
                 />
-                <span style={ventaPorPesoHintStyle}>Vacío usa el margen por defecto de la configuración de costeo.</span>
               </label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>Tiempo de preparación (min)</span>
@@ -551,8 +547,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                   <div style={costReferenceLabelStyle}>Costo con rendimiento: ${costoConRendimiento.toFixed(4)}</div>
                   <div style={costReferenceValueStyle}>Precio sugerido: ${precioSugerido.toFixed(2)}</div>
                   <p style={costReferenceHintStyle}>
-                    Costo de la receta ya con el % de rendimiento global sumado, más el margen de ganancia
-                    ({margenEfectivoPct.toFixed(2)}%{form.margen_ganancia_pct === '' ? ', por defecto' : ', propio de este producto'}).
+                    Margen: {margenEfectivoPct.toFixed(2)}% {form.margen_ganancia_pct === '' ? '(por defecto)' : '(propio)'}
                   </p>
                 </div>
                 <button
@@ -570,7 +565,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
 
             <div style={linkCardStyle}>
               <div style={labelStyle}>Vincular con Receta o Subreceta (opcional)</div>
-              <p style={linkHintStyle}>Así, cuando el mesero pida este producto, cocina verá también de qué está compuesto.</p>
               {ingredientes.length > 0 ? (
                 <div style={noticeStyle}>Quita los ingredientes propios de abajo para poder vincular una receta o subreceta.</div>
               ) : (
@@ -608,9 +602,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                       <div>
                         <div style={costReferenceLabelStyle}>Costo unitario calculado de "{selectedVinculo.nombre}"</div>
                         <div style={costReferenceValueStyle}>${Number(selectedVinculo.costo_unitario_calculado || 0).toFixed(2)}</div>
-                        <p style={costReferenceHintStyle}>
-                          Es la suma del costo de los ingredientes/subrecetas de esta receta. Úsalo como referencia para definir el costo real del producto (empaque, mano de obra, etc.).
-                        </p>
                       </div>
                       <button
                         type="button"
@@ -632,15 +623,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                 `}
               </style>
               <div style={labelStyle}>Ingredientes que lleva este producto (opcional)</div>
-              <p style={linkHintStyle}>
-                Busca el ingrediente y define cuánto lleva el plato, en la unidad que te resulte más cómoda (ej. gramos).
-                El sistema la convierte a la unidad del inventario del ingrediente al descontar stock cuando se venda.
-                {form.venta_por_peso ? (
-                  <> Como este producto se vende por peso, puedes dejar la cantidad vacía: se asume 1&nbsp;kg vendido = 1&nbsp;kg
-                    descontado de ese ingrediente (ideal cuando el producto ES el ingrediente, ej. un corte de carne). El
-                    mesero define el peso real al tomar el pedido y el descuento se ajusta solo a eso.</>
-                ) : null}
-              </p>
 
               {form.vinculo_tipo ? (
                 <div style={noticeStyle}>Quita el vínculo de receta/subreceta de arriba para poder agregar ingredientes propios.</div>
@@ -734,11 +716,6 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
 
             <div style={linkCardStyle}>
               <div style={labelStyle}>Opciones del pedido (opcional)</div>
-              <p style={linkHintStyle}>
-                Para platos con variantes que el mesero debe preguntar al pedir (ej. "Acompañante: Arepas o Casabe").
-                Cada grupo puede ser obligatorio (elegir al menos una) y permitir una o varias opciones a la vez. Cada
-                opción se apoya en una subreceta ya creada, para saber qué descontar de inventario.
-              </p>
 
               {gruposOpciones.map((grupo) => {
                 const draft = opcionDraftByGrupo[grupo.uid] || { preparacion_id: '', precio_adicional: '0' };
@@ -776,20 +753,9 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                         style={inputStyle}
                       />
                     </div>
-                    <p style={linkHintStyle}>
-                      Solo para platos vendidos por peso: cuántos gramos del plato equivalen a 1 ración completa del
-                      acompañante (ej. 250 = 1 ración cada 250g de carne). Si el peso pedido no cae exacto, se
-                      redondea a la ración más cercana (mínimo 1). Déjalo vacío para que el acompañante se descuente
-                      a la par del peso del plato, sin raciones.
-                    </p>
 
                     {esDinamico ? (
                       <>
-                        <p style={linkHintStyle}>
-                          El mesero elegirá entre los productos disponibles de la categoría elegida en el momento del
-                          pedido (si agregas o quitas productos de esa categoría después, el pool cambia solo). Nunca
-                          es obligatorio: si el mesero no elige nada, solo se le avisa antes de continuar.
-                        </p>
                         <div style={composerRowStyle(isMobile)}>
                           <select
                             value={grupo.categoriaOpcionesId}

@@ -452,13 +452,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                   required
                 />
               </div>
-              <p style={hintStyle}>
-                Ya no se suma solo (suma de las líneas: ${borrador.total}) — escribe el total real a pagar. Si
-                esta carga es una cortesia u obsequio del proveedor, escribe 0, sin afectar el costo con el que
-                queda valorado el inventario. Si la factura del proveedor es en bolívares, cambia a "Bs" — ese
-                monto exacto queda congelado a la tasa de hoy y nunca se recalcula después, ni siquiera al pagarlo.
-              </p>
-              <p style={hintStyle}>La fecha de la carga se registra automaticamente con la fecha de hoy.</p>
+              <p style={hintStyle}>Suma de las líneas: ${borrador.total}</p>
               <button type="button" onClick={handleDiscard} style={secondaryButtonStyle} disabled={discarding}>
                 {discarding ? 'Descartando...' : 'Descartar borrador'}
               </button>

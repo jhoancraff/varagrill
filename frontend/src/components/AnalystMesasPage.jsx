@@ -133,7 +133,6 @@ function AnalystMesasPage({ isMobile, isAdmin, onBack, onCreateNewMesa, onEditMe
       <section style={panelStyle}>
         <div style={reportHeaderStyle(isMobile)}>
           <div style={sectionTitleStyle}>Reporte administrativo de mesas</div>
-          <div style={reportHintStyle}>Consulta número, capacidad, ubicación y estado de cada mesa registrada.</div>
         </div>
 
         {loading ? <div style={emptyStateStyle}>Cargando mesas...</div> : null}

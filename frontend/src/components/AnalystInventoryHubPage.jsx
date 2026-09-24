@@ -1,14 +1,6 @@
 const options = [
-  {
-    id: 'create',
-    title: 'Crear ingredientes',
-    description: 'Da de alta ingredientes nuevos, uno por uno o en lote por Excel sin costo ni cantidad — ideal para el montaje inicial del inventario.',
-  },
-  {
-    id: 'view',
-    title: 'Ver inventario actual',
-    description: 'Reporte con buscador para modificar stock y costo, eliminar ingredientes, o registrar reabastecimientos reales por Excel.',
-  },
+  { id: 'create', title: 'Crear ingredientes' },
+  { id: 'view', title: 'Ver inventario actual' },
 ];
 
 function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory }) {
@@ -33,7 +25,6 @@ function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory }
             style={cardButtonStyle}
           >
             <div style={cardTitleStyle}>{option.title}</div>
-            <div style={cardDescriptionStyle}>{option.description}</div>
             <span style={cardLinkStyle}>Continuar</span>
           </button>
         ))}

@@ -146,9 +146,6 @@ function AnalystIngredientsBulkCreatePage({ isMobile, onBack }) {
           style={editInputStyle}
           placeholder='Ej: "Inversión inicial - apertura de restaurante"'
         />
-        <p style={hintStyle}>
-          Este motivo queda guardado como referencia para toda la carga, ya que no se trata de una compra real.
-        </p>
 
         <div style={uploadRowStyle(isMobile)}>
           <a href="/plantilla_ingredientes.xlsx" download style={templateLinkStyle}>
@@ -170,10 +167,6 @@ function AnalystIngredientsBulkCreatePage({ isMobile, onBack }) {
             </button>
           ) : null}
         </div>
-        <p style={hintStyle}>
-          Solo necesitas una columna "Ingrediente" con los nombres. Puedes usar la misma plantilla y dejar vacías
-          las columnas de unidad, cantidad y precio — se ignoran en esta carga.
-        </p>
       </section>
 
       {rows && rows.length > 0 ? (

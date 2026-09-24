@@ -165,9 +165,6 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
             Agregar
           </button>
         </form>
-        <p style={hintStyle}>
-          El banco es opcional: escribe el mismo nombre de banco (ej. "Banesco") en dos métodos distintos —como Pago Móvil y Punto de Venta— para que Disponibilidad Bancaria los muestre agrupados bajo esa cuenta.
-        </p>
       </section>
 
       <section style={panelStyle}>

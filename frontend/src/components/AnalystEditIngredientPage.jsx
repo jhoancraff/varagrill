@@ -175,13 +175,6 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
                 <span style={labelStyle}>Precio de compra</span>
                 <input type="number" step="0.01" value={form.precio_compra} onChange={(e) => handleChange('precio_compra', e.target.value)} style={inputStyle} placeholder="Lo pagado por ese envase" />
               </label>
-              <p style={helpTextStyle}>
-                Contenido del envase y peso real se usan juntos para calcular el costo por gramo/ml/unidad al
-                confirmar una compra — completá los dos o dejá los dos vacíos. Si además cargás el precio de
-                compra de ese envase, el costo unitario de arriba se calcula solo (precio de compra ÷ peso real)
-                y deja de editarse a mano.
-              </p>
-
               <label style={fieldStyle}>
                 <span style={labelStyle}>Ingrediente crudo equivalente</span>
                 <select
@@ -208,11 +201,6 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
                   placeholder="Ej: 500 (500g de carne cruda por paquete)"
                 />
               </label>
-              <p style={helpTextStyle}>
-                Completá esto solo si este ingrediente es un producto empacado para reventa (ej. carne al
-                vacío, patacones empacados): permite usar la acción "Reponer cocina" para abrir paquetes y
-                sumar su contenido al ingrediente crudo cuando la cocina se quede sin materia prima.
-              </p>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>

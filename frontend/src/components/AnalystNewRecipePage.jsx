@@ -315,7 +315,6 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
 
             <div style={helperCardStyle}>
               <div style={helperTitleStyle}>Agregar ingredientes</div>
-              <div style={helperTextStyle}>Busca el ingrediente, define la cantidad y agrégalo a la receta.</div>
 
               <div style={composerRowStyle(isMobile)}>
                 <div ref={ingredientPickerRef} style={pickerWrapStyle}>
@@ -377,7 +376,6 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
 
             <div style={helperCardStyle}>
               <div style={helperTitleStyle}>Agregar subrecetas</div>
-              <div style={helperTextStyle}>Busca la subreceta base, define cuánta se usa y agrégala a la receta.</div>
 
               <div style={composerRowStyle(isMobile)}>
                 <div ref={preparationPickerRef} style={pickerWrapStyle}>
@@ -471,8 +469,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
                 <div>
                   <div style={costLabelStyle}>Costo con rendimiento aplicado</div>
                   <div style={costRendimientoHintStyle}>
-                    Se le suma el {rendimientoPct.toFixed(2)}% de rendimiento configurado en el Panel Analista
-                    ("Configuración de costeo") a los ${estimatedTotalCost.toFixed(2)} netos de arriba.
+                    +{rendimientoPct.toFixed(2)}% de rendimiento
                   </div>
                 </div>
                 <div style={costValueStyle}>${estimatedTotalCostConRendimiento.toFixed(2)}</div>

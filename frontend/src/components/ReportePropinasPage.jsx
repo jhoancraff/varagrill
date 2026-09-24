@@ -333,7 +333,7 @@ function CambiarMetodoModal({ info, busy, onClose, onConfirm }) {
         <div style={modalTitleStyle}>Cambiar cuenta</div>
         <p style={modalDescStyle}>
           Vas a mover este registro de <strong>{info.metodoActualNombre}</strong> a{' '}
-          <strong>{info.metodoNuevoNombre}</strong>. Escribe el motivo del cambio — queda guardado para auditoría.
+          <strong>{info.metodoNuevoNombre}</strong>. Queda guardado para auditoría.
         </p>
         <label style={modalFieldLabelStyle}>
           Motivo del cambio *

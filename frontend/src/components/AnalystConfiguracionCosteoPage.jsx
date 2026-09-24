@@ -86,10 +86,6 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
               style={inputStyle}
               required
             />
-            <p style={hintStyle}>
-              Se suma al costo de ingredientes de CADA receta de producto, para compensar mermas de cocina
-              (ej: una carne que pierde peso al cocinarse). No aplica a subrecetas — solo a recetas.
-            </p>
           </label>
 
           <label style={fieldStyle}>
@@ -103,10 +99,6 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
               style={inputStyle}
               required
             />
-            <p style={hintStyle}>
-              Se usa para sugerir el precio de venta de un producto nuevo (costo con rendimiento x este
-              margen), a menos que ese producto defina su propio margen en su ficha.
-            </p>
           </label>
 
           <button type="submit" disabled={saving} style={saveButtonStyle}>

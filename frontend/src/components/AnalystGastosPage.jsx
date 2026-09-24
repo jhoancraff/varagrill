@@ -855,7 +855,7 @@ function EditarGastoModal({
         {pidiendoMotivo ? (
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ fontSize: 13, color: '#c8bbbb' }}>
-              Para auditoría, indica por qué se corrige este gasto. Es obligatorio.
+              Motivo del ajuste *
             </div>
             <textarea
               value={motivo}

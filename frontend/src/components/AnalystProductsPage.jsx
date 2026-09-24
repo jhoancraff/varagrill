@@ -185,7 +185,6 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
       <section style={panelStyle}>
         <div style={reportHeaderStyle(isMobile)}>
           <div style={sectionTitleStyle}>Reporte administrativo de productos</div>
-          <div style={reportHintStyle}>Consulta precio, categoría, disponibilidad e imagen principal.</div>
         </div>
 
         {!loading && products.length > 0 ? (

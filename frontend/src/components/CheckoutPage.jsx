@@ -1207,11 +1207,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
             + Pago extra
           </button>
         </div>
-        <p style={ingresoExtraHintStyle}>
-          Para cuando el cliente paga todo junto (la nota de entrega más la propina, o de más porque redondeó):
-          cobra la nota solo por el total de los platos y registra la propina o el excedente acá, en la cuenta
-          donde de verdad quedó ese dinero.
-        </p>
 
         <div style={ingresoExtraHistoryTitleStyle}>Propinas y pagos extra registrados</div>
         {ingresosExtraLoading ? (
@@ -1356,12 +1351,6 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
         <div style={ingresoModalTitleStyle}>
           {esPropina ? 'Registrar propina' : 'Registrar pago extra'}
         </div>
-        <p style={ingresoModalDescStyle}>
-          {esPropina
-            ? 'La propina que el cliente pagó junto con la nota de entrega, para los meseros.'
-            : 'El excedente que el cliente pagó de más (redondeó el total) y no pidió de vuelta.'}
-        </p>
-
         <label style={ingresoFieldLabelStyle}>
           Cuenta donde se abonará
           <select

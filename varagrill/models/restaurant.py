@@ -530,6 +530,18 @@ class VGCompra(VGAuditoria):
     # 2 decimales — con este campo, `_serialize_compra` muestra el monto tal
     # cual se escribió, sin ese vaivén de conversión.
     total_bs_factura = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    # En qué moneda escribió el analista el total de la factura al confirmarla
+    # (ver factura_total_bs/factura_total_usd en _importar_ingredientes) —
+    # por ahora solo se registra en la importación por Excel, el resto de los
+    # flujos (carga manual por lote) lo deja vacío y sigue con el
+    # comportamiento de siempre. Cuando es 'USD', el equivalente en bolívares
+    # que se le muestra al analista (`_serialize_compra`) se recalcula con la
+    # tasa BCV VIGENTE cada vez que se consulta — la deuda real está en
+    # dólares, así que lo que cuesta hoy en bolívares cambia con el BCV, igual
+    # que ya hace VGGasto.moneda_origen para un gasto en dólares — en vez de
+    # quedarse pegado a la tasa del día en que se cargó la factura.
+    MONEDAS_ORIGEN = [("USD", "Dólares"), ("VES", "Bolívares")]
+    moneda_origen = models.CharField(max_length=3, choices=MONEDAS_ORIGEN, blank=True, default='')
 
     class Meta:
         db_table = "vg_compras"

@@ -1,4 +1,4 @@
-function Toast({ toast, onClose }) {
+function Toast({ toast, onClose, position = 'top-right' }) {
   if (!toast) {
     return null;
   }
@@ -6,10 +6,10 @@ function Toast({ toast, onClose }) {
   const isError = toast.type === 'error';
 
   return (
-    <div style={wrapStyle}>
+    <div style={wrapStyle(position)}>
       <style>
         {`@keyframes toastSlideIn {
-            from { transform: translateX(24px); opacity: 0; }
+            from { transform: translateX(${position === 'top-left' ? '-24px' : '24px'}); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
           }
         `}
@@ -30,13 +30,13 @@ function Toast({ toast, onClose }) {
   );
 }
 
-const wrapStyle = {
+const wrapStyle = (position) => ({
   position: 'fixed',
   top: 18,
-  right: 18,
+  ...(position === 'top-left' ? { left: 18 } : { right: 18 }),
   zIndex: 9999,
   maxWidth: 'min(360px, calc(100vw - 36px))',
-};
+});
 
 const baseCardStyle = {
   display: 'flex',

@@ -2993,7 +2993,7 @@ def _preview_ingrediente_row(row):
 
 def _importar_ingredientes(
     items, operator, proveedor_nombre='', numero_factura_proveedor='', fecha_factura=None,
-    factura_total_bs=None,
+    factura_total_bs=None, factura_total_usd=None,
 ):
     """
     Aplica la carga de ingredientes ya revisada/editada por el analista (ver
@@ -3016,24 +3016,30 @@ def _importar_ingredientes(
     Cuando una fila resulta en un aumento de stock (ingrediente nuevo, o cantidad positiva
     en uno existente), esa porción SÍ se registra como una compra real — un único VGCompra
     (el "lote") para todo el archivo, con un VGDetalleCompra por cada fila que aumentó
-    stock. El monto de esa línea (y por lo tanto el total del lote) SIEMPRE se calcula por
-    unidad NOMINAL comprada (precio_compra/contenido_envase, o precio_total/delta si no
-    hay trío) — nunca con ingrediente.costo_unitario, que cuando hay trío se calcula por
-    unidad ÚTIL (precio_compra/peso_real, con la merma descontada) para costear recetas;
-    usar ese costo de receta para facturar infla el monto a pagar cada vez que peso_real <
-    contenido_envase. Si ninguna fila aumenta stock, no se crea ningún VGCompra. Una
-    cantidad NEGATIVA en un ingrediente existente resta del stock (ej. una merma) y se
-    registra como 'ajuste', nunca como compra.
+    stock. El costo de esa línea (VGDetalleCompra.costo_unitario, y por lo tanto el costeo
+    del ingrediente y de las recetas que lo usan) SIEMPRE se calcula por unidad NOMINAL
+    comprada (precio_compra/contenido_envase, o precio_total/delta si no hay trío) — nunca
+    con ingrediente.costo_unitario, que cuando hay trío se calcula por unidad ÚTIL
+    (precio_compra/peso_real, con la merma descontada) para costear recetas; usar ese costo
+    de receta para facturar infla el monto a pagar cada vez que peso_real < contenido_envase.
+    Si ninguna fila aumenta stock, no se crea ningún VGCompra. Una cantidad NEGATIVA en un
+    ingrediente existente resta del stock (ej. una merma) y se registra como 'ajuste', nunca
+    como compra.
 
-    `factura_total_bs`, si viene, es lo que la factura del proveedor dice en bolívares
-    para TODA la carga — el analista lo escribe cuando el total en dólares que salió de
-    sumar cada línea no coincide con el proveedor (usan una tasa distinta a la del
-    sistema). Cuando viene, reemplaza compra.total (y por lo tanto compra.saldo_pendiente,
-    la deuda real con el proveedor) por factura_total_bs / compra.tasa_cambio_referencia —
-    la MISMA tasa que ya quedó fija en ese lote — sin tocar costo_unitario de ningún
-    ingrediente ni los VGDetalleCompra ya creados: el costeo de recetas sigue basado en lo
-    que cada línea trajo, solo la cuenta por pagar se corrige a lo que realmente se le debe
-    al proveedor.
+    El TOTAL de la factura (compra.total, la deuda real con el proveedor) ya NO se calcula
+    sumando lo que costó cada línea — eso solo sirve para el costeo de ingredientes, arriba.
+    El total viene siempre de `factura_total_bs` o `factura_total_usd` (mutuamente
+    excluyentes; el llamador —admin_ingredientes_import_view— exige exactamente uno de los
+    dos, incluso 0, antes de llegar acá): lo que la factura FÍSICA del proveedor dice, tal
+    cual, sin recalcularlo — porque la suma de líneas puede no coincidir con lo que el
+    proveedor cobra por descuentos, redondeos de precio unitario, o una tasa de cambio
+    distinta a la del sistema (ver el análisis de la factura de Distribuidora Abequi,
+    2026-09, donde una diferencia de un par de centavos por línea sumó casi $1 de más).
+    `factura_total_bs` congela ese monto EXACTO en bolívares (`compra.total_bs_factura`) y
+    lo convierte a dólares con la MISMA tasa que ya quedó fija en ese lote
+    (`compra.tasa_cambio_referencia`), para que un abono posterior por ese mismo monto en
+    bolívares salde la cuenta sin dejar residuo. Ninguno de los dos toca costo_unitario de
+    ningún ingrediente ni los VGDetalleCompra ya creados.
     """
     creados, actualizados, ignorados = 0, 0, 0
     errores = []
@@ -3106,7 +3112,6 @@ def _importar_ingredientes(
                 # "unidad" el precio de compra YA es el precio por unidad — se usa
                 # tal cual, sin dividir entre nada.
                 costo_linea_factura = None
-                monto_linea_factura = None
                 if trio:
                     ingrediente.contenido_envase = trio['contenido_envase']
                     ingrediente.peso_real = trio['peso_real']
@@ -3118,23 +3123,10 @@ def _importar_ingredientes(
                         ingrediente.costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
                         costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
                     update_fields += ['contenido_envase', 'peso_real', 'precio_compra', 'costo_unitario']
-                    if ingrediente.unidad_medida == 'unidad':
-                        # precio_compra ya es el precio por unidad exacta — sin dividir
-                        # entre nada, así que cantidad * precio_compra es exacto siempre.
-                        monto_linea_factura = delta * trio['precio_compra']
-                    elif delta == trio['contenido_envase']:
-                        # Esta entrega es justo un envase completo: el monto exacto es
-                        # precio_compra tal cual, sin pasar por el costo unitario redondeado.
-                        monto_linea_factura = trio['precio_compra']
-                    else:
-                        # La cantidad no calza con un envase entero — no hay otra forma
-                        # que reconstruir multiplicando por el costo unitario redondeado.
-                        monto_linea_factura = delta * costo_linea_factura
                 elif delta > 0 and precio_total is not None:
                     ingrediente.costo_unitario = _costo_unitario_por_compra(precio_total, delta, ingrediente)
                     update_fields.append('costo_unitario')
                     costo_linea_factura = (precio_total / delta).quantize(Decimal('0.000001'))
-                    monto_linea_factura = precio_total
 
                 if cambia_stock:
                     ingrediente.stock_actual = stock_anterior + cantidad
@@ -3147,12 +3139,9 @@ def _importar_ingredientes(
                 if delta > 0:
                     lote = _obtener_compra()
                     costo_linea = costo_linea_factura if costo_linea_factura is not None else Decimal('0')
-                    monto_linea = monto_linea_factura if monto_linea_factura is not None else Decimal('0')
                     VGDetalleCompra.objects.create(
                         compra=lote, ingrediente=ingrediente, cantidad=delta, costo_unitario=costo_linea,
                     )
-                    lote.total = lote.total + monto_linea
-                    lote.save(update_fields=['total'])
                     movimiento_compra = lote
 
                 if delta != 0:
@@ -3202,17 +3191,6 @@ def _importar_ingredientes(
                 VGDetalleCompra.objects.create(
                     compra=lote, ingrediente=nuevo, cantidad=cantidad, costo_unitario=costo_linea_factura,
                 )
-                # Ver el comentario equivalente arriba: si esta carga inicial es justo
-                # un envase completo (o el ingrediente es "por unidad"), el monto exacto
-                # es precio_compra tal cual, no la reconstruccion redondeada.
-                if unidad_normalizada == 'unidad':
-                    monto_linea_factura = cantidad * trio['precio_compra']
-                elif cantidad == trio['contenido_envase']:
-                    monto_linea_factura = trio['precio_compra']
-                else:
-                    monto_linea_factura = cantidad * costo_linea_factura
-                lote.total = lote.total + monto_linea_factura
-                lote.save(update_fields=['total'])
                 VGMovimientoInventario.objects.create(
                     ingrediente=nuevo,
                     tipo_movimiento='entrada',
@@ -3224,10 +3202,19 @@ def _importar_ingredientes(
                 creados += 1
 
         if compra is not None:
+            # El total de la factura (la cuenta por pagar real) SIEMPRE es lo que el
+            # analista escribió a mano — nunca la suma de lo que costó cada línea. Esa
+            # suma sirve solo para costear cada ingrediente (costo_linea_factura arriba,
+            # que sí sigue calculándose), pero no para la deuda con el proveedor: el
+            # proveedor cobra lo que dice SU factura, que puede no coincidir con la suma
+            # de líneas por descuentos, redondeos o una tasa distinta a la del sistema
+            # (ver el análisis de la factura de Distribuidora Abequi, 2026-09). El
+            # llamador (admin_ingredientes_import_view) exige que venga exactamente uno
+            # de los dos, en dólares o en bolívares — acá solo se aplica el que haya.
             if factura_total_bs is not None:
                 if not compra.tasa_cambio_referencia or compra.tasa_cambio_referencia <= 0:
                     errores.append(
-                        'No se pudo ajustar el total a lo que dice la factura en bolívares: '
+                        'No se pudo registrar el total de la factura en bolívares: '
                         'este lote no quedó con una tasa de cambio de referencia.'
                     )
                 else:
@@ -3239,7 +3226,12 @@ def _importar_ingredientes(
                     # más adelante (reportado 2026-09).
                     compra.total = (factura_total_bs / compra.tasa_cambio_referencia).quantize(Decimal('0.000001'))
                     compra.total_bs_factura = factura_total_bs.quantize(Decimal('0.01'))
-                    compra.save(update_fields=['total', 'total_bs_factura'])
+                    compra.moneda_origen = 'VES'
+                    compra.save(update_fields=['total', 'total_bs_factura', 'moneda_origen'])
+            elif factura_total_usd is not None:
+                compra.total = factura_total_usd.quantize(Decimal('0.000001'))
+                compra.moneda_origen = 'USD'
+                compra.save(update_fields=['total', 'moneda_origen'])
             _finalizar_estado_pago_compra(compra)
 
     return {
@@ -3300,15 +3292,43 @@ def admin_ingredientes_import_view(request):
             except ValueError:
                 return _auth_response({'ok': False, 'message': 'La fecha de la factura no es valida.'}, status=400)
 
+        # El total ya no se calcula sumando líneas (ver el docstring de
+        # _importar_ingredientes): el analista tiene que escribir a mano lo que dice
+        # la factura física del proveedor, en dólares O en bolívares (nunca los dos),
+        # exigido acá mismo — incluso $0/Bs 0 es válido (ej. mercancía de cortesía),
+        # pero el campo vacío no, así que compara contra '' explícitamente en vez de
+        # tratar un 0 como "no vino nada".
         factura_total_bs_raw = data.get('factura_total_bs')
+        factura_total_usd_raw = data.get('factura_total_usd')
+        tiene_bs = factura_total_bs_raw not in (None, '')
+        tiene_usd = factura_total_usd_raw not in (None, '')
+        if tiene_bs and tiene_usd:
+            return _auth_response({
+                'ok': False,
+                'message': 'Indica el total de la factura solo en dólares o solo en bolívares, no en los dos.',
+            }, status=400)
+        if not tiene_bs and not tiene_usd:
+            return _auth_response({
+                'ok': False,
+                'message': 'Escribe el total de la factura (en $ o en Bs) para poder importar — usa 0 si es una cortesía sin costo.',
+            }, status=400)
+
         factura_total_bs = None
-        if factura_total_bs_raw not in (None, ''):
+        factura_total_usd = None
+        if tiene_bs:
             try:
                 factura_total_bs = Decimal(str(factura_total_bs_raw))
             except InvalidOperation:
                 return _auth_response({'ok': False, 'message': 'El monto de la factura en bolívares no es válido.'}, status=400)
             if factura_total_bs < 0:
                 return _auth_response({'ok': False, 'message': 'El monto de la factura en bolívares no puede ser negativo.'}, status=400)
+        else:
+            try:
+                factura_total_usd = Decimal(str(factura_total_usd_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto de la factura en dólares no es válido.'}, status=400)
+            if factura_total_usd < 0:
+                return _auth_response({'ok': False, 'message': 'El monto de la factura en dólares no puede ser negativo.'}, status=400)
 
         resumen = _importar_ingredientes(
             items, request.user,
@@ -3316,6 +3336,7 @@ def admin_ingredientes_import_view(request):
             numero_factura_proveedor=numero_factura_proveedor,
             fecha_factura=fecha_factura,
             factura_total_bs=factura_total_bs,
+            factura_total_usd=factura_total_usd,
         )
         return _auth_response({'ok': True, **resumen})
 
@@ -3483,6 +3504,18 @@ def _serialize_compra(compra, incluir_detalle=False):
         saldo_pendiente_bs = (total_bs - abonado_bs).quantize(Decimal('0.01'))
         if saldo_pendiente_bs <= Decimal('0.00'):
             saldo_pendiente_bs = Decimal('0.00')
+    elif compra.moneda_origen == 'USD':
+        # La deuda real está en dólares (el analista la escribió así al cargar
+        # el Excel, ver factura_total_usd en _importar_ingredientes) — a
+        # diferencia de una factura en bolívares, acá SÍ tiene sentido mostrar
+        # cuántos bolívares cuesta HOY, con la tasa BCV vigente (la última
+        # que haya en caché, sin forzar una consulta nueva al BCV), en vez de
+        # quedarse pegado a la tasa del día en que se cargó la factura — igual
+        # que ya hace _serialize_gasto para un gasto en dólares.
+        tasa_actual = obtener_tasa_actual()
+        tasa_para_bs = tasa_actual.tasa if tasa_actual else compra.tasa_cambio_referencia
+        total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
+        saldo_pendiente_bs = (compra.saldo_pendiente * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
     else:
         tasa_para_bs = compra.tasa_cambio_referencia
         total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
@@ -3501,6 +3534,7 @@ def _serialize_compra(compra, incluir_detalle=False):
         'saldo_pendiente_bs': str(saldo_pendiente_bs) if saldo_pendiente_bs is not None else None,
         'estado_pago': compra.estado_pago,
         'tasa_cambio_referencia': str(compra.tasa_cambio_referencia) if compra.tasa_cambio_referencia is not None else None,
+        'moneda_origen': compra.moneda_origen or None,
         'creado_por': (compra.creado_por.get_full_name() or compra.creado_por.username) if compra.creado_por else '',
         'cantidad_items': compra.detalles.count() if incluir_detalle else None,
     }

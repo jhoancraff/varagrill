@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import ConfirmModal from './ConfirmModal';
 import Toast from './Toast';
 import UnsavedChangesModal from './UnsavedChangesModal';
 import useToast from '../hooks/useToast';
@@ -6,6 +7,14 @@ import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 
 const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
 const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '', total_a_pagar: '' };
+
+function toNumeroOrNull(value) {
+  if (value === '' || value === null || value === undefined) {
+    return null;
+  }
+  const numero = Number(String(value).replace(',', '.'));
+  return Number.isFinite(numero) ? numero : null;
+}
 
 function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [inventory, setInventory] = useState([]);
@@ -16,12 +25,17 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [isNameFocused, setIsNameFocused] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [lote, setLote] = useState(emptyLote);
+  const [monedaTotal, setMonedaTotal] = useState('USD');
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
+  // Aviso aparte (arriba a la izquierda) solo para "falta el total a pagar" —
+  // para que no se confunda con los demás avisos (arriba a la derecha).
+  const { toast: montoToast, showError: showMontoError, hideToast: hideMontoToast } = useToast();
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [summary, setSummary] = useState(null);
   // El borrador en sí ya queda guardado en el servidor apenas se agrega cada
   // ingrediente (ver el docstring de arriba) — lo único que se perdería si el
@@ -187,28 +201,46 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
     }
   };
 
-  const handleConfirm = async (event) => {
+  const totalAPagarTrim = lote.total_a_pagar.trim();
+  const totalAPagarNum = toNumeroOrNull(totalAPagarTrim);
+  const totalAPagarValido = totalAPagarTrim !== '' && totalAPagarNum !== null && totalAPagarNum >= 0;
+
+  const handleConfirmClick = (event) => {
     event.preventDefault();
     if (!lote.proveedor_nombre.trim()) {
       showError('El proveedor es obligatorio para confirmar la carga.');
       return;
     }
+    if (!totalAPagarValido) {
+      hideToast();
+      showMontoError('Debes agregar un monto para el total a pagar (usa 0 si es una cortesía sin costo).');
+      return;
+    }
+    setConfirmModalOpen(true);
+  };
 
+  const handleConfirmSubmit = async () => {
     setConfirming(true);
     try {
+      const { total_a_pagar, ...resto } = lote;
+      const totalField = monedaTotal === 'VES'
+        ? { total_a_pagar_bs: total_a_pagar }
+        : { total_a_pagar };
       const response = await fetch('/api/admin/compras/borrador/confirmar/', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(lote),
+        body: JSON.stringify({ ...resto, ...totalField }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo confirmar la carga.');
       }
+      setConfirmModalOpen(false);
       setSummary(data.compra);
       setBorrador({ id: null, detalles: [], total: '0' });
       setLote(emptyLote);
+      setMonedaTotal('USD');
       markClean({ itemForm, lote: emptyLote });
       showSuccess(data.message || 'Carga confirmada.');
     } catch (error) {
@@ -236,6 +268,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      <Toast toast={montoToast} onClose={hideMontoToast} position="top-left" />
       <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
 
       {loading ? (
@@ -389,7 +422,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
           {hasItems ? (
             <section style={panelStyle}>
               <div style={sectionTitleStyle}>Confirmar carga</div>
-              <form onSubmit={handleConfirm} style={loteFormStyle(isMobile)}>
+              <form onSubmit={handleConfirmClick} style={loteFormStyle(isMobile)}>
                 <input
                   value={lote.proveedor_nombre}
                   onChange={(event) => setLote((c) => ({ ...c, proveedor_nombre: event.target.value }))}
@@ -407,8 +440,12 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                   {confirming ? 'Confirmando...' : 'Confirmar y generar cuenta por pagar'}
                 </button>
               </form>
-              <label style={{ ...fieldStyle, maxWidth: 320 }}>
-                <span style={labelStyle}>Total a pagar (cuenta por pagar)</span>
+              <div style={{ ...fieldStyle, maxWidth: 320 }}>
+                <span style={labelStyle}>Total a pagar (cuenta por pagar) — obligatorio</span>
+                <div style={monedaToggleStyle}>
+                  <button type="button" onClick={() => setMonedaTotal('USD')} style={monedaToggleButtonStyle(monedaTotal === 'USD')}>$</button>
+                  <button type="button" onClick={() => setMonedaTotal('VES')} style={monedaToggleButtonStyle(monedaTotal === 'VES')}>Bs</button>
+                </div>
                 <input
                   type="number"
                   step="0.01"
@@ -416,13 +453,15 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                   value={lote.total_a_pagar}
                   onChange={(event) => setLote((c) => ({ ...c, total_a_pagar: event.target.value }))}
                   style={inputStyle}
-                  placeholder={`Por defecto: $${borrador.total}`}
+                  placeholder={monedaTotal === 'VES' ? 'Total a pagar en Bs' : 'Total a pagar en $'}
+                  required
                 />
-              </label>
+              </div>
               <p style={hintStyle}>
-                Por defecto se cobra la suma de las lineas (${borrador.total}). Si esta carga es una cortesia u
-                obsequio del proveedor, escribe aqui el monto real a pagar — por ejemplo 0 — sin afectar el costo
-                con el que queda valorado el inventario.
+                Ya no se suma solo (suma de las líneas: ${borrador.total}) — escribe el total real a pagar. Si
+                esta carga es una cortesia u obsequio del proveedor, escribe 0, sin afectar el costo con el que
+                queda valorado el inventario. Si la factura del proveedor es en bolívares, cambia a "Bs" — ese
+                monto exacto queda congelado a la tasa de hoy y nunca se recalcula después, ni siquiera al pagarlo.
               </p>
               <p style={hintStyle}>La fecha de la carga se registra automaticamente con la fecha de hoy.</p>
               <button type="button" onClick={handleDiscard} style={secondaryButtonStyle} disabled={discarding}>
@@ -430,6 +469,21 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
               </button>
             </section>
           ) : null}
+
+          <ConfirmModal
+            open={confirmModalOpen}
+            title="Confirmar carga"
+            message={
+              `Vas a registrar este lote por ${monedaTotal === 'VES' ? 'Bs' : '$'} `
+              + `${totalAPagarNum !== null ? totalAPagarNum.toFixed(2) : totalAPagarTrim} como la deuda con el `
+              + 'proveedor (cuenta por pagar). ¿Confirmas que es correcto?'
+            }
+            confirmLabel="Sí, confirmar carga"
+            cancelLabel="Revisar de nuevo"
+            onConfirm={handleConfirmSubmit}
+            onCancel={() => setConfirmModalOpen(false)}
+            busy={confirming}
+          />
 
           {summary ? (
             <section style={panelStyle}>

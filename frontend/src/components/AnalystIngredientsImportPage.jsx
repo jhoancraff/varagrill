@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import BsAmount from './BsAmount';
+import ConfirmModal from './ConfirmModal';
 import Toast from './Toast';
-import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 
 const ACCION_LABELS = {
@@ -24,48 +23,20 @@ function toNumeroOrNull(value) {
   return Number.isFinite(numero) ? numero : null;
 }
 
-// Estima cuánto va a sumar esta fila a la factura del lote — mismo criterio que
-// _importar_ingredientes en el backend (ver admin_ingredientes_import_view),
-// para que el total que se ve ACÁ, antes de confirmar, coincida con
-// "compra_total" que se ve DESPUÉS de confirmar. Se recalcula en el navegador
-// (no se le pide al backend) porque las filas son editables en esta misma
-// pantalla — el total tiene que reaccionar al toque a cada cambio, no solo a
-// la previsualización inicial.
-function calcularMontoLinea(row) {
-  const cantidad = toNumeroOrNull(row.cantidad) || 0;
-  const precioTotal = toNumeroOrNull(row.precio_total);
-  const contenidoEnvase = toNumeroOrNull(row.contenido_envase);
-  const pesoReal = toNumeroOrNull(row.peso_real);
-  const precioCompra = toNumeroOrNull(row.precio_compra);
-  const tieneTrio = contenidoEnvase !== null && pesoReal !== null && precioCompra !== null;
-  const unidad = (row.unidad || row.unidad_actual || '').trim().toLowerCase();
-
-  if (tieneTrio) {
-    if (unidad === 'unidad') {
-      return cantidad * precioCompra;
-    }
-    if (cantidad === contenidoEnvase) {
-      return precioCompra;
-    }
-    if (contenidoEnvase > 0) {
-      return cantidad * (precioCompra / contenidoEnvase);
-    }
-    return 0;
+// Solo para mostrarlo en pantalla con separador de miles (1000 -> "1,000",
+// 1000.5 -> "1,000.5") — el valor que se guarda y se manda al backend
+// (montoFactura) nunca lleva comas, es el número tal cual lo escribió el
+// analista, sin ningún formato.
+function formatearConMiles(valorCrudo) {
+  if (!valorCrudo) {
+    return '';
   }
-
-  // Sin trío, solo un ingrediente YA existente puede recibir esta entrega
-  // usando "precio total" directo — uno nuevo necesita el trío para poder
-  // crearse (ver _importar_ingredientes), así que sin él no hay monto que
-  // estimar todavía.
-  if (row.ingrediente_id && cantidad > 0 && precioTotal !== null) {
-    return precioTotal;
-  }
-
-  return 0;
+  const [entero, decimal] = valorCrudo.split('.');
+  const enteroConComas = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimal !== undefined ? `${enteroConComas}.${decimal}` : enteroConComas;
 }
 
 function AnalystIngredientsImportPage({ isMobile, onBack }) {
-  const tasaCambio = useExchangeRate();
   const fileInputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [rows, setRows] = useState(null);
@@ -73,13 +44,21 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
+  // Aviso aparte (arriba a la izquierda) solo para "falta el monto de la
+  // factura" — para que no se confunda con los demás avisos (arriba a la
+  // derecha) y quede claro que hay que volver a ese campo especificamente.
+  const { toast: montoToast, showError: showMontoError, hideToast: hideMontoToast } = useToast();
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [summary, setSummary] = useState(null);
-  // Monto que el analista escribe a mano al comparar contra la factura en
-  // papel del proveedor — puramente informativo (ver totalRealBs abajo): NO
-  // toca ninguna fila ni lo que se manda al confirmar, solo ayuda a ver de
-  // un vistazo si el total calculado cuadra con lo que el proveedor cobró en
-  // bolívares, que a veces usa una tasa distinta a la que tiene el sistema.
-  const [totalRealBs, setTotalRealBs] = useState('');
+  // El total a pagar por esta factura ya NO lo calcula el sistema sumando lo
+  // que costó cada línea (ver el docstring de _importar_ingredientes en el
+  // backend) — el analista escribe a mano exactamente lo que dice la factura
+  // física del proveedor, en dólares o en bolívares. Si la escribe en
+  // bolívares, ESE monto exacto es lo que queda como deuda con el proveedor
+  // (cuenta por pagar), sin recalcularlo con ninguna tasa después, así que
+  // pagarla con ese mismo monto en bolívares no deja ningún residuo.
+  const [montoFacturaMoneda, setMontoFacturaMoneda] = useState('USD');
+  const [montoFactura, setMontoFactura] = useState('');
 
   const counts = useMemo(() => {
     if (!rows) {
@@ -96,21 +75,27 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     [rows],
   );
 
-  const totalEstimado = useMemo(
-    () => (rows || []).filter((row) => row.selected).reduce((total, row) => total + calcularMontoLinea(row), 0),
-    [rows],
-  );
+  const montoFacturaTrim = montoFactura.trim();
+  const montoFacturaNum = toNumeroOrNull(montoFacturaTrim);
+  const montoFacturaValido = montoFacturaTrim !== '' && montoFacturaNum !== null && montoFacturaNum >= 0;
 
-  const totalRealBsNum = toNumeroOrNull(totalRealBs);
-  const totalRealUsd = totalRealBsNum !== null && tasaCambio > 0 ? totalRealBsNum / tasaCambio : null;
-  const diferenciaUsd = totalRealUsd !== null ? totalRealUsd - totalEstimado : null;
+  const handleMontoFacturaChange = (event) => {
+    // Le quita las comas de miles que el propio formateo visual pudo haber
+    // dejado (o que el analista tecleó) antes de guardar — lo que se guarda
+    // en el estado (y se manda al backend) es siempre el número "limpio".
+    const sinComas = event.target.value.replace(/,/g, '');
+    if (sinComas === '' || /^\d*\.?\d*$/.test(sinComas)) {
+      setMontoFactura(sinComas);
+    }
+  };
 
   const handleFileChange = (event) => {
     const selected = event.target.files && event.target.files[0] ? event.target.files[0] : null;
     setFile(selected);
     setRows(null);
     setSummary(null);
-    setTotalRealBs('');
+    setMontoFactura('');
+    setMontoFacturaMoneda('USD');
   };
 
   const handlePreview = async () => {
@@ -155,18 +140,29 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     setRows((current) => current.map((row) => (row.fila === fila ? { ...row, ...changes } : row)));
   };
 
-  const handleConfirm = async () => {
+  const handleConfirmClick = () => {
+    const items = (rows || []).filter((row) => row.selected);
+    if (items.length === 0) {
+      showError('Marca al menos una fila para importar.');
+      return;
+    }
+
+    if (!montoFacturaValido) {
+      hideToast();
+      showMontoError('Debes agregar un monto para la factura (usa 0 si es una cortesía sin costo).');
+      return;
+    }
+
+    setConfirmModalOpen(true);
+  };
+
+  const handleConfirmSubmit = async () => {
     const items = (rows || [])
       .filter((row) => row.selected)
       .map((row) => ({
         nombre: row.nombre, unidad: row.unidad, cantidad: row.cantidad, precio_total: row.precio_total,
         contenido_envase: row.contenido_envase, peso_real: row.peso_real, precio_compra: row.precio_compra,
       }));
-
-    if (items.length === 0) {
-      showError('Marca al menos una fila para importar.');
-      return;
-    }
 
     setConfirming(true);
     try {
@@ -180,7 +176,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           proveedor_nombre: lote.proveedor_nombre,
           numero_factura_proveedor: lote.numero_factura_proveedor,
           fecha_factura: lote.fecha_factura,
-          factura_total_bs: totalRealBs,
+          ...(montoFacturaMoneda === 'VES' ? { factura_total_bs: montoFacturaTrim } : { factura_total_usd: montoFacturaTrim }),
         }),
       });
       const data = await response.json();
@@ -188,6 +184,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         throw new Error(data.message || 'No se pudo completar la importación.');
       }
 
+      setConfirmModalOpen(false);
       setSummary(data);
       showSuccess('Importación completada.');
     } catch (error) {
@@ -201,7 +198,8 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     setFile(null);
     setRows(null);
     setSummary(null);
-    setTotalRealBs('');
+    setMontoFactura('');
+    setMontoFacturaMoneda('USD');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -222,6 +220,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      <Toast toast={montoToast} onClose={hideMontoToast} position="top-left" />
 
       <section style={panelStyle}>
         <div style={sectionTitleStyle}>Datos del lote (de dónde viene esta carga)</div>
@@ -400,55 +399,72 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
 
           <div style={totalEstimadoBoxStyle}>
             <div style={{ color: '#c8bbbb', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
-              Total estimado a pagar por esta carga
-            </div>
-            <div style={{ color: '#ffcf7d', fontWeight: 800, fontSize: 22 }}>
-              ${totalEstimado.toFixed(2)}
-              <BsAmount amountUsd={totalEstimado} tasa={tasaCambio} style={{ fontSize: '0.55em' }} />
+              Total a pagar por esta factura (obligatorio)
             </div>
             <div style={{ color: '#a89999', fontSize: 12 }}>
-              Revísalo contra la factura del proveedor antes de confirmar — se recalcula solo al editar cantidades o precios.
+              El sistema ya no suma esto por ti — escribe exactamente lo que dice la factura física del
+              proveedor. Si es una cortesía sin costo, escribe 0. Esto no afecta el costo con el que queda
+              valorado el inventario ni las recetas, solo la deuda con el proveedor.
             </div>
 
             <div style={compararBsRowStyle(isMobile)}>
-              <label style={{ display: 'grid', gap: 4 }}>
-                <span style={{ color: '#f0b4b4', fontSize: 12, fontWeight: 700 }}>
-                  ¿La factura del proveedor dice otro monto en Bs? Escríbelo aquí — esto es lo que quedará
-                  como deuda con el proveedor (cuenta por pagar) al confirmar, no el total calculado arriba:
-                </span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={totalRealBs}
-                  onChange={(event) => setTotalRealBs(event.target.value)}
-                  style={{ ...editInputStyle, maxWidth: 220 }}
-                  placeholder="Monto real en Bs"
-                />
-              </label>
-              {totalRealBsNum !== null ? (
-                <div style={{ display: 'grid', gap: 2 }}>
-                  <div style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>
-                    {totalRealUsd !== null ? `≈ $${totalRealUsd.toFixed(2)} a la tasa de hoy — este será el total de la cuenta por pagar` : 'Sin tasa disponible para convertir'}
-                  </div>
-                  {diferenciaUsd !== null && Math.abs(diferenciaUsd) > 0.01 ? (
-                    <div style={{ color: diferenciaUsd > 0 ? '#ffb0b0' : '#8fffb0', fontSize: 12.5, fontWeight: 700 }}>
-                      {diferenciaUsd > 0 ? 'Falta cargar' : 'Sobra'} ${Math.abs(diferenciaUsd).toFixed(2)} frente al total calculado por líneas.
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              <div style={monedaToggleStyle}>
+                <button
+                  type="button"
+                  onClick={() => setMontoFacturaMoneda('USD')}
+                  style={monedaToggleButtonStyle(montoFacturaMoneda === 'USD')}
+                >
+                  Dólares ($)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMontoFacturaMoneda('VES')}
+                  style={monedaToggleButtonStyle(montoFacturaMoneda === 'VES')}
+                >
+                  Bolívares (Bs)
+                </button>
+              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={formatearConMiles(montoFactura)}
+                onChange={handleMontoFacturaChange}
+                style={{ ...editInputStyle, maxWidth: 220 }}
+                placeholder={montoFacturaMoneda === 'VES' ? 'Total de la factura en Bs' : 'Total de la factura en $'}
+                required
+              />
             </div>
           </div>
 
           <div style={confirmRowStyle(isMobile)}>
             <div style={{ color: '#c8bbbb', fontSize: 13 }}>{selectedCount} fila(s) seleccionada(s) para importar</div>
-            <button type="button" onClick={handleConfirm} style={primaryButtonStyle} disabled={confirming || selectedCount === 0}>
+            <button
+              type="button"
+              onClick={handleConfirmClick}
+              style={primaryButtonStyle}
+              disabled={confirming || selectedCount === 0}
+            >
               {confirming ? 'Importando...' : 'Confirmar importación'}
             </button>
           </div>
         </section>
       ) : null}
+
+      <ConfirmModal
+        open={confirmModalOpen}
+        title="Confirmar importación"
+        message={
+          `Vas a registrar esta factura por ${montoFacturaMoneda === 'VES' ? 'Bs' : '$'} `
+          + `${montoFacturaNum !== null ? montoFacturaNum.toFixed(2) : montoFacturaTrim} como la deuda con el `
+          + 'proveedor (cuenta por pagar). Esto no recalcula nada por líneas: quedará exactamente ese monto. '
+          + '¿Confirmas que es correcto?'
+        }
+        confirmLabel="Sí, confirmar importación"
+        cancelLabel="Revisar de nuevo"
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setConfirmModalOpen(false)}
+        busy={confirming}
+      />
 
       {summary ? (
         <section style={panelStyle}>
@@ -509,8 +525,15 @@ const cellPrimaryStyle = { ...cellStyle };
 const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '6px 8px', color: '#fff', fontSize: 13 };
 
 const confirmRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
-const totalEstimadoBoxStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255, 176, 59, 0.35)', background: 'rgba(255, 176, 59, 0.08)' };
-const compararBsRowStyle = (isMobile) => ({ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 16, marginTop: 8, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,0.12)', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'flex-end' });
+const totalEstimadoBoxStyle = { display: 'grid', gap: 8, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255, 176, 59, 0.35)', background: 'rgba(255, 176, 59, 0.08)' };
+const compararBsRowStyle = (isMobile) => ({ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 4, alignItems: isMobile ? 'stretch' : 'center', flexDirection: isMobile ? 'column' : 'row' });
+const monedaToggleStyle = { display: 'flex', gap: 6 };
+const monedaToggleButtonStyle = (activo) => ({
+  border: activo ? 'none' : '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '9px 12px',
+  fontSize: 12.5, fontWeight: 800, cursor: 'pointer',
+  background: activo ? 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)' : 'rgba(255,255,255,0.04)',
+  color: activo ? '#04140a' : '#d2c4c4',
+});
 
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };

@@ -318,21 +318,44 @@ def admin_compra_borrador_confirmar_view(request):
         return _auth_response({'ok': False, 'message': 'El proveedor es obligatorio para confirmar la carga.'}, status=400)
     numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
 
-    # El "total a pagar" se puede ajustar al confirmar, por fuera de la suma de
-    # las líneas — por ejemplo mercancía de cortesía/obsequio del proveedor,
-    # que sí debe entrar al inventario con su costo real (por eso NO se toca
-    # el costeo por línea más abajo) pero no debe generar deuda, así que el
-    # analista puede dejar la cuenta por pagar en $0 aunque las líneas sumen
-    # más. Si no se manda, se usa la suma calculada de siempre.
+    # El total a pagar YA NO se calcula solo (nunca se asume la suma de las
+    # líneas): el analista tiene que escribirlo a mano, en dólares o en
+    # bolívares (nunca los dos) — obligatorio, incluso 0 (mercancía de
+    # cortesía/obsequio del proveedor, que igual entra al inventario con su
+    # costo real, ver el costeo por línea más abajo, sin generar deuda). Esto
+    # es lo mismo que ya exige admin_ingredientes_import_view para la
+    # importación por Excel.
     total_a_pagar_raw = data.get('total_a_pagar')
+    total_a_pagar_bs_raw = data.get('total_a_pagar_bs')
+    tiene_override_usd = total_a_pagar_raw not in (None, '')
+    tiene_override_bs = total_a_pagar_bs_raw not in (None, '')
+    if tiene_override_usd and tiene_override_bs:
+        return _auth_response({
+            'ok': False,
+            'message': 'Ingresa el total a pagar solo en dólares o solo en bolívares, no en los dos.',
+        }, status=400)
+    if not tiene_override_usd and not tiene_override_bs:
+        return _auth_response({
+            'ok': False,
+            'message': 'Escribe el total a pagar (en $ o en Bs) para poder confirmar la carga — usa 0 si es una cortesía sin costo.',
+        }, status=400)
+
     total_a_pagar_override = None
-    if total_a_pagar_raw not in (None, ''):
+    total_a_pagar_bs_override = None
+    if tiene_override_usd:
         try:
             total_a_pagar_override = Decimal(str(total_a_pagar_raw))
         except InvalidOperation:
             return _auth_response({'ok': False, 'message': 'El total a pagar no es válido.'}, status=400)
         if total_a_pagar_override < 0:
             return _auth_response({'ok': False, 'message': 'El total a pagar no puede ser negativo.'}, status=400)
+    elif tiene_override_bs:
+        try:
+            total_a_pagar_bs_override = Decimal(str(total_a_pagar_bs_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'El total a pagar en bolívares no es válido.'}, status=400)
+        if total_a_pagar_bs_override < 0:
+            return _auth_response({'ok': False, 'message': 'El total a pagar en bolívares no puede ser negativo.'}, status=400)
 
     borrador = _get_borrador_abierto()
     if borrador is None or not borrador.detalles.exists():
@@ -348,7 +371,6 @@ def admin_compra_borrador_confirmar_view(request):
             actualizado_por=request.user,
         )
 
-        total = Decimal('0')
         for detalle in borrador.detalles.select_related('ingrediente'):
             ingrediente = detalle.ingrediente
             costo_unitario = _costo_unitario_por_compra(detalle.precio_total, detalle.cantidad, ingrediente)
@@ -369,16 +391,31 @@ def admin_compra_borrador_confirmar_view(request):
                 compra=compra,
                 creado_por=request.user,
             )
-            total += detalle.precio_total
 
-        # 6 decimales, no 2 — si `total` viene de sumar lineas cargadas en
-        # bolivares (con 6 decimales de precision cada una), redondear la
-        # suma a centavos aca de una vez perdia esa precision desde el
-        # origen, antes de que la compra tuviera oportunidad de cobrarse.
-        compra.total = (
-            total_a_pagar_override if total_a_pagar_override is not None else total
-        ).quantize(Decimal('0.000001'))
-        compra.save(update_fields=['total'])
+        if total_a_pagar_bs_override is not None:
+            if not compra.tasa_cambio_referencia or compra.tasa_cambio_referencia <= 0:
+                return _auth_response({
+                    'ok': False,
+                    'message': 'No hay tasa de cambio disponible para convertir el total a dólares.',
+                }, status=400)
+            # 6 decimales, no 2 (ver el comentario en VGCompra.total): redondear
+            # a centavos aquí desalineaba saldo_pendiente de total_bs_factura y
+            # dejaba un residuo al pagar exactamente ese monto en bolívares.
+            compra.total = (total_a_pagar_bs_override / compra.tasa_cambio_referencia).quantize(Decimal('0.000001'))
+            compra.total_bs_factura = total_a_pagar_bs_override.quantize(Decimal('0.01'))
+            compra.moneda_origen = 'VES'
+            compra.save(update_fields=['total', 'total_bs_factura', 'moneda_origen'])
+        else:
+            # 6 decimales, no 2 (ver el comentario en VGCompra.total).
+            compra.total = total_a_pagar_override.quantize(Decimal('0.000001'))
+            # La deuda real de este lote es en dólares (lo que el analista
+            # escribió) — el equivalente en bolívares que se le muestre
+            # después se recalcula con la tasa BCV vigente en cada momento, no
+            # con la tasa del día en que se cargó (ver moneda_origen en el
+            # modelo y _serialize_compra/compra_abono_view), igual que ya se
+            # hace para la importación por Excel.
+            compra.moneda_origen = 'USD'
+            compra.save(update_fields=['total', 'moneda_origen'])
         _finalizar_estado_pago_compra(compra)
 
         borrador.delete()
@@ -501,20 +538,27 @@ def compra_abono_view(request, compra_id):
             if monto_bs <= 0:
                 return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
 
-            # Se paga con la MISMA tasa que quedó congelada en la compra (la
-            # que se usa para mostrarle al analista "debes Bs. X" en cuentas
-            # por pagar) — NUNCA con la tasa de HOY. Si se pagara con la tasa
-            # del día del abono, pagar exactamente el monto en bolívares que
-            # se le muestra al analista podía dejar unos bolívares pendientes
-            # apenas el BCV se movía entre que se cargó la compra y se pagó
-            # (reportado 2026-09, lote #26: la deuda se mostraba en Bs. X con
-            # la tasa congelada, pero el pago se convertía con la tasa de hoy,
-            # más alta, así que ese mismo monto en bolívares valía menos
-            # dólares de lo esperado y quedaba un residuo).
-            tasa_abono = compra.tasa_cambio_referencia
-            if not tasa_abono or tasa_abono <= 0:
+            # La MISMA tasa que usa _serialize_compra para mostrarle al
+            # analista "debes Bs. X" — para que pagar exactamente ese monto en
+            # bolívares salde la deuda completa. Una compra en bolívares (o
+            # sin moneda_origen registrada, el comportamiento de siempre) usa
+            # la tasa que quedó CONGELADA al cargarla — NUNCA la de hoy, para
+            # que el BCV moviéndose entre que se cargó y se pagó no deje
+            # residuo (reportado 2026-09, lote #26). Una compra cargada en
+            # DÓLARES (por ahora solo desde la importación por Excel, ver
+            # VGCompra.moneda_origen) es distinta: la deuda real está en
+            # dólares, así que un pago en bolívares se convierte con la tasa
+            # BCV VIGENTE (la de HOY), igual que ya hace gasto_abono_view para
+            # un gasto en dólares — mezclar las dos tasas es justo lo que
+            # dejaba residuos o rechazaba el pago final.
+            if compra.moneda_origen == 'USD':
                 tasa_actual = obtener_tasa_actual()
-                tasa_abono = tasa_actual.tasa if tasa_actual else None
+                tasa_abono = tasa_actual.tasa if tasa_actual else compra.tasa_cambio_referencia
+            else:
+                tasa_abono = compra.tasa_cambio_referencia
+                if not tasa_abono or tasa_abono <= 0:
+                    tasa_actual = obtener_tasa_actual()
+                    tasa_abono = tasa_actual.tasa if tasa_actual else None
             if not tasa_abono or tasa_abono <= 0:
                 return _auth_response({
                     'ok': False,
@@ -560,16 +604,25 @@ def compra_abono_view(request, compra_id):
         compra.saldo_pendiente = (
             Decimal('0') if saldo_restante <= TOLERANCIA_CIERRE_ABONO else saldo_restante
         )
-        # Red de seguridad adicional para compras de ANTES de este arreglo:
-        # la deuda "real" en bolívares es `total_bs_factura` si se cargó así,
-        # o si no, el total en dólares valorado con la tasa que quedó
-        # congelada en la compra — la MISMA cuenta que ve el analista como
-        # "debes Bs. X". Si abonos VIEJOS quedaron convertidos con la tasa
-        # del día de cada pago en vez de la tasa de la compra (antes de que
-        # compra_abono_view empezara a usar siempre la tasa de la compra),
-        # esto perdona el residuo de esa inconsistencia histórica.
+        # Red de seguridad adicional para compras de ANTES de este arreglo, y
+        # solo para las que NO están en dólares: para una compra en dólares
+        # (moneda_origen='USD') cada abono en bolívares ya se convierte con la
+        # tasa vigente del día en que se pagó (ver arriba), así que sumarlos
+        # y compararlos contra el total valorado con la tasa VIEJA congelada
+        # de cuando se cargó mezclaría dos tasas distintas — la tolerancia en
+        # dólares de más arriba ya alcanza para esas. Para el resto (en
+        # bolívares, o sin moneda_origen registrada): la deuda "real" en
+        # bolívares es `total_bs_factura` si se cargó así, o si no, el total
+        # en dólares valorado con la tasa que quedó congelada en la compra —
+        # la MISMA cuenta que ve el analista como "debes Bs. X". Si abonos
+        # VIEJOS quedaron convertidos con la tasa del día de cada pago en vez
+        # de la tasa de la compra (antes de que compra_abono_view empezara a
+        # usar siempre la tasa de la compra), esto perdona el residuo de esa
+        # inconsistencia histórica.
         deuda_bs = (
-            compra.total_bs_factura
+            None
+            if compra.moneda_origen == 'USD'
+            else compra.total_bs_factura
             if compra.total_bs_factura is not None
             else (compra.total * compra.tasa_cambio_referencia).quantize(Decimal('0.01'))
             if compra.tasa_cambio_referencia

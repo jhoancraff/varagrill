@@ -598,7 +598,10 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
             if opcion.producto_id:
                 # Acompañante de un grupo dinámico (ej. "Yuca al vapor" elegida de
                 # Guarniciones): descuenta según SU PROPIA receta, escalada por raciones
-                # (ver _resolver_multiplicador_acompanante) si el grupo las define.
+                # (ver _resolver_multiplicador_acompanante) si el grupo las define. La receta de
+                # ese producto debe estar definida "por ración" (ej. un producto por unidad, sin
+                # venta_por_peso, con 150g de yuca = 1 unidad) para que raciones x receta dé el
+                # descuento correcto — igual que ya funciona un acompañante curado (Arepas).
                 for component in _product_recipe_components(opcion.producto):
                     amount = component['cantidad'] * multiplicador
                     if component['tipo'] == 'ingrediente':

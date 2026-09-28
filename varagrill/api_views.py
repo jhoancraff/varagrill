@@ -45,6 +45,7 @@ from .models import (
     VGPreparacion,
     VGPromocion,
     VGProducto,
+    VGRacionAcompanante,
     VGRecetaProducto,
     VGRecetaPreparacion,
     VGRecomendacionChef,
@@ -565,6 +566,21 @@ def _resolver_multiplicador_acompanante(opcion, detalle, cantidad_platos):
     return Decimal(detalle.cantidad) * raciones
 
 
+def _buscar_fila_racion_acompanante(grupo_id, producto_id, peso_gramos):
+    """
+    Busca en VGRacionAcompanante la fila de este grupo+producto cuyo peso_tramo está más
+    cerca de `peso_gramos` — cuando hay al menos una fila configurada para ese
+    grupo+producto, SIEMPRE devuelve una (nunca None), incluso para un peso fuera del
+    rango configurado: usa el tramo más chico si el peso pedido es menor a todos, o el
+    más grande si es mayor a todos. Devuelve None solo si no hay ninguna fila (ese
+    grupo+producto no usa tabla, cae al cálculo de gramos_base_racion de siempre).
+    """
+    filas = list(VGRacionAcompanante.objects.filter(grupo_id=grupo_id, producto_id=producto_id))
+    if not filas:
+        return None
+    return min(filas, key=lambda fila: abs(fila.peso_tramo - peso_gramos))
+
+
 def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation):
     """
     Cuánto de cada VGIngrediente hay que descontar del inventario al cobrar `pedido`: recorre
@@ -594,14 +610,27 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
             )
 
         for opcion in detalle.opciones.all():
-            multiplicador = _resolver_multiplicador_acompanante(opcion, detalle, cantidad_platos)
             if opcion.producto_id:
                 # Acompañante de un grupo dinámico (ej. "Yuca al vapor" elegida de
-                # Guarniciones): descuenta según SU PROPIA receta, escalada por raciones
-                # (ver _resolver_multiplicador_acompanante) si el grupo las define. La receta de
-                # ese producto debe estar definida "por ración" (ej. un producto por unidad, sin
-                # venta_por_peso, con 150g de yuca = 1 unidad) para que raciones x receta dé el
-                # descuento correcto — igual que ya funciona un acompañante curado (Arepas).
+                # Guarniciones): descuenta según SU PROPIA receta. Si el grupo tiene una
+                # tabla de raciones por tamaño (VGRacionAcompanante — para cuando las
+                # porciones no siguen ninguna fórmula, solo valores fijos por tamaño),
+                # esa tabla manda: la cantidad de esa fila (gramos si el producto es
+                # venta_por_peso, unidades si no) se usa directo, sin pasar por
+                # gramos_base_racion. Si no hay tabla, cae al cálculo de raciones de
+                # siempre (_resolver_multiplicador_acompanante) — ahí la receta del
+                # acompañante debe estar definida "por ración" (ej. un producto por
+                # unidad, sin venta_por_peso, con 150g de yuca = 1 unidad).
+                fila_tabla = (
+                    _buscar_fila_racion_acompanante(opcion.grupo_id, opcion.producto_id, detalle.peso_gramos)
+                    if opcion.grupo_id and detalle.peso_gramos else None
+                )
+                if fila_tabla is not None:
+                    multiplicador = Decimal(detalle.cantidad) * (
+                        (fila_tabla.cantidad / Decimal('1000')) if opcion.producto.venta_por_peso else fila_tabla.cantidad
+                    )
+                else:
+                    multiplicador = _resolver_multiplicador_acompanante(opcion, detalle, cantidad_platos)
                 for component in _product_recipe_components(opcion.producto):
                     amount = component['cantidad'] * multiplicador
                     if component['tipo'] == 'ingrediente':
@@ -612,6 +641,7 @@ def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_b
                             components_by_preparation, yields_by_preparation, needs, set(),
                         )
                 continue
+            multiplicador = _resolver_multiplicador_acompanante(opcion, detalle, cantidad_platos)
             _add_preparation_needs(
                 opcion.preparacion_id, multiplicador,
                 components_by_preparation, yields_by_preparation, needs, set(),
@@ -4101,6 +4131,15 @@ def _serialize_product(product):
                     }
                     for opcion in grupo.opciones.all()
                 ],
+                'raciones_por_peso': [
+                    {
+                        'peso_tramo': fila.peso_tramo,
+                        'producto_id': fila.producto_id,
+                        'producto_nombre': fila.producto.nombre,
+                        'cantidad': str(fila.cantidad),
+                    }
+                    for fila in grupo.raciones_por_peso.select_related('producto').all()
+                ],
             }
             for grupo in product.grupos_opciones.all()
         ],
@@ -4202,6 +4241,42 @@ def _parse_grupos_opciones(raw_grupos):
                 if maximo_selecciones <= 0:
                     return None, f'El máximo de selecciones del grupo "{nombre}" debe ser mayor a cero.'
 
+            # Tabla de raciones por tamaño (VGRacionAcompanante) — alternativa a
+            # gramos_base_racion para cuando las porciones no siguen ninguna fórmula, solo
+            # valores fijos por tamaño de plato (ver el docstring del modelo). Cada fila:
+            # {"peso_tramo": int, "producto_id": int, "cantidad": str}.
+            raw_raciones_por_peso = grupo.get('raciones_por_peso') or []
+            if not isinstance(raw_raciones_por_peso, list):
+                return None, f'Formato inválido de la tabla de raciones del grupo "{nombre}".'
+            parsed_raciones_por_peso = []
+            vistos = set()
+            for fila_index, fila in enumerate(raw_raciones_por_peso, start=1):
+                if not isinstance(fila, dict):
+                    return None, f'La fila #{fila_index} de la tabla de raciones de "{nombre}" tiene formato inválido.'
+                try:
+                    peso_tramo = int(fila.get('peso_tramo'))
+                except (TypeError, ValueError):
+                    return None, f'El tamaño de la fila #{fila_index} de la tabla de raciones de "{nombre}" no es válido.'
+                if peso_tramo <= 0:
+                    return None, f'El tamaño de la fila #{fila_index} de la tabla de raciones de "{nombre}" debe ser mayor a cero.'
+                try:
+                    fila_producto_id = int(fila.get('producto_id'))
+                except (TypeError, ValueError):
+                    return None, f'El producto de la fila #{fila_index} de la tabla de raciones de "{nombre}" no es válido.'
+                try:
+                    cantidad_fila = Decimal(str(fila.get('cantidad')))
+                except (InvalidOperation, TypeError):
+                    return None, f'La cantidad de la fila #{fila_index} de la tabla de raciones de "{nombre}" no es válida.'
+                if cantidad_fila <= 0:
+                    return None, f'La cantidad de la fila #{fila_index} de la tabla de raciones de "{nombre}" debe ser mayor a cero.'
+                clave = (peso_tramo, fila_producto_id)
+                if clave in vistos:
+                    return None, f'La tabla de raciones de "{nombre}" repite el mismo producto en el mismo tamaño.'
+                vistos.add(clave)
+                parsed_raciones_por_peso.append({
+                    'peso_tramo': peso_tramo, 'producto_id': fila_producto_id, 'cantidad': cantidad_fila,
+                })
+
             categoria_ids.add(categoria_opciones_id)
             parsed_grupos.append({
                 'nombre': nombre,
@@ -4211,6 +4286,7 @@ def _parse_grupos_opciones(raw_grupos):
                 'maximo_selecciones': maximo_selecciones,
                 'gramos_base_racion': gramos_base_racion,
                 'opciones': [],
+                'raciones_por_peso': parsed_raciones_por_peso,
             })
             continue
 
@@ -4245,6 +4321,7 @@ def _parse_grupos_opciones(raw_grupos):
             'maximo_selecciones': None,
             'gramos_base_racion': gramos_base_racion,
             'opciones': parsed_opciones,
+            'raciones_por_peso': [],
         })
 
     preparaciones_map = {
@@ -4264,6 +4341,18 @@ def _parse_grupos_opciones(raw_grupos):
         for grupo in parsed_grupos:
             if grupo['categoria_opciones_id'] is not None and grupo['categoria_opciones_id'] not in categorias_map:
                 return None, f'La categoría de opciones del grupo "{grupo["nombre"]}" no existe.'
+
+    racion_producto_ids = {
+        fila['producto_id'] for grupo in parsed_grupos for fila in grupo['raciones_por_peso']
+    }
+    if racion_producto_ids:
+        productos_existentes = set(
+            VGProducto.objects.filter(id__in=racion_producto_ids).values_list('id', flat=True)
+        )
+        for grupo in parsed_grupos:
+            for fila in grupo['raciones_por_peso']:
+                if fila['producto_id'] not in productos_existentes:
+                    return None, f'Uno de los productos de la tabla de raciones de "{grupo["nombre"]}" no existe.'
 
     return parsed_grupos, None
 
@@ -4567,6 +4656,16 @@ def admin_products_view(request):
                         orden=opcion_orden,
                     )
                     for opcion_orden, opcion in enumerate(grupo_data['opciones'])
+                ])
+            if grupo_data['raciones_por_peso']:
+                VGRacionAcompanante.objects.bulk_create([
+                    VGRacionAcompanante(
+                        grupo=grupo,
+                        producto_id=fila['producto_id'],
+                        peso_tramo=fila['peso_tramo'],
+                        cantidad=fila['cantidad'],
+                    )
+                    for fila in grupo_data['raciones_por_peso']
                 ])
 
     return _auth_response({

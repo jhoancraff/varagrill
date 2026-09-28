@@ -65,6 +65,15 @@ from varagrill.api_views import (
     reporte_margen_ganancia_view,
     tasa_cambio_view,
 )
+from varagrill.ajustes_inventario_views import (
+    admin_ajuste_inventario_agregar_view,
+    admin_ajuste_inventario_descartar_view,
+    admin_ajuste_inventario_editar_view,
+    admin_ajuste_inventario_guardar_view,
+    admin_ajuste_inventario_quitar_view,
+    admin_ajuste_inventario_view,
+    admin_cierre_inventario_view,
+)
 from varagrill.compras_views import (
     admin_compra_borrador_agregar_view,
     admin_compra_borrador_confirmar_view,
@@ -153,6 +162,13 @@ urlpatterns = [
     path('api/admin/compras/borrador/quitar/', admin_compra_borrador_quitar_view, name='admin-compra-borrador-quitar'),
     path('api/admin/compras/borrador/descartar/', admin_compra_borrador_descartar_view, name='admin-compra-borrador-descartar'),
     path('api/admin/compras/borrador/confirmar/', admin_compra_borrador_confirmar_view, name='admin-compra-borrador-confirmar'),
+    path('api/admin/inventario/ajuste/', admin_ajuste_inventario_view, name='admin-ajuste-inventario'),
+    path('api/admin/inventario/ajuste/agregar/', admin_ajuste_inventario_agregar_view, name='admin-ajuste-inventario-agregar'),
+    path('api/admin/inventario/ajuste/editar/', admin_ajuste_inventario_editar_view, name='admin-ajuste-inventario-editar'),
+    path('api/admin/inventario/ajuste/quitar/', admin_ajuste_inventario_quitar_view, name='admin-ajuste-inventario-quitar'),
+    path('api/admin/inventario/ajuste/guardar/', admin_ajuste_inventario_guardar_view, name='admin-ajuste-inventario-guardar'),
+    path('api/admin/inventario/ajuste/descartar/', admin_ajuste_inventario_descartar_view, name='admin-ajuste-inventario-descartar'),
+    path('api/admin/inventario/cierre/', admin_cierre_inventario_view, name='admin-cierre-inventario'),
     path('api/cuentas-por-pagar/', cuentas_por_pagar_view, name='cuentas-por-pagar'),
     path('api/admin/gastos/', admin_gastos_view, name='admin-gastos'),
     path('api/admin/gastos/<int:gasto_id>/', gasto_detail_view, name='admin-gasto-detail'),

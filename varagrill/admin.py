@@ -4,7 +4,8 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from .models import (
     VGUsuario, VGRol, VGMesa, VGCliente, VGCategoriaProducto, VGProducto,
     VGIngrediente, VGPreparacion, VGRecetaPreparacion, VGRecetaProducto,
-    VGCompra, VGDetalleCompra, VGMovimientoInventario, VGPedido, VGDetallePedido, VGPago, VGPromocion, VGRecomendacionChef
+    VGCompra, VGDetalleCompra, VGMovimientoInventario, VGPedido, VGDetallePedido, VGPago, VGPromocion, VGRecomendacionChef,
+    VGAjusteInventario, VGDetalleAjusteInventario, VGCierreInventario,
 )
 
 
@@ -105,3 +106,21 @@ class VGRecomendacionChefPanel(admin.ModelAdmin):
     list_display = ("producto", "fecha", "activo")
     list_filter = ("activo", "fecha")
     search_fields = ("producto__nombre",)
+
+
+class VGDetalleAjusteInventarioSeccion(admin.TabularInline):
+    model = VGDetalleAjusteInventario
+    extra = 0
+
+
+@admin.register(VGAjusteInventario)
+class VGAjusteInventarioPanel(admin.ModelAdmin):
+    list_display = ("id", "anio", "mes", "estado", "fecha_creacion")
+    list_filter = ("estado", "anio", "mes")
+    inlines = [VGDetalleAjusteInventarioSeccion]
+
+
+@admin.register(VGCierreInventario)
+class VGCierreInventarioPanel(admin.ModelAdmin):
+    list_display = ("anio", "mes", "fecha_cierre")
+    list_filter = ("anio", "mes")

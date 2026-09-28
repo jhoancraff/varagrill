@@ -366,7 +366,10 @@ class VGGrupoOpcionProducto(models.Model):
             "(ej: 250 = 1 ración de guarnición por cada 250g de carne pedidos). Solo tiene efecto en "
             "productos vendidos por peso; si el peso no cae en un múltiplo exacto, se redondea a la "
             "ración más cercana (mínimo 1 ración). Vacío = el acompañante se descuenta a la par del "
-            "peso del plato, sin lógica de raciones."
+            "peso del plato, sin lógica de raciones. Si el grupo tiene filas en "
+            "VGRacionAcompanante (tabla de raciones por tamaño), esas filas mandan y este campo se "
+            "ignora — sirve para cuando las porciones no siguen ninguna fórmula, solo una tabla fija "
+            "por tamaño (ver esa tabla, reportado 2026-09 con la tarjeta física de referencia)."
         ),
     )
     orden = models.PositiveSmallIntegerField(default=0)
@@ -379,6 +382,52 @@ class VGGrupoOpcionProducto(models.Model):
 
     def __str__(self):
         return f"{self.producto} — {self.nombre}"
+
+
+class VGRacionAcompanante(models.Model):
+    """
+    Una celda de la "tabla de raciones por tamaño" de un grupo de acompañante dinámico
+    (VGGrupoOpcionProducto.categoria_opciones) — cuánto descontar de UN producto
+    acompañante cuando el plato principal pesa UN tamaño específico. Reemplaza el
+    cálculo lineal de gramos_base_racion cuando las porciones no siguen ninguna fórmula
+    (ej. una tarjeta física de referencia con valores fijos y desiguales por tamaño:
+    250g→150g de yuca, 500g→200g, 750g→300g, 1000g→400g — reportado 2026-09).
+
+    `cantidad` está en gramos si el producto acompañante es venta_por_peso (ej. Yuca
+    sancochada), o en unidades si no (ej. "3 UND" de Patacón) — el mismo criterio que ya
+    usa VGProducto.precio_venta ($/kg vs $/unidad) para decidir qué representa el número.
+
+    Si el peso pedido no coincide exacto con ningún peso_tramo configurado (ej. piden
+    600g y solo hay filas de 500 y 750), se usa el tramo más cercano — nunca se deja sin
+    guarnición que descontar, ni siquiera fuera del rango configurado (un peso por debajo
+    del tramo más chico usa ese; por encima del más grande, usa ese).
+    """
+    grupo = models.ForeignKey(
+        VGGrupoOpcionProducto, on_delete=models.CASCADE, related_name="raciones_por_peso",
+    )
+    producto = models.ForeignKey(
+        VGProducto, on_delete=models.CASCADE, related_name="raciones_configuradas",
+        help_text="El producto acompañante (de la categoría dinámica del grupo) al que aplica esta fila.",
+    )
+    peso_tramo = models.PositiveIntegerField(
+        help_text="Peso del plato principal, en gramos, al que aplica esta fila (ej: 250, 500, 750, 1000).",
+    )
+    cantidad = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        help_text="Cuánto de este producto se descuenta en este tramo: gramos si es venta_por_peso, unidades si no.",
+    )
+
+    class Meta:
+        db_table = "vg_raciones_acompanante"
+        verbose_name = "Ración de acompañante por tamaño"
+        verbose_name_plural = "Raciones de acompañante por tamaño"
+        constraints = [
+            models.UniqueConstraint(fields=["grupo", "producto", "peso_tramo"], name="racion_acompanante_unica"),
+        ]
+        ordering = ["peso_tramo", "producto_id"]
+
+    def __str__(self):
+        return f"{self.grupo} — {self.producto} @ {self.peso_tramo}g = {self.cantidad}"
 
 
 class VGOpcionProducto(models.Model):
@@ -675,6 +724,83 @@ class VGMovimientoInventario(models.Model):
 
     def __str__(self):
         return f"{self.tipo_movimiento} — {self.ingrediente} ({self.cantidad})"
+
+
+class VGCierreInventario(VGAuditoria):
+    """
+    Cierre mensual del modulo de ajuste de inventario (ver VGAjusteInventario):
+    una vez creado el cierre de un anio/mes, ese mes queda de solo lectura —
+    ya no se pueden crear ni editar ajustes para el (ver
+    ajustes_inventario_views._mes_cerrado).
+    """
+    anio = models.PositiveIntegerField()
+    mes = models.PositiveSmallIntegerField()
+    fecha_cierre = models.DateTimeField(auto_now_add=True)
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "vg_cierres_inventario"
+        constraints = [
+            models.UniqueConstraint(fields=["anio", "mes"], name="unico_cierre_inventario_por_mes"),
+        ]
+        ordering = ["-anio", "-mes"]
+
+    def __str__(self):
+        return f"Cierre inventario {self.mes:02d}/{self.anio}"
+
+
+class VGAjusteInventario(VGAuditoria):
+    """
+    Cabecera de una nota de ajuste de inventario — el `id` de este registro ES
+    el "numero de nota" que ve el analista. `estado='confirmado'` no significa
+    que el ajuste este cerrado a mas ediciones dentro del mismo mes: solo
+    indica que ya tiene al menos una linea aplicada al stock (ver
+    VGDetalleAjusteInventario.aplicado) — el ajuste sigue disponible para
+    agregarle mas lineas despues, hasta que se cierre el mes completo (ver
+    VGCierreInventario).
+    """
+    ESTADOS = [("abierto", "Abierto"), ("confirmado", "Confirmado")]
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="abierto")
+    anio = models.PositiveIntegerField()
+    mes = models.PositiveSmallIntegerField()
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "vg_ajustes_inventario"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"Ajuste de inventario #{self.pk} — {self.mes:02d}/{self.anio}"
+
+
+class VGDetalleAjusteInventario(models.Model):
+    TIPOS = [("suma", "Suma al stock"), ("resta", "Resta al stock")]
+    ajuste = models.ForeignKey(VGAjusteInventario, on_delete=models.CASCADE, related_name="detalles")
+    ingrediente = models.ForeignKey(
+        VGIngrediente, on_delete=models.PROTECT, related_name="detalles_ajuste_inventario",
+    )
+    tipo = models.CharField(max_length=10, choices=TIPOS)
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    motivo = models.CharField(max_length=255, blank=True)
+    # Cuanto de `cantidad` ya fue efectivamente aplicado al stock_actual — al
+    # guardar el ajuste (ver admin_ajuste_inventario_guardar_view) queda igual
+    # a `cantidad`; si el analista despues edita la cantidad de una linea ya
+    # aplicada, la diferencia entre ambas es el delta que se vuelve a aplicar,
+    # sin revertir ni reprocesar lo que ya se habia movido (para no perder
+    # trazabilidad frente a VGMovimientoInventario).
+    cantidad_aplicada = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    aplicado = models.BooleanField(default=False)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vg_detalle_ajuste_inventario"
+
+    def __str__(self):
+        return f"{self.tipo} {self.cantidad} — {self.ingrediente} (ajuste #{self.ajuste_id})"
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,11 @@
 const options = [
   { id: 'create', title: 'Crear ingredientes' },
   { id: 'view', title: 'Ver inventario actual' },
+  { id: 'adjust', title: 'Ajuste de inventario' },
 ];
 
-function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory }) {
-  const handlers = { create: onCreate, view: onViewInventory };
+function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory, onAdjustInventory }) {
+  const handlers = { create: onCreate, view: onViewInventory, adjust: onAdjustInventory };
 
   return (
     <section style={containerStyle(isMobile)}>

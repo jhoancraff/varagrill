@@ -46,13 +46,19 @@ function crearGrupoOpcionVacio() {
     maximoSelecciones: '',
     gramosBaseRacion: '',
     opciones: [],
+    racionesPorPeso: [],
   };
+}
+
+function crearRacionRowVacia() {
+  return { uid: nextOpcionesUid('racion'), pesoTramo: '', productoId: '', cantidad: '' };
 }
 
 function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged }) {
   const tasaCambio = useExchangeRate();
   const ingredientPickerRef = useRef(null);
   const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
   const [recetas, setRecetas] = useState([]);
   const [subrecetas, setSubrecetas] = useState([]);
   const [ingredients, setIngredients] = useState([]);
@@ -62,6 +68,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
   const [ingredientes, setIngredientes] = useState([]);
   const [gruposOpciones, setGruposOpciones] = useState([]);
   const [opcionDraftByGrupo, setOpcionDraftByGrupo] = useState({});
+  const [racionesModalGrupoUid, setRacionesModalGrupoUid] = useState(null);
   const [showIngredientResults, setShowIngredientResults] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
@@ -105,6 +112,7 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
           throw new Error(data.message || 'No se pudieron cargar las categorías.');
         }
         setCategories(Array.isArray(data.categories) ? data.categories : []);
+        setProducts(Array.isArray(data.products) ? data.products : []);
         setRecetas(Array.isArray(data.recetas) ? data.recetas : []);
         setSubrecetas(Array.isArray(data.subrecetas) ? data.subrecetas : []);
         setIngredients(Array.isArray(data.ingredients) ? data.ingredients : []);
@@ -283,6 +291,31 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
     )));
   };
 
+  const handleAddRacionRow = (grupoUid) => {
+    setGruposOpciones((current) => current.map((grupo) => (
+      grupo.uid === grupoUid ? { ...grupo, racionesPorPeso: [...grupo.racionesPorPeso, crearRacionRowVacia()] } : grupo
+    )));
+  };
+
+  const handleUpdateRacionRow = (grupoUid, rowUid, field, value) => {
+    setGruposOpciones((current) => current.map((grupo) => (
+      grupo.uid === grupoUid
+        ? {
+          ...grupo,
+          racionesPorPeso: grupo.racionesPorPeso.map((row) => (row.uid === rowUid ? { ...row, [field]: value } : row)),
+        }
+        : grupo
+    )));
+  };
+
+  const handleRemoveRacionRow = (grupoUid, rowUid) => {
+    setGruposOpciones((current) => current.map((grupo) => (
+      grupo.uid === grupoUid
+        ? { ...grupo, racionesPorPeso: grupo.racionesPorPeso.filter((row) => row.uid !== rowUid) }
+        : grupo
+    )));
+  };
+
   const handleImageChange = (event) => {
     const file = event.target.files && event.target.files[0] ? event.target.files[0] : null;
     setImageFile(file);
@@ -324,6 +357,9 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
           categoria_opciones_id: grupo.categoriaOpcionesId,
           maximo_selecciones: grupo.maximoSelecciones || null,
           gramos_base_racion: grupo.gramosBaseRacion || null,
+          raciones_por_peso: grupo.racionesPorPeso
+            .filter((row) => row.pesoTramo && row.productoId && row.cantidad)
+            .map((row) => ({ peso_tramo: row.pesoTramo, producto_id: row.productoId, cantidad: row.cantidad })),
         } : {
           nombre: grupo.nombre,
           obligatorio: grupo.obligatorio,
@@ -687,6 +723,16 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
                             style={inputStyle}
                           />
                         </div>
+                        <div style={composerRowStyle(isMobile)}>
+                          <button
+                            type="button"
+                            onClick={() => setRacionesModalGrupoUid(grupo.uid)}
+                            style={secondaryButtonStyle}
+                            disabled={!grupo.categoriaOpcionesId}
+                          >
+                            Tabla de raciones por tamaño{grupo.racionesPorPeso.length > 0 ? ` (${grupo.racionesPorPeso.length})` : ''}
+                          </button>
+                        </div>
                       </>
                     ) : (
                       <>
@@ -791,7 +837,80 @@ function AnalystNewProductPage({ isMobile, isAdmin, onBack, onProductsChanged })
       </form>
 
       <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
+
+      {racionesModalGrupoUid ? (
+        <RacionesPorPesoModal
+          grupo={gruposOpciones.find((item) => item.uid === racionesModalGrupoUid)}
+          productos={products.filter((item) => String(item.categoria_id) === String(
+            (gruposOpciones.find((g) => g.uid === racionesModalGrupoUid) || {}).categoriaOpcionesId,
+          ))}
+          onAddRow={() => handleAddRacionRow(racionesModalGrupoUid)}
+          onUpdateRow={(rowUid, field, value) => handleUpdateRacionRow(racionesModalGrupoUid, rowUid, field, value)}
+          onRemoveRow={(rowUid) => handleRemoveRacionRow(racionesModalGrupoUid, rowUid)}
+          onClose={() => setRacionesModalGrupoUid(null)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function RacionesPorPesoModal({ grupo, productos, onAddRow, onUpdateRow, onRemoveRow, onClose }) {
+  if (!grupo) {
+    return null;
+  }
+  return (
+    <div style={racionesModalBackdropStyle} onClick={onClose}>
+      <div style={racionesModalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={racionesModalTitleStyle}>Tabla de raciones por tamaño — {grupo.nombre || 'grupo'}</div>
+        {productos.length === 0 ? (
+          <p style={ventaPorPesoHintStyle}>
+            Esta categoría todavía no tiene productos guardados — crea primero los acompañantes (ej. Yuca,
+            Papas fritas, Patacón) para poder elegirlos acá.
+          </p>
+        ) : null}
+        <div style={racionesTableWrapStyle}>
+          {grupo.racionesPorPeso.map((row) => (
+            <div key={row.uid} style={racionesRowStyle}>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Gramos (ej. 250)"
+                value={row.pesoTramo}
+                onChange={(event) => onUpdateRow(row.uid, 'pesoTramo', event.target.value)}
+                style={inputStyle}
+              />
+              <select
+                value={row.productoId}
+                onChange={(event) => onUpdateRow(row.uid, 'productoId', event.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Selecciona un producto...</option>
+                {productos.map((producto) => (
+                  <option key={producto.id} value={producto.id}>{producto.nombre}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="Cantidad"
+                value={row.cantidad}
+                onChange={(event) => onUpdateRow(row.uid, 'cantidad', event.target.value)}
+                style={inputStyle}
+              />
+              <button type="button" onClick={() => onRemoveRow(row.uid)} style={dangerButtonStyle}>Quitar</button>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={onAddRow} style={secondaryButtonStyle} disabled={productos.length === 0}>
+          + Agregar fila
+        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button type="button" onClick={onClose} style={primaryButtonStyle}>Listo</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1098,6 +1217,48 @@ const backButtonStyle = {
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
+};
+
+const racionesModalBackdropStyle = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0, 0, 0, 0.6)',
+  display: 'grid',
+  placeItems: 'center',
+  zIndex: 1000,
+  padding: 16,
+};
+
+const racionesModalCardStyle = {
+  width: '100%',
+  maxWidth: 560,
+  maxHeight: '85vh',
+  overflowY: 'auto',
+  borderRadius: 20,
+  border: '1px solid rgba(255, 145, 145, 0.3)',
+  background: 'linear-gradient(180deg, rgba(28, 12, 12, 0.98) 0%, rgba(10, 8, 8, 0.99) 100%)',
+  padding: '22px 22px 18px',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, 0.45)',
+};
+
+const racionesModalTitleStyle = {
+  color: '#fff',
+  fontSize: 18,
+  fontWeight: 800,
+  marginBottom: 8,
+};
+
+const racionesTableWrapStyle = {
+  display: 'grid',
+  gap: 8,
+  margin: '10px 0',
+};
+
+const racionesRowStyle = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1.6fr 1fr auto',
+  gap: 8,
+  alignItems: 'center',
 };
 
 export default AnalystNewProductPage;

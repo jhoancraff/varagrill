@@ -113,6 +113,15 @@ const MovementIcon = () => (
   </svg>
 );
 
+const BankFlowIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 21h18" />
+    <path d="M5 21V10l7-6 7 6v11" />
+    <path d="M9 21v-6h6v6" />
+    <path d="M9 13h6" />
+  </svg>
+);
+
 // Conciliación bancaria: construida pero oculta a pedido del usuario (2026-09)
 // mientras se termina de definir el flujo — la página y el backend siguen
 // intactos, solo se le quita el acceso desde este panel.
@@ -122,6 +131,7 @@ const reportSections = [
   { id: 'contabilidad-cuadre-caja', title: 'Cuadre de caja diario', icon: CashRegisterIcon },
   { id: 'contabilidad-cuadre-caja-rango', title: 'Cuadre de caja por rango', icon: DateRangeIcon },
   { id: 'contabilidad-disponibilidad-cuentas', title: 'Disponibilidad diaria', icon: AvailabilityIcon },
+  { id: 'flujo-bancario', title: 'Flujo bancario diario', icon: BankFlowIcon },
   ...(CONCILIACION_BANCARIA_HABILITADA ? [{
     id: 'contabilidad-conciliacion-bancaria',
     title: 'Conciliación bancaria',

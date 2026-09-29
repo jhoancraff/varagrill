@@ -29,12 +29,15 @@ from .models import (
 )
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
+    _bancos_seleccionables,
     desglose_caja_por_moneda,
     detalle_cuentas_cobradas_rango,
     detalle_cuentas_por_cobrar_rango,
+    detalle_flujo_bancario_dia,
     detalle_ventas_rango,
     disponibilidad_por_cuenta,
     efectivo_esperado_dia,
+    flujo_bancario_mensual,
     gastos_efectivo_dia,
     resumen_cuadre_caja_rango,
     resumen_ventas_rango,
@@ -1438,4 +1441,129 @@ def reporte_movimiento_productos_view(request):
         'total_lineas': total_lineas,
         'total_unidades_vendidas': str(total_unidades_vendidas.quantize(Decimal('0.01'))),
         'total_kg_vendidos': str(total_kg_vendidos.quantize(Decimal('0.01'))),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Flujo bancario diario
+# ---------------------------------------------------------------------------
+def reporte_flujo_bancario_view(request):
+    """
+    Entradas y salidas dia por dia de un mes calendario, para un banco
+    puntual (ver flujo_bancario_mensual en reportes.py) — pantalla 1 del
+    reporte "Flujo bancario diario": el analista elige mes + banco, y ve una
+    fila por dia con el total que entro y el total que salio ese dia por ese
+    banco. Sin mes/banco en la query, solo devuelve la lista de bancos
+    seleccionables (para pintar el selector antes de la primera consulta).
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    bancos_payload = [{'clave': banco['clave'], 'nombre': banco['nombre']} for banco in _bancos_seleccionables()]
+
+    anio_raw = request.GET.get('anio')
+    mes_raw = request.GET.get('mes')
+    banco_clave = request.GET.get('banco')
+
+    if not anio_raw or not mes_raw or not banco_clave:
+        return _auth_response({
+            'ok': True,
+            'bancos': bancos_payload,
+            'banco_clave': None,
+            'banco': None,
+            'anio': None,
+            'mes': None,
+            'dias': [],
+            'total_entrada': '0.00',
+            'total_salida': '0.00',
+            'total_entrada_bs': '0.00',
+            'total_salida_bs': '0.00',
+        })
+
+    try:
+        anio = int(anio_raw)
+        mes = int(mes_raw)
+        if mes < 1 or mes > 12:
+            raise ValueError
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'El mes o el año no son validos.'}, status=400)
+
+    resultado = flujo_bancario_mensual(anio, mes, banco_clave)
+    if resultado['banco'] is None:
+        return _auth_response({'ok': False, 'message': 'Ese banco no existe o no tiene metodos de pago activos.'}, status=400)
+
+    return _auth_response({
+        'ok': True,
+        'bancos': bancos_payload,
+        'banco_clave': banco_clave,
+        'banco': resultado['banco'],
+        'anio': anio,
+        'mes': mes,
+        'dias': [
+            {
+                'fecha': dia['fecha'].isoformat(),
+                'entrada': str(dia['entrada'].quantize(Decimal('0.01'))),
+                'salida': str(dia['salida'].quantize(Decimal('0.01'))),
+                'entrada_bs': str(dia['entrada_bs']) if dia['entrada_bs'] is not None else None,
+                'salida_bs': str(dia['salida_bs']) if dia['salida_bs'] is not None else None,
+            }
+            for dia in resultado['dias']
+        ],
+        'total_entrada': str(resultado['total_entrada'].quantize(Decimal('0.01'))),
+        'total_salida': str(resultado['total_salida'].quantize(Decimal('0.01'))),
+        'total_entrada_bs': str(resultado['total_entrada_bs'].quantize(Decimal('0.01'))),
+        'total_salida_bs': str(resultado['total_salida_bs'].quantize(Decimal('0.01'))),
+    })
+
+
+def reporte_flujo_bancario_detalle_view(request):
+    """
+    Movimientos individuales de un dia puntual, de un tipo puntual
+    ('entrada'|'salida'), para un banco puntual (ver detalle_flujo_bancario_dia
+    en reportes.py) — pantalla 2 del reporte "Flujo bancario diario": se abre
+    al hacer click en el total de entrada o salida de un dia en la pantalla 1.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    fecha_raw = request.GET.get('fecha')
+    banco_clave = request.GET.get('banco')
+    tipo = request.GET.get('tipo')
+
+    if tipo not in ('entrada', 'salida'):
+        return _auth_response({'ok': False, 'message': 'El tipo debe ser "entrada" o "salida".'}, status=400)
+    try:
+        fecha = date.fromisoformat(fecha_raw)
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'La fecha no es valida.'}, status=400)
+    if not banco_clave:
+        return _auth_response({'ok': False, 'message': 'Falta indicar el banco.'}, status=400)
+
+    movimientos = detalle_flujo_bancario_dia(fecha, banco_clave, tipo)
+    total = sum((movimiento['monto'] for movimiento in movimientos), Decimal('0'))
+
+    return _auth_response({
+        'ok': True,
+        'fecha': fecha.isoformat(),
+        'tipo': tipo,
+        'movimientos': [
+            {
+                'id': movimiento['id'],
+                'tipo_registro': movimiento['tipo_registro'],
+                'fecha_hora': timezone.localtime(movimiento['fecha_hora']).isoformat(),
+                'nombre': movimiento['nombre'],
+                'metodo_pago_nombre': movimiento['metodo_pago_nombre'],
+                'monto': str(movimiento['monto'].quantize(Decimal('0.01'))),
+                'monto_bs': str(movimiento['monto_bs']) if movimiento['monto_bs'] is not None else None,
+                'referencia': movimiento['referencia'],
+            }
+            for movimiento in movimientos
+        ],
+        'total': str(total.quantize(Decimal('0.01'))),
     })

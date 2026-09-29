@@ -9,6 +9,8 @@ import json
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
@@ -26,6 +28,7 @@ from .models import (
     VGMetodoPago,
     VGNotaEntrega,
     VGPago,
+    VGTransferenciaCuenta,
 )
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
@@ -1002,8 +1005,10 @@ def reporte_disponibilidad_cuentas_view(request):
             'activo': cuenta['activo'],
             'ingresos_acumulados': str(cuenta['ingresos_acumulados']),
             'ingresos_extra_acumulados': str(cuenta['ingresos_extra_acumulados']),
+            'transferencias_entrantes_acumuladas': str(cuenta['transferencias_entrantes_acumuladas']),
             'gastos_acumulados': str(cuenta['gastos_acumulados']),
             'compras_acumuladas': str(cuenta['compras_acumuladas']),
+            'transferencias_salientes_acumuladas': str(cuenta['transferencias_salientes_acumuladas']),
             'consignado_acumulado': str(cuenta['consignado_acumulado']),
             'saldo_disponible': str(cuenta['saldo_disponible']),
             'saldo_disponible_bs': str(cuenta['saldo_disponible_bs'].quantize(Decimal('0.01'))) if cuenta['saldo_disponible_bs'] is not None else None,
@@ -1020,6 +1025,8 @@ def reporte_disponibilidad_cuentas_view(request):
                 'agrupado': banco['agrupado'],
                 'moneda': banco['moneda'],
                 'moneda_mixta': banco.get('moneda_mixta', False),
+                'transferencias_entrantes_acumuladas': str(banco['transferencias_entrantes_acumuladas']),
+                'transferencias_salientes_acumuladas': str(banco['transferencias_salientes_acumuladas']),
                 'saldo_disponible': str(banco['saldo_disponible']),
                 'saldo_disponible_bs': str(banco['saldo_disponible_bs'].quantize(Decimal('0.01'))) if banco['saldo_disponible_bs'] is not None else None,
                 'metodos': [_serialize_cuenta(cuenta) for cuenta in banco['metodos']],
@@ -1028,6 +1035,232 @@ def reporte_disponibilidad_cuentas_view(request):
         ],
         'total_disponible': str(sum((cuenta['saldo_disponible'] for cuenta in cuentas), Decimal('0'))),
     })
+
+
+def _serialize_transferencia(transferencia):
+    return {
+        'id': transferencia.id,
+        'fecha': transferencia.fecha.isoformat(),
+        'cuenta_origen_id': transferencia.cuenta_origen_id,
+        'cuenta_origen_nombre': transferencia.cuenta_origen.nombre,
+        'cuenta_destino_id': transferencia.cuenta_destino_id,
+        'cuenta_destino_nombre': transferencia.cuenta_destino.nombre,
+        'moneda_origen': transferencia.moneda_origen,
+        'moneda_destino': transferencia.moneda_destino,
+        'monto_origen': str(transferencia.monto_origen),
+        'monto_destino': str(transferencia.monto_destino),
+        'tasa_cambio': str(transferencia.tasa_cambio) if transferencia.tasa_cambio is not None else None,
+        'monto_usd': str(transferencia.monto_usd),
+        'referencia': transferencia.referencia,
+        'concepto': transferencia.concepto,
+        'creado_por': transferencia.creado_por.username if transferencia.creado_por_id else None,
+        'fecha_creacion': transferencia.fecha_creacion.isoformat(),
+    }
+
+
+@csrf_exempt
+def admin_transferencias_cuentas_view(request):
+    """
+    GET: historial de transferencias entre cuentas propias, con filtros
+    combinables (desde/hasta — mes en curso por defecto, id puntual,
+    cuenta_id que trae las que participaron como origen O destino).
+    POST: registra una transferencia nueva.
+
+    Una transferencia mueve dinero entre dos VGMetodoPago del propio negocio
+    — nunca es una venta ni un gasto, ver VGTransferenciaCuenta y como se
+    integra al saldo de cada cuenta en disponibilidad_por_cuenta
+    (reportes.py). Solo administradores.
+    """
+    if request.method not in ('GET', 'POST'):
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        transferencia_id_raw = request.GET.get('id')
+        if transferencia_id_raw:
+            try:
+                transferencia = (
+                    VGTransferenciaCuenta.objects
+                    .select_related('cuenta_origen', 'cuenta_destino', 'creado_por')
+                    .get(pk=int(transferencia_id_raw))
+                )
+            except (TypeError, ValueError, VGTransferenciaCuenta.DoesNotExist):
+                return _auth_response({'ok': True, 'transferencias': [], 'total': 0, 'total_usd': '0.00'})
+            return _auth_response({
+                'ok': True,
+                'transferencias': [_serialize_transferencia(transferencia)],
+                'total': 1,
+                'total_usd': str(transferencia.monto_usd.quantize(Decimal('0.01'))),
+            })
+
+        desde_raw = request.GET.get('desde')
+        hasta_raw = request.GET.get('hasta')
+        try:
+            desde = date.fromisoformat(desde_raw) if desde_raw else timezone.localdate().replace(day=1)
+            hasta = date.fromisoformat(hasta_raw) if hasta_raw else timezone.localdate()
+        except ValueError:
+            return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+        if desde > hasta:
+            return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+
+        transferencias_qs = (
+            VGTransferenciaCuenta.objects
+            .filter(fecha__gte=desde, fecha__lte=hasta)
+            .select_related('cuenta_origen', 'cuenta_destino', 'creado_por')
+        )
+
+        cuenta_id_raw = request.GET.get('cuenta_id')
+        if cuenta_id_raw:
+            try:
+                cuenta_id = int(cuenta_id_raw)
+            except ValueError:
+                return _auth_response({'ok': False, 'message': 'La cuenta indicada no es valida.'}, status=400)
+            transferencias_qs = transferencias_qs.filter(Q(cuenta_origen_id=cuenta_id) | Q(cuenta_destino_id=cuenta_id))
+
+        transferencias = list(transferencias_qs)
+        total_usd = sum((t.monto_usd for t in transferencias), Decimal('0'))
+
+        return _auth_response({
+            'ok': True,
+            'desde': desde.isoformat(),
+            'hasta': hasta.isoformat(),
+            'transferencias': [_serialize_transferencia(t) for t in transferencias],
+            'total': len(transferencias),
+            'total_usd': str(total_usd.quantize(Decimal('0.01'))),
+        })
+
+    # POST: registrar una transferencia nueva.
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    fecha_raw = data.get('fecha')
+    try:
+        fecha = date.fromisoformat(str(fecha_raw)) if fecha_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'La fecha no es valida.'}, status=400)
+
+    concepto = str(data.get('concepto', '') or '').strip()
+    if not concepto:
+        return _auth_response({'ok': False, 'message': 'El concepto/motivo es obligatorio.'}, status=400)
+
+    try:
+        cuenta_origen_id = int(data.get('cuenta_origen_id'))
+        cuenta_destino_id = int(data.get('cuenta_destino_id'))
+    except (TypeError, ValueError):
+        return _auth_response({'ok': False, 'message': 'Debes indicar la cuenta origen y la cuenta destino.'}, status=400)
+
+    # 1. La cuenta origen y la cuenta destino no pueden ser la misma.
+    if cuenta_origen_id == cuenta_destino_id:
+        return _auth_response({'ok': False, 'message': 'La cuenta origen y la cuenta destino no pueden ser la misma.'}, status=400)
+
+    # 2. Ambas cuentas existen y estan activas.
+    try:
+        cuenta_origen = VGMetodoPago.objects.get(pk=cuenta_origen_id, activo=True)
+    except VGMetodoPago.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'La cuenta origen no existe o esta inactiva.'}, status=400)
+    try:
+        cuenta_destino = VGMetodoPago.objects.get(pk=cuenta_destino_id, activo=True)
+    except VGMetodoPago.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'La cuenta destino no existe o esta inactiva.'}, status=400)
+
+    # 3. Los montos deben ser mayores a cero.
+    try:
+        monto_origen = Decimal(str(data.get('monto_origen')))
+        monto_destino = Decimal(str(data.get('monto_destino')))
+    except (InvalidOperation, TypeError):
+        return _auth_response({'ok': False, 'message': 'Los montos no son validos.'}, status=400)
+    if monto_origen <= 0 or monto_destino <= 0:
+        return _auth_response({'ok': False, 'message': 'Los montos deben ser mayores a cero.'}, status=400)
+
+    tasa_cambio_raw = data.get('tasa_cambio')
+    tasa_cambio = None
+    if tasa_cambio_raw not in (None, ''):
+        try:
+            tasa_cambio = Decimal(str(tasa_cambio_raw))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'La tasa de cambio no es valida.'}, status=400)
+
+    # 4. Misma moneda -> el monto a debitar y el monto a recibir deben coincidir.
+    if cuenta_origen.moneda == cuenta_destino.moneda:
+        if monto_origen != monto_destino:
+            return _auth_response({
+                'ok': False,
+                'message': 'Si ambas cuentas son de la misma moneda, el monto a debitar y el monto a recibir deben ser iguales.',
+            }, status=400)
+    else:
+        # 5. Distinta moneda -> tasa manual obligatoria. NUNCA se usa la tasa
+        # BCV automatica aca — el usuario pudo haber pactado una tasa propia
+        # con su banco, distinta a la oficial del dia, y eso es justo lo que
+        # esta transferencia tiene que reflejar.
+        if not tasa_cambio or tasa_cambio <= 0:
+            return _auth_response({
+                'ok': False,
+                'message': 'Debes indicar la tasa de cambio acordada para transferir entre cuentas de monedas distintas.',
+            }, status=400)
+
+    # El equivalente en USD: si alguna de las dos cuentas ya es USD, se usa
+    # ese lado tal cual (es la conversion mas exacta posible, sin pasar por
+    # ninguna tasa). Si ninguna es USD (las dos cuentas son VES — con solo
+    # USD/VES en el sistema, esto solo pasa cuando NO hay cruce de moneda),
+    # se deriva con la tasa acordada si la escribieron, o si no la tasa BCV
+    # del dia — solo para que este movimiento tenga un equivalente en el
+    # balance general en USD; el saldo en bolivares de cada cuenta se mueve
+    # exacto por monto_origen/monto_destino de todas formas, sin pasar por
+    # esta conversion.
+    if cuenta_origen.moneda == 'USD':
+        monto_usd = monto_origen
+    elif cuenta_destino.moneda == 'USD':
+        monto_usd = monto_destino
+    else:
+        tasa_para_usd = tasa_cambio or tasa_para_fecha(fecha)
+        if not tasa_para_usd:
+            return _auth_response({
+                'ok': False,
+                'message': 'No hay tasa de cambio disponible para calcular el equivalente en dólares de esta transferencia.',
+            }, status=400)
+        monto_usd = (monto_origen / tasa_para_usd).quantize(Decimal('0.01'))
+
+    # 6. Saldo disponible suficiente en la cuenta origen, A LA FECHA del
+    # movimiento (no un total generico de hoy) — reusa disponibilidad_por_cuenta,
+    # la misma fuente de verdad que ve el analista en el reporte.
+    cuentas_disponibilidad, _bancos = disponibilidad_por_cuenta(fecha)
+    cuenta_origen_estado = next((c for c in cuentas_disponibilidad if c['id'] == cuenta_origen.id), None)
+    saldo_disponible_origen = cuenta_origen_estado['saldo_disponible'] if cuenta_origen_estado else Decimal('0')
+    if saldo_disponible_origen < monto_usd:
+        return _auth_response({
+            'ok': False,
+            'message': (
+                f'{cuenta_origen.nombre} no tiene saldo disponible suficiente al {fecha.isoformat()} — '
+                f'disponible: ${saldo_disponible_origen.quantize(Decimal("0.01"))}, se necesitan ${monto_usd.quantize(Decimal("0.01"))}.'
+            ),
+        }, status=400)
+
+    with transaction.atomic():
+        transferencia = VGTransferenciaCuenta.objects.create(
+            fecha=fecha,
+            cuenta_origen=cuenta_origen,
+            cuenta_destino=cuenta_destino,
+            moneda_origen=cuenta_origen.moneda,
+            moneda_destino=cuenta_destino.moneda,
+            monto_origen=monto_origen,
+            monto_destino=monto_destino,
+            tasa_cambio=tasa_cambio,
+            monto_usd=monto_usd,
+            referencia=str(data.get('referencia', '') or '').strip(),
+            concepto=concepto,
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+
+    return _auth_response({
+        'ok': True,
+        'message': 'Transferencia registrada correctamente.',
+        'transferencia': _serialize_transferencia(transferencia),
+    }, status=201)
 
 
 def _serialize_conciliacion(conciliacion):

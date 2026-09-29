@@ -143,6 +143,59 @@ class VGCorreccionMetodoPago(VGAuditoria):
         return f"{self.get_tipo_display()} #{self.registro_id}: {self.metodo_anterior} → {self.metodo_nuevo}"
 
 
+class VGTransferenciaCuenta(VGAuditoria):
+    """
+    Movimiento de dinero entre dos VGMetodoPago propios del negocio (ej.
+    sacar de Zelle para depositar en Banesco) — nunca representa plata que
+    entra o sale del negocio hacia/desde un tercero, por eso vive aparte de
+    VGPago/VGAbonoGasto/VGAbonoCompra: mezclarla ahi inflaria el total de
+    ventas o de gastos con dinero que en realidad ya era del negocio, solo
+    que cambio de cuenta (ver disponibilidad_por_cuenta en reportes.py, que
+    la resta de la cuenta origen y la suma a la cuenta destino sin tocar
+    ingresos/gastos).
+
+    monto_origen/monto_destino quedan cada uno en la moneda de SU propia
+    cuenta — si hay cruce de moneda (ej. de una cuenta USD a una VES),
+    tasa_cambio es la tasa MANUAL que el analista acordó para esa
+    transferencia puntual, nunca la tasa BCV automática: un banco puede
+    cobrar una tasa de conversión distinta a la oficial, y esta tasa debe
+    reflejar exactamente lo que de verdad se recibió, no una estimación.
+
+    monto_usd es el monto ya normalizado a dólares (igual al lado de la
+    transferencia que ya estaba en USD, o derivado con tasa_cambio si
+    ninguno de los dos lados es USD) — se guarda calculado de una vez para
+    que el balance general no tenga que resolver la conversión cada vez que
+    se lee.
+    """
+    fecha = models.DateField(help_text="Fecha contable del movimiento.")
+    cuenta_origen = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, related_name="transferencias_salientes",
+    )
+    cuenta_destino = models.ForeignKey(
+        VGMetodoPago, on_delete=models.PROTECT, related_name="transferencias_entrantes",
+    )
+    moneda_origen = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS)
+    moneda_destino = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS)
+    monto_origen = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    monto_destino = models.DecimalField(max_digits=14, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    tasa_cambio = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="Tasa manual acordada para esta transferencia, solo si hay cruce de moneda — nunca la tasa BCV del día.",
+    )
+    monto_usd = models.DecimalField(max_digits=14, decimal_places=2)
+    referencia = models.CharField(max_length=100, blank=True, default='')
+    concepto = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "vg_transferencias_cuenta"
+        verbose_name = "Transferencia entre cuentas"
+        verbose_name_plural = "Transferencias entre cuentas"
+        ordering = ["-fecha", "-id"]
+
+    def __str__(self):
+        return f"Transferencia #{self.pk}: {self.cuenta_origen} → {self.cuenta_destino} (${self.monto_usd})"
+
+
 # ---------------------------------------------------------------------------
 # Cuadre de caja diario
 # ---------------------------------------------------------------------------

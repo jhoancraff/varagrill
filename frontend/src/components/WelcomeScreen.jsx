@@ -10,6 +10,7 @@ import ReportePropinasPage from './ReportePropinasPage';
 import ReporteDevolucionesPage from './ReporteDevolucionesPage';
 import ReporteCuadreCajaRangoPage from './ReporteCuadreCajaRangoPage';
 import ReporteDisponibilidadCuentasPage from './ReporteDisponibilidadCuentasPage';
+import HistorialTransferenciasPage from './HistorialTransferenciasPage';
 import ReporteConciliacionBancariaPage from './ReporteConciliacionBancariaPage';
 import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
 import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
@@ -1241,6 +1242,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           />
         ) : activeView === 'contabilidad-disponibilidad-cuentas' ? (
           <ReporteDisponibilidadCuentasPage
+            isMobile={isMobile}
+            onBack={goBackView}
+            onNavigate={handleAnalystNavigation}
+          />
+        ) : activeView === 'contabilidad-historial-transferencias' ? (
+          <HistorialTransferenciasPage
             isMobile={isMobile}
             onBack={goBackView}
           />

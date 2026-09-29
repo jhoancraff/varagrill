@@ -21,6 +21,7 @@ from .models import (
     VGNotaEntrega,
     VGPago,
     VGTasaCambio,
+    VGTransferenciaCuenta,
 )
 
 
@@ -599,6 +600,17 @@ def disponibilidad_por_cuenta(fecha):
     metodo — no pasan por VGPago (no son parte de ninguna venta) pero son
     dinero real que entro por esa cuenta igual.
 
+    Las VGTransferenciaCuenta (dinero movido entre cuentas propias, ej. sacar
+    de Zelle para depositar en Banesco) se suman a la cuenta destino y se
+    restan de la cuenta origen — en USD via monto_usd, y en bolivares (si esa
+    cuenta puntual es VES) via monto_origen/monto_destino DIRECTO, sin pasar
+    por ninguna tasa: esos montos ya estan en la moneda real de cada cuenta,
+    tal como el analista los escribio, asi que convertirlos de nuevo con una
+    tasa (BCV o la manual de la transferencia) los desviaria del monto real
+    movido. Nunca se cuentan como ingreso ni como gasto (ver
+    VGTransferenciaCuenta) — son un movimiento aparte, con su propio total
+    acumulado por cuenta.
+
     Devuelve (cuentas, bancos): `cuentas` es la lista de siempre, una fila por
     metodo de pago; `bancos` agrupa esas mismas filas por VGMetodoPago.cuenta_bancaria
     (varios metodos pueden caer en el mismo banco real, ej. Pago Movil y Punto
@@ -669,6 +681,19 @@ def disponibilidad_por_cuenta(fecha):
         if tasa is not None:
             saldo_bs_por_metodo[primer_efectivo_id] = saldo_bs_por_metodo.get(primer_efectivo_id, Decimal('0')) - _monto_bs(consignacion.monto, tasa)
 
+    for transferencia in (
+        VGTransferenciaCuenta.objects.filter(fecha__lte=fecha)
+        .select_related('cuenta_origen', 'cuenta_destino')
+    ):
+        if transferencia.moneda_origen == 'VES':
+            saldo_bs_por_metodo[transferencia.cuenta_origen_id] = (
+                saldo_bs_por_metodo.get(transferencia.cuenta_origen_id, Decimal('0')) - transferencia.monto_origen
+            )
+        if transferencia.moneda_destino == 'VES':
+            saldo_bs_por_metodo[transferencia.cuenta_destino_id] = (
+                saldo_bs_por_metodo.get(transferencia.cuenta_destino_id, Decimal('0')) + transferencia.monto_destino
+            )
+
     ingresos_por_metodo = _totales_por_metodo(
         VGPago.objects.filter(fecha_pago__date__lte=fecha, estado='completado')
     )
@@ -687,6 +712,23 @@ def disponibilidad_por_cuenta(fecha):
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
+    # VGTransferenciaCuenta tiene dos FK a VGMetodoPago (origen/destino), no
+    # una sola `metodo_pago` — no encaja en _totales_por_metodo, se agrupa
+    # aparte por cada lado.
+    transferencias_entrantes_por_metodo = {
+        fila['cuenta_destino_id']: fila['total']
+        for fila in (
+            VGTransferenciaCuenta.objects.filter(fecha__lte=fecha)
+            .values('cuenta_destino_id').annotate(total=Sum('monto_usd'))
+        )
+    }
+    transferencias_salientes_por_metodo = {
+        fila['cuenta_origen_id']: fila['total']
+        for fila in (
+            VGTransferenciaCuenta.objects.filter(fecha__lte=fecha)
+            .values('cuenta_origen_id').annotate(total=Sum('monto_usd'))
+        )
+    }
 
     resultado = []
     for metodo in metodos:
@@ -695,6 +737,8 @@ def disponibilidad_por_cuenta(fecha):
         gastos = gastos_por_metodo.get(metodo.id) or Decimal('0')
         compras = compras_por_metodo.get(metodo.id) or Decimal('0')
         consignado = consignado_acumulado if metodo.id == primer_efectivo_id else Decimal('0')
+        transferencias_entrantes = transferencias_entrantes_por_metodo.get(metodo.id) or Decimal('0')
+        transferencias_salientes = transferencias_salientes_por_metodo.get(metodo.id) or Decimal('0')
         resultado.append({
             'id': metodo.id,
             'nombre': metodo.nombre,
@@ -704,10 +748,15 @@ def disponibilidad_por_cuenta(fecha):
             'activo': metodo.activo,
             'ingresos_acumulados': ingresos,
             'ingresos_extra_acumulados': ingresos_extra,
+            'transferencias_entrantes_acumuladas': transferencias_entrantes,
             'gastos_acumulados': gastos,
             'compras_acumuladas': compras,
+            'transferencias_salientes_acumuladas': transferencias_salientes,
             'consignado_acumulado': consignado,
-            'saldo_disponible': ingresos + ingresos_extra - gastos - compras - consignado,
+            'saldo_disponible': (
+                ingresos + ingresos_extra + transferencias_entrantes
+                - gastos - compras - transferencias_salientes - consignado
+            ),
             'saldo_disponible_bs': saldo_bs_por_metodo.get(metodo.id) if metodo.moneda == 'VES' else None,
         })
 
@@ -726,8 +775,10 @@ def disponibilidad_por_cuenta(fecha):
                 'metodos': [],
                 'ingresos_acumulados': Decimal('0'),
                 'ingresos_extra_acumulados': Decimal('0'),
+                'transferencias_entrantes_acumuladas': Decimal('0'),
                 'gastos_acumulados': Decimal('0'),
                 'compras_acumuladas': Decimal('0'),
+                'transferencias_salientes_acumuladas': Decimal('0'),
                 'consignado_acumulado': Decimal('0'),
                 'saldo_disponible': Decimal('0'),
                 'saldo_disponible_bs': Decimal('0') if cuenta['moneda'] == 'VES' else None,
@@ -737,8 +788,10 @@ def disponibilidad_por_cuenta(fecha):
         banco['metodos'].append(cuenta)
         banco['ingresos_acumulados'] += cuenta['ingresos_acumulados']
         banco['ingresos_extra_acumulados'] += cuenta['ingresos_extra_acumulados']
+        banco['transferencias_entrantes_acumuladas'] += cuenta['transferencias_entrantes_acumuladas']
         banco['gastos_acumulados'] += cuenta['gastos_acumulados']
         banco['compras_acumuladas'] += cuenta['compras_acumuladas']
+        banco['transferencias_salientes_acumuladas'] += cuenta['transferencias_salientes_acumuladas']
         banco['consignado_acumulado'] += cuenta['consignado_acumulado']
         banco['saldo_disponible'] += cuenta['saldo_disponible']
         if banco['saldo_disponible_bs'] is not None and cuenta['saldo_disponible_bs'] is not None:

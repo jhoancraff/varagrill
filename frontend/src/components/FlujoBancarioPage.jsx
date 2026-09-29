@@ -37,6 +37,11 @@ const TIPO_REGISTRO_LABEL = {
   abono_compra: 'Compra',
 };
 
+// Gastos y compras se agrupan por su fecha REAL (fecha_gasto/fecha_factura,
+// sin hora) en vez de cuándo se cargó el abono al sistema — no hay una hora
+// real que mostrar para esos dos tipos.
+const TIPOS_SIN_HORA = new Set(['abono_gasto', 'abono_compra']);
+
 // Un movimiento con monto_bs es de una cuenta en bolívares (ver
 // detalle_flujo_bancario_dia en reportes.py, que solo lo calcula cuando
 // metodo.moneda == 'VES') — se muestra SOLO en bolívares, con el monto EXACTO
@@ -198,7 +203,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                 <div style={headStyle}>Monto</div>
                 {movimientos.map((movimiento) => (
                   <div key={`${movimiento.tipo_registro}-${movimiento.id}`} style={rowFragmentStyle}>
-                    <div style={cellStyle}>{formatHora(movimiento.fecha_hora)}</div>
+                    <div style={cellStyle}>{TIPOS_SIN_HORA.has(movimiento.tipo_registro) ? '—' : formatHora(movimiento.fecha_hora)}</div>
                     <div style={cellStyle}>{TIPO_REGISTRO_LABEL[movimiento.tipo_registro] || movimiento.tipo_registro}</div>
                     <div style={cellStyle}>{movimiento.nombre}</div>
                     <div style={cellStyle}>{movimiento.metodo_pago_nombre}</div>

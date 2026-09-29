@@ -1321,6 +1321,17 @@ class TasaCambioAutoAssignTests(TestCase):
         self.assertEqual(response.status_code, 200)
         compra = VGCompra.objects.get(proveedor_nombre='Proveedor tasa test')
         self.assertEqual(compra.tasa_cambio_referencia, self.tasa_actual.tasa)
+        self.assertEqual(compra.moneda_origen, 'USD')
+
+        tasa_nueva = _set_tasa_actual('900.0000')
+        cuentas_response = self.client.get('/api/cuentas-por-pagar/')
+        self.assertEqual(cuentas_response.status_code, 200)
+        cuenta = next(
+            cuenta for cuenta in cuentas_response.json()['compras']
+            if cuenta['id'] == compra.id and cuenta['tipo'] == 'compra'
+        )
+        bs_actual = (compra.total * tasa_nueva.tasa).quantize(Decimal('0.01'))
+        self.assertEqual(cuenta['saldo_pendiente_bs'], str(bs_actual))
 
     def test_pago_creation_auto_assigns_current_rate(self):
         cliente = VGCliente.objects.create(nombre='Cliente tasa test')

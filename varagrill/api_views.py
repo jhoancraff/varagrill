@@ -2733,6 +2733,7 @@ def admin_catalog_view(request):
                 fecha_factura=fecha_factura,
                 total=total_compra,
                 estado='recibido',
+                moneda_origen='USD',
                 tasa_cambio_referencia=tasa_cambio_para_registro(),
                 creado_por=request.user,
                 actualizado_por=request.user,

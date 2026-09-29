@@ -54,6 +54,7 @@ import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
 import AnalystComprasPage from './AnalystComprasPage';
 import AnalystMargenGananciaPage from './AnalystMargenGananciaPage';
 import AnalystMovimientoProductosPage from './AnalystMovimientoProductosPage';
+import FlujoBancarioPage from './FlujoBancarioPage';
 import AnalystConfiguracionCosteoPage from './AnalystConfiguracionCosteoPage';
 import EditOrderPage from './EditOrderPage';
 import MesasAtendidasPage from './MesasAtendidasPage';
@@ -1156,6 +1157,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           />
         ) : activeView === 'movimiento-productos' ? (
           <AnalystMovimientoProductosPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'flujo-bancario' ? (
+          <FlujoBancarioPage
             isMobile={isMobile}
             onBack={goBackView}
           />

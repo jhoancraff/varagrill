@@ -1,4 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import TransferenciaCuentasModal from './TransferenciaCuentasModal';
+import Toast from './Toast';
+import useToast from '../hooks/useToast';
 
 function todayIso() {
   const now = new Date();
@@ -12,11 +15,13 @@ function formatMonto(value) {
   return number.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
+function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
   const [fecha, setFecha] = useState(todayIso());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [modalTransferenciaAbierto, setModalTransferenciaAbierto] = useState(false);
+  const { toast, showSuccess, hideToast } = useToast();
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -48,13 +53,25 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
 
   return (
     <section style={containerStyle(isMobile)}>
+      <Toast toast={toast} onClose={hideToast} />
+
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <button type="button" onClick={onBack} style={backButtonStyle}>
           ← Volver a Contabilidad
         </button>
-        <button type="button" onClick={() => window.print()} style={printButtonStyle}>
-          Imprimir / Guardar PDF
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => setModalTransferenciaAbierto(true)} style={transferenciaButtonStyle}>
+            ⇄ Transferencia entre cuentas
+          </button>
+          {onNavigate ? (
+            <button type="button" onClick={() => onNavigate('contabilidad-historial-transferencias')} style={historialButtonStyle}>
+              Historial de transferencias
+            </button>
+          ) : null}
+          <button type="button" onClick={() => window.print()} style={printButtonStyle}>
+            Imprimir / Guardar PDF
+          </button>
+        </div>
       </div>
 
       <div style={headerRowStyle(isMobile)}>
@@ -129,8 +146,14 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                       {Number(banco.metodos[0].ingresos_extra_acumulados) > 0 ? (
                         <span>+${formatMonto(banco.metodos[0].ingresos_extra_acumulados)} propinas/extra</span>
                       ) : null}
+                      {Number(banco.metodos[0].transferencias_entrantes_acumuladas) > 0 ? (
+                        <span>+${formatMonto(banco.metodos[0].transferencias_entrantes_acumuladas)} transferencias recibidas</span>
+                      ) : null}
                       <span>−${formatMonto(banco.metodos[0].gastos_acumulados)} gastos</span>
                       <span>−${formatMonto(banco.metodos[0].compras_acumuladas)} proveedores</span>
+                      {Number(banco.metodos[0].transferencias_salientes_acumuladas) > 0 ? (
+                        <span>−${formatMonto(banco.metodos[0].transferencias_salientes_acumuladas)} transferencias enviadas</span>
+                      ) : null}
                       {Number(banco.metodos[0].consignado_acumulado) > 0 ? (
                         <span>−${formatMonto(banco.metodos[0].consignado_acumulado)} consignado</span>
                       ) : null}
@@ -149,8 +172,10 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                 <div style={headStyle}>Cuenta</div>
                 <div style={headStyle}>Cobrado</div>
                 <div style={headStyle}>Propinas/extra</div>
+                <div style={headStyle}>Transf. entrada</div>
                 <div style={headStyle}>Gastos</div>
                 <div style={headStyle}>Proveedores</div>
+                <div style={headStyle}>Transf. salida</div>
                 <div style={headStyle}>Consignado</div>
                 <div style={headStyle}>Saldo disponible</div>
                 {cuentas.map((cuenta) => (
@@ -158,8 +183,10 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                     <div style={cellStyle}>{cuenta.nombre}{cuenta.es_efectivo ? ' (efectivo)' : ''}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.ingresos_acumulados)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.ingresos_extra_acumulados)}</div>
+                    <div style={cellStyle}>${formatMonto(cuenta.transferencias_entrantes_acumuladas)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.gastos_acumulados)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.compras_acumuladas)}</div>
+                    <div style={cellStyle}>${formatMonto(cuenta.transferencias_salientes_acumuladas)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.consignado_acumulado)}</div>
                     <div style={{ ...cellStyle, fontWeight: 800, color: Number(cuenta.saldo_disponible) < 0 ? '#ff9d9d' : '#8fffb0' }}>
                       ${formatMonto(cuenta.saldo_disponible)}
@@ -172,12 +199,25 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack }) {
                 <div style={cellStyle} />
                 <div style={cellStyle} />
                 <div style={cellStyle} />
+                <div style={cellStyle} />
+                <div style={cellStyle} />
                 <div style={{ ...cellStyle, fontWeight: 800 }}>${formatMonto(data.total_disponible)}</div>
               </div>
             </div>
           </section>
         </>
       ) : null}
+
+      <TransferenciaCuentasModal
+        open={modalTransferenciaAbierto}
+        fechaInicial={fecha}
+        onClose={() => setModalTransferenciaAbierto(false)}
+        onSuccess={(transferencia) => {
+          setModalTransferenciaAbierto(false);
+          showSuccess(`Transferencia #${transferencia.id} registrada correctamente.`);
+          loadReport(fecha);
+        }}
+      />
     </section>
   );
 }
@@ -210,11 +250,16 @@ const metodosAnidadosStyle = { display: 'grid', gap: 4, paddingTop: 6, borderTop
 const metodoAnidadoRowStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: '#d2c3c3', fontSize: 12.5 };
 
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(110px,0.8fr) minmax(120px,0.8fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(110px,0.7fr) minmax(140px,0.9fr)', minWidth: 940, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(100px,0.7fr) minmax(140px,0.9fr)', minWidth: 1180, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 
 const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
+// Violeta/azul a proposito, distinto del rojo de "peligrosas" (cerrar mes,
+// descartar) y del azul de navegacion — esta accion crea un movimiento de
+// dinero real, merece su propio color distintivo.
+const transferenciaButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 18px', background: 'linear-gradient(90deg, #6d28d9 0%, #4f46e5 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(109, 40, 217, 0.35)' };
+const historialButtonStyle = { border: '1px solid rgba(150,130,255,0.35)', borderRadius: 999, padding: '10px 16px', background: 'rgba(109,40,217,0.12)', color: '#d3bff5', fontWeight: 700, cursor: 'pointer' };
 
 export default ReporteDisponibilidadCuentasPage;

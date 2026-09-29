@@ -32,6 +32,7 @@ from .contabilidad import (
     VGOrdenCobro,
     VGPreFactura,
     VGPreFacturaLinea,
+    VGTransferenciaCuenta,
 )
 from .restaurant import (
     VGAbonoCompra,
@@ -124,5 +125,6 @@ __all__ = [
     "VGRecomendacionChef",
     "VGRol",
     "VGTasaCambio",
+    "VGTransferenciaCuenta",
     "VGUsuario",
 ]

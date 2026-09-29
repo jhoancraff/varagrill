@@ -1203,20 +1203,26 @@ def reporte_conciliacion_bancaria_view(request):
 # ---------------------------------------------------------------------------
 def reporte_estado_resultados_view(request):
     """
-    Ventas − costo de ingredientes = utilidad bruta; utilidad bruta − gastos
-    operativos = utilidad neta, para un rango de fechas. Reusa
-    _calcular_margen_periodo (api_views.py, la misma logica del reporte de
-    margen por plato) para "ventas" y "costo de ingredientes", y suma VGGasto
-    por fecha_gasto (no por fecha de pago: un gasto cuenta para el periodo en
-    que se incurrio, se haya pagado ya o no) para los gastos operativos.
+    Ventas − gastos operativos = utilidad neta, para un rango de fechas. Suma
+    VGGasto por fecha_gasto (no por fecha de pago: un gasto cuenta para el
+    periodo en que se incurrio, se haya pagado ya o no) para los gastos
+    operativos.
 
     Las facturas de compra a proveedores (VGCompra, inventario subido por Excel)
-    tambien se suman aca como si fueran un gasto mas — a diferencia de VGGasto,
-    por fecha_pago de cada VGAbonoCompra (cuando de verdad se abono/pago, no
-    cuando se cargo la factura): asi decidio el usuario tratarlas (2026-09),
-    aceptando que un ingrediente ya vendido se cuenta dos veces (una vez aca al
-    pagarlo, otra vez en costo_ingredientes_total via el costeo por receta) —
-    ver la decision registrada en la conversacion de esa fecha.
+    tambien se suman aca como si fueran un gasto mas, por fecha_pago de cada
+    VGAbonoCompra (cuando de verdad se abono/pago, no cuando se cargo la
+    factura).
+
+    IMPORTANTE: el reporte YA NO resta el "costo de ingredientes" calculado por
+    receta (costeo teorico via _calcular_margen_periodo) — hasta 2026-09 se
+    restaba ademas de las compras a proveedores pagadas, lo que contaba el
+    mismo ingrediente dos veces (una vez aqui al pagarle al proveedor, otra vez
+    via el costeo por receta) e inflaba el gasto real. El usuario pidio
+    quitarlo (2026-09-29) para que el estado de resultados refleje solo plata
+    que de verdad salio (compras pagadas + gastos), no un costo teorico
+    ademas de esa plata. _calcular_margen_periodo sigue existiendo para el
+    reporte de margen por plato (reporte_margen_ganancia_view), que es donde
+    ese costeo por receta sigue siendo la metrica correcta.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1234,8 +1240,7 @@ def reporte_estado_resultados_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
-    _platos, ventas_total, costo_ingredientes_total, ventas_total_bs = _calcular_margen_periodo(desde, hasta)
-    utilidad_bruta = ventas_total - costo_ingredientes_total
+    _platos, ventas_total, _costo_ingredientes_total, ventas_total_bs = _calcular_margen_periodo(desde, hasta)
 
     gastos = VGGasto.objects.filter(fecha_gasto__gte=desde, fecha_gasto__lte=hasta).select_related('categoria')
 
@@ -1289,19 +1294,8 @@ def reporte_estado_resultados_view(request):
         key=lambda item: Decimal(item['total']), reverse=True,
     )
 
-    # costo_ingredientes_total NO tiene una tasa propia que congelar: es un costo
-    # unitario corriente (VGIngrediente.costo_unitario, promedio móvil por
-    # VGCompra), no una transacción individual — ver el docstring de
-    # _calcular_margen_periodo. Se convierte con la tasa vigente al CIERRE del
-    # período (no la de hoy), para que el mismo período reportado no cambie de
-    # valor en bolívares según cuándo se consulte, aunque no sea una suma
-    # registro-por-registro como ventas_total_bs/gastos_total_bs.
-    tasa_fin_periodo = tasa_para_fecha(hasta)
-    costo_ingredientes_total_bs = (costo_ingredientes_total * tasa_fin_periodo) if tasa_fin_periodo else None
-    utilidad_bruta_bs = (ventas_total_bs - costo_ingredientes_total_bs) if costo_ingredientes_total_bs is not None else None
-    utilidad_neta_bs = (utilidad_bruta_bs - gastos_total_bs) if utilidad_bruta_bs is not None else None
-
-    utilidad_neta = utilidad_bruta - gastos_total
+    utilidad_neta_bs = ventas_total_bs - gastos_total_bs
+    utilidad_neta = ventas_total - gastos_total
     utilidad_neta_pct = (utilidad_neta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
 
     return _auth_response({
@@ -1310,15 +1304,11 @@ def reporte_estado_resultados_view(request):
         'hasta': hasta.isoformat(),
         'ventas_total': str(ventas_total.quantize(Decimal('0.01'))),
         'ventas_total_bs': str(ventas_total_bs.quantize(Decimal('0.01'))),
-        'costo_ingredientes_total': str(costo_ingredientes_total.quantize(Decimal('0.01'))),
-        'costo_ingredientes_total_bs': str(costo_ingredientes_total_bs.quantize(Decimal('0.01'))) if costo_ingredientes_total_bs is not None else None,
-        'utilidad_bruta': str(utilidad_bruta.quantize(Decimal('0.01'))),
-        'utilidad_bruta_bs': str(utilidad_bruta_bs.quantize(Decimal('0.01'))) if utilidad_bruta_bs is not None else None,
         'gastos_total': str(gastos_total.quantize(Decimal('0.01'))),
         'gastos_total_bs': str(gastos_total_bs.quantize(Decimal('0.01'))),
         'gastos_por_categoria': gastos_por_categoria,
         'utilidad_neta': str(utilidad_neta.quantize(Decimal('0.01'))),
-        'utilidad_neta_bs': str(utilidad_neta_bs.quantize(Decimal('0.01'))) if utilidad_neta_bs is not None else None,
+        'utilidad_neta_bs': str(utilidad_neta_bs.quantize(Decimal('0.01'))),
         'utilidad_neta_pct': str(utilidad_neta_pct.quantize(Decimal('0.01'))),
     })
 
@@ -1327,14 +1317,26 @@ def reporte_estado_resultados_view(request):
 
 def reporte_movimiento_productos_view(request):
     """
-    Cuantas unidades (o kg, para productos por peso) de cada producto se
-    vendieron en un rango de fechas, agrupado por producto y por categoria.
-    A diferencia de reporte_margen_ganancia_view, no calcula costo ni
-    ganancia — solo el volumen de movimiento, para responder "cuanto se
-    movio cada plato" sin entrar en plata. Solo incluye pedidos pagados
-    (mismo criterio de "venta real" que el resto de los reportes de
-    contabilidad) y solo productos con al menos una venta en el rango: los
-    que no tuvieron movimiento simplemente no aparecen en la lista.
+    Movimiento DETALLADO, fila por fila (una por cada VGDetallePedido, sin
+    sumar entre pedidos distintos) agrupado por seccion = PRODUCTO (no por
+    categoria) — a proposito distinto de reporte_margen_ganancia_view, que si
+    agrega por producto en un solo numero. El pedido del negocio (2026-09) es
+    ver cada venta individual tal cual paso: si "Tequeños" se vendio 5 veces
+    en el dia, esa es su seccion con 5 filas (una por cada linea de pedido,
+    cada una con su propia hora/cantidad/peso), no una sola fila con
+    cantidad_vendida=5 — asi se puede ver, por ejemplo, que un mismo corte de
+    carne salio varias veces con pesos distintos cada vez. Cada seccion lleva
+    un total al final (suma de todas sus filas, que son siempre del mismo
+    producto).
+
+    Cada fila trae ademas pedido_id y, si existe, la nota de entrega a la que
+    quedo asociado ese pedido (nota_entrega_id/nota_entrega_codigo) — para
+    poder rastrear de una fila del reporte hasta el documento de venta real.
+
+    Solo incluye pedidos pagados (mismo criterio de "venta real" que el resto
+    de los reportes de contabilidad). El frontend por defecto pide solo el
+    dia de hoy (desde=hasta=hoy) — el analista elige el rango si quiere ver
+    mas.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1359,83 +1361,81 @@ def reporte_movimiento_productos_view(request):
             pedido__fecha_creacion__date__gte=desde,
             pedido__fecha_creacion__date__lte=hasta,
         )
-        .select_related('producto__categoria')
+        .select_related('producto__categoria', 'pedido')
+        # notas_entrega es M2M en VGNotaEntrega (related_name="notas_entrega")
+        # — se trae de una vez para no hacer una query de nota de entrega por
+        # cada fila del reporte.
+        .prefetch_related('pedido__notas_entrega')
     )
 
-    filas_por_producto = {}
+    secciones_por_producto = {}
     for detalle in detalles:
         producto = detalle.producto
-        peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
-        cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor
-
-        fila = filas_por_producto.setdefault(producto.id, {
+        seccion = secciones_por_producto.setdefault(producto.id, {
             'producto_id': producto.id,
             'nombre': producto.nombre,
             'categoria_id': producto.categoria_id,
-            'categoria': producto.categoria.nombre if producto.categoria_id else 'Sin categoria',
-            'venta_por_peso': producto.venta_por_peso,
-            'cantidad_vendida': Decimal('0'),
-            'pedidos': set(),
+            'categoria': producto.categoria.nombre if producto.categoria_id else 'Sin categoría',
+            'filas': [],
+            'total_unidades': Decimal('0'),
+            'total_kg': Decimal('0'),
         })
-        fila['cantidad_vendida'] += cantidad_equivalente
-        fila['pedidos'].add(detalle.pedido_id)
 
-    productos = []
-    total_unidades = Decimal('0')
-    total_kg = Decimal('0')
-    categorias_totales = {}
-    for fila in filas_por_producto.values():
-        if fila['venta_por_peso']:
-            total_kg += fila['cantidad_vendida']
+        if producto.venta_por_peso:
+            seccion['total_kg'] += (detalle.peso_gramos or Decimal('0')) * Decimal(detalle.cantidad) / Decimal('1000')
         else:
-            total_unidades += fila['cantidad_vendida']
+            seccion['total_unidades'] += Decimal(detalle.cantidad)
 
-        productos.append({
-            'producto_id': fila['producto_id'],
-            'nombre': fila['nombre'],
-            'categoria_id': fila['categoria_id'],
-            'categoria': fila['categoria'],
-            'unidad': 'kg' if fila['venta_por_peso'] else 'unidad',
-            'cantidad_vendida': str(fila['cantidad_vendida'].quantize(Decimal('0.01'))),
-            'num_ventas': len(fila['pedidos']),
+        # Un pedido puede no tener nota de entrega todavia asociada (ej. si
+        # se facturo con numeracion fiscal en vez de nota de entrega) — en
+        # ese caso queda None y el frontend lo muestra como "—".
+        notas_entrega_pedido = list(detalle.pedido.notas_entrega.all())
+        nota_entrega = notas_entrega_pedido[0] if notas_entrega_pedido else None
+
+        seccion['filas'].append({
+            'detalle_id': detalle.id,
+            'pedido_id': detalle.pedido_id,
+            'nota_entrega_id': nota_entrega.id if nota_entrega else None,
+            'nota_entrega_codigo': nota_entrega.codigo if nota_entrega else None,
+            'fecha_hora': timezone.localtime(detalle.pedido.fecha_creacion).isoformat(),
+            'cantidad': str(detalle.cantidad),
+            'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
+            'unidad': 'kg' if producto.venta_por_peso else 'unidad',
         })
 
-        entry = categorias_totales.setdefault(fila['categoria_id'], {
-            'categoria_id': fila['categoria_id'],
-            'categoria': fila['categoria'],
-            'cantidad_unidades': Decimal('0'),
-            'cantidad_kg': Decimal('0'),
-            'productos_distintos': 0,
+    total_unidades_vendidas = Decimal('0')
+    total_kg_vendidos = Decimal('0')
+    total_lineas = 0
+    secciones = []
+    for seccion in secciones_por_producto.values():
+        # Orden cronologico dentro de la seccion: todas las filas son del
+        # mismo producto, asi que solo importa el orden en que se vendieron.
+        filas_ordenadas = sorted(seccion['filas'], key=lambda fila: fila['fecha_hora'])
+        secciones.append({
+            'producto_id': seccion['producto_id'],
+            'nombre': seccion['nombre'],
+            'categoria_id': seccion['categoria_id'],
+            'categoria': seccion['categoria'],
+            'filas': filas_ordenadas,
+            'total_unidades': str(seccion['total_unidades'].quantize(Decimal('0.01'))),
+            'total_kg': str(seccion['total_kg'].quantize(Decimal('0.01'))),
+            'total_lineas': len(filas_ordenadas),
         })
-        if fila['venta_por_peso']:
-            entry['cantidad_kg'] += fila['cantidad_vendida']
-        else:
-            entry['cantidad_unidades'] += fila['cantidad_vendida']
-        entry['productos_distintos'] += 1
+        total_unidades_vendidas += seccion['total_unidades']
+        total_kg_vendidos += seccion['total_kg']
+        total_lineas += len(filas_ordenadas)
 
-    productos.sort(key=lambda item: Decimal(item['cantidad_vendida']), reverse=True)
-
-    categorias = sorted(
-        [
-            {
-                'categoria_id': entry['categoria_id'],
-                'categoria': entry['categoria'],
-                'cantidad_unidades': str(entry['cantidad_unidades'].quantize(Decimal('0.01'))),
-                'cantidad_kg': str(entry['cantidad_kg'].quantize(Decimal('0.01'))),
-                'productos_distintos': entry['productos_distintos'],
-            }
-            for entry in categorias_totales.values()
-        ],
-        key=lambda item: (Decimal(item['cantidad_unidades']) + Decimal(item['cantidad_kg'])), reverse=True,
-    )
+    # Mas vendido primero (por cantidad — cada producto solo aporta a
+    # total_unidades O total_kg, nunca a ambos, asi que sumarlos es seguro).
+    secciones.sort(key=lambda item: Decimal(item['total_unidades']) + Decimal(item['total_kg']), reverse=True)
 
     return _auth_response({
         'ok': True,
         'desde': desde.isoformat(),
         'hasta': hasta.isoformat(),
-        'productos': productos,
-        'categorias': categorias,
-        'total_productos_distintos': len(productos),
-        'total_unidades_vendidas': str(total_unidades.quantize(Decimal('0.01'))),
-        'total_kg_vendidos': str(total_kg.quantize(Decimal('0.01'))),
+        'secciones': secciones,
+        'total_secciones': len(secciones),
+        'total_lineas': total_lineas,
+        'total_unidades_vendidas': str(total_unidades_vendidas.quantize(Decimal('0.01'))),
+        'total_kg_vendidos': str(total_kg_vendidos.quantize(Decimal('0.01'))),
     })

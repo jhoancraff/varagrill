@@ -142,21 +142,6 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
               </span>
             </div>
             <div style={lineRowStyle}>
-              <span style={lineLabelStyle}>(−) Costo de ingredientes</span>
-              <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
-                −${formatMonto(data.costo_ingredientes_total)}
-                <BsAmount amountUsd={data.costo_ingredientes_total} bs={data.costo_ingredientes_total_bs ?? undefined} tasa={tasaCambio} />
-              </span>
-            </div>
-            <div style={subtotalRowStyle}>
-              <span style={lineLabelStyle}>= Utilidad bruta</span>
-              <span style={{ ...lineValueStyle, fontWeight: 800 }}>
-                ${formatMonto(data.utilidad_bruta)}
-                <BsAmount amountUsd={data.utilidad_bruta} bs={data.utilidad_bruta_bs ?? undefined} tasa={tasaCambio} />
-              </span>
-            </div>
-
-            <div style={lineRowStyle}>
               <span style={lineLabelStyle}>
                 (−) Gastos operativos
                 {onNavigate ? (
@@ -233,7 +218,6 @@ const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid
 
 const waterfallStyle = { display: 'grid', gap: 10, maxWidth: 560 };
 const lineRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 };
-const subtotalRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '8px 0', borderTop: '1px dashed rgba(255,255,255,0.15)', borderBottom: '1px dashed rgba(255,255,255,0.15)' };
 const lineLabelStyle = { color: '#d2c3c3', fontSize: 14.5 };
 const lineValueStyle = { color: '#fff', fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap' };
 const categoriaChipStyle = { display: 'inline-flex', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };

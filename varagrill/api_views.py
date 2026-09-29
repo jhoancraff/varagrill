@@ -895,15 +895,43 @@ def _calcular_margen_periodo(desde, hasta):
 
 def reporte_margen_ganancia_view(request):
     """
-    Margen de ganancia por plato vendido en un rango de fechas: cuánto entró
-    (precio de venta x cantidad), cuánto costó y la ganancia resultante,
-    agrupado por producto. Usa el costo histórico congelado al momento del
-    cobro (VGDetallePedido.costo_unitario_venta, ver _snapshot_costo_venta_detalles)
-    cuando existe; para ventas de antes de que ese campo existiera (o cualquier
-    fila vieja sin snapshot), cae al costo_unitario ACTUAL de los ingredientes
-    como estimación — mismo criterio "último costo" que el reporte de
-    referencia (Profit Plus) — y esa fila queda marcada con 'costo_estimado':
-    true para que quede claro que no es un costo histórico real.
+    Margen de ganancia DETALLADO, fila por fila (una por cada VGDetallePedido,
+    sin sumar entre pedidos distintos) agrupado por seccion = PRODUCTO — mismo
+    patron que reporte_movimiento_productos_view (contabilidad_views.py), pero
+    con ingreso/costo/ganancia por fila en vez de solo cantidad. Cada seccion
+    lleva un total al final (suma de todas sus filas).
+
+    ESTRICTAMENTE historico, a proposito — este reporte NUNCA recalcula con
+    valores de HOY una venta que ya paso:
+      - `ingreso` de cada fila sale de VGDetallePedido.precio_unitario/subtotal,
+        que se congela en la LINEA del pedido al crearla (ver pedido_create_view)
+        y nunca se vuelve a sincronizar contra producto.precio_venta despues —
+        si el precio del plato cambia hoy, las ventas de ayer (o del año
+        pasado) siguen mostrando el precio al que se vendieron en su momento.
+      - `costo` de cada fila sale de VGDetallePedido.costo_unitario_venta,
+        congelado en el momento del COBRO (ver _snapshot_costo_venta_detalles)
+        con los costos de ingredientes vigentes ESE dia — si el costo de un
+        ingrediente de la receta cambia hoy, las ventas ya cobradas no se
+        recalculan con el costo nuevo.
+      - El costo actual de la receta (_compute_product_unit_cost) SOLO se usa
+        como ultimo recurso, fila por fila, para ventas de antes de que
+        costo_unitario_venta existiera (o cualquier fila vieja sin snapshot) —
+        y esa fila puntual (no toda la seccion) queda marcada con
+        'costo_estimado': true para que quede clarisimo que esa fila en
+        particular no es costo historico real. Nunca extiendas esa estimacion
+        a filas que SI tienen su propio costo_unitario_venta congelado.
+      - El costo mostrado es solo el de la receta/sub-receta anclada al
+        producto (ingredientes), sin ningun margen de ganancia sumado encima
+        — el margen ya esta implicito en la diferencia entre ingreso y costo,
+        no se suma como un cargo aparte.
+
+    Cada fila trae ademas pedido_id y, si existe, la nota de entrega asociada
+    a ese pedido (nota_entrega_id/nota_entrega_codigo), igual que en
+    reporte_movimiento_productos_view, para poder rastrear cualquier fila
+    hasta el documento de venta real.
+
+    Solo incluye pedidos pagados (mismo criterio de "venta real" que el resto
+    de los reportes de contabilidad).
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -921,21 +949,131 @@ def reporte_margen_ganancia_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
-    filas, total_ingreso, total_costo, _total_ingreso_bs = _calcular_margen_periodo(desde, hasta)
+    detalles = (
+        VGDetallePedido.objects
+        .filter(
+            pedido__estado='pagado',
+            pedido__fecha_creacion__date__gte=desde,
+            pedido__fecha_creacion__date__lte=hasta,
+        )
+        .select_related('producto__categoria', 'pedido')
+        .prefetch_related('pedido__notas_entrega')
+    )
 
-    total_ganancia = total_ingreso - total_costo
-    total_ganancia_pct = (total_ganancia / total_ingreso * Decimal('100')) if total_ingreso > 0 else Decimal('0')
+    # Costos de ingredientes/preparaciones ACTUALES — solo se usan como ultimo
+    # recurso para filas viejas sin costo_unitario_venta congelado (ver
+    # docstring). Cargarlos una sola vez, no por fila.
+    ingredient_costs = {
+        row['id']: _costo_unitario_efectivo(row['costo_unitario'], row['precio_compra'], row['peso_real'])
+        for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
+    }
+    preparation_cost_map = _load_preparation_cost_map()
+    unit_cost_cache = {}
+
+    secciones_por_producto = {}
+    for detalle in detalles:
+        producto = detalle.producto
+        seccion = secciones_por_producto.setdefault(producto.id, {
+            'producto_id': producto.id,
+            'nombre': producto.nombre,
+            'categoria_id': producto.categoria_id,
+            'categoria': producto.categoria.nombre if producto.categoria_id else 'Sin categoría',
+            'filas': [],
+            'total_unidades': Decimal('0'),
+            'total_kg': Decimal('0'),
+            'total_ingreso': Decimal('0'),
+            'total_costo': Decimal('0'),
+        })
+
+        peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
+        cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor
+
+        if detalle.costo_unitario_venta is not None:
+            costo_unitario = detalle.costo_unitario_venta
+            costo_estimado = False
+        else:
+            if producto.id not in unit_cost_cache:
+                unit_cost_cache[producto.id] = _compute_product_unit_cost(producto, ingredient_costs, preparation_cost_map)
+            costo_unitario = unit_cost_cache[producto.id]
+            costo_estimado = True
+
+        ingreso_linea = detalle.subtotal
+        costo_linea = costo_unitario * cantidad_equivalente
+        ganancia_linea = ingreso_linea - costo_linea
+        ganancia_linea_pct = (ganancia_linea / ingreso_linea * Decimal('100')) if ingreso_linea > 0 else Decimal('0')
+
+        if producto.venta_por_peso:
+            seccion['total_kg'] += cantidad_equivalente
+        else:
+            seccion['total_unidades'] += cantidad_equivalente
+        seccion['total_ingreso'] += ingreso_linea
+        seccion['total_costo'] += costo_linea
+
+        notas_entrega_pedido = list(detalle.pedido.notas_entrega.all())
+        nota_entrega = notas_entrega_pedido[0] if notas_entrega_pedido else None
+
+        seccion['filas'].append({
+            'detalle_id': detalle.id,
+            'pedido_id': detalle.pedido_id,
+            'nota_entrega_id': nota_entrega.id if nota_entrega else None,
+            'nota_entrega_codigo': nota_entrega.codigo if nota_entrega else None,
+            'fecha_hora': timezone.localtime(detalle.pedido.fecha_creacion).isoformat(),
+            'cantidad': str(detalle.cantidad),
+            'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
+            'unidad': 'kg' if producto.venta_por_peso else 'unidad',
+            'costo_unitario': str(costo_unitario.quantize(Decimal('0.0001'))),
+            'ingreso': str(ingreso_linea.quantize(Decimal('0.01'))),
+            'costo': str(costo_linea.quantize(Decimal('0.01'))),
+            'ganancia_monto': str(ganancia_linea.quantize(Decimal('0.01'))),
+            'ganancia_pct': str(ganancia_linea_pct.quantize(Decimal('0.01'))),
+            'costo_estimado': costo_estimado,
+        })
+
+    total_ingreso_general = Decimal('0')
+    total_costo_general = Decimal('0')
+    total_lineas_general = 0
+    secciones = []
+    for seccion in secciones_por_producto.values():
+        filas_ordenadas = sorted(seccion['filas'], key=lambda fila: fila['fecha_hora'])
+        total_ganancia = seccion['total_ingreso'] - seccion['total_costo']
+        total_ganancia_pct = (total_ganancia / seccion['total_ingreso'] * Decimal('100')) if seccion['total_ingreso'] > 0 else Decimal('0')
+        secciones.append({
+            'producto_id': seccion['producto_id'],
+            'nombre': seccion['nombre'],
+            'categoria_id': seccion['categoria_id'],
+            'categoria': seccion['categoria'],
+            'filas': filas_ordenadas,
+            'total_unidades': str(seccion['total_unidades'].quantize(Decimal('0.01'))),
+            'total_kg': str(seccion['total_kg'].quantize(Decimal('0.01'))),
+            'total_ingreso': str(seccion['total_ingreso'].quantize(Decimal('0.01'))),
+            'total_costo': str(seccion['total_costo'].quantize(Decimal('0.01'))),
+            'total_ganancia_monto': str(total_ganancia.quantize(Decimal('0.01'))),
+            'total_ganancia_pct': str(total_ganancia_pct.quantize(Decimal('0.01'))),
+            'total_lineas': len(filas_ordenadas),
+            'tiene_costo_estimado': any(fila['costo_estimado'] for fila in filas_ordenadas),
+        })
+        total_ingreso_general += seccion['total_ingreso']
+        total_costo_general += seccion['total_costo']
+        total_lineas_general += len(filas_ordenadas)
+
+    secciones.sort(key=lambda item: Decimal(item['total_ingreso']), reverse=True)
+
+    total_ganancia_general = total_ingreso_general - total_costo_general
+    total_ganancia_general_pct = (
+        (total_ganancia_general / total_ingreso_general * Decimal('100')) if total_ingreso_general > 0 else Decimal('0')
+    )
 
     return _auth_response({
         'ok': True,
         'desde': desde.isoformat(),
         'hasta': hasta.isoformat(),
-        'platos': filas,
+        'secciones': secciones,
+        'total_lineas': total_lineas_general,
         'totales': {
-            'ingreso_total': str(total_ingreso.quantize(Decimal('0.01'))),
-            'costo_total': str(total_costo.quantize(Decimal('0.01'))),
-            'ganancia_monto': str(total_ganancia.quantize(Decimal('0.01'))),
-            'ganancia_pct': str(total_ganancia_pct.quantize(Decimal('0.01'))),
+            'ingreso_total': str(total_ingreso_general.quantize(Decimal('0.01'))),
+            'costo_total': str(total_costo_general.quantize(Decimal('0.01'))),
+            'ganancia_monto': str(total_ganancia_general.quantize(Decimal('0.01'))),
+            'ganancia_pct': str(total_ganancia_general_pct.quantize(Decimal('0.01'))),
         },
     })
 

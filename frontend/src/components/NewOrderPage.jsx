@@ -71,6 +71,32 @@ function NewOrderPage({
   const [nextGrupoId, setNextGrupoId] = useState(1);
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ cartItems, orderHeader });
   const [mesasOcupadasPorId, setMesasOcupadasPorId] = useState({});
+  const [cartModalOpen, setCartModalOpen] = useState(false);
+
+  // En movil, `position: fixed` ancla la barra al viewport DE LAYOUT, que la
+  // mayoria de navegadores NO encoge cuando aparece el teclado virtual (solo
+  // encogen el viewport VISUAL) — sin esto la barra queda tapada detras del
+  // teclado. `visualViewport` da el espacio real tapado, y subimos la barra
+  // esa misma distancia.
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  useEffect(() => {
+    const visualViewport = window.visualViewport;
+    if (!visualViewport) return undefined;
+
+    const handleViewportResize = () => {
+      const offset = window.innerHeight - visualViewport.height - visualViewport.offsetTop;
+      setKeyboardOffset(Math.max(0, Math.round(offset)));
+    };
+
+    visualViewport.addEventListener('resize', handleViewportResize);
+    visualViewport.addEventListener('scroll', handleViewportResize);
+    handleViewportResize();
+
+    return () => {
+      visualViewport.removeEventListener('resize', handleViewportResize);
+      visualViewport.removeEventListener('scroll', handleViewportResize);
+    };
+  }, []);
 
   // Solo el mesero necesita esto: cajera/admin pueden entrar a cualquier mesa
   // para ayudar (ver la excepcion de pedido_create_view), asi que para ellos
@@ -1056,19 +1082,42 @@ function NewOrderPage({
       </form>
 
       {isCompact && cartItems.length > 0 ? (
-        <div style={mobileCartBarStyle}>
-          <div style={{ color: '#fff', fontWeight: 700 }}>
-            {cartCount} {cartCount === 1 ? 'plato' : 'platos'} · ${subtotal.toFixed(2)}
-            <BsAmount amountUsd={subtotal} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
-          </div>
+        <div style={mobileCartBarStyle(keyboardOffset)}>
           <button
             type="button"
-            onClick={() => document.getElementById('cart-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-            style={mobileCartButtonStyle}
+            onClick={() => setCartModalOpen(true)}
+            style={mobileCartIconButtonStyle}
+            aria-label="Ver resumen del pedido"
           >
-            Ver pedido
+            <span aria-hidden="true">🛒</span>
+            <span style={mobileCartBadgeStyle}>{cartCount}</span>
+          </button>
+          <div style={{ color: '#fff', fontWeight: 700 }}>
+            ${subtotal.toFixed(2)}
+            <BsAmount amountUsd={subtotal} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
+          </div>
+          <button type="button" onClick={handleSubmit} style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
+            {isSubmitting ? 'Guardando...' : 'Registrar pedido'}
           </button>
         </div>
+      ) : null}
+
+      {cartModalOpen ? (
+        <CartSummaryModal
+          cartCount={cartCount}
+          subtotal={subtotal}
+          tasaCambio={tasaCambio}
+          groupedCartItems={groupedCartItems}
+          renderCartLine={renderCartLine}
+          products={products}
+          promotionsByProductId={promotionsByProductId}
+          isSubmitting={isSubmitting}
+          onClose={() => setCartModalOpen(false)}
+          onSubmit={(event) => {
+            setCartModalOpen(false);
+            handleSubmit(event);
+          }}
+        />
       ) : null}
 
       {detailProduct ? (
@@ -1123,6 +1172,84 @@ function NewOrderPage({
 
       <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
     </section>
+  );
+}
+
+function CartSummaryModal({
+  cartCount,
+  subtotal,
+  tasaCambio,
+  groupedCartItems,
+  renderCartLine,
+  products,
+  promotionsByProductId,
+  isSubmitting,
+  onClose,
+  onSubmit,
+}) {
+  // Solo se monta mientras esta abierto (ver `cartModalOpen ? <CartSummaryModal.../> : null`
+  // más arriba) — su sola existencia en el árbol YA significa "abierto".
+  useMobileBackHandler(true, onClose);
+
+  const isEmpty = groupedCartItems.platos.length === 0 && groupedCartItems.ungrouped.length === 0;
+
+  return (
+    <div style={modalBackdropStyle} onClick={onClose}>
+      <div style={cartModalCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={cartModalHeaderStyle}>
+          <div style={cartTitleStyle}>Pedido actual</div>
+          <span style={cartCountBadgeStyle}>{cartCount} {cartCount === 1 ? 'plato' : 'platos'}</span>
+          <button type="button" onClick={onClose} style={cartModalCloseButtonStyle} aria-label="Cerrar">
+            ×
+          </button>
+        </div>
+
+        <div style={cartModalBodyStyle}>
+          {isEmpty ? (
+            <div style={cartEmptyStyle}>Toca un plato del menú para agregarlo aquí.</div>
+          ) : (
+            <>
+              {groupedCartItems.platos.map(({ grupoId, displayNumber, items }) => (
+                <div key={`plato-${grupoId}`} style={platoGroupStyle(false)}>
+                  <div style={platoGroupHeaderStyle}>
+                    <span style={platoGroupTitleRowStyle}>
+                      <span>Plato {displayNumber}</span>
+                    </span>
+                    <span style={platoGroupSubtotalStyle}>
+                      ${items.reduce((sum, item) => sum + computeItemTotal(item, products, promotionsByProductId), 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <div style={platoGroupItemsStyle}>
+                    {items.map((item) => renderCartLine(item))}
+                  </div>
+                </div>
+              ))}
+              {groupedCartItems.ungrouped.length > 0 ? (
+                <div style={ungroupedGroupStyle}>
+                  <div style={ungroupedHeaderStyle}>Otros ítems (sin plato armado)</div>
+                  <div style={platoGroupItemsStyle}>
+                    {groupedCartItems.ungrouped.map((item) => renderCartLine(item))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        <div style={cartModalFooterStyle}>
+          <div style={cartTotalRowStyle}>
+            <span>Total estimado</span>
+            <span style={cartTotalValueStyle}>
+              ${subtotal.toFixed(2)}
+              <BsAmount amountUsd={subtotal} tasa={tasaCambio} />
+            </span>
+          </div>
+          <button type="button" onClick={onSubmit} style={primaryButtonStyle(true)} disabled={isSubmitting || isEmpty}>
+            {isSubmitting ? 'Guardando...' : 'Registrar pedido'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2264,33 +2391,117 @@ const cartTotalValueStyle = {
 };
 
 // --- Barra flotante de resumen en móvil ---
-
-const mobileCartBarStyle = {
-  position: 'sticky',
-  bottom: 8,
-  marginTop: 12,
+//
+// `position: fixed` a proposito (no `sticky`): tiene que quedar anclada a la
+// pantalla sin importar el scroll del formulario. `keyboardOffset` (ver el
+// useEffect de `visualViewport` en el componente) la sube cuando el teclado
+// virtual tapa la parte de abajo — fixed se ancla al viewport de LAYOUT, que
+// la mayoria de navegadores no encoge al abrir el teclado, asi que sin este
+// ajuste la barra queda oculta detras de el.
+const mobileCartBarStyle = (keyboardOffset) => ({
+  position: 'fixed',
+  left: 12,
+  right: 12,
+  bottom: 8 + keyboardOffset,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 10,
-  padding: '12px 14px',
+  padding: '10px 14px',
   borderRadius: 14,
   background: 'rgba(18, 8, 8, 0.96)',
   backdropFilter: 'blur(2px)',
   border: '1px solid rgba(255,255,255,0.14)',
   boxShadow: '0 12px 30px rgba(0,0,0,0.4)',
-  zIndex: 5,
+  zIndex: 15,
+});
+
+const mobileCartIconButtonStyle = {
+  position: 'relative',
+  flexShrink: 0,
+  width: 44,
+  height: 44,
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.18)',
+  background: 'rgba(255,255,255,0.08)',
+  color: '#fff',
+  fontSize: 20,
+  display: 'grid',
+  placeItems: 'center',
+  cursor: 'pointer',
 };
 
-const mobileCartButtonStyle = {
-  border: 'none',
+const mobileCartBadgeStyle = {
+  position: 'absolute',
+  top: -6,
+  right: -6,
+  minWidth: 20,
+  height: 20,
+  padding: '0 5px',
   borderRadius: 999,
-  padding: '10px 16px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: '#ff4d4d',
   color: '#fff',
-  fontWeight: 700,
+  fontSize: 11.5,
+  fontWeight: 800,
+  display: 'grid',
+  placeItems: 'center',
+  border: '2px solid rgba(18, 8, 8, 0.96)',
+};
+
+// --- Modal de resumen del carrito (movil) ---
+
+const cartModalCardStyle = {
+  position: 'relative',
+  width: '100%',
+  maxWidth: 480,
+  maxHeight: '86vh',
+  display: 'grid',
+  gridTemplateRows: 'auto 1fr auto',
+  borderRadius: 20,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
+  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+  overflow: 'hidden',
+};
+
+const cartModalHeaderStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '16px 48px 16px 18px',
+  borderBottom: '1px solid rgba(255,255,255,0.1)',
+};
+
+const cartModalCloseButtonStyle = {
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  border: 'none',
+  background: 'rgba(0,0,0,0.55)',
+  color: '#fff',
+  fontSize: 20,
+  lineHeight: 1,
   cursor: 'pointer',
-  minHeight: 40,
+  display: 'grid',
+  placeItems: 'center',
+};
+
+const cartModalBodyStyle = {
+  overflowY: 'auto',
+  padding: 16,
+  display: 'grid',
+  gap: 12,
+  alignContent: 'start',
+};
+
+const cartModalFooterStyle = {
+  display: 'grid',
+  gap: 10,
+  padding: 16,
+  borderTop: '1px solid rgba(255,255,255,0.1)',
 };
 
 // --- Modal de descripción del producto ---

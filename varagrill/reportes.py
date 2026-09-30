@@ -7,7 +7,7 @@ import calendar
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.utils import timezone
 
 from .models import (
@@ -868,14 +868,21 @@ def flujo_bancario_mensual(anio, mes, banco_clave):
       fecha_creacion (automaticas): una venta se cobra en el momento, no hay
       "carga tardia" que desalinee esa fecha de la real.
     - `salida` de cada dia = VGAbonoGasto + VGAbonoCompra (lo pagado a gastos
-      operativos y a proveedores) de ese metodo/banco ese dia — pero
-      agrupadas por la fecha REAL del gasto/factura (VGGasto.fecha_gasto /
-      VGCompra.fecha_factura), NUNCA por fecha_pago (cuando se cargo el
-      abono al sistema, automatica): es comun cargar una semana de gastos
-      de una sola vez, y en ese caso fecha_pago de todos seria "hoy" aunque
-      cada uno haya pasado en un dia distinto. Una VGAbonoCompra cuya compra
-      no tiene fecha_factura (opcional) cae a la fecha local de
-      VGCompra.fecha_compra (automatica), unico dato disponible en ese caso.
+      operativos y a proveedores) de ese metodo/banco ese dia:
+        - VGAbonoGasto se agrupa por la fecha REAL del gasto (VGGasto.fecha_gasto),
+          nunca por fecha_pago (cuando se cargo el abono al sistema,
+          automatica): es comun cargar una semana de gastos de una sola vez
+          (un solo abono por gasto, por el monto completo), y ahi fecha_pago
+          de todos seria "hoy" aunque cada uno haya pasado en un dia distinto.
+        - VGAbonoCompra, en cambio, se agrupa por SU PROPIA fecha_pago (cada
+          abono, en su propia fecha) — a diferencia de un gasto, una compra
+          se puede pagar en varios abonos parciales en fechas bien distintas
+          (ver compras_views.compra_abono_view); agruparlas por la fecha de
+          la factura (un solo dia) mostraria todos esos abonos como si
+          hubieran salido del banco ese mismo dia, cuando la plata de verdad
+          salio en cada fecha de abono. fecha_pago aca SI es la fecha real
+          de cada salida, porque cada abono se registra el mismo dia en que
+          se paga (no se cargan "atrasados" como los gastos).
     Todos los dias del mes aparecen en `dias`, tengan o no movimiento (para
     que el calendario del reporte quede completo), con entrada/salida en 0
     cuando no hubo nada.
@@ -938,13 +945,12 @@ def flujo_bancario_mensual(anio, mes, banco_clave):
     salidas_usd = {}
     salidas_bs = {}
 
-    # Las salidas de gastos/compras se agrupan por la fecha REAL del
-    # gasto/factura (VGGasto.fecha_gasto / VGCompra.fecha_factura) — la que
-    # el analista escribe a mano al registrar, y puede ser bien distinta de
-    # cuando de verdad se cargo el abono al sistema (fecha_pago, automatica):
-    # es comun cargar gastos de una semana atras de una sola vez. Usar
-    # fecha_pago aca hacia que esas salidas aparecieran en el dia en que se
-    # tipearon, no en el dia en que de verdad salio la plata.
+    # Los gastos se agrupan por la fecha REAL del gasto (VGGasto.fecha_gasto)
+    # — la que el analista escribe a mano al registrar, y puede ser bien
+    # distinta de cuando de verdad se cargo el abono al sistema (fecha_pago,
+    # automatica): es comun cargar gastos de una semana atras de una sola
+    # vez. Usar fecha_pago aca hacia que esas salidas aparecieran en el dia
+    # en que se tipearon, no en el dia en que de verdad salio la plata.
     for abono in (
         VGAbonoGasto.objects
         .filter(gasto__fecha_gasto__gte=desde, gasto__fecha_gasto__lte=hasta, metodo_pago_id__in=metodo_ids)
@@ -957,19 +963,19 @@ def flujo_bancario_mensual(anio, mes, banco_clave):
         if monto_bs is not None:
             salidas_bs[dia] = salidas_bs.get(dia, Decimal('0')) + monto_bs
 
-    # fecha_factura es opcional (compra sin factura fisica con fecha propia)
-    # — para esas, cae a la fecha LOCAL de fecha_compra (automatica), unico
-    # dato que hay.
+    # Las compras, a diferencia de los gastos, se agrupan por la fecha REAL
+    # de CADA ABONO (fecha_pago) — una compra se puede pagar en varios
+    # abonos parciales en fechas distintas, y cada uno sale del banco el dia
+    # en que de verdad se registra (no se cargan "atrasados" como un gasto),
+    # asi que fecha_pago ya es la fecha real de esa salida puntual. Agrupar
+    # por fecha_factura (un solo dia) juntaria todos los abonos de una misma
+    # compra en un solo dia, aunque hayan salido del banco en dias distintos.
     for abono in (
         VGAbonoCompra.objects
-        .filter(
-            Q(compra__fecha_factura__gte=desde, compra__fecha_factura__lte=hasta)
-            | Q(compra__fecha_factura__isnull=True, compra__fecha_compra__date__gte=desde, compra__fecha_compra__date__lte=hasta),
-            metodo_pago_id__in=metodo_ids,
-        )
+        .filter(fecha_pago__date__gte=desde, fecha_pago__date__lte=hasta, metodo_pago_id__in=metodo_ids)
         .select_related('metodo_pago', 'compra')
     ):
-        dia = abono.compra.fecha_factura or timezone.localtime(abono.compra.fecha_compra).date()
+        dia = timezone.localtime(abono.fecha_pago).date()
         salidas_usd[dia] = salidas_usd.get(dia, Decimal('0')) + abono.monto
         tasa_abono = abono.tasa_cambio_referencia or tasa_para_fecha(dia)
         monto_bs = _monto_bs_historico(abono.monto, abono.metodo_pago.moneda, tasa_abono)
@@ -1015,9 +1021,11 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
     factura, o el flujo historico de "mesero cobra directo" ligado
     directo a un VGPedido), mas cada VGIngresoExtra (propina/pago extra).
     'salida': cada VGAbonoGasto (con el nombre del gasto) y cada
-    VGAbonoCompra (con el proveedor de la compra) — `fecha` aca es SIEMPRE
-    la fecha real del gasto/factura (ver flujo_bancario_mensual), no cuando
-    se cargo el abono al sistema.
+    VGAbonoCompra (con el proveedor de la compra) — para un VGAbonoGasto,
+    `fecha` es la fecha real del gasto (VGGasto.fecha_gasto), nunca cuando
+    se cargo el abono; para un VGAbonoCompra, `fecha` SI es fecha_pago (cada
+    abono, en su propia fecha) — ver flujo_bancario_mensual para el porque
+    de esta diferencia entre los dos.
 
     Cada fila trae tambien `monto_bs`: el equivalente en bolivares que de
     verdad se cobro/pago, calculado con LA TASA CONGELADA de ese registro
@@ -1108,20 +1116,19 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
                 'monto_bs': _monto_bs(abono.monto, abono.metodo_pago.moneda, tasa_abono),
                 'referencia': abono.referencia,
             })
+        # A diferencia de VGAbonoGasto, aca `fecha` SI es fecha_pago (el
+        # abono de una compra ya tiene su propia hora real de cuando se
+        # registro — no hace falta fecha_hora_fija).
         for abono in (
             VGAbonoCompra.objects
-            .filter(
-                Q(compra__fecha_factura=fecha)
-                | Q(compra__fecha_factura__isnull=True, compra__fecha_compra__date=fecha),
-                metodo_pago_id__in=metodo_ids,
-            )
+            .filter(fecha_pago__date=fecha, metodo_pago_id__in=metodo_ids)
             .select_related('metodo_pago', 'compra')
         ):
             tasa_abono = abono.tasa_cambio_referencia or tasa_para_fecha(fecha)
             movimientos.append({
                 'id': abono.id,
                 'tipo_registro': 'abono_compra',
-                'fecha_hora': fecha_hora_fija,
+                'fecha_hora': abono.fecha_pago,
                 'nombre': f"Compra — {abono.compra.proveedor_nombre}",
                 'metodo_pago_nombre': abono.metodo_pago.nombre,
                 'monto': abono.monto,

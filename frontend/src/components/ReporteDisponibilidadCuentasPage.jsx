@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import TransferenciaCuentasModal from './TransferenciaCuentasModal';
+import IngresoParcialModal from './IngresoParcialModal';
 import Toast from './Toast';
 import useToast from '../hooks/useToast';
 
@@ -21,7 +22,9 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [modalTransferenciaAbierto, setModalTransferenciaAbierto] = useState(false);
-  const { toast, showSuccess, hideToast } = useToast();
+  const [modalIngresoAbierto, setModalIngresoAbierto] = useState(false);
+  const [ingresoSubmitting, setIngresoSubmitting] = useState(false);
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
   const loadReport = useCallback(async (fechaConsultada) => {
     setLoading(true);
@@ -48,6 +51,34 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
     loadReport(fecha);
   }, [fecha, loadReport]);
 
+  const handleRegistrarIngresoParcial = async ({ monto, descripcion, metodoPagoId }) => {
+    setIngresoSubmitting(true);
+    try {
+      const response = await fetch('/api/contabilidad/ingresos-extra/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          tipo: 'ingreso_no_facturado',
+          monto,
+          descripcion,
+          metodo_pago_id: Number(metodoPagoId),
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json.ok) {
+        throw new Error(json.message || 'No se pudo registrar el ingreso.');
+      }
+      setModalIngresoAbierto(false);
+      showSuccess(json.message || 'Ingreso registrado correctamente.');
+      loadReport(fecha);
+    } catch (requestError) {
+      showError(requestError.message || 'No se pudo registrar el ingreso.');
+    } finally {
+      setIngresoSubmitting(false);
+    }
+  };
+
   const cuentas = data?.cuentas || [];
   const bancos = data?.bancos || [];
 
@@ -60,14 +91,34 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
           ← Volver a Contabilidad
         </button>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button type="button" onClick={() => setModalTransferenciaAbierto(true)} style={transferenciaButtonStyle}>
-            ⇄ Transferencia entre cuentas
-          </button>
-          {onNavigate ? (
-            <button type="button" onClick={() => onNavigate('contabilidad-historial-transferencias')} style={historialButtonStyle}>
-              Historial de transferencias
-            </button>
-          ) : null}
+          <select
+            value=""
+            onChange={(event) => {
+              const accion = event.target.value;
+              if (accion === 'nueva') setModalTransferenciaAbierto(true);
+              else if (accion === 'historial' && onNavigate) onNavigate('contabilidad-historial-transferencias');
+            }}
+            style={accionSelectStyle('transferencia')}
+          >
+            <option value="" disabled>⇄ Transferencias</option>
+            <option value="nueva">+ Nueva transferencia</option>
+            {onNavigate ? <option value="historial">Ver historial</option> : null}
+          </select>
+
+          <select
+            value=""
+            onChange={(event) => {
+              const accion = event.target.value;
+              if (accion === 'nuevo') setModalIngresoAbierto(true);
+              else if (accion === 'historial' && onNavigate) onNavigate('contabilidad-historial-ingresos-no-facturados');
+            }}
+            style={accionSelectStyle('ingreso')}
+          >
+            <option value="" disabled>+ Ingresos parciales</option>
+            <option value="nuevo">+ Registrar ingreso</option>
+            {onNavigate ? <option value="historial">Ver historial</option> : null}
+          </select>
+
           <button type="button" onClick={() => window.print()} style={printButtonStyle}>
             Imprimir / Guardar PDF
           </button>
@@ -218,6 +269,13 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
           loadReport(fecha);
         }}
       />
+
+      <IngresoParcialModal
+        open={modalIngresoAbierto}
+        submitting={ingresoSubmitting}
+        onClose={() => setModalIngresoAbierto(false)}
+        onSubmit={handleRegistrarIngresoParcial}
+      />
     </section>
   );
 }
@@ -256,10 +314,34 @@ const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08
 
 const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-// Violeta/azul a proposito, distinto del rojo de "peligrosas" (cerrar mes,
-// descartar) y del azul de navegacion — esta accion crea un movimiento de
-// dinero real, merece su propio color distintivo.
-const transferenciaButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 18px', background: 'linear-gradient(90deg, #6d28d9 0%, #4f46e5 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(109, 40, 217, 0.35)' };
-const historialButtonStyle = { border: '1px solid rgba(150,130,255,0.35)', borderRadius: 999, padding: '10px 16px', background: 'rgba(109,40,217,0.12)', color: '#d3bff5', fontWeight: 700, cursor: 'pointer' };
+// Cada categoria (transferencia/ingreso) era antes DOS botones sueltos (uno
+// para la accion, otro para el historial) — con 4 botones pegados se veia
+// desordenado. Un solo <select> por categoria agrupa "accion nueva" y "ver
+// historial" en un solo control compacto; el valor siempre vuelve a "" tras
+// elegir una opcion (ver onChange), asi que es un menu de acciones, no un
+// campo que "recuerda" una seleccion.
+const accionSelectStyle = (variante) => {
+  const colores = {
+    transferencia: { border: 'rgba(150,130,255,0.4)', background: 'linear-gradient(90deg, #6d28d9 0%, #4f46e5 100%)', shadow: 'rgba(109, 40, 217, 0.35)' },
+    ingreso: { border: 'rgba(120,220,150,0.4)', background: 'linear-gradient(90deg, #15803d 0%, #22c55e 100%)', shadow: 'rgba(21, 128, 61, 0.35)' },
+  }[variante];
+  return {
+    border: `1px solid ${colores.border}`,
+    borderRadius: 999,
+    padding: '10px 34px 10px 18px',
+    background: colores.background,
+    color: '#fff',
+    fontWeight: 700,
+    fontSize: 13.5,
+    cursor: 'pointer',
+    boxShadow: `0 8px 20px ${colores.shadow}`,
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    backgroundImage: 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 20 20\' fill=\'white\'><path d=\'M5.5 7.5l4.5 5 4.5-5z\'/></svg>")',
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 12px center',
+    backgroundSize: '14px',
+  };
+};
 
 export default ReporteDisponibilidadCuentasPage;

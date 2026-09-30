@@ -11,6 +11,7 @@ import ReporteDevolucionesPage from './ReporteDevolucionesPage';
 import ReporteCuadreCajaRangoPage from './ReporteCuadreCajaRangoPage';
 import ReporteDisponibilidadCuentasPage from './ReporteDisponibilidadCuentasPage';
 import HistorialTransferenciasPage from './HistorialTransferenciasPage';
+import HistorialIngresosNoFacturadosPage from './HistorialIngresosNoFacturadosPage';
 import ReporteConciliacionBancariaPage from './ReporteConciliacionBancariaPage';
 import AnalystBulkPromotionPage from './AnalystBulkPromotionPage';
 import AnalystChefRecommendationsPage from './AnalystChefRecommendationsPage';
@@ -1248,6 +1249,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           />
         ) : activeView === 'contabilidad-historial-transferencias' ? (
           <HistorialTransferenciasPage
+            isMobile={isMobile}
+            onBack={goBackView}
+          />
+        ) : activeView === 'contabilidad-historial-ingresos-no-facturados' ? (
+          <HistorialIngresosNoFacturadosPage
             isMobile={isMobile}
             onBack={goBackView}
           />

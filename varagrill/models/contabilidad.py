@@ -88,10 +88,18 @@ class VGIngresoExtra(VGAuditoria):
     en saltos de varios bolivares — una propina de Bs 2.000 se guardaria
     como $2.48 y, al reconvertir para mostrarla, salia Bs 2.002,32 en vez de
     Bs 2.000,00. Con 6 decimales el redondeo es indetectable en bolivares.
+
+    Un tercer tipo, "ingreso_no_facturado", cubre un caso distinto: dinero que
+    entro al banco sin pasar por un cobro de nota de entrega (ej. un deposito
+    que el analista solo puede documentar con una descripcion) — se registra
+    directo desde Disponibilidad Bancaria (ver admin_ingresos_no_facturados_view
+    e ingresos_extra_view), no desde Cobro. Para este tipo la descripcion es
+    obligatoria (unica diferencia de validacion respecto a propina/pago_extra).
     """
     TIPOS = [
         ("propina", "Propina"),
         ("pago_extra", "Pago extra"),
+        ("ingreso_no_facturado", "Ingreso no facturado"),
     ]
     tipo = models.CharField(max_length=20, choices=TIPOS)
     monto = models.DecimalField(max_digits=14, decimal_places=6, validators=[MinValueValidator(0)])

@@ -124,6 +124,10 @@ def ingresos_extra_view(request):
     if tipo not in {clave for clave, _ in VGIngresoExtra.TIPOS}:
         return _auth_response({'ok': False, 'message': 'Tipo invalido.'}, status=400)
 
+    descripcion = str(data.get('descripcion', '') or '').strip()
+    if tipo == 'ingreso_no_facturado' and not descripcion:
+        return _auth_response({'ok': False, 'message': 'La descripcion es obligatoria para un ingreso no facturado.'}, status=400)
+
     try:
         monto_input = Decimal(str(data.get('monto', '')))
     except InvalidOperation:
@@ -161,7 +165,7 @@ def ingresos_extra_view(request):
         tipo=tipo,
         monto=monto,
         tasa_cambio_referencia=tasa_conversion,
-        descripcion=str(data.get('descripcion', '') or '').strip(),
+        descripcion=descripcion,
         metodo_pago=metodo_pago,
         creado_por=request.user,
     )
@@ -170,6 +174,55 @@ def ingresos_extra_view(request):
         'message': f'{ingreso.get_tipo_display()} registrada correctamente.',
         'ingreso': _serialize_ingreso_extra(ingreso),
     }, status=201)
+
+
+def admin_ingresos_no_facturados_view(request):
+    """
+    Historial de "ingresos no facturados" (ver VGIngresoExtra.TIPOS) creados
+    desde Disponibilidad Bancaria — dinero que entro al banco sin pasar por
+    un cobro de nota de entrega. Solo administrador; a diferencia de
+    ingresos_extra_view (que en GET solo trae las de HOY, para Cobro), este
+    reporte trae cualquier rango de fechas, igual que
+    admin_transferencias_cuentas_view.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    desde_raw = request.GET.get('desde')
+    hasta_raw = request.GET.get('hasta')
+    desde = _parse_fecha_reporte(desde_raw) if desde_raw else timezone.localdate().replace(day=1)
+    hasta = _parse_fecha_reporte(hasta_raw) if hasta_raw else timezone.localdate()
+    if desde is None or hasta is None or desde > hasta:
+        return _auth_response({'ok': False, 'message': 'Rango de fechas invalido.'}, status=400)
+
+    ingresos = (
+        VGIngresoExtra.objects
+        .filter(tipo='ingreso_no_facturado', fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta)
+        .select_related('metodo_pago', 'creado_por')
+        .order_by('-fecha_creacion')
+    )
+
+    metodo_pago_id = request.GET.get('metodo_pago_id')
+    if metodo_pago_id:
+        try:
+            ingresos = ingresos.filter(metodo_pago_id=int(metodo_pago_id))
+        except (TypeError, ValueError):
+            return _auth_response({'ok': False, 'message': 'Cuenta invalida.'}, status=400)
+
+    ingresos = list(ingresos)
+    total_usd = sum((ingreso.monto for ingreso in ingresos), Decimal('0'))
+
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        'total': len(ingresos),
+        'total_usd': str(total_usd.quantize(Decimal('0.01'))),
+        'ingresos': [_serialize_ingreso_extra(ingreso) for ingreso in ingresos],
+    })
 
 
 @csrf_exempt

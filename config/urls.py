@@ -85,6 +85,7 @@ from varagrill.compras_views import (
     cuentas_por_pagar_view,
 )
 from varagrill.contabilidad_views import (
+    admin_ingresos_no_facturados_view,
     admin_metodos_pago_view,
     admin_transferencias_cuentas_view,
     ingresos_extra_view,
@@ -198,6 +199,7 @@ urlpatterns = [
     path('api/admin/reportes/flujo-bancario/detalle/', reporte_flujo_bancario_detalle_view, name='admin-reporte-flujo-bancario-detalle'),
     path('api/admin/metodos-pago/', admin_metodos_pago_view, name='admin-metodos-pago'),
     path('api/admin/transferencias-cuentas/', admin_transferencias_cuentas_view, name='admin-transferencias-cuentas'),
+    path('api/admin/reportes/ingresos-no-facturados/', admin_ingresos_no_facturados_view, name='admin-reporte-ingresos-no-facturados'),
     path('api/metodos-pago/', metodos_pago_activos_view, name='metodos-pago-activos'),
     path('api/contabilidad/ingresos-extra/', ingresos_extra_view, name='ingresos-extra'),
     path('api/promociones/', promociones_activas_view, name='promociones-activas'),

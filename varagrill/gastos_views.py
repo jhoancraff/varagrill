@@ -99,6 +99,25 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None):
         tasa_actual = obtener_tasa_actual()
         tasa_para_bs = tasa_actual.tasa if tasa_actual else gasto.tasa_cambio_referencia
 
+    if not tasa_para_bs:
+        total_bs = saldo_pendiente_bs = None
+    elif gasto.moneda_origen == 'VES':
+        total_bs = (gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))
+        saldo_pendiente_bs = (saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))
+    else:
+        # Gasto en dolares: solo el saldo pendiente sigue a la tasa de hoy; lo ya
+        # abonado queda fijo en los bolivares de cada abono (con su tasa congelada).
+        # Asi, una vez pagado, el total en Bs deja de moverse con el BCV.
+        abonado_bs = sum(
+            (abono.monto * (abono.tasa_cambio_referencia or tasa_para_bs) for abono in gasto.abonos.all()),
+            Decimal('0'),
+        )
+        saldo_pendiente_bs = (
+            Decimal('0.00') if gasto.estado_pago == 'pagado'
+            else (saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))
+        )
+        total_bs = (abonado_bs + saldo_pendiente_bs).quantize(Decimal('0.01'))
+
     data = {
         'id': gasto.id,
         'categoria_id': gasto.categoria_id,
@@ -114,8 +133,8 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None):
         'notas': gasto.notas,
         'moneda_origen': gasto.moneda_origen,
         'tasa_cambio_referencia': str(gasto.tasa_cambio_referencia) if gasto.tasa_cambio_referencia is not None else None,
-        'total_bs': str((gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))) if tasa_para_bs else None,
-        'saldo_pendiente_bs': str((saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))) if tasa_para_bs else None,
+        'total_bs': str(total_bs) if total_bs is not None else None,
+        'saldo_pendiente_bs': str(saldo_pendiente_bs) if saldo_pendiente_bs is not None else None,
         'creado_por': (gasto.creado_por.get_full_name() or gasto.creado_por.username) if gasto.creado_por else '',
         'ultima_correccion': ultima_correccion,
     }

@@ -45,6 +45,7 @@ from .models import (
     VGNotaEntrega,
     VGPago,
 )
+from .reportes import tasa_para_fecha
 from .tasa_cambio import obtener_tasa_actual
 
 logger = logging.getLogger(__name__)
@@ -181,13 +182,15 @@ def aplicar_ajuste_parcial(documento_tipo, documento_id, usuario, motivo, motivo
                 )
 
     numero_nc = VGCorrelativoFiscal.siguiente('NOTA_CREDITO')
+    # Toda nota de credito se genera en bolivares — ver el comentario
+    # equivalente en revertir_y_reabrir_pedido.
     nota_credito = VGNotaCredito.objects.create(
         numero=numero_nc,
         documento_tipo=documento_tipo,
         nota_entrega=documento if documento_tipo == 'nota_entrega' else None,
         factura=documento if documento_tipo == 'factura' else None,
         monto=monto_ajuste.quantize(Decimal('0.000001')),
-        moneda=getattr(documento, 'moneda', 'USD'),
+        moneda='VES',
         motivo=motivo,
         motivo_detalle=motivo_detalle,
         tipo_resolucion='ajuste_parcial',
@@ -405,13 +408,19 @@ def revertir_y_reabrir_pedido(documento_tipo, documento_id, usuario, motivo, mot
 
     numero_nc = VGCorrelativoFiscal.siguiente('NOTA_CREDITO')
     total_documento = sum((pedido.total for pedido in pedidos_originales), Decimal('0'))
+    # Toda nota de credito se genera en bolivares sin importar la moneda del
+    # documento original (politica de negocio 2026-09) — `monto` se sigue
+    # guardando en USD por dentro (igual que el resto del sistema); quien
+    # muestre/imprima esta nota convierte a Bs con la tasa que ya quedo
+    # congelada en el documento original al emitirse (ver
+    # _serialize_nota_credito_resumen), nunca con la tasa de hoy.
     nota_credito = VGNotaCredito.objects.create(
         numero=numero_nc,
         documento_tipo=documento_tipo,
         nota_entrega=documento if documento_tipo == 'nota_entrega' else None,
         factura=documento if documento_tipo == 'factura' else None,
         monto=total_documento,
-        moneda=getattr(documento, 'moneda', 'USD'),
+        moneda='VES',
         motivo=motivo,
         motivo_detalle=motivo_detalle,
         tipo_resolucion=tipo_resolucion,
@@ -489,8 +498,27 @@ def revertir_y_reabrir_pedido(documento_tipo, documento_id, usuario, motivo, mot
 # ---------------------------------------------------------------------------
 # Serializacion para el reporte interactivo
 # ---------------------------------------------------------------------------
+def _monto_bs_nota_credito(nota_credito, documento):
+    """
+    Equivalente en bolivares de `nota_credito.monto` (guardado en USD por
+    dentro) — usa la tasa que ya quedo congelada en el documento original
+    (nota de entrega o factura) al emitirse, nunca la tasa de hoy, para que
+    el monto en Bs de la nota de credito sea consistente con lo que el
+    cliente de verdad pago. Si ese documento nunca congelo una tasa (raro),
+    cae a la tasa BCV vigente el dia en que se emitio. None solo si no hay
+    absolutamente ninguna tasa resoluble.
+    """
+    if documento is None:
+        return None
+    tasa = documento.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(documento.fecha_emision).date())
+    if not tasa:
+        return None
+    return (nota_credito.monto * tasa).quantize(Decimal('0.01'))
+
+
 def _serialize_nota_credito_resumen(nota_credito):
     documento = nota_credito.documento_original
+    monto_bs = _monto_bs_nota_credito(nota_credito, documento)
     return {
         'id': nota_credito.id,
         'codigo': nota_credito.codigo,
@@ -502,6 +530,7 @@ def _serialize_nota_credito_resumen(nota_credito):
         ),
         'monto': str(nota_credito.monto),
         'moneda': nota_credito.moneda,
+        'monto_bs': str(monto_bs) if monto_bs is not None else None,
         'motivo': nota_credito.motivo,
         'motivo_display': dict(VGNotaCredito.MOTIVOS).get(nota_credito.motivo, nota_credito.motivo),
         'motivo_detalle': nota_credito.motivo_detalle,

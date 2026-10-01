@@ -110,6 +110,7 @@ def ingresos_extra_view(request):
         ingresos = (
             VGIngresoExtra.objects
             .filter(fecha_creacion__date=timezone.localdate())
+            .exclude(tipo='ingreso_no_facturado')
             .select_related('metodo_pago', 'creado_por')
             .order_by('-fecha_creacion')
         )
@@ -469,6 +470,7 @@ def reporte_cuadre_caja_view(request):
         ingresos_extra_dia = (
             VGIngresoExtra.objects
             .filter(fecha_creacion__date=fecha)
+            .exclude(tipo='ingreso_no_facturado')
             .select_related('metodo_pago', 'creado_por')
             .order_by('-fecha_creacion')
         )
@@ -700,6 +702,7 @@ def reporte_cuadre_caja_rango_view(request):
     ingresos_extra_rango = (
         VGIngresoExtra.objects
         .filter(fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta)
+        .exclude(tipo='ingreso_no_facturado')
         .select_related('metodo_pago', 'creado_por')
         .order_by('-fecha_creacion')
     )
@@ -1842,6 +1845,8 @@ def reporte_flujo_bancario_detalle_view(request):
             {
                 'id': movimiento['id'],
                 'tipo_registro': movimiento['tipo_registro'],
+                'documento_id': movimiento.get('documento_id'),
+                'documento_codigo': movimiento.get('documento_codigo', ''),
                 'fecha_hora': timezone.localtime(movimiento['fecha_hora']).isoformat(),
                 'nombre': movimiento['nombre'],
                 'metodo_pago_nombre': movimiento['metodo_pago_nombre'],

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ConfirmModal from './ConfirmModal';
+import MoneyInput from './MoneyInput';
 import useExchangeRate from '../hooks/useExchangeRate';
-import { formatBsRaw, formatMontoDocumento } from '../utils/currency';
+import { formatBs, formatBsRaw, formatMontoDocumento } from '../utils/currency';
 
 function getCookie(name) {
   const all = `; ${document.cookie}`;
@@ -32,6 +33,32 @@ function estadoLabel(estado) {
 // para mostrarle a nadie, así que se filtra acá.
 function esReferenciaAutogenerada(referencia) {
   return /^(COBRO|ABONO)-\d{14}-\d+$/.test(referencia || '');
+}
+
+// Texto de confirmación de un cobro: el monto y el saldo salen en la moneda
+// REAL con la que se cobró (dólares o bolívares, nunca las dos), usando la tasa
+// congelada en ese pago.
+function describirCobro(data, sufijo = '') {
+  const pago = data.pago;
+  const tasa = Number(pago.tasa_cambio_referencia);
+  const enBs = pago.moneda === 'VES' && tasa > 0;
+  const fmt = (usd) => (enBs ? formatBsRaw(Number(usd) * tasa) : `$${Number(usd).toFixed(2)}`);
+  const saldo = Number(data.nota_entrega.saldo_pendiente);
+  return `Cobro ${pago.codigo_cobro || ''} registrado${sufijo}: ${fmt(pago.monto)} con ${pago.metodo_pago}. `
+    + (saldo > 0 ? `Saldo pendiente: ${fmt(saldo)}. ` : 'Nota de entrega saldada. ')
+    + (data.impreso ? 'Nota de cobro enviada a la impresora.' : `La nota de cobro NO se imprimió (${data.motivo_no_impreso || 'sin impresora'}) — puedes reimprimirla abajo.`);
+}
+
+// Una nota recién emitida no declara moneda (USD): se muestra el monto en
+// dólares y en bolívares. `bsVigente` (opcional) es el equivalente ya calculado
+// por el backend a la tasa de cobro de hoy; si no viene, se convierte con la
+// tasa dada. Una nota vieja con moneda VES se sigue mostrando solo en Bs.
+function textoUsdBs(usd, moneda, tasa, bsVigente = null) {
+  if (moneda === 'VES') {
+    return formatMontoDocumento(usd, moneda, tasa);
+  }
+  const bs = bsVigente ? formatBsRaw(bsVigente) : formatBs(usd, tasa);
+  return bs ? `$${Number(usd).toFixed(2)} · ${bs}` : `$${Number(usd).toFixed(2)}`;
 }
 
 const NOTAS_POR_PAGINA = 30;
@@ -264,7 +291,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
         return;
       }
       setFeedbackType('success');
-      setFeedback(`Abono de $${Number(data.pago.monto).toFixed(2)} registrado. Saldo pendiente: $${Number(data.nota_entrega.saldo_pendiente).toFixed(2)}.`);
+      setFeedback(describirCobro(data));
       setNotaDetalle(data.nota_entrega);
       setMontoAbono('');
       setReferenciaAbono('');
@@ -290,7 +317,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
         return;
       }
       setFeedbackType('success');
-      setFeedback(`Abono de $${Number(data.pago.monto).toFixed(2)} registrado (cuenta cambiada). Saldo pendiente: $${Number(data.nota_entrega.saldo_pendiente).toFixed(2)}.`);
+      setFeedback(describirCobro(data, ' (cuenta cambiada)'));
       setNotaDetalle(data.nota_entrega);
       setMontoAbono('');
       setReferenciaAbono('');
@@ -301,6 +328,23 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
     } finally {
       setSavingAbono(false);
       setConfirmCambioMetodo(null);
+    }
+  };
+
+  const handleReimprimirCobro = async (pago) => {
+    setFeedback('');
+    try {
+      const response = await fetch(`/api/notas-entrega/${selectedNotaId}/abonos/${pago.id}/reimprimir/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+      });
+      const data = await response.json().catch(() => ({}));
+      setFeedbackType(response.ok && data.ok ? 'success' : 'error');
+      setFeedback(data.message || (response.ok ? 'Nota de cobro reenviada a la impresora.' : 'No se pudo reimprimir la nota de cobro.'));
+    } catch (requestError) {
+      setFeedbackType('error');
+      setFeedback('Error de red al reimprimir la nota de cobro.');
     }
   };
 
@@ -543,15 +587,13 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                     <span style={estadoBadgeStyle(nota.estado)}>{estadoLabel(nota.estado)}</span>
                   </div>
                   <div style={{ color: '#d2c4c4', fontSize: 13 }}>
-                    {nota.metodo_pago}
-                    {' · '}
                     {new Date(nota.fecha_emision).toLocaleString('es-VE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     {' · '}
                     {nota.pedidos.length} pedido(s)
                     {nota.referencia && !esReferenciaAutogenerada(nota.referencia) ? ` · Ref: ${nota.referencia}` : ''}
                   </div>
                   <div style={{ color: '#ffcf7d', fontWeight: 700 }}>
-                    Total: {formatMontoDocumento(nota.total, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
+                    Total: {textoUsdBs(nota.total, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
                   </div>
                   {Number(nota.descuento_monto) > 0 ? (
                     <div style={{ color: '#9fd8ff', fontSize: 12.5 }} title={nota.descuento_motivo}>
@@ -561,7 +603,7 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                   ) : null}
                   {!['pagada', 'anulada'].includes(nota.estado) ? (
                     <div style={{ color: '#ff9b9b', fontWeight: 700 }}>
-                      Saldo: {formatMontoDocumento(nota.saldo_pendiente, nota.moneda, nota.tasa_cambio_referencia || tasaCambio)}
+                      Saldo: {textoUsdBs(nota.saldo_pendiente, nota.moneda, nota.tasa_cambio_referencia || tasaCambio, nota.saldo_pendiente_bs_vigente)}
                     </div>
                   ) : null}
                 </div>
@@ -628,8 +670,6 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                   Nota de entrega {notaDetalle.codigo}
                 </div>
                 <div style={{ color: '#d2c4c4', fontSize: 13 }}>
-                  {notaDetalle.metodo_pago}
-                  {' · '}
                   {new Date(notaDetalle.fecha_emision).toLocaleString('es-VE')}
                   {' · '}
                   {notaDetalle.pedidos.length} pedido(s)
@@ -637,21 +677,19 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
 
                 <div style={detailTotalsStyle}>
                   <span style={{ fontWeight: 800, color: '#fff' }}>
-                    Total: {formatMontoDocumento(notaDetalle.total, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
+                    Total: {textoUsdBs(notaDetalle.total, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
                   </span>
                   <span style={{ fontWeight: 800, color: '#ffcf7d' }}>
-                    Saldo pendiente: {notaDetalle.moneda === 'VES' && notaDetalle.saldo_pendiente_bs_vigente
-                      ? formatBsRaw(notaDetalle.saldo_pendiente_bs_vigente)
-                      : formatMontoDocumento(notaDetalle.saldo_pendiente, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
+                    Saldo pendiente: {textoUsdBs(notaDetalle.saldo_pendiente, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio, notaDetalle.saldo_pendiente_bs_vigente)}
                   </span>
                 </div>
 
-                {!notaDetalle.es_de_hoy && notaDetalle.moneda === 'VES' && notaDetalle.estado !== 'pagada' ? (
+                {!notaDetalle.es_de_hoy && notaDetalle.estado !== 'pagada' ? (
                   <div style={fiadoRecalculadoStyle}>
-                    Esta nota es de días anteriores — el saldo se recalculó a la tasa BCV de HOY
+                    Esta nota es de días anteriores — si se cobra en bolívares, el saldo se calcula a la tasa BCV de HOY
                     (Bs. {Number(notaDetalle.tasa_cobro_vigente || 0).toFixed(2)}/$), no a la tasa con la que se
                     cotizó originalmente (Bs. {Number(notaDetalle.tasa_cambio_referencia || 0).toFixed(2)}/$).
-                    Cóbrale a este monto recalculado, no al que aparece impreso en la nota vieja.
+                    Si se cobra en dólares, es el precio original en $.
                   </div>
                 ) : null}
 
@@ -671,61 +709,107 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                     {notaDetalle.pagos.map((pago) => (
                       <div key={pago.id} style={lineaRowStyle}>
                         <span>
-                          {pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')}
+                          {pago.codigo_cobro ? `${pago.codigo_cobro} · ` : ''}{pago.metodo_pago} — {new Date(pago.fecha_pago).toLocaleString('es-VE')}
                           {pago.referencia && !esReferenciaAutogenerada(pago.referencia) ? ` · Ref: ${pago.referencia}` : ''}
                         </span>
-                        <span>{formatMontoDocumento(pago.monto, pago.moneda, pago.tasa_cambio_referencia || tasaCambio)}</span>
+                        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          {formatMontoDocumento(pago.monto, pago.moneda, pago.tasa_cambio_referencia || tasaCambio)}
+                          {pago.numero_cobro ? (
+                            <button type="button" onClick={() => handleReimprimirCobro(pago)} style={secondaryButtonStyle}>
+                              Reimprimir
+                            </button>
+                          ) : null}
+                        </span>
                       </div>
                     ))}
                   </div>
                 ) : null}
 
                 {!['pagada', 'anulada'].includes(notaDetalle.estado) ? (
-                  <form onSubmit={handleRegistrarAbono} style={abonoFormStyle(isMobile)}>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      placeholder={
-                        metodosPago.find((item) => item.id === (metodoAbono || (metodosPago[0] && metodosPago[0].id)))?.moneda === 'VES'
-                          ? 'Monto del abono (Bs)'
-                          : 'Monto del abono ($)'
-                      }
-                      value={montoAbono}
-                      onChange={(event) => setMontoAbono(event.target.value)}
-                      style={inputStyle}
-                      required
-                    />
-                    {/* El placeholder usa la moneda de la cuenta SELECCIONADA en el
-                        select de abajo, no la de la nota — pueden ser distintas (ver
-                        cambia_metodo en nota_entrega_abono_view): lo que importa para
-                        saber si escribir dólares o bolívares es con qué cuenta se está
-                        cobrando ESTE abono, no con la que se declaró al emitir la nota. */}
-                    {/* Sin `required`: handleRegistrarAbono ya valida esto con un mensaje propio
-                        (ver el bug de `required` nativo bloqueando el aviso, mismo criterio que
-                        Mesa/Cliente en NewOrderPage/EditOrderPage). */}
-                    {!(metodosPago.find((item) => item.id === (metodoAbono || (metodosPago[0] && metodosPago[0].id)))?.es_efectivo) ? (
-                      <input
-                        type="text"
-                        placeholder="Número de referencia del pago"
-                        value={referenciaAbono}
-                        onChange={(event) => setReferenciaAbono(event.target.value)}
-                        style={inputStyle}
-                      />
-                    ) : null}
-                    <select
-                      value={metodoAbono || (metodosPago[0] && metodosPago[0].id) || ''}
-                      onChange={(event) => setMetodoAbono(Number(event.target.value))}
-                      style={selectStyle}
-                      className="admin-dark-select"
-                    >
-                      {metodosPago.map((metodo) => (
-                        <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-                      ))}
-                    </select>
-                    <button type="submit" style={primaryButtonStyle} disabled={savingAbono}>
-                      {savingAbono ? 'Registrando...' : 'Registrar abono'}
-                    </button>
+                  <form onSubmit={handleRegistrarAbono} style={abonoFormStyle}>
+                    {(() => {
+                      // La moneda del abono la define la cuenta ELEGIDA para este cobro (no
+                      // la de la nota): en dólares es el precio original; en bolívares se
+                      // convierte a la tasa de cobro vigente (la del día de emisión si la
+                      // nota es de hoy, la de HOY si es fiado).
+                      const metodoSel = metodosPago.find((item) => item.id === (metodoAbono || (metodosPago[0] && metodosPago[0].id)));
+                      const enBs = metodoSel?.moneda === 'VES';
+                      const saldoBs = notaDetalle.saldo_pendiente_bs_vigente;
+                      const sinTasa = enBs && !saldoBs;
+                      const saldoTexto = enBs ? formatBsRaw(saldoBs) : `$${Number(notaDetalle.saldo_pendiente).toFixed(2)}`;
+                      const saldoValor = enBs ? saldoBs : Number(notaDetalle.saldo_pendiente).toFixed(2);
+                      return (
+                        <>
+                          <div style={abonoTituloStyle}>Registrar cobro</div>
+
+                          <label style={abonoCampoStyle}>
+                            <span style={abonoLabelStyle}>Método de pago</span>
+                            <select
+                              value={metodoAbono || (metodosPago[0] && metodosPago[0].id) || ''}
+                              onChange={(event) => setMetodoAbono(Number(event.target.value))}
+                              style={selectStyle}
+                              className="admin-dark-select"
+                            >
+                              {metodosPago.map((metodo) => (
+                                <option key={metodo.id} value={metodo.id}>
+                                  {metodo.nombre} ({metodo.moneda === 'VES' ? 'Bs' : '$'})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          {sinTasa ? (
+                            <div style={fiadoRecalculadoStyle}>No hay tasa de cambio disponible para cobrar en bolívares.</div>
+                          ) : (
+                            <div style={abonoSaldoBoxStyle}>
+                              <span style={{ color: '#d2c4c4', fontSize: 12.5 }}>Saldo a cobrar en {enBs ? 'bolívares' : 'dólares'}</span>
+                              <span style={{ color: '#ffcf7d', fontSize: 20, fontWeight: 800 }}>{saldoTexto}</span>
+                            </div>
+                          )}
+
+                          <label style={abonoCampoStyle}>
+                            <span style={abonoLabelStyle}>Monto a cobrar ({enBs ? 'Bs' : '$'})</span>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <MoneyInput
+                                placeholder="0.00"
+                                value={montoAbono}
+                                onChange={setMontoAbono}
+                                style={{ ...inputStyle, flex: 1 }}
+                                required
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setMontoAbono(String(saldoValor))}
+                                style={{ ...secondaryButtonStyle, whiteSpace: 'nowrap' }}
+                                disabled={sinTasa}
+                              >
+                                Saldo completo
+                              </button>
+                            </div>
+                          </label>
+
+                          {/* Sin `required`: handleRegistrarAbono ya valida la referencia con un
+                              mensaje propio (el `required` nativo bloqueaba el aviso, mismo
+                              criterio que Mesa/Cliente en NewOrderPage/EditOrderPage). */}
+                          {!metodoSel?.es_efectivo ? (
+                            <label style={abonoCampoStyle}>
+                              <span style={abonoLabelStyle}>Número de referencia del pago</span>
+                              <input
+                                type="text"
+                                placeholder="Ej: 123456"
+                                value={referenciaAbono}
+                                onChange={(event) => setReferenciaAbono(event.target.value)}
+                                style={inputStyle}
+                              />
+                            </label>
+                          ) : null}
+
+                          <button type="submit" style={abonoSubmitStyle} disabled={savingAbono || sinTasa}>
+                            {savingAbono ? 'Registrando...' : 'Registrar cobro e imprimir'}
+                          </button>
+                        </>
+                      );
+                    })()}
                   </form>
                 ) : (
                   <div style={{ color: '#9fe3b0', fontWeight: 700 }}>
@@ -1214,13 +1298,45 @@ const fiadoRecalculadoStyle = {
   lineHeight: 1.5,
 };
 
-const abonoFormStyle = (isMobile) => ({
+const abonoFormStyle = {
   display: 'grid',
-  gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto',
-  gap: 8,
-  paddingTop: 10,
+  gap: 12,
+  paddingTop: 14,
   borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-});
+};
+
+const abonoTituloStyle = {
+  color: '#9fe3b0',
+  fontWeight: 800,
+  fontSize: 12,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+};
+
+const abonoCampoStyle = { display: 'grid', gap: 6 };
+
+const abonoLabelStyle = { color: '#f2e6e6', fontSize: 12.5, fontWeight: 700 };
+
+const abonoSaldoBoxStyle = {
+  display: 'grid',
+  gap: 2,
+  padding: '10px 14px',
+  borderRadius: 12,
+  border: '1px solid rgba(255, 207, 125, 0.25)',
+  background: 'rgba(255, 207, 125, 0.06)',
+};
+
+const abonoSubmitStyle = {
+  border: 'none',
+  borderRadius: 12,
+  padding: '13px 16px',
+  background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)',
+  color: '#04140a',
+  fontWeight: 800,
+  fontSize: 15,
+  cursor: 'pointer',
+  width: '100%',
+};
 
 const selectStyle = {
   ...inputStyle,

@@ -114,7 +114,14 @@ def totales_pagos_por_metodo(fecha):
             else:
                 entry['_bs_incompleto'] = True
 
-    ingresos_extra_dia = VGIngresoExtra.objects.filter(fecha_creacion__date=fecha).select_related('metodo_pago')
+    # El cuadre de caja es lo que se vendio / entro por ventas: un "ingreso no
+    # facturado" (deposito directo a una cuenta, ver VGIngresoExtra.TIPOS) no es
+    # venta, solo cuenta en disponibilidad por cuenta y flujo bancario.
+    ingresos_extra_dia = (
+        VGIngresoExtra.objects.filter(fecha_creacion__date=fecha)
+        .exclude(tipo='ingreso_no_facturado')
+        .select_related('metodo_pago')
+    )
     for ingreso in ingresos_extra_dia:
         metodo = ingreso.metodo_pago
         entry = _metodo_entry(metodo.id, metodo.nombre, metodo.es_efectivo, metodo.moneda, metodo.cuenta_bancaria)
@@ -190,6 +197,7 @@ def resumen_ventas_rango(desde, hasta):
     total_propinas_excedentes = (
         VGIngresoExtra.objects
         .filter(fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta)
+        .exclude(tipo='ingreso_no_facturado')
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
@@ -451,6 +459,7 @@ def efectivo_esperado_dia(fecha):
     ingresos_extra = (
         VGIngresoExtra.objects
         .filter(fecha_creacion__date=fecha, metodo_pago__es_efectivo=True)
+        .exclude(tipo='ingreso_no_facturado')
         .aggregate(total=Sum('monto'))
         .get('total')
     ) or Decimal('0')
@@ -1109,6 +1118,8 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
             movimientos.append({
                 'id': abono.id,
                 'tipo_registro': 'abono_gasto',
+                'documento_id': abono.gasto_id,
+                'documento_codigo': f"Gasto #{abono.gasto_id}",
                 'fecha_hora': fecha_hora_fija,
                 'nombre': f"Gasto — {abono.gasto.descripcion}",
                 'metodo_pago_nombre': abono.metodo_pago.nombre,
@@ -1128,6 +1139,8 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
             movimientos.append({
                 'id': abono.id,
                 'tipo_registro': 'abono_compra',
+                'documento_id': abono.compra_id,
+                'documento_codigo': f"Lote #{abono.compra_id}",
                 'fecha_hora': abono.fecha_pago,
                 'nombre': f"Compra — {abono.compra.proveedor_nombre}",
                 'metodo_pago_nombre': abono.metodo_pago.nombre,

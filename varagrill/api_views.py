@@ -3684,10 +3684,27 @@ def _serialize_compra(compra, incluir_detalle=False):
         # que haya en caché, sin forzar una consulta nueva al BCV), en vez de
         # quedarse pegado a la tasa del día en que se cargó la factura — igual
         # que ya hace _serialize_gasto para un gasto en dólares.
+        #
+        # Solo el SALDO PENDIENTE sigue a la tasa de hoy. Lo que ya se pago queda
+        # fijo en los bolivares de cada abono (con SU tasa congelada), asi que
+        # total_bs = lo abonado (fijo) + lo que falta (a tasa de hoy): una vez
+        # saldada la cuenta el total deja de moverse, en vez de seguir subiendo
+        # con el BCV semana tras semana (reportado 2026-10).
         tasa_actual = obtener_tasa_actual()
         tasa_para_bs = tasa_actual.tasa if tasa_actual else compra.tasa_cambio_referencia
-        total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
-        saldo_pendiente_bs = (compra.saldo_pendiente * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
+        if tasa_para_bs:
+            abonado_bs = sum(
+                (abono.monto * (abono.tasa_cambio_referencia or tasa_para_bs) for abono in compra.abonos.all()),
+                Decimal('0'),
+            )
+            saldo_pendiente_bs = (
+                Decimal('0.00') if compra.estado_pago == 'pagada'
+                else (compra.saldo_pendiente * tasa_para_bs).quantize(Decimal('0.01'))
+            )
+            total_bs = (abonado_bs + saldo_pendiente_bs).quantize(Decimal('0.01'))
+        else:
+            total_bs = None
+            saldo_pendiente_bs = None
     else:
         tasa_para_bs = compra.tasa_cambio_referencia
         total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
@@ -6227,10 +6244,25 @@ def pedidos_cobro_view(request):
     except (TypeError, ValueError):
         return _auth_response({'ok': False, 'message': 'Hay un pedido invalido en la selección.'}, status=400)
 
-    try:
-        metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
-    except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
-        return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
+    # La nota de entrega ya no declara un metodo de pago al emitirse (la cajera
+    # elige cuenta y moneda recien al abonarla — ver nota_entrega_abono_view).
+    # VGNotaEntrega.metodo_pago sigue siendo obligatorio en el modelo, asi que
+    # sin metodo explicito se usa un valor de relleno: una cuenta activa en
+    # dolares (efectivo primero) — moneda USD, que es lo que imprime/muestra la
+    # nota hasta el primer abono, cuando pasa a la cuenta realmente usada.
+    if data.get('metodo_pago_id') in (None, ''):
+        metodo_pago = (
+            VGMetodoPago.objects.filter(activo=True)
+            .order_by('moneda', '-es_efectivo', 'nombre')  # 'USD' antes que 'VES'
+            .first()
+        )
+        if metodo_pago is None:
+            return _auth_response({'ok': False, 'message': 'No hay metodos de pago activos configurados.'}, status=400)
+    else:
+        try:
+            metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
+        except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
     # Descuento manual opcional (ej. cliente frecuente, cortesía, negociación en
     # dólares) — `monto_cobrar` es el monto FINAL que se le va a cobrar al
@@ -6250,6 +6282,21 @@ def pedidos_cobro_view(request):
             return _auth_response({'ok': False, 'message': 'El monto a cobrar no puede ser negativo.'}, status=400)
 
     descuento_motivo = str(data.get('descuento_motivo', '') or '').strip()
+
+    # La nota de entrega ahora SI exige identificar al cliente por cedula
+    # (politica de negocio 2026-09) — a diferencia de pre-factura/factura,
+    # que siguen pidiendo tipo+numero de documento por separado (pueden ser
+    # RIF de empresa), aca siempre es cedula (V): es lo unico que la cajera
+    # anota primero. Si la cedula ya esta en VGCliente se reutiliza ese
+    # registro (el nombre/apellido que haya escrito la cajera se descarta,
+    # para no pisar el dato ya registrado con un typo); si no existe, se crea.
+    cliente_numero_documento = str(data.get('cliente_numero_documento', '') or '').strip()
+    cliente_nombre = str(data.get('cliente_nombre', '') or '').strip()
+    cliente_apellido = str(data.get('cliente_apellido', '') or '').strip()
+    if not cliente_numero_documento:
+        return _auth_response({'ok': False, 'message': 'La cédula del cliente es obligatoria.'}, status=400)
+    if not cliente_nombre:
+        return _auth_response({'ok': False, 'message': 'El nombre del cliente es obligatorio.'}, status=400)
 
     # A esta altura la nota de entrega todavia no tiene un cobro real: metodo_pago
     # es solo el metodo declarado al emitirla (define en que moneda se imprime),
@@ -6356,12 +6403,19 @@ def pedidos_cobro_view(request):
         # quedan guardados aparte para que quede constancia de cuánto se
         # descontó y por qué (auditoría) sin perder el total original de los
         # pedidos, que sigue viviendo en cada VGPedido.total.
+        cliente, _cliente_creado = VGCliente.objects.get_or_create(
+            tipo_documento='V',
+            numero_documento=cliente_numero_documento,
+            defaults={'nombre': cliente_nombre, 'apellido': cliente_apellido},
+        )
+
         nota_entrega = VGNotaEntrega.objects.create(
+            cliente=cliente,
             metodo_pago=metodo_pago,
             total=total_con_descuento,
             saldo_pendiente=total_con_descuento,
             estado='pendiente_pago',
-            moneda=metodo_pago.moneda,
+            moneda=metodo_pago.moneda if data.get('metodo_pago_id') not in (None, '') else 'USD',
             tasa_cambio_referencia=tasa_cambio_pago,
             referencia=referencia,
             descuento_monto=descuento_monto,
@@ -6386,7 +6440,7 @@ def pedidos_cobro_view(request):
             'total': str(total_con_descuento),
             'saldo_pendiente': str(nota_entrega.saldo_pendiente),
             'estado': nota_entrega.estado,
-            'moneda': metodo_pago.moneda,
+            'moneda': nota_entrega.moneda,
             'descuento_monto': str(descuento_monto),
             'descuento_motivo': descuento_motivo,
             'pedidos': [pedido.id for pedido in pedidos],

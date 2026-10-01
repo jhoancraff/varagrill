@@ -26,7 +26,12 @@ from .api_views import (
     _snapshot_costo_venta_detalles,
 )
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user, _is_owner_or_contador_user
-from .impresion_lpd import imprimir_factura_caja, imprimir_nota_entrega_caja, imprimir_prefactura_caja
+from .impresion_lpd import (
+    imprimir_cobro_nota_entrega_caja,
+    imprimir_factura_caja,
+    imprimir_nota_entrega_caja,
+    imprimir_prefactura_caja,
+)
 from .models import (
     VGCliente,
     VGCorrelativoFiscal,
@@ -317,6 +322,7 @@ def _serialize_cliente(cliente):
     return {
         'id': cliente.id,
         'nombre': cliente.nombre,
+        'apellido': cliente.apellido,
         'tipo_documento': cliente.tipo_documento,
         'numero_documento': cliente.numero_documento,
         'direccion_fiscal': cliente.direccion_fiscal,
@@ -373,6 +379,8 @@ def _serialize_pago(pago):
         'fecha_pago': pago.fecha_pago.isoformat(),
         'tasa_cambio_referencia': str(pago.tasa_cambio_referencia) if pago.tasa_cambio_referencia is not None else None,
         'creado_por': (pago.creado_por.get_full_name() or pago.creado_por.username) if pago.creado_por else '',
+        'numero_cobro': pago.numero_cobro,
+        'codigo_cobro': f'COB-{pago.numero_cobro:06d}' if pago.numero_cobro else None,
     }
 
 
@@ -1035,13 +1043,17 @@ def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
         # diferencia por la devaluacion ya calculada) en vez de enterarse
         # despues de que el abono no le cuadro. En una nota de hoy da lo
         # mismo que tasa_cambio_referencia (es la misma tasa).
+        # Siempre se calcula (con 'VES'), no solo si nota.moneda es VES: la nota
+        # nace en dolares sin metodo declarado, y la cajera elige Bs o $ recien
+        # al abonar — necesita ver el saldo en Bs a la tasa del dia antes de
+        # elegir.
         tasa_vigente = _tasa_conversion_vigente(
-            nota.moneda, nota.fecha_emision, nota.tasa_cambio_referencia, tasa_pago_actual,
+            'VES', nota.fecha_emision, nota.tasa_cambio_referencia, tasa_pago_actual,
         )
         data['tasa_cobro_vigente'] = str(tasa_vigente) if tasa_vigente else None
         data['saldo_pendiente_bs_vigente'] = (
             str((nota.saldo_pendiente * tasa_vigente).quantize(Decimal('0.01')))
-            if nota.moneda == 'VES' and tasa_vigente else None
+            if tasa_vigente else None
         )
     if incluir_detalle:
         data['pagos'] = [
@@ -1178,7 +1190,12 @@ def nota_entrega_abono_view(request, nota_id):
         # a la cajera antes de aplicarlo — si no confirma, no se registra
         # nada todavia y el frontend le muestra la alerta.
         cambia_metodo = metodo_pago.id != nota.metodo_pago_id
-        if cambia_metodo and not confirma_cambio_metodo:
+        # Una nota recien emitida ya no declara un metodo real (la cajera elige
+        # cuenta y moneda al abonar — ver pedidos_cobro_view), asi que el primer
+        # abono nunca pide confirmacion: solo se confirma si ya se cobro algo
+        # con otra cuenta y ahora se cambia a una distinta.
+        ya_tiene_cobros = nota.pagos.filter(estado='completado').exists()
+        if cambia_metodo and ya_tiene_cobros and not confirma_cambio_metodo:
             return _auth_response({
                 'ok': False,
                 'requiere_confirmacion': True,
@@ -1226,12 +1243,20 @@ def nota_entrega_abono_view(request, nota_id):
 
         referencia = referencia_usuario or f'ABONO-{timezone.now().strftime("%Y%m%d%H%M%S")}-{nota.id}'
 
+        saldo_restante_pago = max(
+            (nota.saldo_pendiente - monto).quantize(Decimal('0.000001')), Decimal('0'),
+        )
+        if saldo_restante_pago <= TOLERANCIA_CIERRE_ABONO:
+            saldo_restante_pago = Decimal('0')
+
         pago = VGPago.objects.create(
             nota_entrega=nota,
             monto=monto,
             metodo_pago=metodo_pago,
             referencia=referencia,
             estado='completado',
+            numero_cobro=VGCorrelativoFiscal.siguiente('NOTA_COBRO'),
+            saldo_posterior=saldo_restante_pago,
             # La tasa que de verdad se uso para convertir este pago (ver
             # arriba) — no siempre la de hoy: asi el monto en bolivares que se
             # muestre despues (cuadre de caja, historial de notas) siempre
@@ -1272,12 +1297,48 @@ def nota_entrega_abono_view(request, nota_id):
             update_fields += ['metodo_pago', 'moneda']
         nota.save(update_fields=update_fields)
 
+    # Nota de cobro: se imprime fuera de la transaccion — el abono ya quedo
+    # registrado, un fallo de impresora nunca debe tumbarlo (mismo criterio
+    # que la nota de entrega en pedidos_cobro_view).
+    impreso, motivo_no_impreso = False, None
+    try:
+        pago.refresh_from_db()
+        impreso, motivo_no_impreso = imprimir_cobro_nota_entrega_caja(pago)
+    except Exception:
+        logger.exception('Fallo al imprimir la nota de cobro del pago %s', pago.id)
+        motivo_no_impreso = 'Error inesperado al imprimir.'
+
     return _auth_response({
         'ok': True,
         'message': 'Abono registrado correctamente.',
         'nota_entrega': _serialize_nota_entrega(nota, tasa_pago_actual=tasa_pago_actual),
         'pago': _serialize_pago(pago),
+        'impreso': impreso,
+        'motivo_no_impreso': motivo_no_impreso,
     }, status=201)
+
+
+@csrf_exempt
+def nota_entrega_cobro_reimprimir_view(request, nota_id, pago_id):
+    """Reimprime la nota de cobro de un abono ya registrado (ver nota_entrega_abono_view)."""
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para reimprimir cobros.'}, status=401)
+
+    try:
+        pago = (
+            VGPago.objects.select_related('metodo_pago', 'creado_por', 'nota_entrega__cliente')
+            .get(pk=pago_id, nota_entrega_id=nota_id, estado='completado')
+        )
+    except VGPago.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El cobro no existe.'}, status=404)
+
+    exito, motivo = imprimir_cobro_nota_entrega_caja(pago, es_reimpresion=True)
+    if not exito:
+        return _auth_response({'ok': False, 'message': motivo or 'No se pudo reimprimir el cobro.'}, status=502)
+    return _auth_response({'ok': True, 'message': 'Nota de cobro reenviada a la impresora.'})
 
 
 @csrf_exempt

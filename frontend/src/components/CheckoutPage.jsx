@@ -5,13 +5,15 @@ import ConfirmModal from './ConfirmModal';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import FacturasHistorialPage from './FacturasHistorialPage';
+import MoneyInput from './MoneyInput';
 import NotasEntregaHistorialPage from './NotasEntregaHistorialPage';
 import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
-import { formatMontoDocumento } from '../utils/currency';
+import { formatBs, formatMontoDocumento } from '../utils/currency';
 
 const emptyCliente = { nombre: '', tipo_documento: '', numero_documento: '' };
+const emptyNotaCliente = { cedula: '', apellido: '', nombre: '' };
 
 // El SENIAT aun esta homologando el sistema para facturacion fiscal (2026-09) —
 // mientras tanto solo se puede cobrar con nota de entrega (sin efecto fiscal).
@@ -28,6 +30,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const [selectedByGroup, setSelectedByGroup] = useState({});
   const [metodoByGroup, setMetodoByGroup] = useState({});
   const [clienteByGroup, setClienteByGroup] = useState({});
+  // Cliente de la NOTA DE ENTREGA — aparte de `clienteByGroup` (que sigue
+  // siendo el de pre-factura/factura, con su selector de tipo de documento
+  // para poder registrar RIF de empresa): acá siempre es cédula (V), la
+  // cajera anota primero el número y el nombre se autocompleta solo si ya
+  // existe ese cliente (ver buscarClientePorCedula/pedidos_cobro_view).
+  const [notaClienteByGroup, setNotaClienteByGroup] = useState({});
   const [prefacturaByGroup, setPrefacturaByGroup] = useState({});
   // Descuento manual opcional al cobrar (ver pedidos_cobro_view/VGNotaEntrega):
   // se activa con un check que primero pide confirmación (por eso el estado
@@ -339,6 +347,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     ? selectedGroup.pedidos.reduce((sum, pedido) => sum + Number(pedido.total), 0)
     : 0;
   const cliente = selectedGroup ? (clienteByGroup[selectedGroup.key] || emptyCliente) : emptyCliente;
+  const notaCliente = selectedGroup ? (notaClienteByGroup[selectedGroup.key] || emptyNotaCliente) : emptyNotaCliente;
   const prefactura = selectedGroup ? prefacturaByGroup[selectedGroup.key] : null;
   const isBusy = selectedGroup ? busyGroup === selectedGroup.key : false;
 
@@ -404,12 +413,53 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }));
   };
 
-  // La nota de entrega no lleva numeracion fiscal, asi que no necesita
-  // documento del cliente — pero una pre-factura o factura si, para poder
-  // identificar al cliente en el documento fiscal. Se valida en el frontend
-  // antes de llamar al backend (que hoy acepta el documento vacio y cae a
-  // "Consumidor Final") para forzar la politica del negocio de siempre
-  // pedirlo en estos dos flujos.
+  const updateNotaCliente = (groupKey, field, value) => {
+    setNotaClienteByGroup((current) => ({
+      ...current,
+      [groupKey]: { ...(current[groupKey] || emptyNotaCliente), [field]: value },
+    }));
+  };
+
+  // Al salir del campo de cédula, busca si ya existe un cliente con ese
+  // número (VGCliente.numero_documento) — reusa el mismo endpoint liviano de
+  // búsqueda que ya usaba facturación (clientes_buscar_view, filtra por
+  // nombre o número). Si hay una coincidencia EXACTA de número, autocompleta
+  // nombre/apellido; si no, la cajera los escribe a mano y
+  // pedidos_cobro_view crea el cliente nuevo al cobrar.
+  const buscarClientePorCedula = async (groupKey, cedulaInput) => {
+    const cedula = cedulaInput.trim();
+    if (!cedula) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/clientes/buscar/?q=${encodeURIComponent(cedula)}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!data.ok) {
+        return;
+      }
+      const encontrado = (data.clientes || []).find((item) => item.numero_documento === cedula);
+      if (encontrado) {
+        setNotaClienteByGroup((current) => ({
+          ...current,
+          [groupKey]: { cedula, nombre: encontrado.nombre, apellido: encontrado.apellido || '' },
+        }));
+      }
+    } catch (requestError) {
+      // Si falla la busqueda, la cajera simplemente escribe el nombre a mano
+      // — no bloquea el flujo, pedidos_cobro_view igual crea el cliente si
+      // la cedula no existe.
+    }
+  };
+
+  // La pre-factura y la factura SI necesitan poder registrar tipo+numero de
+  // documento por separado (puede ser RIF de empresa, no solo cedula) — se
+  // valida en el frontend antes de llamar al backend (que hoy acepta el
+  // documento vacio y cae a "Consumidor Final") para forzar la politica del
+  // negocio de siempre pedirlo en estos dos flujos. La nota de entrega usa su
+  // propia validacion, mas simple — ver handleClickNotaEntrega.
   const validateClienteDocumento = (group) => {
     const cliente = clienteByGroup[group.key] || emptyCliente;
     if (!cliente.tipo_documento || !cliente.numero_documento.trim()) {
@@ -493,9 +543,13 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       showError(`Selecciona al menos un pedido de ${group.label} para registrar la nota de entrega.`);
       return;
     }
-    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
-    if (!metodoPagoId) {
-      showError('No hay métodos de pago activos configurados.');
+    const notaCliente = notaClienteByGroup[group.key] || emptyNotaCliente;
+    if (!notaCliente.cedula.trim()) {
+      showError(`Indica la cédula del cliente de ${group.label} antes de registrar la nota de entrega.`);
+      return;
+    }
+    if (!notaCliente.nombre.trim()) {
+      showError(`Indica el nombre del cliente de ${group.label} antes de registrar la nota de entrega.`);
       return;
     }
     if (descuentoActivoByGroup[group.key]) {
@@ -536,11 +590,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     if (selectedIds.length === 0) {
       return;
     }
-    const metodoPagoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
-    if (!metodoPagoId) {
-      showError('No hay metodos de pago activos configurados.');
-      return;
-    }
+    const notaCliente = notaClienteByGroup[group.key] || emptyNotaCliente;
 
     // montoCobrar es el monto FINAL a cobrar (no lo que se resta) — vacío/no
     // activo significa "sin descuento", se cobra el total completo (el
@@ -561,9 +611,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         credentials: 'include',
         body: JSON.stringify({
           pedido_ids: selectedIds,
-          metodo_pago_id: metodoPagoId,
           monto_cobrar: montoCobrar,
           descuento_motivo: descuentoMotivo,
+          cliente_numero_documento: notaCliente.cedula.trim(),
+          cliente_nombre: notaCliente.nombre.trim(),
+          cliente_apellido: notaCliente.apellido.trim(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -607,7 +659,6 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     if (selectedIds.length === 0) {
       return;
     }
-    const cliente = clienteByGroup[group.key] || emptyCliente;
 
     setBusyGroup(group.key);
     try {
@@ -615,19 +666,14 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
         credentials: 'include',
-        body: JSON.stringify({
-          pedido_ids: selectedIds,
-          cliente_nombre: cliente.nombre,
-          cliente_tipo_documento: cliente.tipo_documento,
-          cliente_numero_documento: cliente.numero_documento,
-        }),
+        body: JSON.stringify({ pedido_ids: selectedIds }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         showError(data.message || 'No se pudo generar la cuenta del cliente.');
         return;
       }
-      showSuccess(`Cuenta del cliente ${data.prefactura.codigo} generada. Revísala con el cliente antes de confirmar.`);
+      showSuccess(`Cuenta del cliente ${data.prefactura.codigo} generada.`);
       setPrefacturaByGroup((current) => ({ ...current, [group.key]: data.prefactura }));
     } catch (requestError) {
       showError('Error de red al generar la cuenta del cliente.');
@@ -782,18 +828,20 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     const selectedTotal = group.pedidos
       .filter((pedido) => selectedSet.has(pedido.id))
       .reduce((sum, pedido) => sum + Number(pedido.total), 0);
-    const metodoSeleccionadoId = metodoByGroup[group.key] || (metodosPago[0] && metodosPago[0].id);
-    const metodoSeleccionado = metodosPago.find((metodo) => metodo.id === metodoSeleccionadoId);
-    const totalLabel = formatMontoDocumento(selectedTotal, metodoSeleccionado ? metodoSeleccionado.moneda : 'USD', tasaCambio);
+    // La nota de entrega ya no declara método de pago al emitirse (se elige al
+    // abonarla), así que el monto se muestra en dólares y en bolívares.
+    const labelUsdBs = (monto) => {
+      const bs = formatBs(monto, tasaCambio);
+      return bs ? `$${Number(monto).toFixed(2)} (${bs})` : `$${Number(monto).toFixed(2)}`;
+    };
+    const totalLabel = labelUsdBs(selectedTotal);
 
     if (action === 'nota') {
       const montoRaw = descuentoActivoByGroup[group.key] ? descuentoMontoByGroup[group.key] : '';
       const tieneMontoCobrar = montoRaw !== '' && montoRaw !== undefined && montoRaw !== null;
       const montoCobrar = tieneMontoCobrar ? Number(montoRaw) : selectedTotal;
       const hayDescuento = tieneMontoCobrar && montoCobrar < selectedTotal;
-      const montoCobrarLabel = tieneMontoCobrar
-        ? formatMontoDocumento(montoCobrar, metodoSeleccionado ? metodoSeleccionado.moneda : 'USD', tasaCambio)
-        : null;
+      const montoCobrarLabel = tieneMontoCobrar ? labelUsdBs(montoCobrar) : null;
       return {
         title: 'Registrar nota de entrega',
         message: `Vas a cobrar ${selectedSet.size} pedido(s) de ${group.label} por ${totalLabel}`
@@ -1035,54 +1083,88 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
 
                 {!prefactura ? (
                   <div style={footerSectionStyle}>
+                    <div style={clienteSeccionTituloStyle}>Cliente</div>
                     <div style={clienteFormStyle}>
                       <input
-                        placeholder="Cliente (opcional)"
-                        value={cliente.nombre}
-                        onChange={(event) => updateCliente(selectedGroup.key, 'nombre', event.target.value)}
+                        placeholder="Cédula *"
+                        value={notaCliente.cedula}
+                        onChange={(event) => updateNotaCliente(selectedGroup.key, 'cedula', event.target.value)}
+                        onBlur={(event) => buscarClientePorCedula(selectedGroup.key, event.target.value)}
                         style={inputStyle}
                       />
-                      <select
-                        value={cliente.tipo_documento}
-                        onChange={(event) => updateCliente(selectedGroup.key, 'tipo_documento', event.target.value)}
-                        style={selectStyle}
-                        className="admin-dark-select"
-                      >
-                        <option value="">Sin documento</option>
-                        <option value="V">V - Cédula</option>
-                        <option value="E">E - Cédula extranjero</option>
-                        <option value="J">J - RIF jurídico</option>
-                        <option value="G">G - RIF gubernamental</option>
-                        <option value="P">P - Pasaporte</option>
-                      </select>
                       <input
-                        placeholder="Número de documento"
-                        value={cliente.numero_documento}
-                        onChange={(event) => updateCliente(selectedGroup.key, 'numero_documento', event.target.value)}
+                        placeholder="Apellido"
+                        value={notaCliente.apellido}
+                        onChange={(event) => updateNotaCliente(selectedGroup.key, 'apellido', event.target.value)}
+                        style={inputStyle}
+                      />
+                      <input
+                        placeholder="Nombre *"
+                        value={notaCliente.nombre}
+                        onChange={(event) => updateNotaCliente(selectedGroup.key, 'nombre', event.target.value)}
                         style={inputStyle}
                       />
                     </div>
                     <p style={clienteHintStyle}>
-                      {FACTURACION_HABILITADA
-                        ? 'El tipo y número de documento son obligatorios para generar factura fiscal (no aplica a la cuenta del cliente ni a la nota de entrega).'
-                        : 'Opcional: solo para que el nombre del cliente aparezca en la cuenta que se le entrega.'}
+                      Cédula y nombre son obligatorios — si la cédula ya está registrada, el nombre y apellido se completan solos.
                     </p>
+
+                    {/* Datos fiscales para factura: solo existen mientras la facturación esté
+                        habilitada. "Generar cuenta del cliente" ya no pide ningún dato — es solo
+                        el resumen de lo que pidió el cliente (ver prefacturaPanel abajo). */}
+                    {FACTURACION_HABILITADA ? (
+                      <>
+                        <div style={clienteSeccionTituloStyle}>Cliente — factura</div>
+                        <div style={clienteFormStyle}>
+                          <input
+                            placeholder="Cliente (opcional)"
+                            value={cliente.nombre}
+                            onChange={(event) => updateCliente(selectedGroup.key, 'nombre', event.target.value)}
+                            style={inputStyle}
+                          />
+                          <select
+                            value={cliente.tipo_documento}
+                            onChange={(event) => updateCliente(selectedGroup.key, 'tipo_documento', event.target.value)}
+                            style={selectStyle}
+                            className="admin-dark-select"
+                          >
+                            <option value="">Sin documento</option>
+                            <option value="V">V - Cédula</option>
+                            <option value="E">E - Cédula extranjero</option>
+                            <option value="J">J - RIF jurídico</option>
+                            <option value="G">G - RIF gubernamental</option>
+                            <option value="P">P - Pasaporte</option>
+                          </select>
+                          <input
+                            placeholder="Número de documento"
+                            value={cliente.numero_documento}
+                            onChange={(event) => updateCliente(selectedGroup.key, 'numero_documento', event.target.value)}
+                            style={inputStyle}
+                          />
+                        </div>
+                        <p style={clienteHintStyle}>
+                          El tipo y número de documento son obligatorios para generar factura fiscal.
+                        </p>
+                      </>
+                    ) : null}
 
                     <div style={groupFooterStyle(isMobile)}>
                       <div style={{ color: '#fff', fontWeight: 700 }}>
                         Total seleccionado: ${selectedTotal.toFixed(2)}
                         <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
                       </div>
-                      <select
-                        value={metodoByGroup[selectedGroup.key] || (metodosPago[0] && metodosPago[0].id) || ''}
-                        onChange={(event) => setMetodoByGroup((current) => ({ ...current, [selectedGroup.key]: Number(event.target.value) }))}
-                        style={selectStyle}
-                        className="admin-dark-select"
-                      >
-                        {metodosPago.map((metodo) => (
-                          <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-                        ))}
-                      </select>
+                      {FACTURACION_HABILITADA ? (
+                        <select
+                          value={metodoByGroup[selectedGroup.key] || (metodosPago[0] && metodosPago[0].id) || ''}
+                          onChange={(event) => setMetodoByGroup((current) => ({ ...current, [selectedGroup.key]: Number(event.target.value) }))}
+                          style={selectStyle}
+                          className="admin-dark-select"
+                        >
+                          {metodosPago.map((metodo) => (
+                            <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
+                          ))}
+                        </select>
+                      ) : null}
                     </div>
 
                     <DescuentoManualBlock
@@ -1133,31 +1215,23 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     <div style={{ color: '#ffb0b0', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                       Cuenta del cliente {prefactura.codigo}
                     </div>
-                    <div style={{ color: '#d2c4c4', fontSize: 13 }}>
-                      Cliente: {prefactura.cliente ? prefactura.cliente.nombre : 'Consumidor Final'}
-                    </div>
                     <div style={{ display: 'grid', gap: 4 }}>
                       {prefactura.lineas.map((linea) => (
                         <div key={linea.id} style={lineaRowStyle}>
                           <span>{linea.cantidad}x {linea.descripcion}</span>
-                          <span>{formatMontoDocumento(linea.subtotal, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
+                          <span>
+                            ${Number(linea.subtotal).toFixed(2)}
+                            <BsAmount amountUsd={linea.subtotal} tasa={prefactura.tasa_cambio_referencia || tasaCambio} />
+                          </span>
                         </div>
                       ))}
                     </div>
                     <div style={detailTotalsStyle}>
-                      <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(prefactura.total, prefactura.moneda, prefactura.tasa_cambio_referencia || tasaCambio)}</span>
+                      <span style={{ fontWeight: 800, color: '#fff' }}>
+                        Total: ${Number(prefactura.total).toFixed(2)}
+                        <BsAmount amountUsd={prefactura.total} tasa={prefactura.tasa_cambio_referencia || tasaCambio} style={{ color: '#e0c9a3' }} />
+                      </span>
                     </div>
-
-                    <DescuentoManualBlock
-                      group={selectedGroup}
-                      activo={Boolean(descuentoActivoByGroup[selectedGroup.key])}
-                      monto={descuentoMontoByGroup[selectedGroup.key] || ''}
-                      motivo={descuentoMotivoByGroup[selectedGroup.key] || ''}
-                      onActivar={() => handleClickActivarDescuento(selectedGroup)}
-                      onDesactivar={() => handleDesactivarDescuento(selectedGroup.key)}
-                      onMontoChange={(value) => setDescuentoMontoByGroup((current) => ({ ...current, [selectedGroup.key]: value }))}
-                      onMotivoChange={(value) => setDescuentoMotivoByGroup((current) => ({ ...current, [selectedGroup.key]: value }))}
-                    />
 
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
@@ -1166,15 +1240,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                         style={secondaryButtonStyle}
                         disabled={isBusy}
                       >
-                        Descartar (usar otra opción)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => continuarConSeleccionParcial(selectedGroup, () => handleClickNotaEntrega(selectedGroup))}
-                        style={checkoutButtonStyle}
-                        disabled={isBusy}
-                      >
-                        {isBusy ? 'Procesando...' : 'Nota de entrega'}
+                        ← Volver
                       </button>
                       {FACTURACION_HABILITADA ? (
                         <button
@@ -1304,13 +1370,10 @@ function DescuentoManualBlock({ group, activo, monto, motivo, onActivar, onDesac
       </label>
       {activo ? (
         <div style={descuentoFieldsRowStyle}>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
+          <MoneyInput
             placeholder="Monto final a cobrar ($, vacío = cobrar el total)"
             value={monto}
-            onChange={(event) => onMontoChange(event.target.value)}
+            onChange={onMontoChange}
             style={inputStyle}
           />
           <input
@@ -1370,12 +1433,9 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
 
         <label style={ingresoFieldLabelStyle}>
           Monto ({esBs ? 'Bs' : '$'})
-          <input
-            type="number"
-            min="0.01"
-            step="0.01"
+          <MoneyInput
             value={monto}
-            onChange={(event) => setMonto(event.target.value)}
+            onChange={setMonto}
             style={ingresoInputStyle}
             placeholder="0.00"
           />
@@ -1911,6 +1971,15 @@ const clienteHintStyle = {
   margin: 0,
   color: '#a89999',
   fontSize: 12,
+};
+
+const clienteSeccionTituloStyle = {
+  color: '#d2c3c3',
+  fontSize: 11.5,
+  fontWeight: 800,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  marginTop: 4,
 };
 
 const descuentoBlockStyle = {

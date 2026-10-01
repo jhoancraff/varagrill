@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import { formatBsRaw } from '../utils/currency';
 
 function todayIso() {
   const now = new Date();
@@ -91,8 +92,11 @@ function ReporteDevolucionesPage({ isMobile, onBack, onArmarCanje }) {
     }
   };
 
-  const totalMonto = useMemo(
-    () => notas.reduce((acc, nota) => acc + Number(nota.monto || 0), 0),
+  // Toda nota de credito se genera en bolivares (ver devoluciones_views.py) —
+  // se muestra siempre en Bs, nunca en dolares, usando `monto_bs` (ya
+  // convertido con la tasa congelada del documento original).
+  const totalMontoBs = useMemo(
+    () => notas.reduce((acc, nota) => acc + Number(nota.monto_bs || 0), 0),
     [notas],
   );
 
@@ -153,7 +157,7 @@ function ReporteDevolucionesPage({ isMobile, onBack, onArmarCanje }) {
                       {nota.documento_tipo === 'factura' ? 'Factura' : 'Nota de entrega'} {nota.documento_codigo}
                     </div>
                     <div style={cellStyle}>{nota.tipo_resolucion_display}</div>
-                    <div style={cellStyle}>${formatMonto(nota.monto)}</div>
+                    <div style={cellStyle}>{nota.monto_bs !== null ? formatBsRaw(nota.monto_bs) : `$${formatMonto(nota.monto)}`}</div>
                     <div style={cellStyle}>{new Date(nota.fecha_emision).toLocaleString('es-VE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
                     <div style={cellStyle}>
                       <button type="button" onClick={() => abrirDetalle(nota.id)} style={detalleLinkStyle}>
@@ -193,7 +197,7 @@ function ReporteDevolucionesPage({ isMobile, onBack, onArmarCanje }) {
             ) : null}
 
             <div style={{ fontWeight: 700, color: '#fff' }}>
-              Total devuelto: ${formatMonto(totalMonto)}
+              Total devuelto: {formatBsRaw(totalMontoBs)}
             </div>
           </section>
         )

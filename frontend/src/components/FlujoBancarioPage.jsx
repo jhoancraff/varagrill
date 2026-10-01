@@ -195,9 +195,10 @@ function FlujoBancarioPage({ isMobile, onBack }) {
             <div style={emptyStyle}>No hay {esEntrada ? 'entradas' : 'salidas'} registradas ese día para este banco.</div>
           ) : (
             <div style={tableWrapStyle}>
-              <div style={detalleTableStyle}>
+              <div style={detalleTableStyle(esEntrada)}>
                 <div style={headStyle}>Hora</div>
                 <div style={headStyle}>Tipo</div>
+                {!esEntrada ? <div style={headStyle}>ID</div> : null}
                 <div style={headStyle}>Nombre</div>
                 <div style={headStyle}>Método</div>
                 <div style={headStyle}>Referencia</div>
@@ -206,6 +207,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                   <div key={`${movimiento.tipo_registro}-${movimiento.id}`} style={rowFragmentStyle}>
                     <div style={cellStyle}>{TIPOS_SIN_HORA.has(movimiento.tipo_registro) ? '—' : formatHora(movimiento.fecha_hora)}</div>
                     <div style={cellStyle}>{TIPO_REGISTRO_LABEL[movimiento.tipo_registro] || movimiento.tipo_registro}</div>
+                    {!esEntrada ? <div style={{ ...cellStyle, fontWeight: 700, color: '#ffd9a0' }}>{movimiento.documento_codigo || '—'}</div> : null}
                     <div style={cellStyle}>{movimiento.nombre}</div>
                     <div style={cellStyle}>{movimiento.metodo_pago_nombre}</div>
                     <div style={cellStyle}>{movimiento.referencia || '—'}</div>
@@ -215,6 +217,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                   </div>
                 ))}
                 <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800 }}>Total</div>
+                {!esEntrada ? <div style={{ ...cellStyle, ...totalCellStyle }} /> : null}
                 <div style={{ ...cellStyle, ...totalCellStyle }} />
                 <div style={{ ...cellStyle, ...totalCellStyle }} />
                 <div style={{ ...cellStyle, ...totalCellStyle }} />
@@ -331,7 +334,9 @@ const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
 const resumenTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.6fr) minmax(140px,1fr) minmax(140px,1fr)', minWidth: 460, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const detalleTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)', minWidth: 900, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+// En las salidas hay una columna extra "ID" (Lote #36 / Gasto #536) para ubicar rapido
+// la compra o el gasto en Cuentas por pagar.
+const detalleTableStyle = (esEntrada) => ({ display: 'grid', gridTemplateColumns: esEntrada ? 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)' : 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(110px,0.7fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)', minWidth: esEntrada ? 900 : 1010, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' });
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const totalCellStyle = { background: 'rgba(255,255,255,0.04)' };

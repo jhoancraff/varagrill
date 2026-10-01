@@ -80,6 +80,7 @@ class VGCliente(models.Model):
         ("P", "Pasaporte (P)"),
     ]
     nombre = models.CharField(max_length=150)
+    apellido = models.CharField(max_length=150, blank=True)
     telefono = models.CharField(max_length=20, blank=True)
     correo = models.EmailField(blank=True)
     tipo_documento = models.CharField(max_length=1, choices=TIPOS_DOCUMENTO, blank=True)
@@ -1155,6 +1156,14 @@ class VGPago(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    numero_cobro = models.PositiveIntegerField(
+        null=True, blank=True, unique=True,
+        help_text="Numero correlativo de la NOTA DE COBRO que se imprime al abonar una nota de entrega (serie 'NOTA_COBRO' de VGCorrelativoFiscal). Vacio en pagos de otros origenes o anteriores a este campo.",
+    )
+    saldo_posterior = models.DecimalField(
+        max_digits=14, decimal_places=6, null=True, blank=True,
+        help_text="Saldo pendiente (USD) de la nota de entrega justo DESPUES de este cobro — congelado para que una reimpresion de la nota de cobro muestre lo mismo que el ticket original aunque despues se registren mas abonos.",
+    )
     anulado_por_nota_credito = models.ForeignKey(
         "varagrill.VGNotaCredito", on_delete=models.SET_NULL, null=True, blank=True, related_name="pagos_revertidos",
         help_text="Si no es None, este pago quedó en estado 'anulado' porque una devolución revirtió el documento al que pertenecía — así el cuadre de caja (reportes.py) deja de contarlo automáticamente al filtrar estado='completado', sin perder de qué cuenta/método salió originalmente.",

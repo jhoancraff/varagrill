@@ -16,6 +16,7 @@ Sin dependencias externas: solo `socket`, igual que impresion_termica.py.
 """
 import logging
 import socket
+from decimal import Decimal
 
 from django.utils import timezone
 
@@ -334,6 +335,124 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
 
 
 # ---------------------------------------------------------------------------
+# Nota de cobro (ticket de cada abono a una nota de entrega)
+# ---------------------------------------------------------------------------
+def _build_cobro_nota_entrega_bytes(pago, es_reimpresion=False):
+    """
+    Ticket de la NOTA DE COBRO de un abono (VGPago) a una nota de entrega:
+    datos fiscales de la empresa, numero de cobro, nota de entrega a la que
+    hace referencia, metodo, y el monto en la moneda REAL con la que se cobro
+    (dolares o bolivares — nunca las dos juntas). Todo lo que depende de la
+    tasa usa la que quedo congelada en el pago (`pago.tasa_cambio_referencia`,
+    la del dia del cobro), nunca la de hoy, para que una reimpresion salga
+    identica al ticket original. La fecha/hora es la del cobro en hora local.
+    """
+    nota = pago.nota_entrega
+    metodo = pago.metodo_pago
+    en_bs = metodo.moneda == 'VES' and pago.tasa_cambio_referencia
+    tasa = pago.tasa_cambio_referencia
+
+    def monto_texto(valor_usd):
+        if en_bs:
+            return f'Bs. {_formatear_bs((valor_usd * tasa).quantize(Decimal("0.01")))}'
+        return f'${valor_usd:.2f}'
+
+    datos_fiscales = VGDatosFiscalesEmisor.objects.first()
+    fecha_hora = timezone.localtime(pago.fecha_pago).strftime('%d/%m/%Y %H:%M:%S')
+    codigo_cobro = f'COB-{pago.numero_cobro:06d}' if pago.numero_cobro else f'PAGO-{pago.id}'
+    cajero = ''
+    if pago.creado_por:
+        cajero = pago.creado_por.get_full_name() or pago.creado_por.username
+
+    out = bytearray()
+    out += INIT
+    out += KANJI_OFF
+    out += ESC_POS_WCP1252
+    out += ALIGN_CENTER
+    out += BOLD_ON
+    out += _text((datos_fiscales.nombre_comercial if datos_fiscales and datos_fiscales.nombre_comercial else None) or 'VARAGRILL') + FEED
+    out += BOLD_OFF
+    if datos_fiscales:
+        if datos_fiscales.razon_social:
+            out += _text(datos_fiscales.razon_social) + FEED
+        if datos_fiscales.rif:
+            out += _text(f'RIF: {datos_fiscales.rif}') + FEED
+        if datos_fiscales.domicilio_fiscal:
+            out += _text(datos_fiscales.domicilio_fiscal) + FEED
+        if datos_fiscales.telefono:
+            out += _text(f'Tel: {datos_fiscales.telefono}') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += BOLD_ON
+    out += _text('NOTA DE COBRO' + (' (REIMPRESION)' if es_reimpresion else '')) + FEED
+    out += _text(f'Nº {codigo_cobro}') + FEED
+    out += BOLD_OFF
+    out += ALIGN_LEFT
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text(f'Fecha: {fecha_hora}') + FEED
+    out += _text(f'Nota de entrega: {nota.codigo}') + FEED
+    cliente = nota.cliente
+    if cliente is not None:
+        nombre_completo = f'{cliente.nombre} {cliente.apellido}'.strip()
+        out += _text(f'Cliente: {nombre_completo}') + FEED
+        if cliente.numero_documento:
+            out += _text(f'{cliente.tipo_documento}-{cliente.numero_documento}') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text(f'Método de pago: {metodo.nombre}') + FEED
+    out += _text(f'Moneda: {"Bolívares" if en_bs else "Dólares"}') + FEED
+    if pago.referencia and not pago.referencia.startswith('ABONO-'):
+        out += _text(f'Referencia: {pago.referencia}') + FEED
+    if en_bs:
+        out += _text(f'Tasa: Bs. {_formatear_bs(tasa)} por $1') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text(f'Total de la nota: {monto_texto(nota.total)}') + FEED
+    out += BOLD_ON
+    out += _text(f'MONTO COBRADO: {monto_texto(pago.monto)}') + FEED
+    out += BOLD_OFF
+    if pago.saldo_posterior is not None:
+        if pago.saldo_posterior > 0:
+            out += _text(f'Saldo pendiente: {monto_texto(pago.saldo_posterior)}') + FEED
+        else:
+            out += _text('Nota de entrega SALDADA') + FEED
+    if cajero:
+        out += _text(f'Cajero: {cajero}') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += ALIGN_CENTER
+    out += _text('Documento sin efecto fiscal') + FEED
+    out += _text('¡Gracias por su visita!') + FEED
+    out += ALIGN_LEFT
+    out += FEED + FEED + FEED + FEED
+    out += CUT
+    return bytes(out)
+
+
+def imprimir_cobro_nota_entrega_caja(pago, es_reimpresion=False):
+    """
+    Imprime (o reimprime) la nota de cobro de un abono a una nota de entrega.
+    Devuelve (exito, motivo) igual que imprimir_nota_entrega_caja: el abono
+    ya quedo registrado, un fallo de impresora nunca debe tumbarlo.
+    """
+    config = VGImpresoraCaja.obtener_config()
+    if config is None or not config.activo:
+        return False, 'No hay una impresora de caja activa configurada.'
+    if not config.ip or not config.cola:
+        logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la nota de cobro.')
+        return False, 'La impresora de caja no tiene IP o cola configurada.'
+
+    destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
+    try:
+        ticket = _build_cobro_nota_entrega_bytes(pago, es_reimpresion=es_reimpresion)
+        enviar_trabajo_lpd(
+            config.ip, config.puerto, config.cola, ticket,
+            job_id=pago.id, nombre_trabajo=f'Cobro {pago.numero_cobro or pago.id}',
+        )
+        logger.info('Nota de cobro %s enviada a %s', pago.numero_cobro, destino)
+        return True, None
+    except Exception as exc:
+        logger.exception('No se pudo imprimir la nota de cobro %s hacia %s', pago.numero_cobro, destino)
+        return False, f'No se pudo enviar el trabajo de impresion: {exc}'
+
+
+# ---------------------------------------------------------------------------
 # Pre-factura / factura (modulo de facturacion)
 # ---------------------------------------------------------------------------
 def _render_documento_linea(linea, monto_fn):
@@ -378,7 +497,8 @@ def _build_documento_venta_bytes(
     for texto in (info_encabezado or []):
         out += _text(texto) + FEED
     if cliente is not None:
-        out += _text(f'Cliente: {cliente.nombre}') + FEED
+        nombre_completo = f'{cliente.nombre} {cliente.apellido}'.strip()
+        out += _text(f'Cliente: {nombre_completo}') + FEED
         if cliente.numero_documento:
             out += _text(f'{cliente.tipo_documento}-{cliente.numero_documento}') + FEED
     out += _text('-' * LINE_WIDTH) + FEED

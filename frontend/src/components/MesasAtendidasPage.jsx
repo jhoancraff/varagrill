@@ -354,6 +354,8 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
     onAddRoundToTable({
       mesaId: selectedMesa.mesa_id,
       cliente: activePedido?.cliente || '',
+      clienteCedula: activePedido?.cliente_cedula || '',
+      clienteTelefono: activePedido?.cliente_telefono || '',
     });
   };
 

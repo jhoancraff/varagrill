@@ -1059,6 +1059,14 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
         for pago in pagos:
             if pago.nota_entrega_id:
                 origen = f"Nota de entrega {pago.nota_entrega.codigo}"
+                if pago.numero_cobro:
+                    origen = f"Cobro COB-{pago.numero_cobro:06d} — {origen}"
+                # Una nota cobrada dias despues de emitirse entra al banco el dia
+                # del ABONO (no el de la emision) — se aclara cuando difieren para
+                # que ese cobro de una venta anterior se reconozca de un vistazo.
+                fecha_emision = timezone.localtime(pago.nota_entrega.fecha_emision).date()
+                if fecha_emision != fecha:
+                    origen += f" (emitida el {fecha_emision.strftime('%d/%m')})"
             elif pago.factura_id:
                 origen = f"Factura {pago.factura.numero_factura:06d}"
             elif pago.pedido_id:

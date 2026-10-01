@@ -1510,21 +1510,39 @@ def _resolve_or_create_cliente(nombre, cedula, telefono):
     """
     Resuelve el cliente por cédula cuando se da (identificador confiable para
     historial de movimientos y futuros sorteos): si ya existe un VGCliente con
-    esa cédula, se reutiliza tal cual (no se pisa nombre/teléfono ya guardados
-    con lo que haya escrito el mesero esta vez). Si no existe, se crea con los
-    datos capturados ahora. Sin cédula, cae al comportamiento previo
-    (get_or_create solo por nombre), ya que no hay forma confiable de saber si
-    es el mismo cliente.
+    esa cédula SE REUTILIZA — nunca se crea otro — y si el nombre (o el
+    teléfono) que llega ahora es distinto al guardado, se ACTUALIZA el
+    registro existente (el mesero corrigió o completó el nombre; antes esto
+    chocaba y obligaba a cambiar una letra para poder registrar la ronda).
+    Un dato vacío nunca borra uno ya guardado. Sin cédula, se reutiliza el
+    cliente de ese mismo nombre (sin distinguir mayúsculas) o se crea uno; ya
+    no puede fallar si hay varios con el mismo nombre (se toma el más
+    antiguo), que es lo que tumbaba el registro con `get_or_create(nombre=...)`
+    (MultipleObjectsReturned).
     """
+    nombre = nombre.strip()
     cedula = cedula.strip()
+    telefono = telefono.strip()
     if cedula:
-        cliente, _ = VGCliente.objects.get_or_create(
+        cliente, creado = VGCliente.objects.get_or_create(
             tipo_documento='V',
             numero_documento=cedula,
             defaults={'nombre': nombre, 'telefono': telefono},
         )
+        if not creado:
+            cambios = []
+            if nombre and cliente.nombre != nombre:
+                cliente.nombre = nombre
+                cambios.append('nombre')
+            if telefono and cliente.telefono != telefono:
+                cliente.telefono = telefono
+                cambios.append('telefono')
+            if cambios:
+                cliente.save(update_fields=cambios)
         return cliente
-    cliente, _ = VGCliente.objects.get_or_create(nombre=nombre)
+    cliente = VGCliente.objects.filter(nombre__iexact=nombre).order_by('id').first()
+    if cliente is None:
+        cliente = VGCliente.objects.create(nombre=nombre, telefono=telefono)
     return cliente
 
 
@@ -5810,6 +5828,8 @@ def mesas_atendidas_view(request):
                 {
                     'id': p.id,
                     'cliente': p.cliente.nombre if p.cliente else '',
+                    'cliente_cedula': p.cliente.numero_documento if p.cliente else '',
+                    'cliente_telefono': p.cliente.telefono if p.cliente else '',
                     'estado': p.estado,
                     'total': str(p.total),
                     'notas': p.notas,
@@ -6201,6 +6221,8 @@ def pedidos_cobro_view(request):
                     'grupo_id': pedido.grupo_pedido_id or pedido.id,
                     'cliente_id': pedido.cliente_id,
                     'cliente': pedido.cliente.nombre if pedido.cliente else '',
+                    'cliente_apellido': pedido.cliente.apellido if pedido.cliente else '',
+                    'cliente_cedula': pedido.cliente.numero_documento if pedido.cliente else '',
                     'mesero': pedido.usuario.username,
                     'notas': pedido.notas,
                     'subtotal': str(pedido.subtotal),
@@ -6403,11 +6425,24 @@ def pedidos_cobro_view(request):
         # quedan guardados aparte para que quede constancia de cuánto se
         # descontó y por qué (auditoría) sin perder el total original de los
         # pedidos, que sigue viviendo en cada VGPedido.total.
-        cliente, _cliente_creado = VGCliente.objects.get_or_create(
+        cliente, cliente_creado = VGCliente.objects.get_or_create(
             tipo_documento='V',
             numero_documento=cliente_numero_documento,
             defaults={'nombre': cliente_nombre, 'apellido': cliente_apellido},
         )
+        if not cliente_creado:
+            # Cedula ya registrada: se reutiliza y, si la cajera corrigio el
+            # nombre/apellido, se actualiza el mismo registro (nunca se crea
+            # otro). Un campo vacio no borra uno ya guardado.
+            cambios = []
+            if cliente_nombre and cliente.nombre != cliente_nombre:
+                cliente.nombre = cliente_nombre
+                cambios.append('nombre')
+            if cliente_apellido and cliente.apellido != cliente_apellido:
+                cliente.apellido = cliente_apellido
+                cambios.append('apellido')
+            if cambios:
+                cliente.save(update_fields=cambios)
 
         nota_entrega = VGNotaEntrega.objects.create(
             cliente=cliente,

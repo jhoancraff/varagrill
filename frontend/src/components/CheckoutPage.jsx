@@ -347,7 +347,23 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     ? selectedGroup.pedidos.reduce((sum, pedido) => sum + Number(pedido.total), 0)
     : 0;
   const cliente = selectedGroup ? (clienteByGroup[selectedGroup.key] || emptyCliente) : emptyCliente;
-  const notaCliente = selectedGroup ? (notaClienteByGroup[selectedGroup.key] || emptyNotaCliente) : emptyNotaCliente;
+  // Lo que escribió el mesero al tomar el pedido (cédula y nombre del cliente) llega
+  // precargado a la caja; la cajera solo lo edita si hace falta. Una vez que ella
+  // toca algún campo, manda lo que haya en notaClienteByGroup.
+  const clienteDelMesero = (group) => {
+    const pedidoConCedula = group.pedidos.find((pedido) => pedido.cliente_cedula);
+    const origen = pedidoConCedula || group.pedidos.find((pedido) => pedido.cliente) || null;
+    if (!origen) {
+      return emptyNotaCliente;
+    }
+    return {
+      cedula: origen.cliente_cedula || '',
+      apellido: origen.cliente_apellido || '',
+      nombre: origen.cliente || '',
+    };
+  };
+  const notaClienteDe = (group) => notaClienteByGroup[group.key] || clienteDelMesero(group);
+  const notaCliente = selectedGroup ? notaClienteDe(selectedGroup) : emptyNotaCliente;
   const prefactura = selectedGroup ? prefacturaByGroup[selectedGroup.key] : null;
   const isBusy = selectedGroup ? busyGroup === selectedGroup.key : false;
 
@@ -416,7 +432,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const updateNotaCliente = (groupKey, field, value) => {
     setNotaClienteByGroup((current) => ({
       ...current,
-      [groupKey]: { ...(current[groupKey] || emptyNotaCliente), [field]: value },
+      [groupKey]: { ...(current[groupKey] || clienteDelMesero(groups.find((group) => group.key === groupKey) || { pedidos: [] })), [field]: value },
     }));
   };
 
@@ -543,7 +559,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       showError(`Selecciona al menos un pedido de ${group.label} para registrar la nota de entrega.`);
       return;
     }
-    const notaCliente = notaClienteByGroup[group.key] || emptyNotaCliente;
+    const notaCliente = notaClienteDe(group);
     if (!notaCliente.cedula.trim()) {
       showError(`Indica la cédula del cliente de ${group.label} antes de registrar la nota de entrega.`);
       return;
@@ -590,7 +606,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     if (selectedIds.length === 0) {
       return;
     }
-    const notaCliente = notaClienteByGroup[group.key] || emptyNotaCliente;
+    const notaCliente = notaClienteDe(group);
 
     // montoCobrar es el monto FINAL a cobrar (no lo que se resta) — vacío/no
     // activo significa "sin descuento", se cobra el total completo (el

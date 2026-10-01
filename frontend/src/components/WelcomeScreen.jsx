@@ -127,8 +127,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     }
   };
 
-  const handleAddRoundToTable = ({ mesaId, cliente }) => {
-    setNewOrderPreset({ mesaId, cliente, token: Date.now() });
+  const handleAddRoundToTable = ({ mesaId, cliente, clienteCedula, clienteTelefono }) => {
+    setNewOrderPreset({ mesaId, cliente, clienteCedula, clienteTelefono, token: Date.now() });
     goToView('orders');
     if (isSidebarOverlayMode) {
       setIsSidebarOpen(false);

@@ -51,6 +51,16 @@ class VGMetodoPago(VGAuditoria):
     )
     activo = models.BooleanField(default=True)
 
+    # Un metodo marcado es_punto_venta (debito/credito) NO suma al saldo de su
+    # cuenta el dia del cobro: sus cobros se agrupan en lotes (VGLotePOS) y el
+    # saldo sube cuando alguien, tras revisar el punto/banco, toca "Acreditar" en
+    # el lote cerrado. Sin porcentajes, dias ni calendario: es un clic. Solo un
+    # metodo en bolivares (moneda='VES') puede ser punto de venta.
+    es_punto_venta = models.BooleanField(
+        default=False,
+        help_text="Cobros por punto de venta: se agrupan en lotes y suman al saldo cuando el lote se acredita.",
+    )
+
     class Meta:
         db_table = "vg_metodos_pago"
         verbose_name = "Metodo de pago"
@@ -243,6 +253,15 @@ class VGCierreCaja(VGAuditoria):
     efectivo_contado_final = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     diferencia = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     notas = models.TextField(blank=True)
+    # Los cierres anteriores a los lotes POS contaban el efectivo fisico a mano
+    # (conteo_efectivo_realizado=True, el default, para esas filas). El cierre
+    # nuevo ya NO pide ese conteo: guarda efectivo_contado_final = esperado −
+    # consignado y diferencia = 0, y deja esta marca en False para que ninguna
+    # pantalla presente ese "contado" como si alguien lo hubiera contado.
+    conteo_efectivo_realizado = models.BooleanField(default=True)
+    # Snapshot INMUTABLE (USD) de lo que quedaba por acreditar de los lotes POS
+    # (abiertos/cerrados) al momento de cerrar la caja de `fecha`.
+    pos_por_acreditar_usd = models.DecimalField(max_digits=14, decimal_places=6, default=0)
 
     class Meta:
         db_table = "vg_cierres_caja"
@@ -305,6 +324,72 @@ class VGConciliacionBancaria(VGAuditoria):
 
     def __str__(self):
         return f"Conciliación {self.banco_nombre} — {self.fecha}"
+
+
+# ---------------------------------------------------------------------------
+# Lotes de Punto de Venta (POS)
+# ---------------------------------------------------------------------------
+class VGLotePOS(VGAuditoria):
+    """
+    Lote de cobros por punto de venta (debito/credito) de UN metodo de pago
+    es_punto_venta — el "cierre de lote" de la maquina fisica. El dinero de un
+    cobro POS no esta disponible el dia de la venta: queda "por acreditar" hasta
+    que el personal revisa el punto/banco y, si el lote cayo, toca Acreditar.
+
+    Ciclo de vida: abierto (recibe cada cobro POS automaticamente; hay UNO por
+    metodo, ver la constraint) → cerrado (la cajera lo cierra, o se autoclausura
+    al cerrar la caja) → acreditado (un clic: el monto del lote suma al saldo de
+    la cuenta con fecha_abono_real = hoy). 'anulado' = descartado con motivo.
+    Un acreditado por error se revierte a 'cerrado' (revertir_acreditacion).
+
+    Se acredita el monto que el sistema registro, tal cual (bruto, en USD y en Bs
+    con la tasa congelada de cada cobro): no hay porcentajes, retenciones ni
+    estimaciones de fecha. La cuenta transitoria "POS por cobrar" NO es una tabla:
+    es el saldo calculado de los lotes abierto/cerrado. Motor de partida doble:
+    diferido (FASE 7).
+    """
+    ESTADOS = [
+        ("abierto", "Abierto"),
+        ("cerrado", "Cerrado"),
+        ("acreditado", "Acreditado"),
+        ("anulado", "Anulado"),
+    ]
+    numero = models.PositiveIntegerField(unique=True, help_text="Correlativo de la serie 'LOTE_POS'.")
+    metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="lotes_pos")
+    cuenta_bancaria = models.CharField(max_length=80, blank=True, help_text="Snapshot de VGMetodoPago.cuenta_bancaria al abrir el lote.")
+    fecha_operacion = models.DateField(help_text="Dia (local) del primer cobro del lote.")
+    fecha_cierre = models.DateTimeField(null=True, blank=True)
+    estado = models.CharField(max_length=12, choices=ESTADOS, default="abierto")
+    notas = models.TextField(blank=True)
+    cerrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="lotes_pos_cerrados",
+    )
+    acreditado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="lotes_pos_acreditados",
+    )
+    moneda = models.CharField(max_length=3, choices=VGMetodoPago.MONEDAS, default="VES")
+    monto_bruto_usd = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    monto_bruto_sistema_bs = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0,
+        help_text="Suma en Bs de los cobros del lote, cada uno a su tasa congelada.",
+    )
+    fecha_abono_real = models.DateField(null=True, blank=True, help_text="Dia en que se acredito (sumo al saldo de la cuenta).")
+    fecha_acreditacion = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "vg_lotes_pos"
+        verbose_name = "Lote POS"
+        verbose_name_plural = "Lotes POS"
+        ordering = ["-numero"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["metodo_pago"], condition=models.Q(estado="abierto"),
+                name="un_lote_abierto_por_metodo",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Lote POS #{self.numero} — {self.metodo_pago} ({self.get_estado_display()})"
 
 
 # ---------------------------------------------------------------------------

@@ -632,3 +632,136 @@ def imprimir_factura_caja(factura, es_reimpresion=False):
     except Exception as exc:
         logger.exception('No se pudo imprimir la factura %s hacia %s', codigo, destino)
         return False, f'No se pudo enviar el trabajo de impresion: {exc}'
+
+# ---------------------------------------------------------------------------
+# Cierre de lote de punto de venta (POS)
+# ---------------------------------------------------------------------------
+def _fila_izq_der(izquierda, derecha):
+    """Una linea de LINE_WIDTH caracteres con texto a la izquierda y monto a la derecha."""
+    derecha = str(derecha)
+    espacio = max(LINE_WIDTH - len(derecha) - 1, 0)
+    return f'{str(izquierda)[:espacio]:<{espacio}} {derecha}'
+
+
+def _origen_pago_corto(pago):
+    if pago.nota_entrega_id:
+        return pago.nota_entrega.codigo
+    if pago.factura_id:
+        return f'FAC {pago.factura.numero_factura}' if pago.factura.numero_factura else f'FAC #{pago.factura_id}'
+    return f'PED #{pago.pedido_id}'
+
+
+def _cliente_pago_corto(pago):
+    cliente = pago.nota_entrega.cliente if pago.nota_entrega_id else None
+    if cliente is None:
+        return ''
+    return f'{cliente.nombre} {cliente.apellido}'.strip()
+
+
+def _build_cierre_lote_pos_bytes(lote, es_reimpresion=False):
+    """
+    Ticket del CIERRE DE LOTE de punto de venta: un renglon por cada cobro del lote
+    con su nota de entrega (u otro origen), hora, cliente, referencia/voucher y monto
+    en bolivares, y el total del lote. Sirve para comparar, cobro por cobro, lo que
+    registro el sistema contra el cierre de lote que imprime el punto fisico. Los
+    montos en Bs usan la tasa congelada de cada cobro (nunca la de hoy).
+    """
+    from .lotes_pos import _tasa_de_pago  # import tardio: evita ciclos entre modulos
+
+    datos_fiscales = VGDatosFiscalesEmisor.objects.first()
+    pagos = list(
+        lote.pagos.filter(estado='completado')
+        .select_related('nota_entrega__cliente', 'factura', 'creado_por')
+        .order_by('fecha_pago')
+    )
+    titulo = 'CIERRE DE LOTE POS'
+    if lote.estado == 'abierto':
+        titulo = 'LOTE POS ABIERTO (PARCIAL)'
+    if es_reimpresion:
+        titulo += ' (REIMPRESION)'
+
+    out = bytearray()
+    out += INIT
+    out += KANJI_OFF
+    out += ESC_POS_WCP1252
+    out += ALIGN_CENTER
+    out += BOLD_ON
+    out += _text((datos_fiscales.nombre_comercial if datos_fiscales and datos_fiscales.nombre_comercial else None) or 'VARAGRILL') + FEED
+    out += _text(titulo) + FEED
+    out += _text(f'LOTE-{lote.numero:06d}') + FEED
+    out += BOLD_OFF
+    out += ALIGN_LEFT
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += _text(f'Metodo: {lote.metodo_pago.nombre}') + FEED
+    if lote.cuenta_bancaria:
+        out += _text(f'Banco: {lote.cuenta_bancaria}') + FEED
+    out += _text(f'Operacion: {lote.fecha_operacion.strftime("%d/%m/%Y")}') + FEED
+    if lote.fecha_cierre:
+        out += _text(f'Cerrado: {timezone.localtime(lote.fecha_cierre).strftime("%d/%m/%Y %H:%M")}') + FEED
+        if lote.cerrado_por:
+            out += _text(f'Por: {lote.cerrado_por.get_full_name() or lote.cerrado_por.username}') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += BOLD_ON
+    out += _text(f'COBROS DEL LOTE ({len(pagos)})') + FEED
+    out += BOLD_OFF
+    out += _text('Compara con el cierre del punto') + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+
+    total_bs = Decimal('0')
+    total_usd = Decimal('0')
+    for pago in pagos:
+        tasa = _tasa_de_pago(pago)
+        monto_bs = (pago.monto * tasa).quantize(Decimal('0.01')) if tasa else None
+        total_usd += pago.monto
+        if monto_bs is not None:
+            total_bs += monto_bs
+        hora = timezone.localtime(pago.fecha_pago).strftime('%H:%M')
+        monto_txt = f'Bs.{_formatear_bs(monto_bs)}' if monto_bs is not None else f'${pago.monto:.2f}'
+        out += _text(_fila_izq_der(f'{hora} {_origen_pago_corto(pago)}', monto_txt)) + FEED
+        detalle = _cliente_pago_corto(pago)
+        referencia = pago.referencia if pago.referencia and not pago.referencia.startswith('ABONO-') else ''
+        if referencia:
+            detalle = f'{detalle[:14]} Ref:{referencia[:12]}'.strip()
+        if detalle:
+            out += _text(f'  {detalle}'[:LINE_WIDTH]) + FEED
+
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += BOLD_ON
+    out += _text(_fila_izq_der('TOTAL Bs.', _formatear_bs(total_bs))) + FEED
+    out += BOLD_OFF
+    out += _text(_fila_izq_der('Total en dolares', f'${total_usd:.2f}')) + FEED
+    out += _text(_fila_izq_der('Cantidad de cobros', len(pagos))) + FEED
+    out += _text('-' * LINE_WIDTH) + FEED
+    out += ALIGN_CENTER
+    out += _text('Documento sin efecto fiscal') + FEED
+    out += ALIGN_LEFT
+    out += FEED + FEED + FEED + FEED
+    out += CUT
+    return bytes(out)
+
+
+def imprimir_cierre_lote_pos(lote, es_reimpresion=False):
+    """
+    Imprime (o reimprime) el cierre de un lote POS en la impresora de caja. Devuelve
+    (exito, motivo) igual que imprimir_cobro_nota_entrega_caja: el lote ya quedo
+    cerrado, un fallo de impresora nunca debe tumbar el cierre.
+    """
+    config = VGImpresoraCaja.obtener_config()
+    if config is None or not config.activo:
+        return False, 'No hay una impresora de caja activa configurada.'
+    if not config.ip or not config.cola:
+        logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite el cierre de lote.')
+        return False, 'La impresora de caja no tiene IP o cola configurada.'
+
+    destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
+    try:
+        ticket = _build_cierre_lote_pos_bytes(lote, es_reimpresion=es_reimpresion)
+        enviar_trabajo_lpd(
+            config.ip, config.puerto, config.cola, ticket,
+            job_id=lote.id, nombre_trabajo=f'Lote POS {lote.numero}',
+        )
+        logger.info('Cierre del lote POS %s enviado a %s', lote.numero, destino)
+        return True, None
+    except Exception as exc:
+        logger.exception('No se pudo imprimir el lote POS %s hacia %s', lote.numero, destino)
+        return False, f'No se pudo enviar el trabajo de impresion: {exc}'

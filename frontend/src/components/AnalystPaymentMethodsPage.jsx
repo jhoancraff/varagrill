@@ -16,7 +16,6 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
   const [editandoBancoId, setEditandoBancoId] = useState(null);
   const [bancoEnEdicion, setBancoEnEdicion] = useState('');
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ nombre, moneda, esEfectivo, cuentaBancaria });
-
   const loadMetodos = async () => {
     setLoading(true);
     try {
@@ -103,6 +102,35 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
     }
   };
 
+  const handleTogglePuntoVenta = async (metodo) => {
+    const activando = !metodo.es_punto_venta;
+    const aviso = activando
+      ? `¿Marcar "${metodo.nombre}" como punto de venta? Sus cobros nuevos se agruparán en lotes y solo sumarán al saldo cuando acredites el lote. Los cobros anteriores se mantienen en el saldo.`
+      : `¿Quitar "${metodo.nombre}" como punto de venta?`;
+    if (!window.confirm(aviso)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch('/api/admin/metodos-pago/', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'marcar_punto_venta', id: metodo.id, es_punto_venta: activando }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudo actualizar el metodo.');
+      }
+      showSuccess(data.message || 'Metodo actualizado.');
+      loadMetodos();
+    } catch (error) {
+      showError(error.message || 'No se pudo actualizar el metodo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleToggleActivo = async (metodo) => {
     setSaving(true);
     try {
@@ -178,6 +206,7 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
               <div style={headStyle}>Moneda</div>
               <div style={headStyle}>Banco</div>
               <div style={headStyle}>Efectivo</div>
+              <div style={headStyle}>Punto de venta</div>
               <div style={headStyle}>Estado</div>
               <div style={headStyle}>Acciones</div>
               {metodos.map((metodo) => (
@@ -212,6 +241,19 @@ function AnalystPaymentMethodsPage({ isMobile, onBack }) {
                     )}
                   </div>
                   <div style={cellStyle}>{metodo.es_efectivo ? 'Si' : 'No'}</div>
+                  <div style={cellStyle}>
+                    {metodo.moneda === 'VES' ? (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: saving ? 'default' : 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(metodo.es_punto_venta)}
+                          disabled={saving}
+                          onChange={() => handleTogglePuntoVenta(metodo)}
+                        />
+                        {metodo.es_punto_venta ? 'Sí' : 'No'}
+                      </label>
+                    ) : '—'}
+                  </div>
                   <div style={cellStyle}>{metodo.activo ? 'Activo' : 'Inactivo'}</div>
                   <div style={cellActionsStyle}>
                     <button
@@ -243,7 +285,7 @@ const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, bo
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) minmax(110px,0.6fr) minmax(150px,0.8fr) minmax(100px,0.6fr) minmax(100px,0.6fr) minmax(160px,1fr)', minWidth: 850, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) minmax(110px,0.6fr) minmax(150px,0.8fr) minmax(100px,0.6fr) minmax(120px,0.7fr) minmax(100px,0.6fr) minmax(160px,1fr)', minWidth: 960, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const bancoButtonStyle = { border: '1px dashed rgba(255,255,255,0.25)', borderRadius: 10, padding: '6px 10px', background: 'transparent', color: '#f2e6e6', cursor: 'pointer', fontSize: 13, textAlign: 'left' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };

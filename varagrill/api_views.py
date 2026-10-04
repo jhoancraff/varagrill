@@ -3677,6 +3677,24 @@ def _serialize_abono_compra(abono):
     }
 
 
+def _serialize_nota_credito_compra(nota):
+    return {
+        'id': nota.id,
+        'numero': nota.numero,
+        'codigo': f'NCC-{nota.numero:06d}',
+        'numero_documento_proveedor': nota.numero_documento_proveedor,
+        'fecha': nota.fecha.isoformat(),
+        'monto': str(nota.monto),
+        'monto_bs': str(nota.monto_bs) if nota.monto_bs is not None else None,
+        'tasa_cambio_referencia': str(nota.tasa_cambio_referencia) if nota.tasa_cambio_referencia is not None else None,
+        'motivo': nota.motivo,
+        'estado': nota.estado,
+        'motivo_anulacion': nota.motivo_anulacion,
+        'registrada_por': (nota.creado_por.get_full_name() or nota.creado_por.username) if nota.creado_por else '',
+        'fecha_creacion': nota.fecha_creacion.isoformat(),
+    }
+
+
 def _serialize_compra(compra, incluir_detalle=False):
     # Si esta compra tiene un total_bs_factura (el analista escribió el monto
     # EXACTO de la factura en bolívares al confirmar, ver _importar_ingredientes),
@@ -3745,7 +3763,14 @@ def _serialize_compra(compra, incluir_detalle=False):
         'creado_por': (compra.creado_por.get_full_name() or compra.creado_por.username) if compra.creado_por else '',
         'cantidad_items': compra.detalles.count() if incluir_detalle else None,
     }
+    # Notas de credito del proveedor (vigentes): el total y el saldo ya vienen rebajados;
+    # total_original es lo que se cargo antes de ellas.
+    notas_vigentes = [nota for nota in compra.notas_credito.all() if nota.estado == 'vigente']
+    monto_notas = sum((nota.monto for nota in notas_vigentes), Decimal('0'))
+    data['monto_notas_credito'] = str(monto_notas)
+    data['total_original'] = str(compra.total + monto_notas)
     if incluir_detalle:
+        data['notas_credito'] = [_serialize_nota_credito_compra(nota) for nota in compra.notas_credito.all()]
         data['detalles'] = [
             {
                 'id': detalle.id,
@@ -3805,7 +3830,7 @@ def compra_detail_view(request, compra_id):
         return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
 
     try:
-        compra = VGCompra.objects.select_related('creado_por').prefetch_related('detalles__ingrediente').get(pk=compra_id)
+        compra = VGCompra.objects.select_related('creado_por').prefetch_related('detalles__ingrediente', 'notas_credito__creado_por').get(pk=compra_id)
     except VGCompra.DoesNotExist:
         return _auth_response({'ok': False, 'message': 'El lote de compra no existe.'}, status=404)
 

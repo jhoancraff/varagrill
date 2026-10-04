@@ -21,6 +21,7 @@ from .api_views import (
     _finalizar_estado_pago_compra,
     _serialize_abono_compra,
     _serialize_compra,
+    _serialize_nota_credito_compra,
 )
 from .auth_helpers import _auth_response, _is_admin_user
 from .gastos_views import _serialize_gasto
@@ -28,12 +29,14 @@ from .models import (
     VGAbonoCompra,
     VGCompra,
     VGCompraBorrador,
+    VGCorrelativoFiscal,
     VGDetalleCompra,
     VGDetalleCompraBorrador,
     VGGasto,
     VGIngrediente,
     VGMetodoPago,
     VGMovimientoInventario,
+    VGNotaCreditoCompra,
 )
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
@@ -653,3 +656,298 @@ def compra_abono_view(request, compra_id):
         'compra': _serialize_compra(compra, incluir_detalle=True),
         'abono': _serialize_abono_compra(abono),
     }, status=201)
+
+
+# ---------------------------------------------------------------------------
+# Notas de credito de proveedor sobre una factura de compra
+# ---------------------------------------------------------------------------
+def _estado_pago_de_compra(compra):
+    """pagada / abonada_parcial / pendiente segun el saldo y lo ya abonado."""
+    if compra.saldo_pendiente <= 0:
+        return 'pagada'
+    if compra.abonos.exists():
+        return 'abonada_parcial'
+    return 'pendiente'
+
+
+def _abonado_bs_de_compra(compra):
+    """Bolivares ya pagados a esta compra, cada abono con SU tasa congelada (None si algun abono no la tiene)."""
+    total = Decimal('0')
+    for abono in compra.abonos.all():
+        if abono.tasa_cambio_referencia is None:
+            return None
+        total += abono.monto * abono.tasa_cambio_referencia
+    return total.quantize(Decimal('0.01'))
+
+
+@csrf_exempt
+def compra_nota_credito_view(request, compra_id):
+    """
+    GET: notas de credito del proveedor de una factura de compra.
+    POST: registra una — baja el total y el saldo pendiente de la factura por el monto
+    (en $ o en Bs, nunca los dos), con motivo obligatorio. Nunca puede superar lo que
+    aun se debe: una factura ya saldada no admite nota de credito. Ver VGNotaCreditoCompra.
+    """
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    if request.method == 'GET':
+        try:
+            compra = VGCompra.objects.get(pk=compra_id)
+        except VGCompra.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'La compra no existe.'}, status=404)
+        notas = compra.notas_credito.select_related('creado_por')
+        return _auth_response({'ok': True, 'notas_credito': [_serialize_nota_credito_compra(nota) for nota in notas]})
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    motivo = str(data.get('motivo', '') or '').strip()
+    if not motivo:
+        return _auth_response({'ok': False, 'message': 'El motivo de la nota de credito es obligatorio.'}, status=400)
+
+    monto_raw = data.get('monto')
+    monto_bs_raw = data.get('monto_bs')
+    tiene_monto = monto_raw not in (None, '')
+    tiene_monto_bs = monto_bs_raw not in (None, '')
+    if tiene_monto and tiene_monto_bs:
+        return _auth_response({'ok': False, 'message': 'Ingresa el monto solo en dólares o solo en bolívares, no en los dos.'}, status=400)
+    if not tiene_monto and not tiene_monto_bs:
+        return _auth_response({'ok': False, 'message': 'Indica el monto de la nota de crédito.'}, status=400)
+
+    fecha_raw = data.get('fecha')
+    try:
+        fecha = date.fromisoformat(str(fecha_raw)) if fecha_raw else timezone.localdate()
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'La fecha no es valida.'}, status=400)
+    if fecha > timezone.localdate():
+        return _auth_response({'ok': False, 'message': 'La fecha de la nota de crédito no puede ser futura.'}, status=400)
+
+    with transaction.atomic():
+        try:
+            compra = VGCompra.objects.select_for_update().get(pk=compra_id)
+        except VGCompra.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'La compra no existe.'}, status=404)
+
+        if compra.estado_pago == 'pagada' or compra.saldo_pendiente <= 0:
+            return _auth_response({
+                'ok': False,
+                'message': 'Esta factura ya está saldada: no queda deuda que rebajar con una nota de crédito.',
+            }, status=409)
+
+        monto_bs_ingresado = None
+        tasa_nota = compra.tasa_cambio_referencia
+        if tiene_monto_bs:
+            try:
+                monto_bs_ingresado = Decimal(str(monto_bs_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto en bolívares no es válido.'}, status=400)
+            if monto_bs_ingresado <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto en bolívares debe ser mayor a cero.'}, status=400)
+            # Misma regla de tasa que compra_abono_view: una factura en dolares se convierte con el
+            # BCV vigente; el resto con la tasa que quedo congelada en la compra.
+            if compra.moneda_origen == 'USD':
+                actual = obtener_tasa_actual()
+                tasa_nota = actual.tasa if actual else compra.tasa_cambio_referencia
+            elif not tasa_nota or tasa_nota <= 0:
+                actual = obtener_tasa_actual()
+                tasa_nota = actual.tasa if actual else None
+            if not tasa_nota or tasa_nota <= 0:
+                return _auth_response({'ok': False, 'message': 'No hay tasa de cambio disponible para convertir el monto a dólares.'}, status=400)
+            monto = (monto_bs_ingresado / tasa_nota).quantize(Decimal('0.000001'))
+        else:
+            try:
+                monto = Decimal(str(monto_raw)).quantize(Decimal('0.000001'))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto no es válido.'}, status=400)
+            if monto <= 0:
+                return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
+
+        saldo_actual = compra.saldo_pendiente
+        if monto > saldo_actual + TOLERANCIA_REDONDEO_ABONO:
+            return _auth_response({
+                'ok': False,
+                'message': (
+                    f'La nota de crédito (${monto:.2f}) no puede ser mayor que lo que aún se debe (${saldo_actual:.2f}). '
+                    'Si la factura ya se pagó, la diferencia no se puede rebajar aquí.'
+                ),
+            }, status=400)
+        monto = min(monto, saldo_actual)
+
+        total_anterior = compra.total
+        total_bs_anterior = compra.total_bs_factura
+        saldo_restante = max((saldo_actual - monto).quantize(Decimal('0.000001')), Decimal('0'))
+        if saldo_restante <= TOLERANCIA_CIERRE_ABONO:
+            # La nota salda la deuda: el total queda exactamente en lo ya abonado.
+            saldo_restante = Decimal('0')
+            total_nuevo = sum((abono.monto for abono in compra.abonos.all()), Decimal('0')).quantize(Decimal('0.000001'))
+        else:
+            total_nuevo = max((total_anterior - monto).quantize(Decimal('0.000001')), Decimal('0'))
+        monto_efectivo = (total_anterior - total_nuevo).quantize(Decimal('0.000001'))
+
+        monto_bs_aplicado = None
+        if total_bs_anterior is not None:
+            if saldo_restante == 0:
+                abonado_bs = _abonado_bs_de_compra(compra)
+                total_bs_nuevo = abonado_bs if abonado_bs is not None else Decimal('0.00')
+            else:
+                rebaja_bs = monto_bs_ingresado if monto_bs_ingresado is not None else (
+                    (monto_efectivo * compra.tasa_cambio_referencia).quantize(Decimal('0.01'))
+                    if compra.tasa_cambio_referencia else Decimal('0.00')
+                )
+                total_bs_nuevo = max((total_bs_anterior - rebaja_bs).quantize(Decimal('0.01')), Decimal('0.00'))
+            monto_bs_aplicado = (total_bs_anterior - total_bs_nuevo).quantize(Decimal('0.01'))
+            compra.total_bs_factura = total_bs_nuevo
+
+        compra.total = total_nuevo
+        compra.saldo_pendiente = saldo_restante
+        compra.estado_pago = _estado_pago_de_compra(compra)
+        compra.actualizado_por = request.user
+        compra.save(update_fields=['total', 'total_bs_factura', 'saldo_pendiente', 'estado_pago', 'actualizado_por', 'fecha_actualizacion'])
+
+        nota = VGNotaCreditoCompra.objects.create(
+            compra=compra,
+            numero=VGCorrelativoFiscal.siguiente('NC_COMPRA'),
+            numero_documento_proveedor=str(data.get('numero_documento_proveedor', '') or '').strip()[:100],
+            fecha=fecha,
+            monto=monto_efectivo,
+            monto_bs=monto_bs_aplicado,
+            tasa_cambio_referencia=tasa_nota,
+            motivo=motivo[:255],
+            creado_por=request.user,
+            actualizado_por=request.user,
+        )
+
+    compra = VGCompra.objects.prefetch_related('detalles__ingrediente', 'notas_credito__creado_por').get(pk=compra.pk)
+    return _auth_response({
+        'ok': True,
+        'message': f'Nota de crédito NCC-{nota.numero:06d} registrada: la deuda bajó ${monto_efectivo:.2f}.',
+        'nota_credito': _serialize_nota_credito_compra(nota),
+        'compra': _serialize_compra(compra, incluir_detalle=True),
+    }, status=201)
+
+
+@csrf_exempt
+def compra_nota_credito_anular_view(request, nota_id):
+    """Anula una nota de credito de compra (motivo obligatorio): el monto vuelve al total y al saldo de la factura."""
+    if request.method != 'POST':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+    motivo = str(data.get('motivo', '') or '').strip()
+    if not motivo:
+        return _auth_response({'ok': False, 'message': 'El motivo de la anulación es obligatorio.'}, status=400)
+
+    with transaction.atomic():
+        try:
+            nota = VGNotaCreditoCompra.objects.select_for_update().get(pk=nota_id)
+        except VGNotaCreditoCompra.DoesNotExist:
+            return _auth_response({'ok': False, 'message': 'La nota de crédito no existe.'}, status=404)
+        if nota.estado != 'vigente':
+            return _auth_response({'ok': False, 'message': 'Esta nota de crédito ya está anulada.'}, status=409)
+
+        compra = VGCompra.objects.select_for_update().get(pk=nota.compra_id)
+        compra.total = (compra.total + nota.monto).quantize(Decimal('0.000001'))
+        compra.saldo_pendiente = (compra.saldo_pendiente + nota.monto).quantize(Decimal('0.000001'))
+        if nota.monto_bs is not None and compra.total_bs_factura is not None:
+            compra.total_bs_factura = (compra.total_bs_factura + nota.monto_bs).quantize(Decimal('0.01'))
+        compra.estado_pago = _estado_pago_de_compra(compra)
+        compra.actualizado_por = request.user
+        compra.save(update_fields=['total', 'total_bs_factura', 'saldo_pendiente', 'estado_pago', 'actualizado_por', 'fecha_actualizacion'])
+
+        nota.estado = 'anulada'
+        nota.motivo_anulacion = motivo[:255]
+        nota.fecha_anulacion = timezone.now()
+        nota.actualizado_por = request.user
+        nota.save(update_fields=['estado', 'motivo_anulacion', 'fecha_anulacion', 'actualizado_por', 'fecha_actualizacion'])
+
+    compra = VGCompra.objects.prefetch_related('detalles__ingrediente', 'notas_credito__creado_por').get(pk=nota.compra_id)
+    return _auth_response({
+        'ok': True,
+        'message': f'Nota de crédito NCC-{nota.numero:06d} anulada: la deuda volvió a subir ${nota.monto:.2f}.',
+        'nota_credito': _serialize_nota_credito_compra(nota),
+        'compra': _serialize_compra(compra, incluir_detalle=True),
+    })
+
+
+def reporte_notas_credito_compra_view(request):
+    """
+    Reporte de notas de credito de proveedor (VGNotaCreditoCompra) en un rango de
+    fechas de la NOTA (no de la factura): una fila por nota con su factura, proveedor,
+    motivo y monto, mas totales de las vigentes y un resumen por proveedor. `estado`
+    = vigente | anulada | (vacio = todas). Las anuladas se listan pero no suman.
+    """
+    if request.method != 'GET':
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    hoy = timezone.localdate()
+    try:
+        desde = date.fromisoformat(request.GET['desde']) if request.GET.get('desde') else hoy.replace(day=1)
+        hasta = date.fromisoformat(request.GET['hasta']) if request.GET.get('hasta') else hoy
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+
+    notas = (
+        VGNotaCreditoCompra.objects
+        .filter(fecha__gte=desde, fecha__lte=hasta)
+        .select_related('compra', 'creado_por')
+        .order_by('-fecha', '-numero')
+    )
+    estado = str(request.GET.get('estado', '') or '').strip().lower()
+    if estado in ('vigente', 'anulada'):
+        notas = notas.filter(estado=estado)
+
+    total_usd = Decimal('0')
+    total_bs = Decimal('0')
+    por_proveedor = {}
+    filas = []
+    for nota in notas:
+        compra = nota.compra
+        # Bolivares de la nota: los que se restaron de la factura si los hubo; si no, el
+        # monto en dolares con la tasa con la que se registro (nunca la de hoy).
+        monto_bs = nota.monto_bs
+        if monto_bs is None and nota.tasa_cambio_referencia:
+            monto_bs = (nota.monto * nota.tasa_cambio_referencia).quantize(Decimal('0.01'))
+        if nota.estado == 'vigente':
+            total_usd += nota.monto
+            if monto_bs is not None:
+                total_bs += monto_bs
+            resumen = por_proveedor.setdefault(compra.proveedor_nombre, {'proveedor': compra.proveedor_nombre, 'cantidad': 0, 'monto_usd': Decimal('0')})
+            resumen['cantidad'] += 1
+            resumen['monto_usd'] += nota.monto
+        filas.append({
+            **_serialize_nota_credito_compra(nota),
+            'monto_bs': str(monto_bs) if monto_bs is not None else None,
+            'compra_id': compra.id,
+            'proveedor_nombre': compra.proveedor_nombre,
+            'numero_factura_proveedor': compra.numero_factura_proveedor,
+            'estado_pago_factura': compra.estado_pago,
+            'total_factura_actual': str(compra.total),
+        })
+
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        'cantidad_vigentes': sum(1 for fila in filas if fila['estado'] == 'vigente'),
+        'total_usd': str(total_usd),
+        'total_bs': str(total_bs),
+        'por_proveedor': [
+            {**item, 'monto_usd': str(item['monto_usd'])}
+            for item in sorted(por_proveedor.values(), key=lambda item: -item['monto_usd'])
+        ],
+        'notas': filas,
+    })

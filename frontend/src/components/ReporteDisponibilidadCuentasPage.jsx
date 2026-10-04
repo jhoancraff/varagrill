@@ -81,6 +81,8 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
 
   const cuentas = data?.cuentas || [];
   const bancos = data?.bancos || [];
+  const hayPuntoVenta = bancos.some((banco) => banco.tiene_punto_venta);
+  const transitorio = data?.pos_por_cobrar || null;
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -154,6 +156,12 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
               <div style={{ fontSize: 12, color: '#ffcf85' }}>No hay tasa BCV registrada para esta fecha; las cuentas en bolívares no muestran conversión.</div>
             )}
 
+            {hayPuntoVenta ? (
+              <div style={{ fontSize: 12, color: '#c8bbbb' }}>
+                En los puntos de venta, el saldo disponible solo cuenta los lotes ya acreditados; lo demás está por acreditar.
+              </div>
+            ) : null}
+
             <div style={cuentasGridStyle(isMobile)}>
               {bancos.map((banco) => (
                 <article key={banco.nombre} style={cuentaCardStyle(Number(banco.saldo_disponible) < 0)}>
@@ -175,6 +183,15 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                       <>${formatMonto(banco.saldo_disponible)}</>
                     )}
                   </div>
+                  {banco.tiene_punto_venta ? (
+                    <div style={porAcreditarBoxStyle}>
+                      <div style={{ fontWeight: 800, color: '#ffe3a3' }}>
+                        Por acreditar: {banco.moneda === 'VES' ? `Bs. ${formatMonto(banco.por_acreditar_bs)} ` : ''}
+                        <span style={secondaryAmountStyle}>(${formatMonto(banco.por_acreditar_usd)})</span>
+                      </div>
+                      <div>{banco.lotes_por_acreditar.length} lote(s) sin acreditar</div>
+                    </div>
+                  ) : null}
                   {banco.agrupado ? (
                     <div style={metodosAnidadosStyle}>
                       {banco.metodos.map((metodo) => (
@@ -216,6 +233,36 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
             </div>
           </section>
 
+          {transitorio && Number(transitorio.total_usd) > 0 ? (
+            <section style={panelStyle}>
+              <div style={sectionTitleStyle}>Puntos de venta por cobrar (transitorio) — al {fecha}</div>
+              <div style={{ fontSize: 12.5, color: '#c8bbbb' }}>
+                Lotes de punto de venta abiertos o cerrados que todavía no se acreditan: ${formatMonto(transitorio.total_usd)} en total.
+              </div>
+              <div style={tableWrapStyle}>
+                <div style={transitorioTableStyle}>
+                  <div style={headStyle}>Banco</div>
+                  <div style={headStyle}>Lotes abiertos</div>
+                  <div style={headStyle}>Lotes cerrados</div>
+                  <div style={headStyle}>Por acreditar</div>
+                  {transitorio.por_banco.map((item) => (
+                    <Fragment key={item.banco}>
+                      <div style={cellStyle}>{item.banco}</div>
+                      <div style={cellStyle}>{item.lotes_abiertos}</div>
+                      <div style={cellStyle}>{item.lotes_cerrados}</div>
+                      <div style={cellStyle}>${formatMonto(item.monto_usd)}</div>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+              {onNavigate ? (
+                <button type="button" className="no-print" onClick={() => onNavigate('contabilidad-lotes-pos')} style={verLotesLinkStyle}>
+                  Ver lotes de punto de venta →
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Detalle por cuenta</div>
             <div style={tableWrapStyle}>
@@ -229,6 +276,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                 <div style={headStyle}>Transf. salida</div>
                 <div style={headStyle}>Consignado</div>
                 <div style={headStyle}>Saldo disponible</div>
+                <div style={headStyle}>Por acreditar</div>
                 {cuentas.map((cuenta) => (
                   <Fragment key={cuenta.id}>
                     <div style={cellStyle}>{cuenta.nombre}{cuenta.es_efectivo ? ' (efectivo)' : ''}</div>
@@ -242,6 +290,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                     <div style={{ ...cellStyle, fontWeight: 800, color: Number(cuenta.saldo_disponible) < 0 ? '#ff9d9d' : '#8fffb0' }}>
                       ${formatMonto(cuenta.saldo_disponible)}
                     </div>
+                    <div style={cellStyle}>{cuenta.es_punto_venta ? `$${formatMonto(cuenta.por_acreditar_usd)}` : '—'}</div>
                   </Fragment>
                 ))}
                 <div style={{ ...cellStyle, fontWeight: 800 }}>Total disponible</div>
@@ -253,6 +302,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                 <div style={cellStyle} />
                 <div style={cellStyle} />
                 <div style={{ ...cellStyle, fontWeight: 800 }}>${formatMonto(data.total_disponible)}</div>
+                <div style={{ ...cellStyle, fontWeight: 800 }}>${formatMonto(data.total_por_acreditar)}</div>
               </div>
             </div>
           </section>
@@ -307,8 +357,11 @@ const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 13, marginLeft: 6, fo
 const metodosAnidadosStyle = { display: 'grid', gap: 4, paddingTop: 6, borderTop: '1px dashed rgba(255,255,255,0.12)' };
 const metodoAnidadoRowStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: '#d2c3c3', fontSize: 12.5 };
 
+const porAcreditarBoxStyle = { display: 'grid', gap: 2, padding: '8px 10px', borderRadius: 10, border: '1px dashed rgba(255,207,133,0.4)', background: 'rgba(255,207,133,0.06)', color: '#e8d9b6', fontSize: 12.5 };
+const transitorioTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(140px,1.2fr) repeat(3, minmax(110px,0.8fr))', minWidth: 520, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const verLotesLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontSize: 13, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(100px,0.7fr) minmax(140px,0.9fr)', minWidth: 1180, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(100px,0.7fr) minmax(140px,0.9fr) minmax(120px,0.8fr)', minWidth: 1300, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 

@@ -103,7 +103,12 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None):
         total_bs = saldo_pendiente_bs = None
     elif gasto.moneda_origen == 'VES':
         total_bs = (gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))
-        saldo_pendiente_bs = (saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))
+        # Un gasto 'pagado' sin abonos (los que genera un lote POS al acreditarse, ver
+        # VGGasto.lote_pos) no tiene saldo: nunca se le resta un VGAbonoGasto.
+        saldo_pendiente_bs = (
+            Decimal('0.00') if gasto.estado_pago == 'pagado'
+            else (saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))
+        )
     else:
         # Gasto en dolares: solo el saldo pendiente sigue a la tasa de hoy; lo ya
         # abonado queda fijo en los bolivares de cada abono (con su tasa congelada).

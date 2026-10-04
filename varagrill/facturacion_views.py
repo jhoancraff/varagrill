@@ -48,6 +48,7 @@ from .models import (
     VGPreFactura,
     VGPreFacturaLinea,
 )
+from .lotes_pos import asignar_pago_a_lote
 from .tasa_cambio import obtener_tasa_actual
 
 logger = logging.getLogger(__name__)
@@ -870,6 +871,8 @@ def factura_abono_view(request, factura_id):
             ),
             creado_por=request.user,
         )
+        # Metodo de punto de venta: el cobro entra al lote POS abierto del metodo.
+        asignar_pago_a_lote(pago, request.user)
 
         # Se redondea a 6 decimales (mismos que VGPago.monto), no a 2 — con 2
         # decimales, un abono exacto por Bs dejaba un residuo de varios
@@ -1271,6 +1274,8 @@ def nota_entrega_abono_view(request, nota_id):
             ),
             creado_por=request.user,
         )
+        # Metodo de punto de venta: el cobro entra al lote POS abierto del metodo.
+        asignar_pago_a_lote(pago, request.user)
 
         # Ver el comentario equivalente en factura_abono_view: se redondea a 6
         # decimales (mismos que VGPago.monto), no a 2, para no perder

@@ -122,6 +122,19 @@ const BankFlowIcon = () => (
   </svg>
 );
 
+const PosTerminalIcon = () => (
+  <svg {...iconProps}>
+    <rect x="5" y="2" width="14" height="20" rx="2" />
+    <path d="M9 6h6" />
+    <path d="M9 11h.01" />
+    <path d="M12 11h.01" />
+    <path d="M15 11h.01" />
+    <path d="M9 15h.01" />
+    <path d="M12 15h.01" />
+    <path d="M15 15h.01" />
+  </svg>
+);
+
 // Conciliación bancaria: construida pero oculta a pedido del usuario (2026-09)
 // mientras se termina de definir el flujo — la página y el backend siguen
 // intactos, solo se le quita el acceso desde este panel.
@@ -132,6 +145,7 @@ const reportSections = [
   { id: 'contabilidad-cuadre-caja-rango', title: 'Cuadre de caja por rango', icon: DateRangeIcon },
   { id: 'contabilidad-disponibilidad-cuentas', title: 'Disponibilidad diaria', icon: AvailabilityIcon },
   { id: 'flujo-bancario', title: 'Flujo bancario diario', icon: BankFlowIcon },
+  { id: 'contabilidad-lotes-pos', title: 'Lotes de punto de venta', icon: PosTerminalIcon },
   ...(CONCILIACION_BANCARIA_HABILITADA ? [{
     id: 'contabilidad-conciliacion-bancaria',
     title: 'Conciliación bancaria',

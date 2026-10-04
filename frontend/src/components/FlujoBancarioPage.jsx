@@ -35,13 +35,14 @@ const TIPO_REGISTRO_LABEL = {
   ingreso_extra: 'Ingreso extra',
   abono_gasto: 'Gasto',
   abono_compra: 'Compra',
+  lote_pos: 'Abono lote POS',
 };
 
 // Los gastos se agrupan por su fecha REAL (fecha_gasto, sin hora) en vez de
 // cuándo se cargó el abono al sistema — no hay una hora real que mostrar.
 // Las compras SÍ tienen hora real (cada abono se agrupa por su propia
 // fecha_pago), así que no entran en este set.
-const TIPOS_SIN_HORA = new Set(['abono_gasto']);
+const TIPOS_SIN_HORA = new Set(['abono_gasto', 'lote_pos']);
 
 // Un movimiento con monto_bs es de una cuenta en bolívares (ver
 // detalle_flujo_bancario_dia en reportes.py, que solo lo calcula cuando

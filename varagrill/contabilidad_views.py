@@ -6,7 +6,7 @@ menu, inventario, pedidos, cocina, checkout...) para que ninguno de los
 dos archivos seguiera creciendo junto por cosas sin relacion.
 """
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
@@ -25,14 +25,31 @@ from .models import (
     VGDetallePedido,
     VGGasto,
     VGIngresoExtra,
+    VGLotePOS,
     VGMetodoPago,
     VGNotaEntrega,
     VGPago,
     VGTransferenciaCuenta,
 )
+from .impresion_lpd import imprimir_cierre_lote_pos
+from .lotes_pos import (
+    LoteError,
+    acreditar_lote,
+    anular_lote,
+    aplicar_cambio_metodo_pago,
+    autoclausurar_lotes_abiertos,
+    backfill_historico_metodo,
+    cerrar_lote,
+    mover_pago_de_lote,
+    reabrir_lote,
+    revertir_acreditacion,
+    validar_cambio_metodo_pago,
+)
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
     _bancos_seleccionables,
+    lotes_pos_por_acreditar,
+    pos_por_cobrar_transitorio,
     desglose_caja_por_moneda,
     detalle_cuentas_cobradas_rango,
     detalle_cuentas_por_cobrar_rango,
@@ -40,6 +57,7 @@ from .reportes import (
     detalle_ventas_rango,
     disponibilidad_por_cuenta,
     efectivo_esperado_dia,
+    efectivo_esperado_por_moneda,
     flujo_bancario_mensual,
     gastos_efectivo_dia,
     resumen_cuadre_caja_rango,
@@ -58,6 +76,7 @@ def _serialize_metodo_pago(metodo):
         'es_efectivo': metodo.es_efectivo,
         'cuenta_bancaria': metodo.cuenta_bancaria,
         'activo': metodo.activo,
+        'es_punto_venta': metodo.es_punto_venta,
     }
 
 
@@ -300,6 +319,42 @@ def admin_metodos_pago_view(request):
             'metodo_pago': _serialize_metodo_pago(metodo),
         })
 
+    if action == 'marcar_punto_venta':
+        try:
+            metodo = VGMetodoPago.objects.get(pk=int(data.get('id')))
+        except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'El metodo de pago no existe.'}, status=400)
+
+        es_punto_venta = bool(data.get('es_punto_venta'))
+        if es_punto_venta and metodo.moneda != 'VES':
+            return _auth_response({
+                'ok': False,
+                'message': 'Solo un metodo en bolivares puede ser punto de venta.',
+            }, status=400)
+        if metodo.es_punto_venta and not es_punto_venta:
+            if VGLotePOS.objects.filter(metodo_pago=metodo, estado__in=('abierto', 'cerrado')).exists():
+                return _auth_response({
+                    'ok': False,
+                    'message': 'Este metodo tiene lotes abiertos o cerrados sin acreditar: acreditalos antes de quitarle punto de venta.',
+                }, status=400)
+
+        activando = es_punto_venta and not metodo.es_punto_venta
+        with transaction.atomic():
+            metodo.es_punto_venta = es_punto_venta
+            metodo.actualizado_por = request.user
+            metodo.save(update_fields=['es_punto_venta', 'actualizado_por', 'fecha_actualizacion'])
+            # Al marcar el metodo como POS por primera vez, sus cobros anteriores se agrupan
+            # en lotes historicos ya acreditados para no alterar los saldos que el usuario ya conoce.
+            lotes_historicos = backfill_historico_metodo(metodo, request.user) if activando else 0
+        return _auth_response({
+            'ok': True,
+            'message': 'Metodo actualizado.' + (
+                f' Se agruparon {lotes_historicos} dias de cobros anteriores en lotes historicos ya acreditados.' if lotes_historicos else ''
+            ),
+            'lotes_historicos_creados': lotes_historicos,
+            'metodo_pago': _serialize_metodo_pago(metodo),
+        })
+
     return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
 
 
@@ -368,9 +423,98 @@ def _serialize_cierre_caja(cierre):
         'total_consignado': str(cierre.total_consignado),
         'efectivo_contado_final': str(cierre.efectivo_contado_final),
         'diferencia': str(cierre.diferencia),
+        'conteo_efectivo_realizado': cierre.conteo_efectivo_realizado,
+        'pos_por_acreditar_usd': str(cierre.pos_por_acreditar_usd),
         'notas': cierre.notas,
         'cerrado_por': cierre.creado_por.get_full_name() or cierre.creado_por.username if cierre.creado_por else '',
         'fecha_creacion': cierre.fecha_creacion.isoformat(),
+    }
+
+
+def _fecha_iso(valor):
+    return valor.isoformat() if valor is not None else None
+
+
+def _str_o_none(valor):
+    return str(valor) if valor is not None else None
+
+
+def _serialize_lote(lote, incluir_pagos=False):
+    data = {
+        'id': lote.id,
+        'numero': lote.numero,
+        'codigo': f'LOTE-{lote.numero:06d}',
+        'metodo_pago_id': lote.metodo_pago_id,
+        'metodo_pago_nombre': lote.metodo_pago.nombre,
+        'cuenta_bancaria': lote.cuenta_bancaria,
+        'estado': lote.estado,
+        'estado_label': lote.get_estado_display(),
+        'fecha_operacion': _fecha_iso(lote.fecha_operacion),
+        'fecha_cierre': lote.fecha_cierre.isoformat() if lote.fecha_cierre else None,
+        'cerrado_por': (lote.cerrado_por.get_full_name() or lote.cerrado_por.username) if lote.cerrado_por else '',
+        'fecha_abono': _fecha_iso(lote.fecha_abono_real),
+        'fecha_acreditacion': lote.fecha_acreditacion.isoformat() if lote.fecha_acreditacion else None,
+        'acreditado_por': (lote.acreditado_por.get_full_name() or lote.acreditado_por.username) if lote.acreditado_por else '',
+        'notas': lote.notas,
+        'num_pagos': lote.pagos.filter(estado='completado').count(),
+        'monto_usd': str(lote.monto_bruto_usd),
+        'monto_bs': str(lote.monto_bruto_sistema_bs),
+    }
+    if incluir_pagos:
+        pagos = []
+        for pago in lote.pagos.select_related('nota_entrega__cliente', 'factura').order_by('fecha_pago'):
+            tasa = pago.tasa_cambio_referencia or (pago.nota_entrega.tasa_cambio_referencia if pago.nota_entrega_id else None)
+            pagos.append({
+                'id': pago.id,
+                'monto_usd': str(pago.monto),
+                'monto_bs': str((pago.monto * tasa).quantize(Decimal('0.01'))) if tasa else None,
+                'cliente': (
+                    f'{pago.nota_entrega.cliente.nombre} {pago.nota_entrega.cliente.apellido}'.strip()
+                    if pago.nota_entrega_id and pago.nota_entrega.cliente_id else ''
+                ),
+                'origen': (
+                    f'Nota {pago.nota_entrega.codigo}' if pago.nota_entrega_id
+                    else (f'Factura #{pago.factura_id}' if pago.factura_id else f'Pedido #{pago.pedido_id}')
+                ),
+                'referencia': pago.referencia,
+                'fecha_pago': pago.fecha_pago.isoformat(),
+                'estado': pago.estado,
+            })
+        data['pagos'] = pagos
+    return data
+
+
+def _bloque_pos_cuadre(fecha, disponibilidad_total):
+    """
+    Bloque de punto de venta del cuadre de caja de `fecha`: lotes del dia, lo que
+    sigue por acreditar (transitorio), lo acreditado ese dia y la disponibilidad
+    REAL (que excluye los lotes sin acreditar). None si no hay metodos POS ni lotes.
+    """
+    hay_metodos = VGMetodoPago.objects.filter(activo=True, es_punto_venta=True).exists()
+    lotes_dia = list(
+        VGLotePOS.objects.filter(fecha_operacion=fecha).exclude(estado='anulado')
+        .select_related('metodo_pago', 'cerrado_por', 'acreditado_por').order_by('numero')
+    )
+    abiertos = list(
+        VGLotePOS.objects.filter(estado='abierto', fecha_operacion__lte=fecha)
+        .select_related('metodo_pago', 'cerrado_por', 'acreditado_por').order_by('numero')
+    )
+    if not (hay_metodos or lotes_dia or abiertos):
+        return None
+    transitorio = pos_por_cobrar_transitorio(fecha)
+    acreditado_hoy_usd = sum(
+        (lote.monto_bruto_usd for lote in VGLotePOS.objects.filter(estado='acreditado', fecha_abono_real=fecha)),
+        Decimal('0'),
+    )
+    ids_dia = {lote.id for lote in lotes_dia}
+    return {
+        'hay_metodos_pos': hay_metodos,
+        'lotes_dia': [_serialize_lote(lote) for lote in lotes_dia],
+        'lotes_abiertos_anteriores': [_serialize_lote(lote) for lote in abiertos if lote.id not in ids_dia],
+        'cobrado_dia_usd': str(sum((lote.monto_bruto_usd for lote in lotes_dia), Decimal('0'))),
+        'acreditado_hoy_usd': str(acreditado_hoy_usd),
+        'por_acreditar_usd': str(transitorio['total_usd']),
+        'disponibilidad_real_usd': str(disponibilidad_total),
     }
 
 
@@ -485,6 +629,8 @@ def reporte_cuadre_caja_view(request):
 
         correcciones_pago = _ultimas_correcciones_por_registro('pago', [item.id for item in pagos_dia])
         correcciones_ingreso = _ultimas_correcciones_por_registro('ingreso_extra', [item.id for item in ingresos_extra_dia])
+        cuentas_disp, _bancos_disp = disponibilidad_por_cuenta(fecha)
+        disponibilidad_real = sum((cuenta['saldo_disponible'] for cuenta in cuentas_disp), Decimal('0'))
 
         return _auth_response({
             'ok': True,
@@ -519,7 +665,12 @@ def reporte_cuadre_caja_view(request):
             'metodos_pago': [_serialize_metodo_pago(metodo) for metodo in VGMetodoPago.objects.filter(activo=True).order_by('nombre')],
             'gastos_efectivo_dia': str(gastos_efectivo_dia(fecha)),
             'efectivo_esperado_preview': str(efectivo_esperado_dia(fecha)),
+            'efectivo_por_moneda': {
+                clave: (str(valor) if valor is not None else None)
+                for clave, valor in efectivo_esperado_por_moneda(fecha).items()
+            },
             'cierre': _serialize_cierre_caja(cierre),
+            'pos': _bloque_pos_cuadre(fecha, disponibilidad_real),
         })
 
     try:
@@ -566,8 +717,17 @@ def reporte_cuadre_caja_view(request):
             if metodo_nuevo.id == pago.metodo_pago_id:
                 return _auth_response({'ok': False, 'message': 'Ya está en esa cuenta.'}, status=400)
 
+            # Un cobro que ya esta en un lote POS cerrado/acreditado no se mueve de
+            # cuenta sin reabrir el lote antes (su dinero ya esta en una maquina y un banco).
+            bloqueo_lote = validar_cambio_metodo_pago(pago)
+            if bloqueo_lote:
+                return _auth_response({'ok': False, 'message': bloqueo_lote}, status=400)
+            if metodo_nuevo.es_punto_venta and metodo_nuevo.moneda != 'VES':
+                return _auth_response({'ok': False, 'message': 'Un metodo de punto de venta debe ser en bolivares.'}, status=400)
+
             pago.metodo_pago = metodo_nuevo
             pago.save(update_fields=['metodo_pago'])
+            aplicar_cambio_metodo_pago(pago, request.user)
             VGCorreccionMetodoPago.objects.create(
                 tipo='pago', registro_id=pago.id, metodo_anterior=metodo_anterior, metodo_nuevo=metodo_nuevo,
                 motivo=motivo, creado_por=request.user, actualizado_por=request.user,
@@ -634,34 +794,66 @@ def reporte_cuadre_caja_view(request):
         }, status=201)
 
     if action == 'cerrar_caja':
+        # Ya NO se cuenta el efectivo a mano (esa seccion se quito del cuadre):
+        # cerrar la caja registra el efectivo esperado, lo consignado, autoclausura
+        # los lotes POS que sigan abiertos (decision cerrada: lotes automaticos) y
+        # congela cuanto queda por acreditar. `efectivo_contado_final` solo se
+        # acepta si alguien lo manda explicitamente (clientes viejos).
         if VGCierreCaja.objects.filter(fecha=fecha).exists():
             return _auth_response({'ok': False, 'message': 'La caja de ese dia ya esta cerrada.'}, status=400)
 
-        try:
-            efectivo_contado_final = Decimal(str(data.get('efectivo_contado_final', '')))
-        except InvalidOperation:
-            return _auth_response({'ok': False, 'message': 'El monto contado no es valido.'}, status=400)
-        if efectivo_contado_final < 0:
-            return _auth_response({'ok': False, 'message': 'El monto contado no puede ser negativo.'}, status=400)
+        efectivo_contado_raw = data.get('efectivo_contado_final')
+        contado_explicito = efectivo_contado_raw not in (None, '')
+        if contado_explicito:
+            try:
+                efectivo_contado_final = Decimal(str(efectivo_contado_raw))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'El monto contado no es valido.'}, status=400)
+            if efectivo_contado_final < 0:
+                return _auth_response({'ok': False, 'message': 'El monto contado no puede ser negativo.'}, status=400)
 
-        efectivo_esperado = efectivo_esperado_dia(fecha)
-        consignado = total_consignado(fecha)
-        diferencia = (consignado + efectivo_contado_final) - efectivo_esperado
+        with transaction.atomic():
+            # Solo se autoclausura al cerrar el dia de HOY: los lotes se cierran "ahora"
+            # (hora de corte real), no con la hora de un dia pasado.
+            lotes_autocerrados = []
+            if fecha == timezone.localdate():
+                lotes_autocerrados = autoclausurar_lotes_abiertos(request.user)
 
-        cierre = VGCierreCaja.objects.create(
-            fecha=fecha,
-            efectivo_esperado=efectivo_esperado,
-            total_consignado=consignado,
-            efectivo_contado_final=efectivo_contado_final,
-            diferencia=diferencia,
-            notas=str(data.get('notas', '') or '').strip(),
-            creado_por=request.user,
-        )
+            efectivo_esperado = efectivo_esperado_dia(fecha)
+            consignado = total_consignado(fecha)
+            if not contado_explicito:
+                efectivo_contado_final = efectivo_esperado - consignado
+            diferencia = (consignado + efectivo_contado_final) - efectivo_esperado
+
+            cierre = VGCierreCaja.objects.create(
+                fecha=fecha,
+                efectivo_esperado=efectivo_esperado,
+                total_consignado=consignado,
+                efectivo_contado_final=efectivo_contado_final,
+                diferencia=diferencia,
+                conteo_efectivo_realizado=contado_explicito,
+                pos_por_acreditar_usd=pos_por_cobrar_transitorio(fecha)['total_usd'],
+                notas=str(data.get('notas', '') or '').strip(),
+                creado_por=request.user,
+            )
+        # Los lotes que se cerraron solos tambien se imprimen (cobro por cobro) para compararlos
+        # con el cierre del punto fisico; ya con la caja cerrada, un fallo de impresora no la tumba.
+        mensaje = 'Caja cerrada correctamente.'
+        fallos_impresion = [
+            lote.numero for lote in lotes_autocerrados if not _imprimir_cierre_lote(lote)['ok']
+        ]
+        if lotes_autocerrados:
+            if fallos_impresion:
+                mensaje += f' No se pudo imprimir el detalle de los lotes {", ".join(f"#{n}" for n in fallos_impresion)}: reimprímelos desde Lotes de punto de venta.'
+            else:
+                mensaje += f' Se imprimió el detalle de {len(lotes_autocerrados)} lote(s) de punto de venta.'
         return _auth_response({
             'ok': True,
-            'message': 'Caja cerrada correctamente.',
+            'message': mensaje,
             'cierre': _serialize_cierre_caja(cierre),
         }, status=201)
+
+    return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
 
 
 MAX_DIAS_RANGO_CUADRE_CAJA = 92
@@ -1024,6 +1216,38 @@ def reporte_cuentas_cobradas_dia_view(request):
     })
 
 
+def _serialize_campos_pos(fila):
+    """Campos POS (por acreditar y sus lotes) de una cuenta o banco."""
+    return {
+        'por_acreditar_usd': str(fila['por_acreditar_usd']),
+        'por_acreditar_bs': str(fila['por_acreditar_bs'].quantize(Decimal('0.01'))),
+        'lotes_por_acreditar': [
+            {
+                **lote,
+                'fecha_operacion': _fecha_iso(lote['fecha_operacion']),
+                'monto_bruto_usd': str(lote['monto_bruto_usd']),
+                'monto_bruto_bs': str(lote['monto_bruto_bs']),
+            }
+            for lote in fila['lotes_por_acreditar']
+        ],
+    }
+
+
+def _serialize_transitorio(transitorio):
+    return {
+        'total_usd': str(transitorio['total_usd']),
+        'por_banco': [
+            {
+                'banco': item['banco'],
+                'lotes_abiertos': item['lotes_abiertos'],
+                'lotes_cerrados': item['lotes_cerrados'],
+                'monto_usd': str(item['monto_usd']),
+            }
+            for item in transitorio['por_banco']
+        ],
+    }
+
+
 def reporte_disponibilidad_cuentas_view(request):
     """
     Saldo acumulado disponible en cada cuenta/metodo de pago hasta una
@@ -1068,6 +1292,7 @@ def reporte_disponibilidad_cuentas_view(request):
             'consignado_acumulado': str(cuenta['consignado_acumulado']),
             'saldo_disponible': str(cuenta['saldo_disponible']),
             'saldo_disponible_bs': str(cuenta['saldo_disponible_bs'].quantize(Decimal('0.01'))) if cuenta['saldo_disponible_bs'] is not None else None,
+            **_serialize_campos_pos(cuenta),
         }
 
     return _auth_response({
@@ -1085,11 +1310,15 @@ def reporte_disponibilidad_cuentas_view(request):
                 'transferencias_salientes_acumuladas': str(banco['transferencias_salientes_acumuladas']),
                 'saldo_disponible': str(banco['saldo_disponible']),
                 'saldo_disponible_bs': str(banco['saldo_disponible_bs'].quantize(Decimal('0.01'))) if banco['saldo_disponible_bs'] is not None else None,
+                'tiene_punto_venta': banco['tiene_punto_venta'],
+                **_serialize_campos_pos(banco),
                 'metodos': [_serialize_cuenta(cuenta) for cuenta in banco['metodos']],
             }
             for banco in bancos
         ],
         'total_disponible': str(sum((cuenta['saldo_disponible'] for cuenta in cuentas), Decimal('0'))),
+        'total_por_acreditar': str(sum((cuenta['por_acreditar_usd'] for cuenta in cuentas), Decimal('0'))),
+        'pos_por_cobrar': _serialize_transitorio(pos_por_cobrar_transitorio(fecha)),
     })
 
 
@@ -1858,3 +2087,136 @@ def reporte_flujo_bancario_detalle_view(request):
         ],
         'total': str(total.quantize(Decimal('0.01'))),
     })
+
+
+# ---------------------------------------------------------------------------
+# Lotes de punto de venta (POS)
+# ---------------------------------------------------------------------------
+def _imprimir_cierre_lote(lote, es_reimpresion=False):
+    lote = VGLotePOS.objects.select_related('metodo_pago', 'cerrado_por').get(pk=lote.pk)
+    exito, motivo = imprimir_cierre_lote_pos(lote, es_reimpresion=es_reimpresion)
+    return {'ok': exito, 'message': motivo or 'Impreso.'}
+
+
+@csrf_exempt
+def admin_lotes_pos_view(request):
+    """
+    Lotes de punto de venta (ver VGLotePOS y lotes_pos.py).
+
+    GET: lista por rango de fecha de operacion / estado / metodo — SIEMPRE incluye
+    los lotes abiertos o cerrados sin acreditar, sin importar la fecha, porque son
+    los que requieren accion. Con `lote_id` devuelve el detalle con sus cobros.
+    POST (patron `action`): cerrar_lote y acreditar_lote (cajera/admin);
+    reabrir_lote, anular_lote y revertir_acreditacion (admin/contador).
+    """
+    if request.method not in ['GET', 'POST']:
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    es_admin = _is_admin_user(request.user)
+    es_cajera = _is_cajera_user(request.user)
+    if not (es_admin or es_cajera):
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para ver los lotes POS.'}, status=401)
+
+    if request.method == 'GET':
+        base = VGLotePOS.objects.select_related('metodo_pago', 'cerrado_por', 'acreditado_por')
+
+        lote_id = request.GET.get('lote_id')
+        if lote_id:
+            try:
+                lote = base.get(pk=int(lote_id))
+            except (TypeError, ValueError, VGLotePOS.DoesNotExist):
+                return _auth_response({'ok': False, 'message': 'El lote no existe.'}, status=404)
+            return _auth_response({'ok': True, 'lote': _serialize_lote(lote, incluir_pagos=True)})
+
+        hoy = timezone.localdate()
+        desde = _parse_fecha_reporte(request.GET.get('desde')) if request.GET.get('desde') else hoy - timedelta(days=30)
+        hasta = _parse_fecha_reporte(request.GET.get('hasta')) if request.GET.get('hasta') else hoy
+        if desde is None or hasta is None or desde > hasta:
+            return _auth_response({'ok': False, 'message': 'Rango de fechas invalido.'}, status=400)
+
+        lotes = base.filter(Q(fecha_operacion__gte=desde, fecha_operacion__lte=hasta) | Q(estado__in=('abierto', 'cerrado')))
+        estado = request.GET.get('estado')
+        if estado:
+            if estado not in {clave for clave, _ in VGLotePOS.ESTADOS}:
+                return _auth_response({'ok': False, 'message': 'Estado invalido.'}, status=400)
+            lotes = lotes.filter(estado=estado)
+        metodo_id = request.GET.get('metodo_pago_id')
+        if metodo_id:
+            try:
+                lotes = lotes.filter(metodo_pago_id=int(metodo_id))
+            except (TypeError, ValueError):
+                return _auth_response({'ok': False, 'message': 'Metodo invalido.'}, status=400)
+
+        lotes = list(lotes.order_by('-numero'))
+        metodos_pos = VGMetodoPago.objects.filter(es_punto_venta=True).order_by('nombre')
+        return _auth_response({
+            'ok': True,
+            'desde': desde.isoformat(),
+            'hasta': hasta.isoformat(),
+            'metodos_pos': [_serialize_metodo_pago(metodo) for metodo in metodos_pos],
+            'es_admin': es_admin,
+            'lotes': [_serialize_lote(lote) for lote in lotes],
+        })
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'reabrir_lote', 'anular_lote', 'revertir_acreditacion', 'mover_pago'):
+        return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
+    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote') and not es_admin:
+        return _auth_response({'ok': False, 'message': 'Solo administrador o contador puede hacer esto.'}, status=401)
+
+    try:
+        lote = VGLotePOS.objects.select_related('metodo_pago').get(pk=int(data.get('lote_id')))
+    except (TypeError, ValueError, VGLotePOS.DoesNotExist):
+        return _auth_response({'ok': False, 'message': 'El lote no existe.'}, status=404)
+
+    impresion = None
+    try:
+        if action == 'cerrar_lote':
+            lote = cerrar_lote(lote, request.user)
+            mensaje = f'Lote #{lote.numero} cerrado. Cuando caiga en el banco, acredítalo.'
+            # Al cerrar se imprime el detalle (cobro por cobro, con su nota de entrega) para
+            # compararlo con el cierre del punto fisico. Un fallo de impresora no tumba el cierre.
+            impresion = _imprimir_cierre_lote(lote)
+            mensaje += ' Detalle enviado a la impresora.' if impresion['ok'] else f' No se pudo imprimir el cierre: {impresion["message"]}'
+        elif action == 'imprimir_lote':
+            if lote.estado == 'anulado':
+                raise LoteError('Un lote anulado no se imprime.')
+            impresion = _imprimir_cierre_lote(lote, es_reimpresion=lote.estado != 'abierto')
+            if not impresion['ok']:
+                return _auth_response({'ok': False, 'message': impresion['message']}, status=502)
+            mensaje = f'Detalle del lote #{lote.numero} enviado a la impresora.'
+        elif action == 'acreditar_lote':
+            lote = acreditar_lote(lote, request.user)
+            mensaje = f'Lote #{lote.numero} acreditado: ${lote.monto_bruto_usd:.2f} sumados a {lote.metodo_pago.nombre}.'
+        elif action == 'reabrir_lote':
+            lote = reabrir_lote(lote, request.user, data.get('motivo'))
+            mensaje = f'Lote #{lote.numero} reabierto.'
+        elif action == 'mover_pago':
+            try:
+                pago = lote.pagos.get(pk=int(data.get('pago_id')))
+            except (TypeError, ValueError, VGPago.DoesNotExist):
+                raise LoteError('Ese cobro no pertenece a este lote.')
+            metodo_destino = None
+            if data.get('metodo_pago_id'):
+                try:
+                    metodo_destino = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')))
+                except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
+                    raise LoteError('La cuenta elegida no existe.')
+            lote = mover_pago_de_lote(pago, request.user, data.get('motivo'), metodo_destino)
+            mensaje = f'Cobro movido fuera del lote #{lote.numero}.' + (' El lote quedo sin cobros y se anulo.' if lote.estado == 'anulado' else '')
+        elif action == 'revertir_acreditacion':
+            lote = revertir_acreditacion(lote, request.user, data.get('motivo'))
+            mensaje = f'Acreditación del lote #{lote.numero} revertida.'
+        else:
+            lote = anular_lote(lote, request.user, data.get('motivo'))
+            mensaje = f'Lote #{lote.numero} anulado.'
+    except LoteError as error:
+        return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
+    lote = VGLotePOS.objects.select_related('metodo_pago', 'cerrado_por', 'acreditado_por').get(pk=lote.pk)
+    return _auth_response({'ok': True, 'message': mensaje, 'impresion': impresion, 'lote': _serialize_lote(lote, incluir_pagos=True)})

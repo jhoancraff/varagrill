@@ -45,6 +45,7 @@ from .models import (
     VGNotaEntrega,
     VGPago,
 )
+from .lotes_pos import pago_anulado
 from .reportes import tasa_para_fecha
 from .tasa_cambio import obtener_tasa_actual
 
@@ -448,6 +449,9 @@ def revertir_y_reabrir_pedido(documento_tipo, documento_id, usuario, motivo, mot
             pago.estado = 'anulado'
             pago.anulado_por_nota_credito = nota_credito
             pago.save(update_fields=['estado', 'anulado_por_nota_credito'])
+            # Si el cobro era de punto de venta y su lote sigue abierto, se
+            # recalcula la sumatoria del lote sin ese cobro.
+            pago_anulado(pago)
 
     # 'canje' NO clona el pedido aca: en vez de adivinar que plato nuevo
     # quiere el cliente (el original ya no sirve, por eso lo esta devolviendo),

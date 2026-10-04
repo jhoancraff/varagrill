@@ -699,6 +699,46 @@ class VGAbonoCompra(models.Model):
         return f"Abono {self.monto} — Compra #{self.compra_id}"
 
 
+class VGNotaCreditoCompra(VGAuditoria):
+    """
+    Nota de credito de un PROVEEDOR sobre una factura de compra (VGCompra): baja lo
+    que se le debe cuando la factura se cargo con un monto equivocado (o el proveedor
+    rebaja el precio) y hay que justificar ese ajuste con un documento. No tiene nada
+    que ver con VGNotaCredito (devoluciones de VENTAS a clientes).
+
+    Solo baja la deuda: total y saldo_pendiente de la compra bajan por `monto`, que
+    nunca puede superar el saldo pendiente (si ya se pago, no hay a quien rebajarle).
+    No toca el inventario ni los costos de los ingredientes (el total a pagar de una
+    compra se escribe aparte de sus lineas) ni los abonos ya hechos. Se puede anular
+    (con motivo): devuelve el monto al total y al saldo. monto_bs guarda cuantos
+    bolivares se restaron de total_bs_factura (null si la compra no lo usa), para
+    poder revertirlo exacto.
+    """
+    ESTADOS = [("vigente", "Vigente"), ("anulada", "Anulada")]
+    compra = models.ForeignKey(VGCompra, on_delete=models.PROTECT, related_name="notas_credito")
+    numero = models.PositiveIntegerField(unique=True, help_text="Correlativo interno, serie 'NC_COMPRA'.")
+    numero_documento_proveedor = models.CharField(
+        max_length=100, blank=True, help_text="Numero de la nota de credito que emitio el proveedor (si la trae).",
+    )
+    fecha = models.DateField(help_text="Fecha de la nota de credito.")
+    monto = models.DecimalField(max_digits=14, decimal_places=6)
+    monto_bs = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    motivo = models.CharField(max_length=255)
+    estado = models.CharField(max_length=10, choices=ESTADOS, default="vigente")
+    motivo_anulacion = models.CharField(max_length=255, blank=True)
+    fecha_anulacion = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "vg_notas_credito_compra"
+        verbose_name = "Nota de credito de compra"
+        verbose_name_plural = "Notas de credito de compra"
+        ordering = ["-numero"]
+
+    def __str__(self):
+        return f"NCC-{self.numero:06d} — Compra #{self.compra_id} (${self.monto})"
+
+
 class VGMovimientoInventario(models.Model):
     TIPOS = [
         ("entrada", "Entrada"),
@@ -1163,6 +1203,10 @@ class VGPago(models.Model):
     saldo_posterior = models.DecimalField(
         max_digits=14, decimal_places=6, null=True, blank=True,
         help_text="Saldo pendiente (USD) de la nota de entrega justo DESPUES de este cobro — congelado para que una reimpresion de la nota de cobro muestre lo mismo que el ticket original aunque despues se registren mas abonos.",
+    )
+    lote_pos = models.ForeignKey(
+        "varagrill.VGLotePOS", on_delete=models.PROTECT, null=True, blank=True, related_name="pagos",
+        help_text="Lote de punto de venta al que pertenece este cobro (solo si su metodo_pago es_punto_venta) — ver lotes_pos.asignar_pago_a_lote.",
     )
     anulado_por_nota_credito = models.ForeignKey(
         "varagrill.VGNotaCredito", on_delete=models.SET_NULL, null=True, blank=True, related_name="pagos_revertidos",

@@ -904,7 +904,11 @@ class PedidoCobroInventoryDeductionTests(TestCase):
     def _cobrar(self, pedido_ids):
         return self.client.post(
             '/api/pedidos/cobro/',
-            data=json.dumps({'pedido_ids': pedido_ids, 'metodo_pago_id': self.metodo_pago.id}),
+            data=json.dumps({
+                'pedido_ids': pedido_ids, 'metodo_pago_id': self.metodo_pago.id,
+                # La nota de entrega exige los datos del cliente (cedula + nombre).
+                'cliente_numero_documento': '99000111', 'cliente_nombre': 'Cliente Test',
+            }),
             content_type='application/json',
         )
 
@@ -1488,3 +1492,794 @@ class EstadoResultadosHistoricoAcumuladoTests(TestCase):
         usd_total = gasto_1.monto + gasto_2.monto
         bs_con_tasa_actual_al_consultar = (usd_total * tasa_y.tasa).quantize(Decimal('0.01'))
         self.assertNotEqual(payload['gastos_total_bs'], str(bs_con_tasa_actual_al_consultar))
+
+
+# ---------------------------------------------------------------------------
+# Lotes de punto de venta (POS) — cierre de lotes y acreditacion con un clic
+# ---------------------------------------------------------------------------
+from datetime import timedelta  # noqa: E402
+
+from django.db import IntegrityError, transaction  # noqa: E402
+
+from varagrill import lotes_pos  # noqa: E402
+from varagrill.models import VGCierreCaja, VGLotePOS, VGPago  # noqa: E402
+from varagrill.reportes import disponibilidad_por_cuenta, flujo_bancario_mensual, pos_por_cobrar_transitorio  # noqa: E402
+
+
+class LotesPOSBase(TestCase):
+    def setUp(self):
+        self.admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='pos_admin', password='claveAdmin123', cedula='91000001',
+            email='pos_admin@varagrill.test', id_role=self.admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='pos_cajera', password='claveCajera123', cedula='91000002',
+            email='pos_cajera@varagrill.test', id_role=self.cajera_role,
+        )
+        self.hoy = timezone.localdate()
+        self.tasa_hoy = _set_tasa_actual('100.0000')
+        self.pos = VGMetodoPago.objects.create(
+            nombre='Punto Banesco', moneda='VES', cuenta_bancaria='Banesco', es_punto_venta=True,
+        )
+        self.otro_pos = VGMetodoPago.objects.create(
+            nombre='Punto Mercantil', moneda='VES', cuenta_bancaria='Mercantil', es_punto_venta=True,
+        )
+
+    def pago(self, monto_usd='100', tasa='100.0000', metodo=None, usuario=None):
+        pedido = VGPedido.objects.create(
+            usuario=usuario or self.admin, tipo_pedido='local', estado='entregado',
+            subtotal=monto_usd, total=monto_usd,
+        )
+        pago = VGPago.objects.create(
+            pedido=pedido, monto=Decimal(monto_usd), metodo_pago=metodo or self.pos,
+            estado='completado', tasa_cambio_referencia=Decimal(tasa), creado_por=usuario or self.admin,
+        )
+        lotes_pos.asignar_pago_a_lote(pago, usuario or self.admin)
+        pago.refresh_from_db()
+        return pago
+
+    def cerrar(self, lote):
+        return lotes_pos.cerrar_lote(lote, self.admin)
+
+    def acreditar(self, lote):
+        return lotes_pos.acreditar_lote(lote, self.admin)
+
+    def saldo_banco(self, nombre, fecha=None):
+        _cuentas, bancos = disponibilidad_por_cuenta(fecha or self.hoy)
+        return next(b for b in bancos if b['nombre'] == nombre)
+
+
+class LotePOSCicloTests(LotesPOSBase):
+    def test_cobro_pos_crea_y_reutiliza_el_lote_abierto(self):
+        p1 = self.pago('40')
+        p2 = self.pago('60')
+        self.assertEqual(p1.lote_pos_id, p2.lote_pos_id)
+        lote = VGLotePOS.objects.get(pk=p1.lote_pos_id)
+        self.assertEqual(lote.estado, 'abierto')
+        self.assertEqual(lote.monto_bruto_usd, Decimal('100.000000'))
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('10000.00'))
+
+    def test_metodo_que_no_es_pos_no_genera_lote(self):
+        efectivo = VGMetodoPago.objects.create(nombre='Efectivo USD test', es_efectivo=True)
+        pago = self.pago('10', metodo=efectivo)
+        self.assertIsNone(pago.lote_pos_id)
+        self.assertEqual(VGLotePOS.objects.count(), 0)
+
+    def test_no_pueden_existir_dos_lotes_abiertos_del_mismo_metodo(self):
+        self.pago('10')
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                VGLotePOS.objects.create(numero=999, metodo_pago=self.pos, fecha_operacion=self.hoy)
+
+    def test_cierre_parcial_el_siguiente_cobro_abre_otro_lote(self):
+        primero = self.pago('50').lote_pos
+        self.cerrar(primero)
+        segundo = self.pago('30').lote_pos
+        self.assertNotEqual(primero.pk, segundo.pk)
+        primero.refresh_from_db()
+        self.assertEqual(primero.estado, 'cerrado')
+        self.assertEqual(segundo.estado, 'abierto')
+        self.assertEqual(primero.monto_bruto_usd, Decimal('50.000000'))
+
+    def test_no_se_cierra_un_lote_vacio(self):
+        pago = self.pago('10')
+        pago.estado = 'anulado'
+        pago.save(update_fields=['estado'])
+        lotes_pos.pago_anulado(pago)
+        with self.assertRaises(lotes_pos.LoteError):
+            self.cerrar(pago.lote_pos)
+
+    def test_anular_un_pago_recalcula_la_sumatoria_del_lote_abierto(self):
+        p1 = self.pago('40')
+        p2 = self.pago('60')
+        p2.estado = 'anulado'
+        p2.save(update_fields=['estado'])
+        lotes_pos.pago_anulado(p2)
+        lote = VGLotePOS.objects.get(pk=p1.lote_pos_id)
+        self.assertEqual(lote.monto_bruto_usd, Decimal('40.000000'))
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('4000.00'))
+
+    def test_reabrir_y_anular_exigen_motivo_y_no_aplican_a_acreditados(self):
+        lote = self.cerrar(self.pago('10').lote_pos)
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.reabrir_lote(lote, self.admin, '')
+        lote = lotes_pos.reabrir_lote(lote, self.admin, 'Cierre por error')
+        self.assertEqual(lote.estado, 'abierto')
+        self.assertIn('Cierre por error', lote.notas)
+
+        lote = self.acreditar(self.cerrar(lote))
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.reabrir_lote(lote, self.admin, 'x')
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.anular_lote(lote, self.admin, 'x')
+
+    def test_anular_lote_cerrado_mueve_sus_cobros_al_lote_abierto(self):
+        cerrado = self.cerrar(self.pago('25').lote_pos)
+        lotes_pos.anular_lote(cerrado, self.admin, 'Lote duplicado')
+        cerrado.refresh_from_db()
+        self.assertEqual(cerrado.estado, 'anulado')
+        abierto = VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto')
+        self.assertEqual(abierto.monto_bruto_usd, Decimal('25.000000'))
+
+    def test_cobro_de_lote_cerrado_no_cambia_de_cuenta(self):
+        pago = self.pago('10')
+        self.cerrar(pago.lote_pos)
+        pago.refresh_from_db()
+        self.assertIn('lote POS', lotes_pos.validar_cambio_metodo_pago(pago))
+
+
+class AcreditacionLotePOSTests(LotesPOSBase):
+    def test_disponibilidad_solo_suma_cuando_se_acredita_el_lote(self):
+        lote = self.pago('100').lote_pos
+
+        # Abierto: nada disponible, todo por acreditar.
+        banco = self.saldo_banco('Banesco')
+        self.assertEqual(banco['saldo_disponible'], Decimal('0'))
+        self.assertEqual(banco['por_acreditar_usd'], Decimal('100.000000'))
+
+        lote = self.cerrar(lote)
+        banco = self.saldo_banco('Banesco')
+        self.assertEqual(banco['saldo_disponible'], Decimal('0'))
+        self.assertEqual(banco['por_acreditar_usd'], Decimal('100.000000'))
+        self.assertEqual(len(banco['lotes_por_acreditar']), 1)
+
+        # Un clic: el monto del lote suma completo a la cuenta, en USD y en Bs.
+        lote = self.acreditar(lote)
+        self.assertEqual(lote.estado, 'acreditado')
+        self.assertEqual(lote.fecha_abono_real, self.hoy)
+        self.assertEqual(lote.acreditado_por, self.admin)
+        banco = self.saldo_banco('Banesco')
+        self.assertEqual(banco['saldo_disponible'], Decimal('100.000000'))
+        self.assertEqual(banco['saldo_disponible_bs'], Decimal('10000.00'))
+        self.assertEqual(banco['por_acreditar_usd'], Decimal('0'))
+
+    def test_solo_se_acredita_un_lote_cerrado_y_una_sola_vez(self):
+        lote = self.pago('100').lote_pos
+        with self.assertRaises(lotes_pos.LoteError):
+            self.acreditar(lote)  # abierto: primero se cierra
+        lote = self.acreditar(self.cerrar(lote))
+        with self.assertRaises(lotes_pos.LoteError):
+            self.acreditar(lote)  # doble clic: no suma dos veces
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('100.000000'))
+
+    def test_acreditado_se_ve_solo_desde_su_fecha(self):
+        self.acreditar(self.cerrar(self.pago('100').lote_pos))
+        ayer = self.hoy - timedelta(days=1)
+        self.assertEqual(self.saldo_banco('Banesco', ayer)['saldo_disponible'], Decimal('0'))
+        self.assertEqual(self.saldo_banco('Banesco', self.hoy)['saldo_disponible'], Decimal('100.000000'))
+
+    def test_revertir_acreditacion_quita_el_monto_del_saldo(self):
+        lote = self.acreditar(self.cerrar(self.pago('100').lote_pos))
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.revertir_acreditacion(lote, self.admin, '')
+        lote = lotes_pos.revertir_acreditacion(lote, self.admin, 'Click por error')
+        self.assertEqual(lote.estado, 'cerrado')
+        self.assertIn('Click por error', lote.notas)
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('0'))
+        self.assertEqual(self.saldo_banco('Banesco')['por_acreditar_usd'], Decimal('100.000000'))
+
+    def test_transitorio_pos_por_cobrar(self):
+        self.cerrar(self.pago('100').lote_pos)
+        self.pago('50', metodo=self.otro_pos)  # lote abierto de otro banco
+        data = pos_por_cobrar_transitorio(self.hoy)
+        self.assertEqual(data['total_usd'], Decimal('150.000000'))
+        self.assertEqual({item['banco'] for item in data['por_banco']}, {'Banesco', 'Mercantil'})
+
+    def test_flujo_bancario_cuenta_el_lote_una_sola_vez_el_dia_que_se_acredita(self):
+        self.assertEqual(flujo_bancario_mensual(self.hoy.year, self.hoy.month, 'Banesco')['total_entrada'], Decimal('0'))
+        lote = self.cerrar(self.pago('100').lote_pos)
+        self.assertEqual(flujo_bancario_mensual(self.hoy.year, self.hoy.month, 'Banesco')['total_entrada'], Decimal('0'))
+        self.acreditar(lote)
+        flujo = flujo_bancario_mensual(self.hoy.year, self.hoy.month, 'Banesco')
+        dia = next(d for d in flujo['dias'] if d['fecha'] == self.hoy)
+        self.assertEqual(dia['entrada'], Decimal('100.000000'))
+        self.assertEqual(flujo['total_entrada'], Decimal('100.000000'))
+
+    def test_backfill_historico_no_altera_el_saldo_conocido(self):
+        metodo = VGMetodoPago.objects.create(nombre='Punto viejo', moneda='VES', cuenta_bancaria='Provincial')
+        for monto, dias_atras in (('40', 20), ('60', 15)):
+            pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='local', estado='entregado', subtotal=monto, total=monto)
+            pago = VGPago.objects.create(
+                pedido=pedido, monto=Decimal(monto), metodo_pago=metodo, estado='completado',
+                tasa_cambio_referencia=Decimal('100'),
+            )
+            VGPago.objects.filter(pk=pago.pk).update(fecha_pago=timezone.now() - timedelta(days=dias_atras))
+        antes = self.saldo_banco('Provincial')['saldo_disponible']
+        self.assertEqual(antes, Decimal('100.000000'))
+
+        metodo.es_punto_venta = True
+        metodo.save()
+        self.assertEqual(lotes_pos.backfill_historico_metodo(metodo), 2)
+        self.assertEqual(self.saldo_banco('Provincial')['saldo_disponible'], antes)
+        self.assertEqual(VGLotePOS.objects.filter(metodo_pago=metodo, estado='acreditado').count(), 2)
+        # Idempotente: ya no quedan cobros sin lote.
+        self.assertEqual(lotes_pos.backfill_historico_metodo(metodo), 0)
+
+
+class CierreCajaPOSApiTests(LotesPOSBase):
+    def post_cuadre(self, **payload):
+        return self.client.post(
+            '/api/admin/reportes/cuadre-caja/', data=json.dumps({'fecha': self.hoy.isoformat(), **payload}),
+            content_type='application/json',
+        )
+
+    def test_cerrar_caja_autoclausura_lotes_y_persiste_el_snapshot(self):
+        lote = self.pago('100').lote_pos
+        self.client.force_login(self.cajera)
+
+        response = self.post_cuadre(action='cerrar_caja')
+        self.assertEqual(response.status_code, 201, response.content)
+        cierre = VGCierreCaja.objects.get(fecha=self.hoy)
+        lote.refresh_from_db()
+        self.assertEqual(lote.estado, 'cerrado')
+        self.assertFalse(cierre.conteo_efectivo_realizado)
+        self.assertEqual(cierre.diferencia, Decimal('0'))
+        self.assertEqual(cierre.pos_por_acreditar_usd, Decimal('100.000000'))
+        self.assertFalse(VGLotePOS.objects.filter(estado='abierto').exists())
+
+        # El snapshot del cierre es inmutable: acreditar despues no lo cambia.
+        self.acreditar(lote)
+        cierre.refresh_from_db()
+        self.assertEqual(cierre.pos_por_acreditar_usd, Decimal('100.000000'))
+
+    def test_cerrar_caja_sin_lotes(self):
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.post_cuadre(action='cerrar_caja').status_code, 201)
+
+    def test_cuadre_trae_el_bloque_pos_y_la_disponibilidad_real(self):
+        self.pago('100')
+        self.client.force_login(self.admin)
+        data = self.client.get(f'/api/admin/reportes/cuadre-caja/?fecha={self.hoy.isoformat()}').json()
+        self.assertEqual(data['pos']['cobrado_dia_usd'], '100.000000')
+        self.assertEqual(data['pos']['por_acreditar_usd'], '100.000000')
+        self.assertEqual(data['pos']['acreditado_hoy_usd'], '0')
+        self.assertEqual(Decimal(data['pos']['disponibilidad_real_usd']), Decimal('0'))
+
+    def test_endpoint_lotes_cierra_y_acredita_con_un_clic(self):
+        lote = self.pago('100').lote_pos
+        self.client.force_login(self.cajera)
+
+        def post(**payload):
+            return self.client.post('/api/admin/lotes-pos/', data=json.dumps(payload), content_type='application/json')
+
+        r = post(action='cerrar_lote', lote_id=lote.id)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['lote']['estado'], 'cerrado')
+
+        r = post(action='acreditar_lote', lote_id=lote.id)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['lote']['estado'], 'acreditado')
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('100.000000'))
+
+        # Revertir, reabrir y anular son de administrador/contador, no de la cajera.
+        self.assertEqual(post(action='revertir_acreditacion', lote_id=lote.id, motivo='x').status_code, 401)
+        self.client.force_login(self.admin)
+        self.assertEqual(post(action='revertir_acreditacion', lote_id=lote.id, motivo='x').status_code, 200)
+
+        listado = self.client.get('/api/admin/lotes-pos/').json()
+        self.assertTrue(any(item['id'] == lote.id and item['estado'] == 'cerrado' for item in listado['lotes']))
+
+    def test_marcar_punto_venta_valida_y_hace_backfill(self):
+        self.client.force_login(self.admin)
+
+        def post(**payload):
+            return self.client.post('/api/admin/metodos-pago/', data=json.dumps(payload), content_type='application/json')
+
+        usd = VGMetodoPago.objects.create(nombre='Zelle test', moneda='USD')
+        self.assertEqual(post(action='marcar_punto_venta', id=usd.id, es_punto_venta=True).status_code, 400)
+
+        nuevo = VGMetodoPago.objects.create(nombre='Punto Provincial', moneda='VES', cuenta_bancaria='Provincial')
+        r = post(action='marcar_punto_venta', id=nuevo.id, es_punto_venta=True)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()['metodo_pago']['es_punto_venta'])
+
+        # Con un lote sin acreditar no se le puede quitar la marca.
+        nuevo.refresh_from_db()
+        self.pago('10', metodo=nuevo)
+        self.assertEqual(post(action='marcar_punto_venta', id=nuevo.id, es_punto_venta=False).status_code, 400)
+
+
+class ImpresionCierreLotePOSTests(LotesPOSBase):
+    def test_ticket_lista_cada_cobro_y_el_total_en_bs(self):
+        from varagrill.impresion_lpd import _build_cierre_lote_pos_bytes
+        self.pago('40')
+        lote = self.pago('60').lote_pos
+        lote = self.cerrar(lote)
+        texto = _build_cierre_lote_pos_bytes(lote).decode('cp1252', errors='replace')
+        self.assertIn('CIERRE DE LOTE POS', texto)
+        self.assertIn(f'LOTE-{lote.numero:06d}', texto)
+        self.assertIn('COBROS DEL LOTE (2)', texto)
+        self.assertIn('Bs.4.000,00', texto)   # 40 USD x 100
+        self.assertIn('Bs.6.000,00', texto)   # 60 USD x 100
+        self.assertIn('TOTAL Bs.', texto)
+        self.assertIn('10.000,00', texto)
+        self.assertIn('REIMPRESION', _build_cierre_lote_pos_bytes(lote, es_reimpresion=True).decode('cp1252', errors='replace'))
+
+    def test_cerrar_lote_imprime_y_un_fallo_de_impresora_no_tumba_el_cierre(self):
+        from unittest.mock import patch
+        lote = self.pago('100').lote_pos
+        self.client.force_login(self.cajera)
+
+        def post(**payload):
+            return self.client.post('/api/admin/lotes-pos/', data=json.dumps(payload), content_type='application/json')
+
+        with patch('varagrill.contabilidad_views.imprimir_cierre_lote_pos', return_value=(False, 'No hay una impresora de caja activa configurada.')) as impresora:
+            r = post(action='cerrar_lote', lote_id=lote.id)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['lote']['estado'], 'cerrado')
+        self.assertFalse(r.json()['impresion']['ok'])
+        self.assertIn('No se pudo imprimir', r.json()['message'])
+        impresora.assert_called_once()
+
+        with patch('varagrill.contabilidad_views.imprimir_cierre_lote_pos', return_value=(True, None)) as impresora:
+            r = post(action='imprimir_lote', lote_id=lote.id)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(impresora.call_args.kwargs['es_reimpresion'])
+
+        with patch('varagrill.contabilidad_views.imprimir_cierre_lote_pos', return_value=(False, 'sin impresora')):
+            self.assertEqual(post(action='imprimir_lote', lote_id=lote.id).status_code, 502)
+
+    def test_cerrar_caja_imprime_los_lotes_que_se_cierran_solos(self):
+        from unittest.mock import patch
+        self.pago('100')
+        self.client.force_login(self.cajera)
+        with patch('varagrill.contabilidad_views.imprimir_cierre_lote_pos', return_value=(True, None)) as impresora:
+            r = self.client.post(
+                '/api/admin/reportes/cuadre-caja/',
+                data=json.dumps({'action': 'cerrar_caja', 'fecha': self.hoy.isoformat()}), content_type='application/json',
+            )
+        self.assertEqual(r.status_code, 201, r.content)
+        impresora.assert_called_once()
+        self.assertIn('Se imprimió el detalle', r.json()['message'])
+
+
+class MontoBsDelLoteInmutableTests(LotesPOSBase):
+    """El monto en Bs de un lote es lo que se cobro en el punto: la tasa BCV no lo toca nunca."""
+
+    def test_cambiar_la_tasa_bcv_no_mueve_ningun_monto_en_bs(self):
+        from varagrill.impresion_lpd import _build_cierre_lote_pos_bytes
+        from varagrill.models import VGTasaCambio
+
+        # Cobros en Bs: 1.234,56 y 8.765,44 (suman 10.000,00), tasa del dia 100.
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='local', estado='entregado', subtotal='1', total='1')
+        for bs in ('1234.56', '8765.44'):
+            usd = (Decimal(bs) / Decimal('100')).quantize(Decimal('0.000001'))
+            pago = VGPago.objects.create(
+                pedido=pedido, monto=usd, metodo_pago=self.pos, estado='completado',
+                tasa_cambio_referencia=Decimal('100.0000'), creado_por=self.admin,
+            )
+            lotes_pos.asignar_pago_a_lote(pago, self.admin)
+        lote = VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto')
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('10000.00'))
+        lote = self.cerrar(lote)
+
+        # El BCV se dispara: hoy y en los dias siguientes.
+        _set_tasa_actual('250.0000')
+        VGTasaCambio.objects.create(fecha=self.hoy + timedelta(days=1), tasa=Decimal('400.0000'))
+
+        lote.refresh_from_db()
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('10000.00'))
+        self.assertIn('10.000,00', _build_cierre_lote_pos_bytes(lote).decode('cp1252', errors='replace'))
+
+        lote = self.acreditar(lote)
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('10000.00'))
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible_bs'], Decimal('10000.00'))
+        flujo = flujo_bancario_mensual(self.hoy.year, self.hoy.month, 'Banesco')
+        dia = next(d for d in flujo['dias'] if d['fecha'] == self.hoy)
+        self.assertEqual(dia['entrada_bs'], Decimal('10000.00'))
+
+        self.client.force_login(self.admin)
+        detalle = self.client.get(f'/api/admin/lotes-pos/?lote_id={lote.id}').json()['lote']
+        self.assertEqual(detalle['monto_bs'], '10000.00')
+        self.assertEqual(sum(Decimal(pago['monto_bs']) for pago in detalle['pagos']), Decimal('10000.00'))
+
+
+class EfectivoPorMonedaTests(LotesPOSBase):
+    def test_separa_el_efectivo_en_bs_y_dolares_y_suma_el_esperado(self):
+        from varagrill.models import VGAbonoGasto
+        from varagrill.reportes import efectivo_esperado_dia, efectivo_esperado_por_moneda
+
+        efectivo_bs = VGMetodoPago.objects.create(nombre='Efectivo Bs test', moneda='VES', es_efectivo=True)
+        efectivo_usd = VGMetodoPago.objects.create(nombre='Efectivo USD test2', moneda='USD', es_efectivo=True)
+        # Cobros: Bs 5.000 (tasa 100 = $50) y $20 en dolares. El punto de venta NO cuenta como efectivo.
+        self.pago('50', tasa='100.0000', metodo=efectivo_bs)
+        self.pago('20', metodo=efectivo_usd)
+        self.pago('99', metodo=self.pos)
+        # Gasto pagado en efectivo en bolivares: Bs 1.000 ($10 a tasa 100) y otro en dolares: $5.
+        categoria = VGCategoriaGasto.objects.create(nombre='Aseo test')
+        for monto, metodo, tasa in (('10', efectivo_bs, '100.0000'), ('5', efectivo_usd, None)):
+            gasto = VGGasto.objects.create(
+                categoria=categoria, descripcion='Gasto en efectivo', monto=Decimal(monto), saldo_pendiente=0,
+                estado_pago='pagado', fecha_gasto=self.hoy,
+            )
+            VGAbonoGasto.objects.create(
+                gasto=gasto, monto=Decimal(monto), metodo_pago=metodo, tasa_cambio_referencia=Decimal(tasa) if tasa else None,
+            )
+
+        datos = efectivo_esperado_por_moneda(self.hoy)
+        self.assertEqual(datos['bs'], Decimal('4000.00'))      # 5.000 − 1.000
+        self.assertEqual(datos['usd'], Decimal('15.000000'))   # 20 − 5
+        self.assertEqual(datos['usd'] + datos['bs_en_usd'], efectivo_esperado_dia(self.hoy))
+
+        # El BCV cambia: los bolivares en la gaveta no se mueven.
+        _set_tasa_actual('900.0000')
+        self.assertEqual(efectivo_esperado_por_moneda(self.hoy)['bs'], Decimal('4000.00'))
+
+        self.client.force_login(self.cajera)
+        data = self.client.get(f'/api/admin/reportes/cuadre-caja/?fecha={self.hoy.isoformat()}').json()
+        self.assertEqual(data['efectivo_por_moneda']['bs'], '4000.00')
+        self.assertEqual(data['efectivo_por_moneda']['usd'], '15.000000')
+
+
+class DeshacerPuntoDeVentaTests(LotesPOSBase):
+    """Si un cobro entra a un lote (o un metodo se marca POS) por error, se puede deshacer sin descuadrar nada."""
+
+    def post_metodos(self, **payload):
+        return self.client.post('/api/admin/metodos-pago/', data=json.dumps(payload), content_type='application/json')
+
+    def test_cobro_en_punto_por_error_se_saca_del_lote_abierto_cambiando_la_cuenta(self):
+        pago_movil = VGMetodoPago.objects.create(nombre='Pago movil test', moneda='VES', cuenta_bancaria='Banesco')
+        pago = self.pago('50')  # se cobro con el punto por error
+        lote = pago.lote_pos
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('0'))
+
+        self.client.force_login(self.cajera)
+        r = self.client.post(
+            '/api/admin/reportes/cuadre-caja/',
+            data=json.dumps({
+                'action': 'cambiar_metodo_pago', 'fecha': self.hoy.isoformat(), 'tipo': 'pago', 'id': pago.id,
+                'metodo_pago_id': pago_movil.id, 'motivo': 'Era pago movil',
+            }), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        pago.refresh_from_db()
+        lote.refresh_from_db()
+        self.assertIsNone(pago.lote_pos_id)
+        self.assertEqual(lote.monto_bruto_usd, Decimal('0'))
+        # Ya es un cobro normal: suma al saldo del banco de una vez.
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('50.000000'))
+
+    def test_si_el_lote_ya_se_cerro_primero_se_reabre(self):
+        pago_movil = VGMetodoPago.objects.create(nombre='Pago movil test', moneda='VES', cuenta_bancaria='Banesco')
+        pago = self.pago('50')
+        lote = self.cerrar(pago.lote_pos)
+        pago.refresh_from_db()
+        self.assertIn('Mover cobro', lotes_pos.validar_cambio_metodo_pago(pago))
+        lotes_pos.reabrir_lote(lote, self.admin, 'Cobro con metodo equivocado')
+        pago.refresh_from_db()
+        self.assertIsNone(lotes_pos.validar_cambio_metodo_pago(pago))
+        pago.metodo_pago = pago_movil
+        pago.save(update_fields=['metodo_pago'])
+        lotes_pos.aplicar_cambio_metodo_pago(pago, self.admin)
+        pago.refresh_from_db()
+        self.assertIsNone(pago.lote_pos_id)
+
+    def test_quitar_la_marca_de_punto_de_venta_no_duplica_saldo_ni_flujo(self):
+        lote = self.acreditar(self.cerrar(self.pago('100').lote_pos))
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('100.000000'))
+
+        self.client.force_login(self.admin)
+        r = self.post_metodos(action='marcar_punto_venta', id=self.pos.id, es_punto_venta=False)
+        self.assertEqual(r.status_code, 200, r.content)
+
+        # El cobro vuelve a contar como cobro normal: el saldo sigue en 100, no 200.
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('100.000000'))
+        flujo = flujo_bancario_mensual(self.hoy.year, self.hoy.month, 'Banesco')
+        self.assertEqual(flujo['total_entrada'], Decimal('100.000000'))
+
+    def test_no_se_quita_la_marca_con_lotes_sin_acreditar(self):
+        self.pago('100')
+        self.client.force_login(self.admin)
+        self.assertEqual(self.post_metodos(action='marcar_punto_venta', id=self.pos.id, es_punto_venta=False).status_code, 400)
+
+    def test_marcar_un_metodo_por_error_y_desmarcarlo_deja_los_saldos_como_estaban(self):
+        efectivo = VGMetodoPago.objects.create(nombre='Pago movil test', moneda='VES', cuenta_bancaria='Mercantil')
+        self.pago('70', metodo=efectivo)
+        antes = self.saldo_banco('Mercantil')['saldo_disponible']
+        self.assertEqual(antes, Decimal('70.000000'))
+
+        self.client.force_login(self.admin)
+        self.post_metodos(action='marcar_punto_venta', id=efectivo.id, es_punto_venta=True)
+        # Hoy el cobro paso al lote abierto: deja de estar disponible hasta acreditar.
+        self.assertEqual(self.saldo_banco('Mercantil')['saldo_disponible'], Decimal('0'))
+        lote = VGLotePOS.objects.get(metodo_pago=efectivo, estado='abierto')
+        self.acreditar(self.cerrar(lote))
+        self.assertEqual(self.saldo_banco('Mercantil')['saldo_disponible'], antes)
+        self.assertEqual(self.post_metodos(action='marcar_punto_venta', id=efectivo.id, es_punto_venta=False).status_code, 200)
+        self.assertEqual(self.saldo_banco('Mercantil')['saldo_disponible'], antes)
+
+
+class MoverCobroDeLoteCerradoTests(LotesPOSBase):
+    """Se dan cuenta al final del dia de que un cobro no va en el lote cerrado, y el metodo ya tiene otro lote abierto."""
+
+    def escenario(self):
+        correcto = self.pago('30')
+        equivocado = self.pago('20')
+        lote_a = self.cerrar(correcto.lote_pos)          # el punto cerro con ambos cobros adentro
+        nuevo = self.pago('10')                          # y siguio cobrando: lote B abierto
+        lote_b = nuevo.lote_pos
+        self.assertNotEqual(lote_a.pk, lote_b.pk)
+        return lote_a, lote_b, equivocado
+
+    def test_pasa_al_lote_abierto_sin_reabrir_el_cerrado(self):
+        lote_a, lote_b, pago = self.escenario()
+        self.assertEqual(lote_a.monto_bruto_usd, Decimal('50.000000'))
+
+        # Reabrir no se puede mientras haya otro lote abierto...
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.reabrir_lote(lote_a, self.admin, 'x')
+        # ...pero mover el cobro si.
+        lotes_pos.mover_pago_de_lote(pago, self.admin, 'Se cobro despues del cierre del punto')
+
+        lote_a.refresh_from_db()
+        lote_b.refresh_from_db()
+        pago.refresh_from_db()
+        self.assertEqual(lote_a.estado, 'cerrado')
+        self.assertEqual(lote_a.monto_bruto_usd, Decimal('30.000000'))
+        self.assertEqual(lote_a.monto_bruto_sistema_bs, Decimal('3000.00'))
+        self.assertEqual(pago.lote_pos_id, lote_b.pk)
+        self.assertEqual(lote_b.monto_bruto_usd, Decimal('30.000000'))
+        self.assertIn('Se cobro despues del cierre', lote_a.notas)
+        self.assertIn('Se cobro despues del cierre', lote_b.notas)
+        # Sigue sin acreditar: nada suma al saldo todavia.
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('0'))
+        self.assertEqual(self.saldo_banco('Banesco')['por_acreditar_usd'], Decimal('60.000000'))  # A: 30 + B: 10 + 20 movidos
+
+    def test_cambia_la_cuenta_y_suma_al_saldo_si_el_destino_no_es_punto(self):
+        lote_a, _lote_b, pago = self.escenario()
+        pago_movil = VGMetodoPago.objects.create(nombre='Pago movil test', moneda='VES', cuenta_bancaria='Banesco')
+        lotes_pos.mover_pago_de_lote(pago, self.admin, 'Era pago movil', pago_movil)
+        pago.refresh_from_db()
+        lote_a.refresh_from_db()
+        self.assertIsNone(pago.lote_pos_id)
+        self.assertEqual(pago.metodo_pago_id, pago_movil.id)
+        self.assertEqual(lote_a.monto_bruto_usd, Decimal('30.000000'))
+        self.assertEqual(self.saldo_banco('Banesco')['saldo_disponible'], Decimal('20.000000'))
+        from varagrill.models import VGCorreccionMetodoPago
+        self.assertTrue(VGCorreccionMetodoPago.objects.filter(tipo='pago', registro_id=pago.id, motivo='Era pago movil').exists())
+
+    def test_un_lote_que_se_queda_sin_cobros_se_anula(self):
+        pago = self.pago('20')
+        lote = self.cerrar(pago.lote_pos)
+        lotes_pos.mover_pago_de_lote(pago, self.admin, 'Todo el lote era un error')
+        lote.refresh_from_db()
+        self.assertEqual(lote.estado, 'anulado')
+        self.assertEqual(VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto').monto_bruto_usd, Decimal('20.000000'))
+
+    def test_reglas_motivo_y_estado(self):
+        lote_a, lote_b, pago = self.escenario()
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.mover_pago_de_lote(pago, self.admin, '')
+        # Un cobro de un lote abierto usa "cambiar cuenta" del cuadre, no esta accion.
+        abierto = lote_b.pagos.first()
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.mover_pago_de_lote(abierto, self.admin, 'x')
+        # Acreditado: primero se revierte.
+        self.acreditar(lote_a)
+        with self.assertRaises(lotes_pos.LoteError):
+            lotes_pos.mover_pago_de_lote(pago, self.admin, 'x')
+
+    def test_endpoint_solo_administrador(self):
+        lote_a, lote_b, pago = self.escenario()
+
+        def post(**payload):
+            return self.client.post('/api/admin/lotes-pos/', data=json.dumps(payload), content_type='application/json')
+
+        self.client.force_login(self.cajera)
+        self.assertEqual(post(action='mover_pago', lote_id=lote_a.id, pago_id=pago.id, motivo='x').status_code, 401)
+        self.client.force_login(self.admin)
+        r = post(action='mover_pago', lote_id=lote_a.id, pago_id=pago.id, motivo='Fuera del lote cerrado')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['lote']['monto_usd'], '30.000000')
+        # Un cobro que no es de ese lote se rechaza.
+        self.assertEqual(post(action='mover_pago', lote_id=lote_a.id, pago_id=lote_b.pagos.first().id, motivo='x').status_code, 400)
+
+
+# ---------------------------------------------------------------------------
+# Notas de credito de proveedor sobre facturas de compra
+# ---------------------------------------------------------------------------
+class NotaCreditoCompraTests(TestCase):
+    def setUp(self):
+        from varagrill.models import VGAbonoCompra  # noqa: F401
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='nc_admin', password='claveAdmin123', cedula='92000001', email='nc_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='nc_cajera', password='claveCajera123', cedula='92000002', email='nc_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.metodo = VGMetodoPago.objects.create(nombre='Efectivo NC test', moneda='USD', es_efectivo=True)
+        self.client.force_login(self.admin)
+
+    def compra(self, total='100', abonado='0', moneda='USD', total_bs=None, tasa='100.0000'):
+        from varagrill.models import VGAbonoCompra
+        total = Decimal(total)
+        abonado = Decimal(abonado)
+        compra = VGCompra.objects.create(
+            proveedor_nombre='Proveedor NC', numero_factura_proveedor='F-1', estado='recibido',
+            total=total, saldo_pendiente=total - abonado, estado_pago='pendiente' if abonado == 0 else 'abonada_parcial',
+            tasa_cambio_referencia=Decimal(tasa), moneda_origen=moneda,
+            total_bs_factura=Decimal(total_bs) if total_bs else None,
+        )
+        if abonado:
+            VGAbonoCompra.objects.create(compra=compra, monto=abonado, metodo_pago=self.metodo, tasa_cambio_referencia=Decimal(tasa))
+        return compra
+
+    def nota(self, compra, **payload):
+        payload.setdefault('motivo', 'La administradora cargó mal el monto')
+        return self.client.post(
+            f'/api/admin/compras/{compra.id}/notas-credito/', data=json.dumps(payload), content_type='application/json',
+        )
+
+    def test_baja_el_total_y_el_saldo_y_conserva_el_total_original(self):
+        compra = self.compra('100', abonado='30')
+        r = self.nota(compra, monto='20', numero_documento_proveedor='NC-998')
+        self.assertEqual(r.status_code, 201, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.total, Decimal('80.000000'))
+        self.assertEqual(compra.saldo_pendiente, Decimal('50.000000'))
+        self.assertEqual(compra.estado_pago, 'abonada_parcial')
+        datos = r.json()['compra']
+        self.assertEqual(datos['total_original'], '100.000000')
+        self.assertEqual(datos['monto_notas_credito'], '20.000000')
+        self.assertEqual(datos['notas_credito'][0]['codigo'], 'NCC-000001')
+        self.assertEqual(datos['notas_credito'][0]['numero_documento_proveedor'], 'NC-998')
+        # Los abonos ya hechos no se tocan.
+        self.assertEqual(compra.abonos.count(), 1)
+
+    def test_no_puede_superar_lo_que_aun_se_debe(self):
+        compra = self.compra('100', abonado='30')
+        r = self.nota(compra, monto='70.50')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('no puede ser mayor', r.json()['message'])
+        compra.refresh_from_db()
+        self.assertEqual(compra.total, Decimal('100.000000'))
+
+    def test_una_factura_saldada_no_admite_nota_de_credito(self):
+        compra = self.compra('100', abonado='100')
+        compra.estado_pago = 'pagada'
+        compra.save()
+        self.assertEqual(self.nota(compra, monto='5').status_code, 409)
+
+    def test_si_la_nota_salda_la_deuda_el_total_queda_en_lo_abonado(self):
+        compra = self.compra('100', abonado='30')
+        r = self.nota(compra, monto='70')
+        self.assertEqual(r.status_code, 201, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.saldo_pendiente, Decimal('0'))
+        self.assertEqual(compra.total, Decimal('30.000000'))
+        self.assertEqual(compra.estado_pago, 'pagada')
+
+    def test_motivo_y_monto_son_obligatorios_y_solo_una_moneda(self):
+        compra = self.compra('100')
+        self.assertEqual(self.nota(compra, monto='5', motivo='').status_code, 400)
+        self.assertEqual(self.nota(compra).status_code, 400)  # sin monto
+        self.assertEqual(self.nota(compra, monto='5', monto_bs='500').status_code, 400)
+        self.assertEqual(self.nota(compra, monto='-5').status_code, 400)
+
+    def test_factura_en_bolivares_rebaja_el_monto_exacto_en_bs(self):
+        compra = self.compra('100', moneda='VES', total_bs='10000.00', tasa='100.0000')
+        r = self.nota(compra, monto_bs='2500')
+        self.assertEqual(r.status_code, 201, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.total, Decimal('75.000000'))
+        self.assertEqual(compra.total_bs_factura, Decimal('7500.00'))
+        datos = r.json()['compra']
+        self.assertEqual(datos['total_bs'], '7500.00')
+        self.assertEqual(datos['saldo_pendiente_bs'], '7500.00')
+
+    def test_nota_que_salda_una_factura_en_bs_no_deja_centimos_fantasma(self):
+        compra = self.compra('100', abonado='40', moneda='VES', total_bs='10000.00', tasa='100.0000')
+        r = self.nota(compra, monto_bs='6000')
+        self.assertEqual(r.status_code, 201, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.estado_pago, 'pagada')
+        self.assertEqual(compra.total_bs_factura, Decimal('4000.00'))
+        self.assertEqual(r.json()['compra']['saldo_pendiente_bs'], '0.00')
+
+    def test_anular_devuelve_el_monto_al_total_y_al_saldo(self):
+        compra = self.compra('100', abonado='30', moneda='VES', total_bs='10000.00', tasa='100.0000')
+        nota_id = self.nota(compra, monto_bs='2000').json()['nota_credito']['id']
+        compra.refresh_from_db()
+        self.assertEqual(compra.saldo_pendiente, Decimal('50.000000'))
+
+        url = f'/api/admin/compras/notas-credito/{nota_id}/anular/'
+        post = lambda **p: self.client.post(url, data=json.dumps(p), content_type='application/json')  # noqa: E731
+        self.assertEqual(post(motivo='').status_code, 400)
+        r = post(motivo='Se registró en la factura equivocada')
+        self.assertEqual(r.status_code, 200, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.total, Decimal('100.000000'))
+        self.assertEqual(compra.saldo_pendiente, Decimal('70.000000'))
+        self.assertEqual(compra.total_bs_factura, Decimal('10000.00'))
+        self.assertEqual(r.json()['compra']['monto_notas_credito'], '0')
+        self.assertEqual(post(motivo='otra vez').status_code, 409)
+
+    def test_anular_una_nota_que_habia_saldado_la_factura_la_reabre(self):
+        compra = self.compra('100', abonado='30')
+        nota_id = self.nota(compra, monto='70').json()['nota_credito']['id']
+        self.client.post(
+            f'/api/admin/compras/notas-credito/{nota_id}/anular/', data=json.dumps({'motivo': 'Error'}), content_type='application/json',
+        )
+        compra.refresh_from_db()
+        self.assertEqual(compra.estado_pago, 'abonada_parcial')
+        self.assertEqual(compra.saldo_pendiente, Decimal('70.000000'))
+
+    def test_dos_notas_acumulan_y_cada_una_tiene_su_numero(self):
+        compra = self.compra('100')
+        self.nota(compra, monto='10')
+        r = self.nota(compra, monto='15')
+        compra.refresh_from_db()
+        self.assertEqual(compra.total, Decimal('75.000000'))
+        self.assertEqual(r.json()['nota_credito']['codigo'], 'NCC-000002')
+        listado = self.client.get(f'/api/admin/compras/{compra.id}/notas-credito/').json()
+        self.assertEqual(len(listado['notas_credito']), 2)
+
+    def test_solo_administrador(self):
+        compra = self.compra('100')
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.nota(compra, monto='5').status_code, 401)
+
+    def test_la_cuenta_por_pagar_muestra_el_total_rebajado(self):
+        compra = self.compra('100')
+        self.nota(compra, monto='25')
+        data = self.client.get('/api/cuentas-por-pagar/').json()
+        fila = next(item for item in data['compras'] if item['tipo'] == 'compra' and item['id'] == compra.id)
+        self.assertEqual(fila['total'], '75.000000')
+        self.assertEqual(fila['total_original'], '100.000000')
+
+    def test_reporte_por_rango_con_totales_y_proveedor(self):
+        a = self.compra('100')
+        b = self.compra('200', moneda='VES', total_bs='20000.00', tasa='100.0000')
+        self.nota(a, monto='10')
+        nota_b = self.nota(b, monto_bs='5000').json()['nota_credito']
+        anulada = self.nota(a, monto='30').json()['nota_credito']
+        self.client.post(
+            f"/api/admin/compras/notas-credito/{anulada['id']}/anular/", data=json.dumps({'motivo': 'Error'}), content_type='application/json',
+        )
+
+        hoy = timezone.localdate().isoformat()
+        data = self.client.get(f'/api/admin/reportes/notas-credito-compra/?desde={hoy}&hasta={hoy}').json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['cantidad_vigentes'], 2)
+        self.assertEqual(Decimal(data['total_usd']), Decimal('60.000000'))      # 10 + 50 (Bs 5.000 a tasa 100)
+        self.assertEqual(Decimal(data['total_bs']), Decimal('6000.00'))          # 1.000 (10 x 100) + 5.000
+        self.assertEqual(len(data['notas']), 3)                                  # la anulada se lista pero no suma
+        self.assertEqual(len(data['por_proveedor']), 1)
+        self.assertEqual(data['por_proveedor'][0]['cantidad'], 2)
+        self.assertEqual(next(n for n in data['notas'] if n['id'] == nota_b['id'])['monto_bs'], '5000.00')
+
+        solo_anuladas = self.client.get(f'/api/admin/reportes/notas-credito-compra/?desde={hoy}&hasta={hoy}&estado=anulada').json()
+        self.assertEqual([n['estado'] for n in solo_anuladas['notas']], ['anulada'])
+        self.assertEqual(Decimal(solo_anuladas['total_usd']), Decimal('0'))
+
+        vacio = self.client.get('/api/admin/reportes/notas-credito-compra/?desde=2020-01-01&hasta=2020-01-31').json()
+        self.assertEqual(vacio['notas'], [])
+
+    def test_reporte_solo_administrador_y_valida_fechas(self):
+        self.assertEqual(self.client.get('/api/admin/reportes/notas-credito-compra/?desde=2026-02-01&hasta=2026-01-01').status_code, 400)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get('/api/admin/reportes/notas-credito-compra/').status_code, 401)

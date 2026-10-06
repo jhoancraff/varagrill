@@ -3673,6 +3673,11 @@ def _serialize_abono_compra(abono):
         'referencia': abono.referencia,
         'fecha_pago': abono.fecha_pago.isoformat(),
         'tasa_cambio_referencia': str(abono.tasa_cambio_referencia) if abono.tasa_cambio_referencia is not None else None,
+        'tasa_manual': abono.tasa_manual,
+        'monto_bs': (
+            str((abono.monto * abono.tasa_cambio_referencia).quantize(Decimal('0.01')))
+            if abono.tasa_cambio_referencia else None
+        ),
         'creado_por': (abono.creado_por.get_full_name() or abono.creado_por.username) if abono.creado_por else '',
     }
 
@@ -3745,6 +3750,27 @@ def _serialize_compra(compra, incluir_detalle=False):
         tasa_para_bs = compra.tasa_cambio_referencia
         total_bs = (compra.total * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
         saldo_pendiente_bs = (compra.saldo_pendiente * tasa_para_bs).quantize(Decimal('0.01')) if tasa_para_bs else None
+
+    # Si algun abono se pago a una tasa propia (ver VGAbonoCompra.tasa_manual), los Bs ya
+    # pagados son los que salieron del banco, y lo que falta se valora a la tasa de la
+    # factura: restar esos Bs del total en Bs de la factura daria un saldo que no
+    # corresponde a los dolares que de verdad se deben. Total en Bs = pagado + lo que falta.
+    # (La compra en dolares ya se calcula asi arriba.)
+    if compra.moneda_origen != 'USD' and any(abono.tasa_manual for abono in compra.abonos.all()):
+        if compra.total_bs_factura is not None and compra.total > 0:
+            tasa_saldo = compra.total_bs_factura / compra.total
+        else:
+            tasa_saldo = compra.tasa_cambio_referencia
+        if tasa_saldo:
+            abonado_bs = sum(
+                (abono.monto * abono.tasa_cambio_referencia for abono in compra.abonos.all() if abono.tasa_cambio_referencia),
+                Decimal('0'),
+            )
+            saldo_pendiente_bs = (
+                Decimal('0.00') if compra.estado_pago == 'pagada'
+                else (compra.saldo_pendiente * tasa_saldo).quantize(Decimal('0.01'))
+            )
+            total_bs = (abonado_bs + saldo_pendiente_bs).quantize(Decimal('0.01'))
 
     data = {
         'id': compra.id,

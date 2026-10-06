@@ -691,6 +691,11 @@ class VGAbonoCompra(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    # True cuando quien pago escribio SU tasa (la que le cobro el proveedor o con la que
+    # compro los Bs en el banco) en vez de la de la factura/BCV. Los Bs de este abono son
+    # monto * esa tasa y NO se tocan despues, aunque no cuadren con la tasa de la factura:
+    # lo que cuenta es lo que de verdad salio del banco.
+    tasa_manual = models.BooleanField(default=False)
 
     class Meta:
         db_table = "vg_abonos_compra"

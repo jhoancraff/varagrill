@@ -2283,3 +2283,120 @@ class NotaCreditoCompraTests(TestCase):
         self.assertEqual(self.client.get('/api/admin/reportes/notas-credito-compra/?desde=2026-02-01&hasta=2026-01-01').status_code, 400)
         self.client.force_login(self.cajera)
         self.assertEqual(self.client.get('/api/admin/reportes/notas-credito-compra/').status_code, 401)
+
+
+# ---------------------------------------------------------------------------
+# Abono a una factura de compra con la tasa propia de quien paga
+# ---------------------------------------------------------------------------
+class AbonoCompraTasaPropiaTests(TestCase):
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='tp_admin', password='claveAdmin123', cedula='93000001', email='tp_admin@varagrill.test', id_role=admin_role,
+        )
+        self.metodo = VGMetodoPago.objects.create(nombre='Banco VES tasa propia', moneda='VES')
+        self.client.force_login(self.admin)
+
+    def compra(self, total='100', tasa='480.0000', total_bs='48000.00', moneda='VES'):
+        total = Decimal(total)
+        return VGCompra.objects.create(
+            proveedor_nombre='Proveedor tasa propia', numero_factura_proveedor='TP-1', estado='recibido',
+            total=total, saldo_pendiente=total, estado_pago='pendiente',
+            tasa_cambio_referencia=Decimal(tasa), moneda_origen=moneda,
+            total_bs_factura=Decimal(total_bs) if total_bs else None,
+        )
+
+    def abonar(self, compra, **payload):
+        payload.setdefault('metodo_pago_id', self.metodo.id)
+        return self.client.post(
+            f'/api/admin/compras/{compra.id}/abonos/', data=json.dumps(payload), content_type='application/json',
+        )
+
+    def test_en_dolares_con_tasa_propia_los_bs_son_monto_por_esa_tasa(self):
+        compra = self.compra()
+        r = self.abonar(compra, monto='50', tasa_cambio='482.5')
+        self.assertEqual(r.status_code, 201, r.content)
+        abono = r.json()['abono']
+        self.assertEqual(abono['tasa_cambio_referencia'], '482.5000')
+        self.assertTrue(abono['tasa_manual'])
+        self.assertEqual(abono['monto_bs'], '24125.00')
+        # La deuda en dolares baja solo por los dolares.
+        compra.refresh_from_db()
+        self.assertEqual(compra.saldo_pendiente, Decimal('50.000000'))
+        self.assertEqual(compra.estado_pago, 'abonada_parcial')
+
+    def test_en_bolivares_con_tasa_propia_descuenta_bs_entre_la_tasa(self):
+        compra = self.compra()
+        r = self.abonar(compra, monto_bs='24100', tasa_cambio='482')
+        self.assertEqual(r.status_code, 201, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.saldo_pendiente, Decimal('50.000000'))
+        self.assertEqual(r.json()['abono']['monto_bs'], '24100.00')
+
+    def test_sin_tasa_se_comporta_como_siempre(self):
+        compra = self.compra()
+        # En bolivares sin tasa: la de la factura, como antes.
+        r = self.abonar(compra, monto_bs='4800')
+        self.assertEqual(r.status_code, 201, r.content)
+        abono = r.json()['abono']
+        self.assertFalse(abono['tasa_manual'])
+        self.assertEqual(Decimal(abono['tasa_cambio_referencia']), Decimal('480.0000'))
+        # En dolares sin tasa: la del BCV de hoy (no se marca como tasa propia).
+        r = self.abonar(compra, monto='5')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertFalse(r.json()['abono']['tasa_manual'])
+
+    def test_tasa_invalida_se_rechaza(self):
+        compra = self.compra()
+        self.assertEqual(self.abonar(compra, monto='10', tasa_cambio='0').status_code, 400)
+        self.assertEqual(self.abonar(compra, monto='10', tasa_cambio='abc').status_code, 400)
+        self.assertEqual(compra.abonos.count(), 0)
+
+    def test_una_tasa_mas_alta_no_perdona_dolares_que_aun_se_deben(self):
+        # 99.80 a 482 son 48.103,60 Bs: mas que los 48.000 de la factura. Sin cuidado, el
+        # "perdon de residuo" compararia Bs contra Bs y cerraria una factura con $0.20 vivos.
+        compra = self.compra()
+        r = self.abonar(compra, monto='99.80', tasa_cambio='482')
+        self.assertEqual(r.status_code, 201, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.saldo_pendiente, Decimal('0.200000'))
+        self.assertEqual(compra.estado_pago, 'abonada_parcial')
+
+    def test_total_y_saldo_en_bs_separan_lo_pagado_de_lo_que_falta(self):
+        compra = self.compra()
+        datos = self.abonar(compra, monto='50', tasa_cambio='482').json()['compra']
+        # Lo pagado son los Bs que salieron del banco; lo que falta, $50 a la tasa de la factura.
+        self.assertEqual(datos['saldo_pendiente_bs'], '24000.00')
+        self.assertEqual(datos['total_bs'], '48100.00')
+
+    def test_saldada_a_tasa_propia_el_total_en_bs_es_lo_que_salio_del_banco(self):
+        compra = self.compra()
+        datos = self.abonar(compra, monto='100', tasa_cambio='482').json()['compra']
+        compra.refresh_from_db()
+        self.assertEqual(compra.estado_pago, 'pagada')
+        self.assertEqual(datos['total_bs'], '48200.00')
+        self.assertEqual(datos['saldo_pendiente_bs'], '0.00')
+
+    def test_los_bs_pagados_no_cambian_cuando_se_mueve_el_bcv(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from varagrill.models.restaurant import VGTasaCambio
+        # Factura en dolares: lo que falta sigue al BCV de hoy, pero lo ya pagado queda fijo.
+        compra = self.compra(moneda='USD', total_bs=None)
+        VGTasaCambio.objects.update_or_create(fecha=timezone.localdate(), defaults={'tasa': Decimal('480')})
+        self.abonar(compra, monto='60', tasa_cambio='482')
+        antes = self.client.get(f'/api/admin/compras/{compra.id}/').json()['compra']
+        abono_antes = antes['abonos'][0]
+        # El BCV sube mucho al dia siguiente.
+        VGTasaCambio.objects.update_or_create(fecha=timezone.localdate() + timedelta(days=1), defaults={'tasa': Decimal('900')})
+        despues = self.client.get(f'/api/admin/compras/{compra.id}/').json()['compra']
+        abono_despues = despues['abonos'][0]
+        self.assertEqual(abono_antes['monto_bs'], '28920.00')
+        self.assertEqual(abono_despues['monto_bs'], '28920.00')
+        self.assertEqual(abono_despues['tasa_cambio_referencia'], '482.0000')
+        # Saldada despues, el total en Bs es exactamente lo que salio del banco.
+        self.abonar(compra, monto='40', tasa_cambio='490')
+        VGTasaCambio.objects.update_or_create(fecha=timezone.localdate() + timedelta(days=1), defaults={'tasa': Decimal('1500')})
+        final = self.client.get(f'/api/admin/compras/{compra.id}/').json()['compra']
+        self.assertEqual(final['estado_pago'], 'pagada')
+        self.assertEqual(final['total_bs'], '48520.00')  # 28.920 + 19.600

@@ -523,6 +523,19 @@ def compra_abono_view(request, compra_id):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # Tasa propia de quien paga (opcional): los proveedores cobran a tasas distintas a la
+    # de la factura/BCV y lo que importa es que los Bs registrados sean los que de verdad
+    # salieron del banco. Con ella, los Bs del abono son monto * esta tasa y la deuda en
+    # dolares baja solo por el monto en dolares.
+    tasa_manual = None
+    if data.get('tasa_cambio') not in (None, ''):
+        try:
+            tasa_manual = Decimal(str(data.get('tasa_cambio'))).quantize(Decimal('0.0001'))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'La tasa no es valida.'}, status=400)
+        if tasa_manual <= 0:
+            return _auth_response({'ok': False, 'message': 'La tasa debe ser mayor a cero.'}, status=400)
+
     with transaction.atomic():
         try:
             compra = VGCompra.objects.select_for_update().get(pk=compra_id)
@@ -554,7 +567,9 @@ def compra_abono_view(request, compra_id):
             # BCV VIGENTE (la de HOY), igual que ya hace gasto_abono_view para
             # un gasto en dólares — mezclar las dos tasas es justo lo que
             # dejaba residuos o rechazaba el pago final.
-            if compra.moneda_origen == 'USD':
+            if tasa_manual is not None:
+                tasa_abono = tasa_manual
+            elif compra.moneda_origen == 'USD':
                 tasa_actual = obtener_tasa_actual()
                 tasa_abono = tasa_actual.tasa if tasa_actual else compra.tasa_cambio_referencia
             else:
@@ -577,7 +592,7 @@ def compra_abono_view(request, compra_id):
                 return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
             if monto <= 0:
                 return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
-            tasa_abono = tasa_cambio_para_registro()
+            tasa_abono = tasa_manual if tasa_manual is not None else tasa_cambio_para_registro()
 
         if monto > compra.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
             return _auth_response({
@@ -593,6 +608,7 @@ def compra_abono_view(request, compra_id):
             metodo_pago=metodo_pago,
             referencia=referencia,
             tasa_cambio_referencia=tasa_abono,
+            tasa_manual=tasa_manual is not None,
             creado_por=request.user,
         )
 
@@ -622,9 +638,13 @@ def compra_abono_view(request, compra_id):
         # de la tasa de la compra (antes de que compra_abono_view empezara a
         # usar siempre la tasa de la compra), esto perdona el residuo de esa
         # inconsistencia histórica.
+        # Tampoco aplica si algun abono se pago a una tasa propia: sus Bs ya no son
+        # comparables con los de la factura (uno pagado a una tasa mas alta pasaria de
+        # la deuda en Bs y perdonaria dolares que de verdad se deben).
+        hay_tasa_manual = any(registro.tasa_manual for registro in compra.abonos.all())
         deuda_bs = (
             None
-            if compra.moneda_origen == 'USD'
+            if compra.moneda_origen == 'USD' or hay_tasa_manual
             else compra.total_bs_factura
             if compra.total_bs_factura is not None
             else (compra.total * compra.tasa_cambio_referencia).quantize(Decimal('0.01'))

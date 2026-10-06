@@ -81,6 +81,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const [loadingDetalle, setLoadingDetalle] = useState(false);
   const [montoAbono, setMontoAbono] = useState('');
   const [monedaAbono, setMonedaAbono] = useState('USD');
+  // Tasa propia del abono (vacia = la de la factura/BCV). Ver tasaPorDefecto.
+  const [tasaAbono, setTasaAbono] = useState('');
   const [metodoAbono, setMetodoAbono] = useState('');
   const [savingAbono, setSavingAbono] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -184,6 +186,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setFeedback('');
     setMontoAbono('');
     setMonedaAbono('USD');
+    setTasaAbono('');
     setSelectedCompraId(compra.id);
     setSelectedTipo(compra.tipo);
     fetchCompraDetalle(compra.id, compra.tipo);
@@ -193,6 +196,28 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
+
+  // La tasa con la que se paga por defecto (la misma que usa el servidor si no se escribe
+  // ninguna): en dolares o con la deuda en dolares, la del BCV de hoy; en bolivares, la de la
+  // factura (congelada al cargarla). Los proveedores cobran a tasas distintas; quien paga puede
+  // escribir la suya para que los Bs registrados sean los que salieron del banco.
+  const tasaPorDefecto = (monedaAbono === 'USD' || compraDetalle?.moneda_origen === 'USD')
+    ? Number(tasaCambio)
+    : Number(compraDetalle?.tasa_cambio_referencia ?? tasaCambio);
+  const origenTasaPorDefecto = tasaPorDefecto === Number(tasaCambio) ? 'BCV de hoy' : 'de la factura';
+  const tasaAbonoNum = Number(tasaAbono);
+  const tasaAbonoManual = tasaAbono !== '' && Number.isFinite(tasaAbonoNum) && tasaAbonoNum > 0
+    && Math.abs(tasaAbonoNum - tasaPorDefecto) > 0.00005;
+  const tasaEfectiva = tasaAbonoManual ? tasaAbonoNum : tasaPorDefecto;
+  const montoAbonoNum = Number(montoAbono);
+  const vistaPreviaAbono = (() => {
+    if (!Number.isFinite(montoAbonoNum) || montoAbonoNum <= 0 || !Number.isFinite(tasaEfectiva) || tasaEfectiva <= 0) {
+      return '';
+    }
+    return monedaAbono === 'VES'
+      ? `Se descontarán $${(montoAbonoNum / tasaEfectiva).toFixed(2)} de la deuda (${formatBsRaw(montoAbonoNum)} ÷ ${tasaEfectiva})`
+      : `Se registrarán ${formatBsRaw(montoAbonoNum * tasaEfectiva)} (${'$'}${montoAbonoNum.toFixed(2)} × ${tasaEfectiva})`;
+  })();
 
   const handleRegistrarAbono = async (event) => {
     event.preventDefault();
@@ -219,6 +244,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         credentials: 'include',
         body: JSON.stringify({
           ...(monedaAbono === 'VES' ? { monto_bs: montoAbono } : { monto: montoAbono }),
+          // Solo si la tasa se cambio a mano: asi un abono normal sigue usando la de la factura.
+          ...(selectedTipo === 'compra' && tasaAbonoManual ? { tasa_cambio: tasaAbono } : {}),
           metodo_pago_id: metodoPagoId,
         }),
       });
@@ -234,6 +261,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       setCompraDetalle({ ...cuentaActualizada, tipo: selectedTipo });
       setUltimoAbonoId(data.abono.id);
       setMontoAbono('');
+      setTasaAbono('');
       await fetchCompras();
     } catch (requestError) {
       setFeedbackType('error');
@@ -527,6 +555,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 <div style={detailTotalsStyle}>
                   <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.total_bs)}</span>
                   <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatSaldoUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.saldo_pendiente_bs)}</span>
+                  {compraDetalle.tipo === 'compra' && tasaAbonoManual && !esEstadoSaldado(compraDetalle.estado_pago) ? (
+                    <span style={{ fontWeight: 800, color: '#9fe3b0' }}>
+                      A tu tasa ({tasaAbonoNum}): {formatBsRaw(Number(compraDetalle.saldo_pendiente) * tasaAbonoNum)}
+                    </span>
+                  ) : null}
                 </div>
 
                 {compraDetalle.abonos.length > 0 ? (
@@ -536,7 +569,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                       <div key={abono.id} style={lineaRowStyle}>
                         <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio)}
+                          {abono.tasa_manual ? <span title={`Pagado a tasa propia: ${abono.tasa_cambio_referencia}`} style={{ color: '#ffcf7d', fontSize: 11.5 }}>tasa {abono.tasa_cambio_referencia}</span> : null}
+                          {formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio, abono.monto_bs)}
                           {onVerComprobante ? (
                             <button type="button" onClick={() => onVerComprobante(compraDetalle.tipo, compraDetalle.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">
                               🖨
@@ -643,13 +677,49 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                     <input
                       type="number"
                       min="0.01"
-                      step="0.01"
+                      step="any"
                       placeholder={monedaAbono === 'VES' ? 'Monto del abono en Bs' : 'Monto del abono en $'}
                       value={montoAbono}
                       onChange={(event) => setMontoAbono(event.target.value)}
                       style={inputStyle}
                       required
                     />
+                    {selectedTipo === 'compra' ? (
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <label style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+                          Tasa de este pago (Bs por $) — cámbiala si el proveedor cobró a otra tasa
+                        </label>
+                        <input
+                          type="number"
+                          min="0.0001"
+                          step="0.0001"
+                          placeholder={Number.isFinite(tasaPorDefecto) && tasaPorDefecto > 0 ? `Sin cambiar usa ${tasaPorDefecto} (${origenTasaPorDefecto})` : 'Tasa en Bs por $'}
+                          value={tasaAbono}
+                          onChange={(event) => setTasaAbono(event.target.value)}
+                          style={inputStyle}
+                        />
+                        {Number.isFinite(tasaEfectiva) && tasaEfectiva > 0 ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', color: tasaAbonoManual ? '#ffcf7d' : '#c8bbbb', fontSize: 12.5, fontWeight: 700 }}>
+                            <span>
+                              Saldo ${Number(compraDetalle.saldo_pendiente).toFixed(2)} × {tasaEfectiva} = {formatBsRaw(Number(compraDetalle.saldo_pendiente) * tasaEfectiva)}
+                              {tasaAbonoManual ? ' (con tu tasa)' : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => { setMonedaAbono('USD'); setMontoAbono(String(Number(Number(compraDetalle.saldo_pendiente).toFixed(6)))); }}
+                              style={miniPrintButtonStyle}
+                            >
+                              Pagar todo el saldo
+                            </button>
+                          </div>
+                        ) : null}
+                        {vistaPreviaAbono ? (
+                          <div style={{ color: tasaAbonoManual ? '#ffcf7d' : '#9fe3b0', fontSize: 12.5, fontWeight: 700 }}>
+                            {vistaPreviaAbono}{tasaAbonoManual ? ' · con tu tasa' : ''}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <select
                       value={metodoAbono || (metodosPago[0] && metodosPago[0].id) || ''}
                       onChange={(event) => setMetodoAbono(Number(event.target.value))}

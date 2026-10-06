@@ -32,3 +32,7 @@ frontend/.env.*
 .DS_Store
 .vscode/
 .idea/
+
+#code review
+REVIEW_FEEDBACK.md
+.agent_status

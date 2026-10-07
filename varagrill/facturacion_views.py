@@ -1112,7 +1112,7 @@ def notas_entrega_view(request):
         'ok': True,
         'notas_entrega': [
             _serialize_nota_entrega(nota, incluir_detalle=False, tasa_pago_actual=tasa_pago_actual)
-            for nota in notas[:200]
+            for nota in notas
         ],
     })
 

@@ -20,6 +20,7 @@ from varagrill.models import (
     VGIngrediente,
     VGMetodoPago,
     VGMovimientoInventario,
+    VGNotaEntrega,
     VGPedido,
     VGPreparacion,
     VGProducto,
@@ -31,6 +32,33 @@ from varagrill.models import (
 )
 from varagrill.api_views import _importar_ingredientes, _load_preparation_cost_map, _preview_ingrediente_row
 from varagrill.unit_rescale import rescale_legacy_units
+
+
+class NotasEntregaHistorialTests(TestCase):
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        admin = VGUsuario.objects.create_superuser(
+            username='notas_historial_admin',
+            password='claveAdmin123',
+            cedula='99000001',
+            email='notas_historial_admin@varagrill.test',
+            id_role=admin_role,
+        )
+        self.client.force_login(admin)
+        self.metodo_pago = VGMetodoPago.objects.create(nombre='Efectivo historial test', moneda='USD')
+
+    @patch('varagrill.facturacion_views.obtener_tasa_actual', return_value=None)
+    def test_date_filter_returns_more_than_200_notes(self, _obtener_tasa_actual):
+        VGNotaEntrega.objects.bulk_create([
+            VGNotaEntrega(metodo_pago=self.metodo_pago)
+            for _ in range(205)
+        ])
+        fecha = timezone.localdate().isoformat()
+
+        response = self.client.get('/api/notas-entrega/', {'desde': fecha, 'hasta': fecha})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()['notas_entrega']), 205)
 
 
 class LoginViewTests(TestCase):
@@ -1492,6 +1520,34 @@ class EstadoResultadosHistoricoAcumuladoTests(TestCase):
         usd_total = gasto_1.monto + gasto_2.monto
         bs_con_tasa_actual_al_consultar = (usd_total * tasa_y.tasa).quantize(Decimal('0.01'))
         self.assertNotEqual(payload['gastos_total_bs'], str(bs_con_tasa_actual_al_consultar))
+
+    def test_ventas_suma_cobrado_de_notas_pagadas_y_parciales(self):
+        hoy = timezone.localdate()
+        metodo = VGMetodoPago.objects.create(nombre='Efectivo notas estado test', moneda='USD')
+        VGNotaEntrega.objects.create(
+            metodo_pago=metodo, total=Decimal('12.00'), saldo_pendiente=Decimal('0'),
+            estado='pagada', tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        VGNotaEntrega.objects.create(
+            metodo_pago=metodo, total=Decimal('20.00'), saldo_pendiente=Decimal('20.00'),
+            estado='pendiente_pago', tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        VGNotaEntrega.objects.create(
+            metodo_pago=metodo, total=Decimal('30.00'), saldo_pendiente=Decimal('5.00'),
+            estado='abonada_parcial', tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        VGNotaEntrega.objects.create(
+            metodo_pago=metodo, total=Decimal('40.00'), saldo_pendiente=Decimal('0'),
+            estado='anulada', tasa_cambio_referencia=Decimal('100.0000'),
+        )
+
+        response = self.client.get(
+            f'/api/admin/reportes/estado-resultados/?desde={hoy.isoformat()}&hasta={hoy.isoformat()}',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['ventas_total'], '37.00')
+        self.assertEqual(response.json()['ventas_total_bs'], '3700.00')
 
 
 # ---------------------------------------------------------------------------

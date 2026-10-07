@@ -14,7 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from .api_views import _calcular_margen_periodo, _serialize_detalle_adicionales, _serialize_detalle_opciones
+from .api_views import _serialize_detalle_adicionales, _serialize_detalle_opciones
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import (
     VGAbonoCompra,
@@ -1724,8 +1724,10 @@ def reporte_conciliacion_bancaria_view(request):
 # ---------------------------------------------------------------------------
 def reporte_estado_resultados_view(request):
     """
-    Ventas − gastos operativos = utilidad neta, para un rango de fechas. Suma
-    VGGasto por fecha_gasto (no por fecha de pago: un gasto cuenta para el
+    Ventas − gastos operativos = utilidad neta, para un rango de fechas. Las
+    ventas son el total cobrado de las notas de entrega pagadas o abonadas
+    parcialmente, por fecha de emision; las pendientes y anuladas no se
+    incluyen. Suma VGGasto por fecha_gasto (no por fecha de pago: un gasto cuenta para el
     periodo en que se incurrio, se haya pagado ya o no) para los gastos
     operativos.
 
@@ -1734,16 +1736,8 @@ def reporte_estado_resultados_view(request):
     VGAbonoCompra (cuando de verdad se abono/pago, no cuando se cargo la
     factura).
 
-    IMPORTANTE: el reporte YA NO resta el "costo de ingredientes" calculado por
-    receta (costeo teorico via _calcular_margen_periodo) — hasta 2026-09 se
-    restaba ademas de las compras a proveedores pagadas, lo que contaba el
-    mismo ingrediente dos veces (una vez aqui al pagarle al proveedor, otra vez
-    via el costeo por receta) e inflaba el gasto real. El usuario pidio
-    quitarlo (2026-09-29) para que el estado de resultados refleje solo plata
-    que de verdad salio (compras pagadas + gastos), no un costo teorico
-    ademas de esa plata. _calcular_margen_periodo sigue existiendo para el
-    reporte de margen por plato (reporte_margen_ganancia_view), que es donde
-    ese costeo por receta sigue siendo la metrica correcta.
+    IMPORTANTE: el reporte no resta el costo teorico de ingredientes por receta;
+    ese costeo sigue disponible en el reporte de margen por plato.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1761,7 +1755,19 @@ def reporte_estado_resultados_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
-    _platos, ventas_total, _costo_ingredientes_total, ventas_total_bs = _calcular_margen_periodo(desde, hasta)
+    notas_cobradas = VGNotaEntrega.objects.filter(
+        fecha_emision__date__gte=desde,
+        fecha_emision__date__lte=hasta,
+        estado__in=['pagada', 'abonada_parcial'],
+    )
+    ventas_total = Decimal('0')
+    ventas_total_bs = Decimal('0')
+    for nota in notas_cobradas:
+        monto_cobrado = nota.total - nota.saldo_pendiente
+        ventas_total += monto_cobrado
+        tasa = nota.tasa_cambio_referencia or tasa_para_fecha(timezone.localdate(nota.fecha_emision))
+        if tasa:
+            ventas_total_bs += monto_cobrado * tasa
 
     gastos = VGGasto.objects.filter(fecha_gasto__gte=desde, fecha_gasto__lte=hasta).select_related('categoria')
 

@@ -169,7 +169,6 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                     <div style={cuentaNombreStyle}>
                       {banco.nombre}
                       {!banco.agrupado && !banco.metodos[0].activo ? <span style={inactivaBadgeStyle}>Inactiva</span> : null}
-                      {banco.agrupado ? <span style={efectivoBadgeStyle}>{banco.metodos.length} métodos</span> : null}
                       {banco.moneda_mixta ? <span style={inactivaBadgeStyle}>Monedas mixtas</span> : null}
                     </div>
                   </div>
@@ -192,42 +191,8 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                       <div>{banco.lotes_por_acreditar.length} lote(s) sin acreditar</div>
                     </div>
                   ) : null}
-                  {banco.agrupado ? (
-                    <div style={metodosAnidadosStyle}>
-                      {banco.metodos.map((metodo) => (
-                        <div key={metodo.id} style={metodoAnidadoRowStyle}>
-                          <span>
-                            {metodo.nombre}
-                            {!metodo.activo ? <span style={inactivaBadgeStyle}> Inactiva</span> : null}
-                          </span>
-                          <span>
-                            {metodo.moneda === 'VES'
-                              ? `Bs. ${metodo.saldo_disponible_bs !== null ? formatMonto(metodo.saldo_disponible_bs) : '—'}`
-                              : `$${formatMonto(metodo.saldo_disponible)}`}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={cuentaDetalleStyle}>
-                      <span>+${formatMonto(banco.metodos[0].ingresos_acumulados)} cobrado</span>
-                      {Number(banco.metodos[0].ingresos_extra_acumulados) > 0 ? (
-                        <span>+${formatMonto(banco.metodos[0].ingresos_extra_acumulados)} propinas/extra</span>
-                      ) : null}
-                      {Number(banco.metodos[0].transferencias_entrantes_acumuladas) > 0 ? (
-                        <span>+${formatMonto(banco.metodos[0].transferencias_entrantes_acumuladas)} transferencias recibidas</span>
-                      ) : null}
-                      <span>−${formatMonto(banco.metodos[0].gastos_acumulados)} gastos</span>
-                      <span>−${formatMonto(banco.metodos[0].compras_acumuladas)} proveedores</span>
-                      {Number(banco.metodos[0].transferencias_salientes_acumuladas) > 0 ? (
-                        <span>−${formatMonto(banco.metodos[0].transferencias_salientes_acumuladas)} transferencias enviadas</span>
-                      ) : null}
-                      {Number(banco.metodos[0].consignado_acumulado) > 0 ? (
-                        <span>−${formatMonto(banco.metodos[0].consignado_acumulado)} consignado</span>
-                      ) : null}
-                      {banco.metodos[0].es_efectivo ? <span style={efectivoBadgeStyle}>Efectivo</span> : null}
-                    </div>
-                  )}
+                  {/* Las tarjetas muestran solo el saldo: el desglose (cobrado, gastos, proveedores, metodos)
+                      confundia. Ese detalle sigue en la tabla "Detalle por cuenta" de mas abajo. */}
                 </article>
               ))}
             </div>
@@ -350,12 +315,8 @@ const cuentaCardStyle = (negativo) => ({
 const cuentaHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 };
 const cuentaNombreStyle = { color: '#fff', fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' };
 const inactivaBadgeStyle = { fontSize: 10.5, fontWeight: 800, color: '#c8bbbb', background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em' };
-const efectivoBadgeStyle = { fontSize: 10.5, fontWeight: 800, color: '#bdf0cf', background: 'rgba(70,200,120,0.14)', padding: '2px 8px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' };
 const cuentaSaldoStyle = (negativo) => ({ fontSize: 22, fontWeight: 800, color: negativo ? '#ff9d9d' : '#fff' });
-const cuentaDetalleStyle = { display: 'flex', flexDirection: 'column', gap: 2, color: '#c8bbbb', fontSize: 12.5 };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 13, marginLeft: 6, fontWeight: 600 };
-const metodosAnidadosStyle = { display: 'grid', gap: 4, paddingTop: 6, borderTop: '1px dashed rgba(255,255,255,0.12)' };
-const metodoAnidadoRowStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: '#d2c3c3', fontSize: 12.5 };
 
 const porAcreditarBoxStyle = { display: 'grid', gap: 2, padding: '8px 10px', borderRadius: 10, border: '1px dashed rgba(255,207,133,0.4)', background: 'rgba(255,207,133,0.06)', color: '#e8d9b6', fontSize: 12.5 };
 const transitorioTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(140px,1.2fr) repeat(3, minmax(110px,0.8fr))', minWidth: 520, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };

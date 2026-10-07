@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Pagination from './Pagination';
 import Toast from './Toast';
 import useToast from '../hooks/useToast';
@@ -15,6 +15,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [costFilter, setCostFilter] = useState('');
 
   const loadProducts = async () => {
     setLoading(true);
@@ -101,6 +102,12 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
     if (statusFilter === 'no-disponible' && product.disponible) {
       return false;
     }
+    if (costFilter === 'con-costo' && !tieneCosto(product)) {
+      return false;
+    }
+    if (costFilter === 'sin-costo' && tieneCosto(product)) {
+      return false;
+    }
     if (!normalizedSearch) {
       return true;
     }
@@ -136,14 +143,20 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
     setPage(0);
   };
 
+  const handleCostFilterChange = (value) => {
+    setCostFilter(value);
+    setPage(0);
+  };
+
   const clearFilters = () => {
     setSearchTerm('');
     setCategoryFilter('');
     setStatusFilter('');
+    setCostFilter('');
     setPage(0);
   };
 
-  const hasActiveFilters = Boolean(searchTerm || categoryFilter || statusFilter);
+  const hasActiveFilters = Boolean(searchTerm || categoryFilter || statusFilter || costFilter);
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -217,6 +230,15 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
               <option value="disponible">Disponibles</option>
               <option value="no-disponible">No disponibles</option>
             </select>
+            <select
+              value={costFilter}
+              onChange={(event) => handleCostFilterChange(event.target.value)}
+              style={filterSelectStyle}
+            >
+              <option value="">Todos (con y sin costo)</option>
+              <option value="con-costo">Con costo</option>
+              <option value="sin-costo">Sin costo</option>
+            </select>
             {hasActiveFilters ? (
               <button type="button" onClick={clearFilters} style={secondaryButtonStyle}>
                 Limpiar filtros
@@ -237,11 +259,13 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
               <div style={tableHeadStyle}>Producto</div>
               <div style={tableHeadStyle}>Categoría</div>
               <div style={tableHeadStyle}>Precio</div>
+              <div style={tableHeadStyle}>Costo</div>
+              <div style={tableHeadStyle} title="Costo de la receta más el margen de producción (mermas)">Costo + margen de producción</div>
               <div style={tableHeadStyle}>Estado</div>
               <div style={tableHeadStyle}>Acciones</div>
 
               {pagedProducts.map((product) => (
-                <>
+                <Fragment key={product.id}>
                   <div key={`product-${product.id}`} style={tableCellPrimaryStyle}>
                     <div style={nameStyle}>{product.nombre || 'Sin nombre'}</div>
                     <div style={metaStyle}>{product.descripcion || 'Sin descripción'}</div>
@@ -257,6 +281,31 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
                   <div key={`price-${product.id}`} style={tableCellStyle}>
                     {formatCurrency(product.precio_venta)}
                   </div>
+                  <div key={`cost-${product.id}`} style={tableCellStyle}>
+                    {!product.tiene_receta ? (
+                      <span style={sinCostoPillStyle} title="Este producto no tiene receta, subreceta ni ingredientes anclados">Sin costo</span>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 700 }}>
+                          {formatCurrency(product.costo_receta)}
+                          {product.venta_por_peso ? <span style={costoUnidadStyle}> /kg</span> : null}
+                        </div>
+                        {!tieneCosto(product) ? (
+                          <span style={sinCostoPillStyle} title="Tiene receta, pero sus ingredientes están en costo 0">Costo en $0</span>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                  <div key={`cost-margin-${product.id}`} style={tableCellStyle}>
+                    {!product.tiene_receta ? (
+                      <span style={{ color: '#7a6f6f' }}>—</span>
+                    ) : (
+                      <div style={{ fontWeight: 700 }}>
+                        {formatCurrency(product.costo_con_margen_produccion)}
+                        {product.venta_por_peso ? <span style={costoUnidadStyle}> /kg</span> : null}
+                      </div>
+                    )}
+                  </div>
                   <div key={`status-${product.id}`} style={tableCellStyle}>
                     <span style={statusPillStyle(product.disponible)}>{product.disponible ? 'Disponible' : 'No disponible'}</span>
                   </div>
@@ -268,7 +317,7 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
                       Eliminar
                     </button>
                   </div>
-                </>
+                </Fragment>
               ))}
             </div>
           </div>
@@ -292,6 +341,12 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
       </div>
     </section>
   );
+}
+
+// Un producto "tiene costo" cuando tiene receta, subreceta o ingredientes anclados y el costo
+// que resulta es mayor que cero (el costo viene calculado en vivo desde el servidor).
+function tieneCosto(product) {
+  return Boolean(product.tiene_receta) && Number(product.costo_receta) > 0;
 }
 
 function formatCurrency(value) {
@@ -439,9 +494,9 @@ const tableWrapStyle = {
 };
 
 const tableStyle = {
-  minWidth: 880,
+  minWidth: 1150,
   display: 'grid',
-  gridTemplateColumns: 'minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(140px, .7fr) minmax(130px, .7fr) minmax(220px, 1fr)',
+  gridTemplateColumns: 'minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(120px, .6fr) minmax(130px, .7fr) minmax(150px, .8fr) minmax(130px, .7fr) minmax(220px, 1fr)',
   background: 'rgba(8, 8, 8, 0.55)',
 };
 
@@ -508,6 +563,19 @@ const pillStyle = {
   background: 'rgba(255, 143, 143, 0.16)',
   color: '#ffc4c4',
 };
+
+const sinCostoPillStyle = {
+  display: 'inline-flex',
+  width: 'fit-content',
+  padding: '4px 10px',
+  borderRadius: 999,
+  fontSize: 11.5,
+  fontWeight: 800,
+  background: 'rgba(255, 200, 120, 0.16)',
+  color: '#ffcf7d',
+};
+
+const costoUnidadStyle = { color: '#a89999', fontSize: 11.5, fontWeight: 600 };
 
 const statusPillStyle = (isAvailable) => ({
   display: 'inline-flex',

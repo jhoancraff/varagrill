@@ -928,6 +928,10 @@ class VGDetallePedido(models.Model):
         max_digits=12, decimal_places=4, null=True, blank=True,
         help_text="Costo de receta por unidad (o por kg si venta_por_peso), congelado en el momento del cobro con los costos de ingredientes vigentes ese día. Vacío para pedidos cobrados antes de que este campo existiera — el reporte de margen cae al costo actual para esos casos.",
     )
+    margen_produccion_pct_venta = models.DecimalField(
+        max_digits=6, decimal_places=2, null=True, blank=True,
+        help_text="Margen de producción (VGConfiguracionCosteo.rendimiento_receta_pct) vigente en el momento del cobro, congelado junto a costo_unitario_venta. Permite separar el costo puro de receta del margen y sumarlo sin contarlo dos veces. Vacío para ventas cobradas antes de que existiera.",
+    )
     estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
     notas = models.CharField(max_length=255, blank=True)
 

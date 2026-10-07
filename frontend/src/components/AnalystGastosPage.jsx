@@ -1,56 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Toast from './Toast';
 import UnsavedChangesModal from './UnsavedChangesModal';
-import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
-import { formatBs, formatBsRaw } from '../utils/currency';
-
-function formatUsdBs(amount, tasa) {
-  const usd = `$${Number(amount).toFixed(2)}`;
-  const bs = formatBs(amount, tasa);
-  return bs ? `${usd} (${bs})` : usd;
-}
-
-// A diferencia de formatUsdBs (una tasa para un monto), este toma un monto en USD
-// ya sumado (p. ej. el total del período que devuelve el backend) junto con el Bs.
-// ya acumulado registro por registro (ver bsTotalGeneral/bsTotalesPorCategoria) —
-// evita el drift de convertir la suma global en USD con la tasa en vivo.
-function formatUsdBsPrecomputed(usdAmount, bsAmount) {
-  const usd = `$${Number(usdAmount).toFixed(2)}`;
-  const bs = Number.isFinite(bsAmount) && bsAmount > 0 ? formatBsRaw(bsAmount) : '';
-  return bs ? `${usd} (${bs})` : usd;
-}
-
-// Saldo pendiente de un gasto: usa saldo_pendiente_bs, precalculado por el
-// backend (_serialize_gasto) — un gasto en VES lo reconstruye con la tasa
-// congelada al registrarlo (se queda fijo, ej. 2000 Bs), uno en USD lo
-// recalcula con la tasa ACTUAL mientras siga pendiente, para reflejar lo que
-// costaria saldarlo hoy. Recalcularlo aqui con tasaDeRegistro perdia esa
-// distincion.
-function formatSaldoUsdBs(gasto) {
-  const usd = `$${Number(gasto.saldo_pendiente).toFixed(2)}`;
-  const bs = gasto.saldo_pendiente_bs != null ? formatBsRaw(gasto.saldo_pendiente_bs) : '';
-  return bs ? `${usd} (${bs})` : usd;
-}
-
-// Bs. de un solo gasto/abono, priorizando su propia tasa congelada al momento de
-// registrarlo sobre la tasa en vivo — así reimprimir/reconsultar un registro viejo
-// no cambia su equivalente en bolívares con el paso del tiempo.
-function tasaDeRegistro(registro, tasaEnVivo) {
-  return registro?.tasa_cambio_referencia ?? tasaEnVivo;
-}
 
 function todayIso() {
   const now = new Date();
   const offset = now.getTimezoneOffset();
   const local = new Date(now.getTime() - offset * 60000);
   return local.toISOString().slice(0, 10);
-}
-
-function firstDayOfMonthIso() {
-  const today = todayIso();
-  return `${today.slice(0, 7)}-01`;
 }
 
 const emptyForm = {
@@ -65,16 +23,7 @@ const emptyForm = {
   metodo_pago_id: '',
 };
 
-const ESTADO_LABELS = {
-  pendiente: { label: 'Pendiente', color: '#ff9b9b', background: 'rgba(255, 145, 145, 0.16)' },
-  abonada_parcial: { label: 'Abonado', color: '#ffcf7d', background: 'rgba(255, 200, 120, 0.16)' },
-  pagado: { label: 'Pagado', color: '#9fe3b0', background: 'rgba(80, 200, 130, 0.18)' },
-};
-
-const FILAS_POR_PAGINA = 50;
-
-function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
-  const tasaCambio = useExchangeRate();
+function AnalystGastosPage({ isMobile, onBack, onVerComprobante, onVerReporte }) {
   const [categorias, setCategorias] = useState([]);
   const [metodosPago, setMetodosPago] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -82,42 +31,9 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
   const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
-  const [fechaDesde, setFechaDesde] = useState(firstDayOfMonthIso());
-  const [fechaHasta, setFechaHasta] = useState(todayIso());
-  const [filtroCategoriaId, setFiltroCategoriaId] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState('');
-  const [filtroMetodoPagoId, setFiltroMetodoPagoId] = useState('');
-  const [gastos, setGastos] = useState([]);
-  const [totalesPorCategoria, setTotalesPorCategoria] = useState([]);
-  const [totalGeneral, setTotalGeneral] = useState('0');
-  const [loadingGastos, setLoadingGastos] = useState(true);
-
-  const [abonandoId, setAbonandoId] = useState(null);
-  const [montoAbono, setMontoAbono] = useState('');
-  const [metodoAbono, setMetodoAbono] = useState('');
-  const [savingAbono, setSavingAbono] = useState(false);
-
   const [showCategorias, setShowCategorias] = useState(false);
   const [nuevaCategoria, setNuevaCategoria] = useState('');
   const [savingCategoria, setSavingCategoria] = useState(false);
-
-  const [verAbonosId, setVerAbonosId] = useState(null);
-  const [abonosDetalle, setAbonosDetalle] = useState([]);
-  const [loadingAbonosDetalle, setLoadingAbonosDetalle] = useState(false);
-
-  const [pagina, setPagina] = useState(0);
-
-  const [editandoGastoId, setEditandoGastoId] = useState(null);
-  const [editDetalle, setEditDetalle] = useState(null);
-  const [editLoading, setEditLoading] = useState(false);
-  const [editMonto, setEditMonto] = useState('');
-  const [editFecha, setEditFecha] = useState('');
-  const [editMetodoPagoId, setEditMetodoPagoId] = useState('');
-  const [editError, setEditError] = useState('');
-  const [editSaving, setEditSaving] = useState(false);
-  const [pidiendoMotivo, setPidiendoMotivo] = useState(false);
-  const [motivoEdicion, setMotivoEdicion] = useState('');
-  const [motivoError, setMotivoError] = useState('');
 
   const loadCategorias = useCallback(async () => {
     try {
@@ -143,64 +59,9 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
     }
   }, []);
 
-  const loadGastos = useCallback(async () => {
-    setLoadingGastos(true);
-    try {
-      const params = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
-      if (filtroCategoriaId) params.set('categoria_id', filtroCategoriaId);
-      if (filtroEstado) params.set('estado_pago', filtroEstado);
-      if (filtroMetodoPagoId) params.set('metodo_pago_id', filtroMetodoPagoId);
-      const response = await fetch(`/api/admin/gastos/?${params.toString()}`, { credentials: 'include', cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudieron cargar los gastos.');
-      }
-      setGastos(Array.isArray(data.gastos) ? data.gastos : []);
-      setTotalesPorCategoria(Array.isArray(data.totales_por_categoria) ? data.totales_por_categoria : []);
-      setTotalGeneral(data.total_general || '0');
-      setPagina(0);
-    } catch (error) {
-      showError(error.message || 'No se pudieron cargar los gastos.');
-    } finally {
-      setLoadingGastos(false);
-    }
-  }, [fechaDesde, fechaHasta, filtroCategoriaId, filtroEstado, filtroMetodoPagoId]);
-
   useEffect(() => { loadCategorias(); loadMetodosPago(); }, [loadCategorias, loadMetodosPago]);
-  useEffect(() => { loadGastos(); }, [loadGastos]);
 
   const categoriasActivas = useMemo(() => categorias.filter((c) => c.activo), [categorias]);
-
-  // Bs. del período: cada gasto se convierte con SU PROPIA tasa (congelada al
-  // registrarlo, con fallback a la tasa en vivo si aún no tiene una), y luego se
-  // suman los bolívares ya convertidos — en vez de sumar los montos en USD y
-  // convertir esa suma con la tasa de hoy (lo que hacía que el total de un período
-  // cerrado cambiara con el tiempo aunque los gastos no cambiaran).
-  const bsTotalesPorCategoria = useMemo(() => {
-    const totales = new Map();
-    gastos.forEach((gasto) => {
-      const tasa = Number(tasaDeRegistro(gasto, tasaCambio));
-      if (!Number.isFinite(tasa) || tasa <= 0) return;
-      const bs = Number(gasto.monto) * tasa;
-      totales.set(gasto.categoria_id, (totales.get(gasto.categoria_id) || 0) + bs);
-    });
-    return totales;
-  }, [gastos, tasaCambio]);
-
-  const bsTotalGeneral = useMemo(() => (
-    gastos.reduce((suma, gasto) => {
-      const tasa = Number(tasaDeRegistro(gasto, tasaCambio));
-      if (!Number.isFinite(tasa) || tasa <= 0) return suma;
-      return suma + Number(gasto.monto) * tasa;
-    }, 0)
-  ), [gastos, tasaCambio]);
-
-  // Los totales de arriba (bsTotalGeneral, totalesPorCategoria) siguen
-  // calculandose sobre `gastos` completo — solo la tabla se pagina, para que
-  // el total del periodo no cambie segun que pagina este viendo el usuario.
-  const totalPaginas = Math.max(1, Math.ceil(gastos.length / FILAS_POR_PAGINA));
-  const paginaActual = Math.min(pagina, totalPaginas - 1);
-  const gastosPagina = gastos.slice(paginaActual * FILAS_POR_PAGINA, (paginaActual + 1) * FILAS_POR_PAGINA);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -265,172 +126,10 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
       );
       markClean({ ...emptyForm, fecha_gasto: form.fecha_gasto });
       setForm({ ...emptyForm, fecha_gasto: form.fecha_gasto });
-      loadGastos();
     } catch (error) {
       showError(error.message || 'No se pudo registrar el gasto.');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleAbrirAbono = (gasto) => {
-    setAbonandoId(gasto.id === abonandoId ? null : gasto.id);
-    setMontoAbono('');
-    setMetodoAbono('');
-  };
-
-  const handleRegistrarAbono = async (event, gastoId) => {
-    event.preventDefault();
-    const metodoPagoId = metodoAbono || (metodosPago[0] && metodosPago[0].id);
-    if (!metodoPagoId) {
-      showError('No hay metodos de pago activos configurados.'); return;
-    }
-    setSavingAbono(true);
-    try {
-      const response = await fetch(`/api/admin/gastos/${gastoId}/abonos/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ monto: montoAbono, metodo_pago_id: metodoPagoId }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo registrar el abono.');
-      }
-      showSuccess(
-        `Abono de $${data.abono.monto} registrado.`,
-        onVerComprobante ? {
-          action: {
-            label: 'Ver comprobante de pago',
-            onClick: () => onVerComprobante('gasto', gastoId, data.abono.id),
-          },
-        } : undefined,
-      );
-      setAbonandoId(null);
-      loadGastos();
-    } catch (error) {
-      showError(error.message || 'No se pudo registrar el abono.');
-    } finally {
-      setSavingAbono(false);
-    }
-  };
-
-  const handleVerAbonos = async (gasto) => {
-    if (verAbonosId === gasto.id) {
-      setVerAbonosId(null);
-      return;
-    }
-    setVerAbonosId(gasto.id);
-    setLoadingAbonosDetalle(true);
-    try {
-      const response = await fetch(`/api/admin/gastos/${gasto.id}/`, { credentials: 'include', cache: 'no-store' });
-      const data = await response.json();
-      if (response.ok && data.ok) {
-        setAbonosDetalle(Array.isArray(data.gasto.abonos) ? data.gasto.abonos : []);
-      }
-    } catch (error) {
-      setAbonosDetalle([]);
-    } finally {
-      setLoadingAbonosDetalle(false);
-    }
-  };
-
-  const handleAbrirEdicion = async (gasto) => {
-    setEditandoGastoId(gasto.id);
-    setEditDetalle(null);
-    setEditError('');
-    setPidiendoMotivo(false);
-    setMotivoEdicion('');
-    setMotivoError('');
-    setEditLoading(true);
-    try {
-      const response = await fetch(`/api/admin/gastos/${gasto.id}/`, { credentials: 'include', cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo cargar el gasto.');
-      }
-      const abonos = Array.isArray(data.gasto.abonos) ? data.gasto.abonos : [];
-      setEditDetalle(data.gasto);
-      setEditMonto(data.gasto.monto);
-      setEditFecha(data.gasto.fecha_gasto);
-      setEditMetodoPagoId(abonos.length === 1 ? String(abonos[0].metodo_pago_id) : '');
-    } catch (error) {
-      setEditError(error.message || 'No se pudo cargar el gasto.');
-    } finally {
-      setEditLoading(false);
-    }
-  };
-
-  const cerrarEdicion = () => {
-    if (editSaving) return;
-    setEditandoGastoId(null);
-    setEditDetalle(null);
-    setPidiendoMotivo(false);
-    setMotivoEdicion('');
-    setMotivoError('');
-  };
-
-  const abonoUnicoEdicion = editDetalle && Array.isArray(editDetalle.abonos) && editDetalle.abonos.length === 1
-    ? editDetalle.abonos[0]
-    : null;
-
-  const handlePedirMotivo = (event) => {
-    event.preventDefault();
-    setEditError('');
-    if (!editMonto || Number(editMonto) <= 0) {
-      setEditError('Indica un monto valido.'); return;
-    }
-    if (!editFecha) {
-      setEditError('Indica la fecha del gasto.'); return;
-    }
-    const hayCambios = (
-      Number(editMonto) !== Number(editDetalle.monto)
-      || editFecha !== editDetalle.fecha_gasto
-      || (abonoUnicoEdicion && String(editMetodoPagoId) !== String(abonoUnicoEdicion.metodo_pago_id))
-    );
-    if (!hayCambios) {
-      setEditError('No hay cambios que guardar.'); return;
-    }
-    setMotivoEdicion('');
-    setMotivoError('');
-    setPidiendoMotivo(true);
-  };
-
-  const handleConfirmarEdicion = async () => {
-    if (!motivoEdicion.trim()) {
-      setMotivoError('La descripcion para auditoria es obligatoria.');
-      return;
-    }
-    setEditSaving(true);
-    setMotivoError('');
-    try {
-      const body = { action: 'editar', motivo: motivoEdicion.trim() };
-      if (Number(editMonto) !== Number(editDetalle.monto)) body.monto = editMonto;
-      if (editFecha !== editDetalle.fecha_gasto) body.fecha_gasto = editFecha;
-      if (abonoUnicoEdicion && String(editMetodoPagoId) !== String(abonoUnicoEdicion.metodo_pago_id)) {
-        body.metodo_pago_id = editMetodoPagoId;
-      }
-
-      const response = await fetch(`/api/admin/gastos/${editandoGastoId}/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo guardar el gasto.');
-      }
-      showSuccess(data.message || 'Gasto actualizado.');
-      setEditandoGastoId(null);
-      setEditDetalle(null);
-      setPidiendoMotivo(false);
-      setMotivoEdicion('');
-      loadGastos();
-    } catch (error) {
-      setMotivoError(error.message || 'No se pudo guardar el gasto.');
-    } finally {
-      setEditSaving(false);
     }
   };
 
@@ -481,8 +180,13 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
         ← Volver a Contabilidad
       </button>
 
-      <div>
+      <div style={headerRowStyle}>
         <h2 style={titleStyle(isMobile)}>Gastos operativos</h2>
+        {onVerReporte ? (
+          <button type="button" onClick={() => guard(onVerReporte)} style={primaryButtonStyle}>
+            Ver reporte de gastos
+          </button>
+        ) : null}
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
@@ -582,314 +286,19 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante }) {
           </div>
         ) : null}
       </section>
-
-      <section style={panelStyle}>
-        <div style={sectionTitleStyle}>Reporte de gastos</div>
-        <div style={filtrosRowStyle(isMobile)}>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Desde</span>
-            <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Hasta</span>
-            <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Categoría</span>
-            <select value={filtroCategoriaId} onChange={(e) => setFiltroCategoriaId(e.target.value)} style={inputStyle} className="admin-dark-select">
-              <option value="">Todas</option>
-              {categorias.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.nombre}</option>
-              ))}
-            </select>
-          </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Estado</span>
-            <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} style={inputStyle} className="admin-dark-select">
-              <option value="">Todos</option>
-              <option value="pendiente">Pendiente</option>
-              <option value="abonada_parcial">Abonado parcial</option>
-              <option value="pagado">Pagado</option>
-            </select>
-          </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Método de pago</span>
-            <select value={filtroMetodoPagoId} onChange={(e) => setFiltroMetodoPagoId(e.target.value)} style={inputStyle} className="admin-dark-select">
-              <option value="">Todos</option>
-              {metodosPago.map((metodo) => (
-                <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {totalesPorCategoria.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {totalesPorCategoria.map((entry) => (
-              <span key={entry.categoria_id} style={categoriaTotalChipStyle}>
-                {entry.categoria_nombre}: {formatUsdBsPrecomputed(entry.total, bsTotalesPorCategoria.get(entry.categoria_id) || 0)}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <div style={{ color: '#ffcf7d', fontWeight: 800 }}>Total del período: {formatUsdBsPrecomputed(totalGeneral, bsTotalGeneral)}</div>
-
-        {loadingGastos ? <div style={emptyStyle}>Cargando gastos...</div> : null}
-        {!loadingGastos && gastos.length === 0 ? <div style={emptyStyle}>No hay gastos para ese filtro.</div> : null}
-
-        {!loadingGastos && gastos.length > 0 ? (
-          <div style={tableWrapStyle}>
-            <div style={tableStyle}>
-              <div style={headStyle}>ID</div>
-              <div style={headStyle}>Fecha</div>
-              <div style={headStyle}>Categoría</div>
-              <div style={headStyle}>Descripción</div>
-              <div style={headStyle}>Monto</div>
-              <div style={headStyle}>Estado</div>
-              <div style={headStyle}></div>
-
-              {gastosPagina.map((gasto) => {
-                const badge = ESTADO_LABELS[gasto.estado_pago];
-                return (
-                  <>
-                    <div key={`id-${gasto.id}`} style={cellStyle}>
-                      <button type="button" onClick={() => handleAbrirEdicion(gasto)} style={idLinkStyle}>
-                        #{gasto.id}
-                      </button>
-                    </div>
-                    <div key={`fecha-${gasto.id}`} style={cellStyle}>
-                      {gasto.fecha_gasto}
-                      <div style={{ fontSize: 11, color: '#a89999' }}>
-                        Creado: {new Date(gasto.fecha_creacion).toLocaleDateString('es-VE')}
-                      </div>
-                    </div>
-                    <div key={`cat-${gasto.id}`} style={cellStyle}>{gasto.categoria_nombre}</div>
-                    <div key={`desc-${gasto.id}`} style={cellPrimaryStyle}>
-                      <div>{gasto.descripcion}</div>
-                      {gasto.proveedor_nombre ? <div style={{ fontSize: 11, color: '#a89999' }}>{gasto.proveedor_nombre}</div> : null}
-                      {gasto.ultima_correccion ? (
-                        <div style={{ fontSize: 11, color: '#a89999' }} title={gasto.ultima_correccion.motivo}>
-                          Editado por {gasto.ultima_correccion.corregido_por || '—'}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div key={`monto-${gasto.id}`} style={cellStyle}>
-                      {formatUsdBs(gasto.monto, tasaDeRegistro(gasto, tasaCambio))}
-                      {gasto.estado_pago !== 'pagado' ? (
-                        <div style={{ fontSize: 11, color: '#ffcf7d' }}>Saldo: {formatSaldoUsdBs(gasto)}</div>
-                      ) : null}
-                    </div>
-                    <div key={`estado-${gasto.id}`} style={cellStyle}>
-                      <span style={countBadgeStyle(badge)}>{badge?.label || gasto.estado_pago}</span>
-                    </div>
-                    <div key={`accion-${gasto.id}`} style={{ ...cellStyle, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {gasto.estado_pago !== 'pagado' ? (
-                        <button type="button" onClick={() => handleAbrirAbono(gasto)} style={secondaryButtonStyle}>
-                          {abonandoId === gasto.id ? 'Cerrar' : 'Abonar'}
-                        </button>
-                      ) : null}
-                      {gasto.estado_pago !== 'pendiente' ? (
-                        <button type="button" onClick={() => handleVerAbonos(gasto)} style={secondaryButtonStyle}>
-                          {verAbonosId === gasto.id ? 'Ocultar' : 'Ver abonos'}
-                        </button>
-                      ) : null}
-                    </div>
-                    {abonandoId === gasto.id ? (
-                      <div key={`abono-${gasto.id}`} style={{ gridColumn: '1 / -1' }}>
-                        <form onSubmit={(e) => handleRegistrarAbono(e, gasto.id)} style={abonoFormStyle(isMobile)}>
-                          <input type="number" min="0.01" step="0.01" placeholder="Monto del abono" value={montoAbono} onChange={(e) => setMontoAbono(e.target.value)} style={inputStyle} required />
-                          <select value={metodoAbono || (metodosPago[0] && metodosPago[0].id) || ''} onChange={(e) => setMetodoAbono(Number(e.target.value))} style={inputStyle} className="admin-dark-select">
-                            {metodosPago.map((m) => (
-                              <option key={m.id} value={m.id}>{m.nombre}</option>
-                            ))}
-                          </select>
-                          <button type="submit" style={primaryButtonStyle} disabled={savingAbono}>
-                            {savingAbono ? 'Registrando...' : 'Registrar abono'}
-                          </button>
-                        </form>
-                      </div>
-                    ) : null}
-                    {verAbonosId === gasto.id ? (
-                      <div key={`abonos-list-${gasto.id}`} style={{ gridColumn: '1 / -1', display: 'grid', gap: 6, padding: '6px 0' }}>
-                        {loadingAbonosDetalle ? <div style={{ fontSize: 12, color: '#c8bbbb' }}>Cargando abonos...</div> : null}
-                        {!loadingAbonosDetalle && abonosDetalle.map((abono) => (
-                          <div key={abono.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#e8dede' }}>
-                            <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              {formatUsdBs(abono.monto, tasaDeRegistro(abono, tasaCambio))}
-                              {onVerComprobante ? (
-                                <button type="button" onClick={() => onVerComprobante('gasto', gasto.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">🖨</button>
-                              ) : null}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-
-        {gastos.length > FILAS_POR_PAGINA ? (
-          <div style={paginacionRowStyle(isMobile)}>
-            <div style={paginacionInfoStyle}>
-              Mostrando {paginaActual * FILAS_POR_PAGINA + 1}–{Math.min((paginaActual + 1) * FILAS_POR_PAGINA, gastos.length)} de {gastos.length} gasto(s)
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button
-                type="button"
-                onClick={() => setPagina((p) => Math.max(0, p - 1))}
-                disabled={paginaActual === 0}
-                style={paginacionButtonStyle(paginaActual === 0)}
-              >
-                ← Anteriores
-              </button>
-              <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
-              <button
-                type="button"
-                onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
-                disabled={paginaActual >= totalPaginas - 1}
-                style={paginacionButtonStyle(paginaActual >= totalPaginas - 1)}
-              >
-                Siguientes →
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      {editandoGastoId ? (
-        <EditarGastoModal
-          loading={editLoading}
-          error={editError}
-          detalle={editDetalle}
-          monto={editMonto}
-          setMonto={setEditMonto}
-          fecha={editFecha}
-          setFecha={setEditFecha}
-          metodoPagoId={editMetodoPagoId}
-          setMetodoPagoId={setEditMetodoPagoId}
-          metodosPago={metodosPago}
-          pidiendoMotivo={pidiendoMotivo}
-          motivo={motivoEdicion}
-          setMotivo={setMotivoEdicion}
-          motivoError={motivoError}
-          saving={editSaving}
-          onPedirMotivo={handlePedirMotivo}
-          onCancelarMotivo={() => setPidiendoMotivo(false)}
-          onConfirmar={handleConfirmarEdicion}
-          onClose={cerrarEdicion}
-        />
-      ) : null}
     </section>
-  );
-}
-
-function EditarGastoModal({
-  loading, error, detalle, monto, setMonto, fecha, setFecha,
-  metodoPagoId, setMetodoPagoId, metodosPago, pidiendoMotivo,
-  motivo, setMotivo, motivoError, saving, onPedirMotivo, onCancelarMotivo, onConfirmar, onClose,
-}) {
-  const abonos = detalle && Array.isArray(detalle.abonos) ? detalle.abonos : [];
-  const abonoUnico = abonos.length === 1 ? abonos[0] : null;
-  const tieneVariosAbonos = abonos.length > 1;
-
-  return (
-    <div style={modalBackdropStyle} onClick={pidiendoMotivo || saving ? undefined : onClose}>
-      <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
-        <div style={modalHeaderStyle}>
-          <div style={modalTitleStyle}>
-            {pidiendoMotivo ? 'Motivo del cambio' : `Editar gasto ${detalle ? `#${detalle.id}` : ''}`}
-          </div>
-          <button type="button" onClick={onClose} style={modalCloseButtonStyle} disabled={saving}>✕</button>
-        </div>
-
-        {loading ? <div style={emptyStyle}>Cargando gasto...</div> : null}
-
-        {!loading && detalle && !pidiendoMotivo ? (
-          <form onSubmit={onPedirMotivo} style={{ display: 'grid', gap: 12 }}>
-            <div style={{ fontSize: 13, color: '#c8bbbb' }}>
-              {detalle.categoria_nombre} — {detalle.descripcion}
-            </div>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Monto ($)</span>
-              <input type="number" min="0.01" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} style={inputStyle} required />
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Fecha del gasto</span>
-              <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={inputStyle} required />
-            </label>
-            <div style={fieldStyle}>
-              <span style={labelStyle}>Método de pago</span>
-              {abonoUnico ? (
-                <>
-                  <select value={metodoPagoId} onChange={(e) => setMetodoPagoId(e.target.value)} style={inputStyle} className="admin-dark-select">
-                    {metodosPago.map((m) => (
-                      <option key={m.id} value={m.id}>{m.nombre} ({m.moneda === 'VES' ? 'Bs' : '$'})</option>
-                    ))}
-                  </select>
-                  <div style={{ fontSize: 11.5, color: '#a89999', marginTop: 4 }}>
-                    Si cambias a una cuenta en otra moneda, el monto se muestra convertido con la tasa vigente — no se pierde ni se duplica.
-                  </div>
-                </>
-              ) : (
-                <div style={{ fontSize: 12, color: '#a89999' }}>
-                  {tieneVariosAbonos
-                    ? 'Este gasto tiene varios abonos — el método de pago no se puede cambiar aquí.'
-                    : 'Este gasto aún no tiene un abono registrado — el método de pago se define al pagarlo.'}
-                </div>
-              )}
-            </div>
-
-            {error ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{error}</div> : null}
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" onClick={onClose} style={secondaryButtonStyle}>Cancelar</button>
-              <button type="submit" style={primaryButtonStyle}>Guardar cambios</button>
-            </div>
-          </form>
-        ) : null}
-
-        {pidiendoMotivo ? (
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ fontSize: 13, color: '#c8bbbb' }}>
-              Motivo del ajuste *
-            </div>
-            <textarea
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value)}
-              style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }}
-              placeholder="Ej: El monto real de la factura era distinto al registrado."
-              autoFocus
-            />
-            {motivoError ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{motivoError}</div> : null}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" onClick={onCancelarMotivo} style={secondaryButtonStyle} disabled={saving}>Volver</button>
-              <button type="button" onClick={onConfirmar} style={primaryButtonStyle} disabled={saving}>
-                {saving ? 'Guardando...' : 'Confirmar y guardar'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6, maxWidth: 760 };
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
 const sectionTitleStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
-
 const formGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'end' });
 const fieldStyle = { display: 'grid', gap: 6 };
 const labelStyle = { color: '#f0b4b4', fontSize: 12.5, fontWeight: 700 };
 const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '9px 10px', color: '#fff', fontSize: 13 };
-
 const toggleRowStyle = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const toggleButtonStyle = (active) => ({
   border: active ? '1px solid rgba(80, 200, 130, 0.5)' : '1px solid rgba(255,255,255,0.14)',
@@ -903,44 +312,8 @@ const categoriaChipStyle = (activo) => ({
   borderRadius: 999, padding: '6px 12px', background: activo ? 'rgba(255,255,255,0.04)' : 'rgba(255,98,98,0.1)',
   color: activo ? '#fff' : '#ffb0b0', fontSize: 12.5, cursor: 'pointer',
 });
-
-const filtrosRowStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0,1fr))', gap: 10 });
-
-const categoriaTotalChipStyle = { display: 'inline-flex', padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };
-
-const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: '70px 100px 140px minmax(180px,1.4fr) minmax(140px,1fr) 110px 170px', gap: '10px 12px', alignItems: 'center', minWidth: 960 };
-const idLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
-
-const paginacionRowStyle = (isMobile) => ({
-  display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
-});
-const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
-const paginacionButtonStyle = (disabled) => ({
-  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
-  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
-  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
-});
-
-const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
-const modalCardStyle = { width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 14 };
-const modalHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
-const modalCloseButtonStyle = { border: 'none', background: 'rgba(255,255,255,0.08)', color: '#fff', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
-const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
-const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
-const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };
-const countBadgeStyle = (badge) => ({
-  display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 999,
-  fontSize: 11, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase',
-  color: badge ? badge.color : '#fff', background: badge ? badge.background : 'rgba(255,255,255,0.08)',
-});
-const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto', gap: 8, padding: '10px 0' });
-
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
-
-const miniPrintButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
+const headerRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' };
 
 export default AnalystGastosPage;

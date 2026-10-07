@@ -2467,3 +2467,277 @@ class AbonoCompraTasaPropiaTests(TestCase):
         final = self.client.get(f'/api/admin/compras/{compra.id}/').json()['compra']
         self.assertEqual(final['estado_pago'], 'pagada')
         self.assertEqual(final['total_bs'], '48520.00')  # 28.920 + 19.600
+
+
+# ---------------------------------------------------------------------------
+# Reporte de margen de ganancia por producto (en vivo)
+# ---------------------------------------------------------------------------
+class MargenProductosReporteTests(TestCase):
+    def setUp(self):
+        from varagrill.models import VGCategoriaProducto, VGConfiguracionCosteo, VGIngrediente, VGProducto, VGRecetaProducto
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='mp_admin', password='claveAdmin123', cedula='94000001', email='mp_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='mp_cajera', password='claveCajera123', cedula='94000002', email='mp_cajera@varagrill.test', id_role=cajera_role,
+        )
+        config = VGConfiguracionCosteo.obtener_config()
+        config.rendimiento_receta_pct = Decimal('50')
+        config.margen_ganancia_defecto_pct = Decimal('60')
+        config.save()
+        self.categoria = VGCategoriaProducto.objects.create(nombre='Entradas MP test')
+        self.ingrediente = VGIngrediente.objects.create(nombre='Maiz MP test', unidad_medida='g', costo_unitario='0.98')
+        self.producto = VGProducto.objects.create(nombre='Maiz Dorado MP test', categoria=self.categoria, precio_venta='4.00')
+        VGRecetaProducto.objects.create(producto=self.producto, ingrediente=self.ingrediente, cantidad_requerida='1')
+        self.client.force_login(self.admin)
+
+    def fila(self, producto=None):
+        r = self.client.get('/api/admin/reportes/margen-productos/')
+        self.assertEqual(r.status_code, 200, r.content)
+        producto = producto or self.producto
+        return next(f for f in r.json()['productos'] if f['producto_id'] == producto.id)
+
+    def test_calcula_las_columnas_del_reporte(self):
+        f = self.fila()
+        self.assertEqual(Decimal(f['costo_receta']), Decimal('0.98'))
+        self.assertEqual(Decimal(f['margen_produccion_pct']), Decimal('50'))
+        self.assertEqual(Decimal(f['costo_a_tomar']), Decimal('1.47'))
+        self.assertEqual(Decimal(f['margen_ganancia_pct']), Decimal('60'))
+        self.assertFalse(f['margen_ganancia_propio'])
+        self.assertEqual(Decimal(f['precio_sugerido']), Decimal('2.35'))   # 1.47 x 1.6 = 2.352
+        self.assertEqual(Decimal(f['precio_real']), Decimal('4.00'))
+        self.assertEqual(Decimal(f['ganancia']), Decimal('2.53'))          # 4 - 1.47
+        self.assertEqual(Decimal(f['ganancia_pct']), Decimal('172.11'))    # 2.53 / 1.47
+        self.assertTrue(f['tiene_receta'])
+
+    def test_el_margen_propio_del_producto_manda_sobre_el_defecto(self):
+        self.producto.margen_ganancia_pct = Decimal('100')
+        self.producto.save()
+        f = self.fila()
+        self.assertTrue(f['margen_ganancia_propio'])
+        self.assertEqual(Decimal(f['margen_ganancia_pct']), Decimal('100'))
+        self.assertEqual(Decimal(f['precio_sugerido']), Decimal('2.94'))   # 1.47 x 2
+
+    def test_si_cambia_el_costo_del_ingrediente_cambia_la_fila(self):
+        self.ingrediente.costo_unitario = Decimal('1.40')
+        self.ingrediente.save()
+        f = self.fila()
+        self.assertEqual(Decimal(f['costo_receta']), Decimal('1.40'))
+        self.assertEqual(Decimal(f['costo_a_tomar']), Decimal('2.10'))
+        self.assertEqual(Decimal(f['precio_sugerido']), Decimal('3.36'))
+        self.assertEqual(Decimal(f['ganancia']), Decimal('1.90'))
+
+    def test_si_cambia_la_cantidad_de_la_receta_cambia_la_fila(self):
+        componente = self.producto.receta.first()
+        componente.cantidad_requerida = Decimal('2')
+        componente.save()
+        self.assertEqual(Decimal(self.fila()['costo_receta']), Decimal('1.96'))
+
+    def test_el_margen_de_produccion_tambien_aplica_a_productos_ligados_a_una_subreceta(self):
+        from varagrill.models import VGPreparacion, VGProducto, VGRecetaPreparacion
+        sub = VGPreparacion.objects.create(nombre='Salsa MP test', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=self.ingrediente, cantidad_requerida='1')
+        ligado = VGProducto.objects.create(nombre='Salsa vendida MP test', categoria=self.categoria, precio_venta='3.00', subreceta_vinculada=sub)
+        f = self.fila(ligado)
+        self.assertEqual(Decimal(f['margen_produccion_pct']), Decimal('50'))
+        self.assertEqual(Decimal(f['costo_receta']), Decimal('0.98'))
+        self.assertEqual(Decimal(f['costo_a_tomar']), Decimal('1.47'))
+        # Si cambia el ingrediente de esa subreceta, cambia tambien.
+        self.ingrediente.costo_unitario = Decimal('2')
+        self.ingrediente.save()
+        self.assertEqual(Decimal(self.fila(ligado)['costo_a_tomar']), Decimal('3.00'))
+
+    def test_subir_o_bajar_el_margen_de_produccion_mueve_el_costo_a_tomar(self):
+        from varagrill.models import VGConfiguracionCosteo
+        config = VGConfiguracionCosteo.obtener_config()
+        for pct, esperado in (('100', '1.96'), ('20', '1.176'), ('0', '0.98')):
+            config.rendimiento_receta_pct = Decimal(pct)
+            config.save()
+            f = self.fila()
+            self.assertEqual(Decimal(f['margen_produccion_pct']), Decimal(pct))
+            self.assertEqual(Decimal(f['costo_receta']), Decimal('0.98'))   # el costo puro no se mueve
+            self.assertEqual(Decimal(f['costo_a_tomar']).quantize(Decimal('0.001')), Decimal(esperado))
+
+    def test_producto_sin_receta_se_marca_y_no_inventa_porcentaje(self):
+        from varagrill.models import VGProducto
+        vacio = VGProducto.objects.create(nombre='Sin receta MP test', categoria=self.categoria, precio_venta='5.00')
+        f = self.fila(vacio)
+        self.assertFalse(f['tiene_receta'])
+        self.assertEqual(Decimal(f['costo_a_tomar']), Decimal('0'))
+        self.assertIsNone(f['ganancia_pct'])
+
+    def test_la_lista_de_productos_trae_el_costo_de_receta_en_vivo(self):
+        from varagrill.models import VGConfiguracionCosteo, VGPreparacion, VGProducto, VGRecetaPreparacion
+        # El margen de produccion NO entra en esta columna: es el costo de la receta.
+        self.assertEqual(VGConfiguracionCosteo.obtener_config().rendimiento_receta_pct, Decimal('50'))
+        sub = VGPreparacion.objects.create(nombre='Salsa lista MP test', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=self.ingrediente, cantidad_requerida='1')
+        ligado = VGProducto.objects.create(nombre='Con subreceta lista MP test', categoria=self.categoria, precio_venta='3.00', subreceta_vinculada=sub)
+        vacio = VGProducto.objects.create(nombre='Sin nada lista MP test', categoria=self.categoria, precio_venta='5.00')
+        cero_ing = type(self.ingrediente).objects.create(nombre='Agua MP test', unidad_medida='g', costo_unitario='0')
+        en_cero = VGProducto.objects.create(nombre='Receta en cero lista MP test', categoria=self.categoria, precio_venta='2.00')
+        type(self.producto.receta.first()).objects.create(producto=en_cero, ingrediente=cero_ing, cantidad_requerida='1')
+
+        def filas():
+            r = self.client.get('/api/admin/productos/')
+            self.assertEqual(r.status_code, 200, r.content)
+            return {p['id']: p for p in r.json()['products']}
+
+        f = filas()
+        self.assertTrue(f[self.producto.id]['tiene_receta'])
+        self.assertEqual(Decimal(f[self.producto.id]['costo_receta']), Decimal('0.98'))
+        self.assertEqual(Decimal(f[self.producto.id]['costo_con_margen_produccion']), Decimal('1.47'))   # 0.98 x 1.5
+        self.assertTrue(f[ligado.id]['tiene_receta'])
+        self.assertEqual(Decimal(f[ligado.id]['costo_receta']), Decimal('0.98'))
+        self.assertEqual(Decimal(f[ligado.id]['costo_con_margen_produccion']), Decimal('1.47'))   # tambien los de subreceta
+        self.assertFalse(f[vacio.id]['tiene_receta'])
+        self.assertEqual(Decimal(f[vacio.id]['costo_receta']), Decimal('0'))
+        self.assertTrue(f[en_cero.id]['tiene_receta'])
+        self.assertEqual(Decimal(f[en_cero.id]['costo_receta']), Decimal('0'))
+        # En vivo: si cambia el ingrediente, cambia la lista.
+        self.ingrediente.costo_unitario = Decimal('1.20')
+        self.ingrediente.save()
+        f = filas()
+        self.assertEqual(Decimal(f[self.producto.id]['costo_receta']), Decimal('1.20'))
+        self.assertEqual(Decimal(f[ligado.id]['costo_receta']), Decimal('1.20'))
+        self.assertEqual(Decimal(f[self.producto.id]['costo_con_margen_produccion']), Decimal('1.80'))
+        # Y si cambia el margen de produccion, cambia la segunda columna pero no la primera.
+        config = VGConfiguracionCosteo.obtener_config()
+        config.rendimiento_receta_pct = Decimal('10')
+        config.save()
+        f = filas()
+        self.assertEqual(Decimal(f[self.producto.id]['costo_receta']), Decimal('1.20'))
+        self.assertEqual(Decimal(f[self.producto.id]['costo_con_margen_produccion']), Decimal('1.32'))
+
+    def test_solo_administradores_y_solo_lectura(self):
+        self.assertEqual(self.client.post('/api/admin/reportes/margen-productos/').status_code, 405)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get('/api/admin/reportes/margen-productos/').status_code, 401)
+
+
+# ---------------------------------------------------------------------------
+# Reporte DETALLADO de margen de ganancia (venta por venta): costo + margen de produccion y totales
+# ---------------------------------------------------------------------------
+class MargenDetalladoReporteTests(TestCase):
+    def setUp(self):
+        from varagrill.models import VGCategoriaProducto, VGConfiguracionCosteo, VGIngrediente, VGPreparacion, VGProducto, VGRecetaPreparacion, VGRecetaProducto
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='md_admin', password='claveAdmin123', cedula='95000001', email='md_admin@varagrill.test', id_role=admin_role,
+        )
+        config = VGConfiguracionCosteo.obtener_config()
+        config.rendimiento_receta_pct = Decimal('50')
+        config.save()
+        categoria = VGCategoriaProducto.objects.create(nombre='Cat MD test')
+        self.ingrediente = VGIngrediente.objects.create(nombre='Maiz MD test', unidad_medida='g', costo_unitario='0.98')
+        self.receta_producto = VGProducto.objects.create(nombre='Plato con receta MD test', categoria=categoria, precio_venta='4.00')
+        VGRecetaProducto.objects.create(producto=self.receta_producto, ingrediente=self.ingrediente, cantidad_requerida='1')
+        sub = VGPreparacion.objects.create(nombre='Subreceta MD test', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=self.ingrediente, cantidad_requerida='1')
+        self.sub_producto = VGProducto.objects.create(
+            nombre='Plato con subreceta MD test', categoria=categoria, precio_venta='4.00', subreceta_vinculada=sub,
+        )
+        self.client.force_login(self.admin)
+
+    def venta(self, producto, cantidad=1, costo=None, margen=None, precio='4.00'):
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='local', estado='pagado', subtotal=precio, total=precio)
+        return VGDetallePedido.objects.create(
+            pedido=pedido, producto=producto, cantidad=cantidad, precio_unitario=precio, estado='entregado',
+            costo_unitario_venta=Decimal(costo) if costo is not None else None,
+            margen_produccion_pct_venta=Decimal(margen) if margen is not None else None,
+        )
+
+    def reporte(self, desde=None, hasta=None):
+        hoy = timezone.localdate().isoformat()
+        r = self.client.get(f'/api/admin/reportes/margen-ganancia/?desde={desde or hoy}&hasta={hasta or hoy}')
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def fila(self, data, producto):
+        seccion = next(s for s in data['secciones'] if s['producto_id'] == producto.id)
+        return seccion['filas'][0]
+
+    def test_venta_de_receta_con_margen_congelado_separa_el_costo_puro(self):
+        # El costo guardado (1.47) ya trae el 50% sumado: el costo puro es 0.98.
+        self.venta(self.receta_producto, cantidad=2, costo='1.47', margen='50')
+        f = self.fila(self.reporte(), self.receta_producto)
+        self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))
+        self.assertEqual(Decimal(f['costo']), Decimal('1.96'))
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('2.94'))
+        self.assertEqual(Decimal(f['ganancia_monto']), Decimal('5.06'))      # 8.00 - 2.94
+        self.assertFalse(f['margen_estimado'])
+        self.assertFalse(f['costo_estimado'])
+
+    def test_venta_de_subreceta_no_trae_margen_dentro_y_se_le_suma(self):
+        self.venta(self.sub_producto, costo='0.98', margen='50')
+        f = self.fila(self.reporte(), self.sub_producto)
+        self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))
+        self.assertEqual(Decimal(f['ganancia_monto']), Decimal('2.53'))
+
+    def test_el_margen_congelado_no_cambia_si_despues_cambia_la_configuracion(self):
+        from varagrill.models import VGConfiguracionCosteo
+        self.venta(self.receta_producto, costo='1.47', margen='50')
+        config = VGConfiguracionCosteo.obtener_config()
+        config.rendimiento_receta_pct = Decimal('200')
+        config.save()
+        f = self.fila(self.reporte(), self.receta_producto)
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))
+        self.assertFalse(f['margen_estimado'])
+
+    def test_venta_vieja_sin_margen_guardado_usa_el_de_hoy_y_se_marca(self):
+        self.venta(self.receta_producto, costo='1.00', margen=None)
+        f = self.fila(self.reporte(), self.receta_producto)
+        self.assertEqual(Decimal(f['costo_unitario']), Decimal('1.00'))
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.50'))
+        self.assertTrue(f['margen_estimado'])
+        self.assertFalse(f['costo_estimado'])
+
+    def test_venta_sin_costo_congelado_se_estima_con_el_costo_puro_de_hoy(self):
+        self.venta(self.receta_producto, costo=None, margen=None)
+        f = self.fila(self.reporte(), self.receta_producto)
+        self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))
+        self.assertTrue(f['costo_estimado'])
+        self.assertTrue(f['margen_estimado'])
+
+    def test_los_totales_suman_todas_las_ventas_aunque_el_plato_se_repita(self):
+        self.venta(self.receta_producto, cantidad=1, costo='1.47', margen='50')
+        self.venta(self.receta_producto, cantidad=2, costo='1.47', margen='50')
+        self.venta(self.sub_producto, cantidad=1, costo='0.98', margen='50')
+        data = self.reporte()
+        t = data['totales']
+        self.assertEqual(data['total_lineas'], 3)
+        self.assertEqual(Decimal(t['ingreso_total']), Decimal('16.00'))            # 4 + 8 + 4
+        self.assertEqual(Decimal(t['costo_total']), Decimal('3.92'))               # 0.98 x 4 unidades
+        self.assertEqual(Decimal(t['costo_con_margen_total']), Decimal('5.88'))    # 1.47 x 4 unidades
+        self.assertEqual(Decimal(t['ganancia_monto']), Decimal('10.12'))           # 16 - 5.88
+        seccion = next(s for s in data['secciones'] if s['producto_id'] == self.receta_producto.id)
+        self.assertEqual(seccion['total_lineas'], 2)
+        self.assertEqual(Decimal(seccion['total_costo_con_margen']), Decimal('4.41'))   # 3 platos x 1.47
+
+    def test_respeta_las_fechas_elegidas(self):
+        detalle = self.venta(self.receta_producto, costo='1.47', margen='50')
+        ayer = timezone.now() - timedelta(days=3)
+        VGPedido.objects.filter(pk=detalle.pedido_id).update(fecha_creacion=ayer)
+        hoy = timezone.localdate()
+        self.assertEqual(self.reporte()['total_lineas'], 0)
+        rango = self.reporte(desde=(hoy - timedelta(days=5)).isoformat(), hasta=hoy.isoformat())
+        self.assertEqual(rango['total_lineas'], 1)
+
+    def test_al_cobrar_se_congela_el_margen_de_produccion_de_ese_dia(self):
+        from varagrill.api_views import _load_preparation_cost_map, _snapshot_costo_venta_detalles
+        from varagrill.models import VGConfiguracionCosteo, VGIngrediente
+        detalle = self.venta(self.receta_producto, costo=None, margen=None)
+        ingredient_costs = {i.id: i.costo_unitario for i in VGIngrediente.objects.all()}
+        _snapshot_costo_venta_detalles(detalle.pedido, ingredient_costs, _load_preparation_cost_map())
+        detalle.refresh_from_db()
+        self.assertEqual(detalle.costo_unitario_venta, Decimal('1.4700'))
+        self.assertEqual(detalle.margen_produccion_pct_venta, Decimal('50.00'))
+        # Y al volver a leer el reporte, el costo puro se recupera sin contar el margen dos veces.
+        f = self.fila(self.reporte(), self.receta_producto)
+        self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))
+        self.assertFalse(f['margen_estimado'])

@@ -807,6 +807,7 @@ def disponibilidad_por_cuenta(fecha):
         return monto * tasa if tasa is not None else None
 
     saldo_bs_por_metodo = {}
+    saldo_bs_incompleto = set()
     movimientos_bs = (
         VGPago.objects.filter(fecha_pago__date__lte=fecha, estado='completado')
         .select_related('metodo_pago', 'nota_entrega', 'factura')
@@ -829,6 +830,8 @@ def disponibilidad_por_cuenta(fecha):
             tasa = tasa_para_fecha(timezone.localtime(pago.fecha_pago).date())
         if tasa is not None:
             saldo_bs_por_metodo[pago.metodo_pago_id] = saldo_bs_por_metodo.get(pago.metodo_pago_id, Decimal('0')) + _monto_bs(pago.monto, tasa)
+        else:
+            saldo_bs_incompleto.add(pago.metodo_pago_id)
 
     pos_ids = [metodo.id for metodo in metodos if metodo.es_punto_venta]
     resumen_pos = _resumen_lotes_pos(fecha, pos_ids)
@@ -842,6 +845,8 @@ def disponibilidad_por_cuenta(fecha):
         tasa = ingreso.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(ingreso.fecha_creacion).date())
         if tasa is not None:
             saldo_bs_por_metodo[ingreso.metodo_pago_id] = saldo_bs_por_metodo.get(ingreso.metodo_pago_id, Decimal('0')) + _monto_bs(ingreso.monto, tasa)
+        else:
+            saldo_bs_incompleto.add(ingreso.metodo_pago_id)
 
     for abono in VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha).select_related('metodo_pago'):
         if abono.metodo_pago.moneda != 'VES':
@@ -849,6 +854,8 @@ def disponibilidad_por_cuenta(fecha):
         tasa = abono.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(abono.fecha_pago).date())
         if tasa is not None:
             saldo_bs_por_metodo[abono.metodo_pago_id] = saldo_bs_por_metodo.get(abono.metodo_pago_id, Decimal('0')) - _monto_bs(abono.monto, tasa)
+        else:
+            saldo_bs_incompleto.add(abono.metodo_pago_id)
 
     for abono in VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha).select_related('metodo_pago'):
         if abono.metodo_pago.moneda != 'VES':
@@ -856,14 +863,19 @@ def disponibilidad_por_cuenta(fecha):
         tasa = abono.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(abono.fecha_pago).date())
         if tasa is not None:
             saldo_bs_por_metodo[abono.metodo_pago_id] = saldo_bs_por_metodo.get(abono.metodo_pago_id, Decimal('0')) - _monto_bs(abono.monto, tasa)
+        else:
+            saldo_bs_incompleto.add(abono.metodo_pago_id)
 
-    primer_efectivo_id = next((metodo.id for metodo in metodos if metodo.es_efectivo), None)
+    primer_efectivo = next((metodo for metodo in metodos if metodo.es_efectivo), None)
+    primer_efectivo_id = primer_efectivo.id if primer_efectivo else None
     for consignacion in VGConsignacionCaja.objects.filter(fecha__lte=fecha):
-        if primer_efectivo_id is None:
+        if primer_efectivo is None:
             break
         tasa = tasa_para_fecha(consignacion.fecha)
         if tasa is not None:
-            saldo_bs_por_metodo[primer_efectivo_id] = saldo_bs_por_metodo.get(primer_efectivo_id, Decimal('0')) - _monto_bs(consignacion.monto, tasa)
+            saldo_bs_por_metodo[primer_efectivo.id] = saldo_bs_por_metodo.get(primer_efectivo.id, Decimal('0')) - _monto_bs(consignacion.monto, tasa)
+        elif primer_efectivo.moneda == 'VES':
+            saldo_bs_incompleto.add(primer_efectivo.id)
 
     for transferencia in (
         VGTransferenciaCuenta.objects.filter(fecha__lte=fecha)
@@ -948,7 +960,10 @@ def disponibilidad_por_cuenta(fecha):
                 ingresos + ingresos_extra + transferencias_entrantes
                 - gastos - compras - transferencias_salientes - consignado
             ),
-            'saldo_disponible_bs': saldo_bs_por_metodo.get(metodo.id) if metodo.moneda == 'VES' else None,
+            'saldo_disponible_bs': (
+                None if metodo.id in saldo_bs_incompleto
+                else saldo_bs_por_metodo.get(metodo.id, Decimal('0'))
+            ) if metodo.moneda == 'VES' else None,
             'es_punto_venta': metodo.es_punto_venta,
             **(fila_pos_a_cuenta(fila_pos) if fila_pos is not None else fila_pos_a_cuenta(None)),
         })

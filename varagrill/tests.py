@@ -1631,6 +1631,17 @@ class LotePOSCicloTests(LotesPOSBase):
 
 
 class AcreditacionLotePOSTests(LotesPOSBase):
+    def test_metodo_vacio_del_mismo_banco_no_oculta_el_saldo_en_bs(self):
+        metodo_sin_movimientos = VGMetodoPago.objects.create(
+            nombre='Transferencia Banesco', moneda='VES', cuenta_bancaria='Banesco',
+        )
+
+        banco = self.saldo_banco('Banesco')
+
+        self.assertEqual(banco['saldo_disponible_bs'], Decimal('0'))
+        metodo = next(m for m in banco['metodos'] if m['id'] == metodo_sin_movimientos.id)
+        self.assertEqual(metodo['saldo_disponible_bs'], Decimal('0'))
+
     def test_disponibilidad_solo_suma_cuando_se_acredita_el_lote(self):
         lote = self.pago('100').lote_pos
 

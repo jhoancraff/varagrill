@@ -3,6 +3,7 @@ import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
 import ReporteNotasCreditoCompra from './ReporteNotasCreditoCompra';
+import { RangoFechas } from './FiltroFechas';
 
 // `bsPreciso`, cuando viene, es el total_bs que ya calculó el backend (para
 // una compra con total_bs_factura, es el monto EXACTO que el analista
@@ -392,28 +393,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         <>
 
       {vista === 'pagadas' ? (
-        <div style={historialFiltrosStyle(isMobile)}>
-          <label style={dateLabelStyle}>
-            Desde
-            <input
-              type="date"
-              value={historialDesde}
-              max={historialHasta}
-              onChange={(event) => setHistorialDesde(event.target.value)}
-              style={dateInputStyle}
-            />
-          </label>
-          <label style={dateLabelStyle}>
-            Hasta
-            <input
-              type="date"
-              value={historialHasta}
-              max={todayIso()}
-              onChange={(event) => setHistorialHasta(event.target.value)}
-              style={dateInputStyle}
-            />
-          </label>
-        </div>
+        <RangoFechas
+          desde={historialDesde}
+          hasta={historialHasta}
+          onChange={(rango) => { setHistorialDesde(rango.desde); setHistorialHasta(rango.hasta); }}
+        />
       ) : null}
 
       <div style={filtrosBusquedaRowStyle(isMobile)}>
@@ -824,9 +808,6 @@ const tabButtonStyle = (activo) => ({
   background: activo ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
   color: activo ? '#ffb0b0' : '#d2c4c4',
 });
-const historialFiltrosStyle = (isMobile) => ({ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row' });
-const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const monedaToggleStyle = { display: 'flex', gap: 8 };
 const monedaToggleButtonStyle = (activo) => ({
   flex: 1, border: activo ? 'none' : '1px solid rgba(255,255,255,0.14)', borderRadius: 12, padding: '9px 10px',

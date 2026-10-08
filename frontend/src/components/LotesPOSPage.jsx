@@ -9,6 +9,7 @@ import {
   imprimirLoteEnNavegador,
   postLotePos,
 } from '../utils/lotesPos';
+import { RangoFechas } from './FiltroFechas';
 
 function todayIso() {
   const now = new Date();
@@ -158,12 +159,11 @@ function LotesPOSPage({ isMobile, onBack }) {
 
       <section style={panelStyle}>
         <div className="no-print" style={filtrosStyle(isMobile)}>
-          <label style={fieldStyle}>Desde
-            <input type="date" value={desde} max={hasta} onChange={(event) => setDesde(event.target.value)} style={inputStyle} />
-          </label>
-          <label style={fieldStyle}>Hasta
-            <input type="date" value={hasta} min={desde} max={todayIso()} onChange={(event) => setHasta(event.target.value)} style={inputStyle} />
-          </label>
+          <RangoFechas
+            desde={desde}
+            hasta={hasta}
+            onChange={(rango) => { setDesde(rango.desde); setHasta(rango.hasta); }}
+          />
           <label style={fieldStyle}>Estado
             <select value={estado} onChange={(event) => setEstado(event.target.value)} style={inputStyle} className="admin-dark-select">
               {ESTADOS.map(([valor, etiqueta]) => <option key={valor} value={valor}>{etiqueta}</option>)}

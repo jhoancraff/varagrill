@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
 import { formatBsRaw } from '../utils/currency';
+import { DiaFecha } from './FiltroFechas';
 
 function todayIso() {
   const now = new Date();
@@ -119,15 +120,7 @@ function ReporteDevolucionesPage({ isMobile, onBack, onArmarCanje }) {
             ? `Notas de crédito emitidas entre ${rango.desde} y ${rango.hasta}.`
             : 'Notas de crédito emitidas el'}
           {!rango ? (
-            <label style={{ marginLeft: 8 }}>
-              <input
-                type="date"
-                value={fecha}
-                max={todayIso()}
-                onChange={(event) => setFecha(event.target.value)}
-                style={dateInputStyle}
-              />
-            </label>
+            <span style={{ display: 'block', marginTop: 10 }}><DiaFecha value={fecha} onChange={setFecha} etiqueta="Fecha de emisión" /></span>
           ) : null}
         </p>
       </div>
@@ -336,7 +329,6 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
 const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', display: 'flex', alignItems: 'center', flexWrap: 'wrap' };
-const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '8px 10px', color: '#fff' };
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };

@@ -67,6 +67,12 @@ select {
   color-scheme: dark;
 }
 
+/* Los campos de fecha de los formularios también se dibujan en tema oscuro: así el
+ * icono del calendario se ve en vez de quedar negro sobre negro. */
+input[type="date"] {
+  color-scheme: dark;
+}
+
 select option {
   background-color: #17100f;
   color: #fff4f4;

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { formatMontoDocumento } from '../utils/currency';
+import { RangoFechas } from './FiltroFechas';
 
 function todayIso() {
   const now = new Date();
@@ -104,22 +105,11 @@ function HistorialIngresosNoFacturadosPage({ isMobile, onBack }) {
       </div>
 
       <form onSubmit={handleBuscar} className="no-print" style={filtrosRowStyle(isMobile)}>
-        <label style={fieldStyle}>
-          <span style={labelStyle}>Desde</span>
-          <input
-            type="date" value={filtros.desde} max={filtros.hasta}
-            onChange={(event) => setFiltros((f) => ({ ...f, desde: event.target.value }))}
-            style={inputStyle}
-          />
-        </label>
-        <label style={fieldStyle}>
-          <span style={labelStyle}>Hasta</span>
-          <input
-            type="date" value={filtros.hasta} max={todayIso()}
-            onChange={(event) => setFiltros((f) => ({ ...f, hasta: event.target.value }))}
-            style={inputStyle}
-          />
-        </label>
+        <RangoFechas
+          desde={filtros.desde}
+          hasta={filtros.hasta}
+          onChange={(rango) => setFiltros((f) => ({ ...f, desde: rango.desde, hasta: rango.hasta }))}
+        />
         <label style={fieldStyle}>
           <span style={labelStyle}>Cuenta</span>
           <select

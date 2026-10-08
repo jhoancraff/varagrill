@@ -293,6 +293,14 @@ function AnalystProductsPage({ isMobile, isAdmin, onBack, onCreateNewProduct, on
                         {!tieneCosto(product) ? (
                           <span style={sinCostoPillStyle} title="Tiene receta, pero sus ingredientes están en costo 0">Costo en $0</span>
                         ) : null}
+                        {product.ingredientes_sin_costo && product.ingredientes_sin_costo.length > 0 ? (
+                          <span
+                            style={sinCostoPillStyle}
+                            title="Ese ingrediente no tiene precio de compra registrado: aporta $0 y el costo del producto queda incompleto."
+                          >
+                            Falta costo: {product.ingredientes_sin_costo.join(', ')}
+                          </span>
+                        ) : null}
                       </>
                     )}
                   </div>

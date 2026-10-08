@@ -2611,6 +2611,45 @@ class MargenProductosReporteTests(TestCase):
         self.assertEqual(Decimal(f[self.producto.id]['costo_receta']), Decimal('1.20'))
         self.assertEqual(Decimal(f[self.producto.id]['costo_con_margen_produccion']), Decimal('1.32'))
 
+    def test_senala_los_ingredientes_sin_costo_aunque_esten_dentro_de_una_subreceta(self):
+        from varagrill.models import VGIngrediente, VGPreparacion, VGProducto, VGRecetaPreparacion, VGRecetaProducto
+        sin_precio = VGIngrediente.objects.create(nombre='Platano sin precio MP test', unidad_medida='g', costo_unitario='0')
+        sin_precio_2 = VGIngrediente.objects.create(nombre='Sal sin precio MP test', unidad_medida='g', costo_unitario='0')
+        interna = VGPreparacion.objects.create(nombre='Interna MP test', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=interna, ingrediente=sin_precio_2, cantidad_requerida='1')
+        sub = VGPreparacion.objects.create(nombre='Externa MP test', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=sin_precio, cantidad_requerida='1')
+        VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=self.ingrediente, cantidad_requerida='1')
+        VGRecetaPreparacion.objects.create(preparacion=sub, sub_preparacion=interna, cantidad_requerida='1')
+        ligado = VGProducto.objects.create(nombre='Con faltantes MP test', categoria=self.categoria, precio_venta='3.00', subreceta_vinculada=sub)
+        directo = VGProducto.objects.create(nombre='Directo sin precio MP test', categoria=self.categoria, precio_venta='2.00')
+        VGRecetaProducto.objects.create(producto=directo, ingrediente=sin_precio, cantidad_requerida='5')
+
+        f = self.fila(ligado)
+        self.assertEqual(f['ingredientes_sin_costo'], ['Platano sin precio MP test', 'Sal sin precio MP test'])
+        # El costo mostrado es solo el de lo que si tiene precio (0.98 del maiz).
+        self.assertEqual(Decimal(f['costo_receta']), Decimal('0.98'))
+        self.assertEqual(self.fila(directo)['ingredientes_sin_costo'], ['Platano sin precio MP test'])
+        # Un producto completo no trae avisos.
+        self.assertEqual(self.fila()['ingredientes_sin_costo'], [])
+        # Y la lista de productos trae el mismo aviso.
+        r = self.client.get('/api/admin/productos/')
+        self.assertEqual(r.status_code, 200, r.content)
+        por_id = {p['id']: p for p in r.json()['products']}
+        self.assertEqual(por_id[directo.id]['ingredientes_sin_costo'], ['Platano sin precio MP test'])
+        self.assertEqual(por_id[self.producto.id]['ingredientes_sin_costo'], [])
+
+    def test_no_incluye_la_categoria_recetas(self):
+        from varagrill.models import VGCategoriaProducto, VGProducto
+        recetas = VGCategoriaProducto.objects.create(nombre='Recetas')
+        receta = VGProducto.objects.create(nombre='Receta maestra MP test', categoria=recetas, precio_venta='0')
+        r = self.client.get('/api/admin/reportes/margen-productos/')
+        self.assertEqual(r.status_code, 200, r.content)
+        ids = {f['producto_id'] for f in r.json()['productos']}
+        self.assertNotIn(receta.id, ids)
+        self.assertIn(self.producto.id, ids)
+        self.assertNotIn('Recetas', {f['categoria'] for f in r.json()['productos']})
+
     def test_solo_administradores_y_solo_lectura(self):
         self.assertEqual(self.client.post('/api/admin/reportes/margen-productos/').status_code, 405)
         self.client.force_login(self.cajera)

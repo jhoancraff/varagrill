@@ -163,6 +163,14 @@ function AnalystMargenGananciaPage({ isMobile, onBack, onVerDetalle }) {
                           {sinDato ? <span style={tagWarnStyle}>sin receta</span> : null}
                         </div>
                         <div style={{ fontSize: 11.5, color: '#a89999' }}>{fila.categoria}</div>
+                        {fila.ingredientes_sin_costo && fila.ingredientes_sin_costo.length > 0 ? (
+                          <div
+                            style={{ fontSize: 11.5, color: '#ffcf7d', fontWeight: 700 }}
+                            title="Ese ingrediente no tiene precio de compra registrado: aporta $0 y el costo del producto queda incompleto."
+                          >
+                            Falta el costo de: {fila.ingredientes_sin_costo.join(', ')}
+                          </div>
+                        ) : null}
                       </div>
                       <div style={cellStyle}><CeldaMonto value={fila.costo_receta} sinDato={sinDato} /></div>
                       <div style={cellStyle}>{sinDato ? <span style={{ color: '#7a6f6f' }}>—</span> : formatPct(fila.margen_produccion_pct)}</div>

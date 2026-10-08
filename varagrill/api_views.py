@@ -1151,6 +1151,38 @@ class ProductoListView(generics.ListAPIView):
     serializer_class = ProductoSerializer
 
 
+def _ingredientes_sin_costo_de_producto(producto, ingredient_costs, components_by_preparation, nombres_ingredientes):
+    """
+    Nombres de los ingredientes de la receta de `producto` (directos, o dentro de sus subrecetas
+    y sub-subrecetas) cuyo costo es 0. Un ingrediente sin precio de compra aporta $0 al costo del
+    producto sin dar ningun aviso, y el costo mostrado queda incompleto: esta lista permite
+    senalarlo en las tablas de costo.
+    """
+    faltan = set()
+    visitadas = set()
+
+    def revisar(ingrediente_id):
+        if not ingredient_costs.get(ingrediente_id):
+            faltan.add(ingrediente_id)
+
+    def visitar(preparacion_id):
+        if preparacion_id in visitadas:
+            return
+        visitadas.add(preparacion_id)
+        for componente in components_by_preparation.get(preparacion_id, []):
+            if componente['tipo'] == 'ingrediente':
+                revisar(componente['referencia_id'])
+            else:
+                visitar(componente['referencia_id'])
+
+    for componente in _product_recipe_components(producto):
+        if componente['tipo'] == 'ingrediente':
+            revisar(componente['referencia_id'])
+        else:
+            visitar(componente['referencia_id'])
+    return sorted(nombres_ingredientes.get(ingrediente_id, '?') for ingrediente_id in faltan)
+
+
 def reporte_margen_productos_view(request):
     """
     Margen de ganancia POR PRODUCTO, en vivo — una fila por producto con su costo de
@@ -1191,9 +1223,14 @@ def reporte_margen_productos_view(request):
         for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
     }
     preparation_cost_map = _load_preparation_cost_map()
+    components_by_preparation, _rendimientos = _load_preparation_structure()
+    nombres_ingredientes = dict(VGIngrediente.objects.values_list('id', 'nombre'))
 
+    # Solo productos vendibles: la categoria 'Recetas' agrupa las recetas maestras (que otros productos
+    # enlazan), no platos a la venta — igual que la lista de Productos (admin_products_view).
     productos = (
         VGProducto.objects
+        .exclude(categoria__nombre__iexact='Recetas')
         .select_related('categoria', 'receta_vinculada', 'subreceta_vinculada')
         .prefetch_related('receta', 'receta_vinculada__receta', 'subreceta_vinculada__componentes')
         .order_by('categoria__nombre', 'nombre')
@@ -1219,6 +1256,9 @@ def reporte_margen_productos_view(request):
             'disponible': producto.disponible,
             'venta_por_peso': producto.venta_por_peso,
             'tiene_receta': tiene_receta,
+            'ingredientes_sin_costo': _ingredientes_sin_costo_de_producto(
+                producto, ingredient_costs, components_by_preparation, nombres_ingredientes,
+            ),
             'costo_receta': str(costo_receta.quantize(Decimal('0.0001'))),
             'margen_produccion_pct': str(margen_produccion),
             'costo_a_tomar': str(costo_a_tomar.quantize(Decimal('0.0001'))),
@@ -4756,6 +4796,8 @@ def admin_products_view(request):
             for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
         }
         config_sin_rendimiento = SimpleNamespace(rendimiento_receta_pct=Decimal('0'))
+        components_by_preparation, _rendimientos = _load_preparation_structure()
+        nombres_ingredientes = dict(VGIngrediente.objects.values_list('id', 'nombre'))
         # Segunda columna: el mismo costo con el margen de produccion sumado (igual que el "costo a
         # tomar" del reporte de margen, que lo aplica a todos los productos, tambien a los de subreceta).
         factor_produccion = Decimal('1') + (config_costeo.rendimiento_receta_pct or Decimal('0')) / Decimal('100')
@@ -4763,6 +4805,9 @@ def admin_products_view(request):
         for product in products:
             data_producto = _serialize_product(product)
             data_producto['tiene_receta'] = bool(_product_recipe_components(product))
+            data_producto['ingredientes_sin_costo'] = _ingredientes_sin_costo_de_producto(
+                product, ingredient_costs_vivos, components_by_preparation, nombres_ingredientes,
+            )
             costo_receta = _compute_product_unit_cost(
                 product, ingredient_costs_vivos, preparation_cost_map, config_sin_rendimiento,
             )

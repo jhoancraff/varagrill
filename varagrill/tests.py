@@ -2780,3 +2780,79 @@ class MargenDetalladoReporteTests(TestCase):
         self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))
         self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))
         self.assertFalse(f['margen_estimado'])
+
+
+class ReporteInventarioPdfTests(TestCase):
+    URL = '/api/admin/reportes/inventario-pdf/'
+
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='pdf_admin', password='claveAdmin123', cedula='95000001', email='pdf_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='pdf_cajera', password='claveCajera123', cedula='95000002', email='pdf_cajera@varagrill.test', id_role=cajera_role,
+        )
+
+    def test_solo_administradores_pueden_descargarlo(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+
+    def test_responde_un_pdf_descargable(self):
+        from varagrill.models import VGIngrediente
+        VGIngrediente.objects.create(nombre='Carne PDF test', unidad_medida='g', stock_actual='1500', costo_unitario='0.0068')
+        self.client.force_login(self.admin)
+        r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        self.assertIn('attachment; filename="inventario-actual-', r['Content-Disposition'])
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_un_inventario_vacio_tambien_genera_pdf(self):
+        from varagrill.models import VGIngrediente
+        VGIngrediente.objects.all().delete()
+        self.client.force_login(self.admin)
+        r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_usa_el_costo_efectivo_y_omite_los_ingredientes_ocultos(self):
+        from unittest import mock
+        from varagrill.models import VGIngrediente
+        # costo_unitario desincronizado (0.5) pero el envase dice 10 / 1000 = 0.01 por gramo
+        VGIngrediente.objects.create(
+            nombre='Harina PDF test', unidad_medida='g', stock_actual='2000', costo_unitario='0.5',
+            contenido_envase='1000', peso_real='1000', precio_compra='10.00',
+        )
+        VGIngrediente.objects.create(id=285, nombre='Oculto PDF test', unidad_medida='g', stock_actual='1', costo_unitario='1')
+        self.client.force_login(self.admin)
+        with mock.patch('varagrill.reportes_pdf_views.generar_pdf_inventario', return_value=b'%PDF-falso') as generar:
+            r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        enviados = {i['nombre']: i for i in generar.call_args.args[0]}
+        self.assertNotIn('Oculto PDF test', enviados)
+        self.assertEqual(Decimal(enviados['Harina PDF test']['costo_unitario']), Decimal('0.01'))
+
+    def test_calcula_valor_total_orden_y_total_del_inventario(self):
+        from varagrill.pdf_reportes import armar_filas_inventario
+        filas, total = armar_filas_inventario([
+            {'nombre': 'zanahoria', 'unidad_medida': 'g', 'stock_actual': Decimal('100'), 'costo_unitario': Decimal('0.00125')},
+            {'nombre': 'Aceite', 'unidad_medida': 'ml', 'stock_actual': Decimal('6000'), 'costo_unitario': Decimal('0.0065')},
+            {'nombre': '7UP', 'unidad_medida': 'unidad', 'stock_actual': Decimal('48'), 'costo_unitario': Decimal('0.58')},
+        ])
+        self.assertEqual([f['nombre'] for f in filas], ['7UP', 'Aceite', 'zanahoria'])
+        self.assertEqual([f['unidad'] for f in filas], ['Unidad', 'Mililitros', 'Gramos'])
+        self.assertEqual([f['valor_total'] for f in filas], [Decimal('27.84'), Decimal('39.00'), Decimal('0.13')])
+        self.assertEqual(total, Decimal('66.97'))
+
+    def test_formato_de_numeros_como_el_resto_del_sistema(self):
+        from varagrill.pdf_reportes import formatear_numero
+        self.assertEqual(formatear_numero(Decimal('1234.5')), '1.234,50')
+        self.assertEqual(formatear_numero(Decimal('0.0068'), 2, 6), '0,0068')
+        self.assertEqual(formatear_numero(Decimal('0.58'), 2, 6), '0,58')
+        self.assertEqual(formatear_numero(Decimal('0'), 2, 6), '0,00')
+        self.assertEqual(formatear_numero(Decimal('1022819.95'), 0, 2), '1.022.819,95')
+        self.assertEqual(formatear_numero(Decimal('6000'), 0, 2), '6.000')
+        self.assertEqual(formatear_numero(Decimal('-3239.27')), '-3.239,27')

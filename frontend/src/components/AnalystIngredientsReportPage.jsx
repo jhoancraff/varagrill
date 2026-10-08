@@ -10,6 +10,7 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [descargandoPdf, setDescargandoPdf] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [page, setPage] = useState(0);
 
@@ -117,6 +118,43 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
     }
   };
 
+  // El PDF lo arma el servidor (ReportLab). Se baja con fetch para poder mostrar un aviso
+  // si falla (sesion vencida, error) en vez de dejar al usuario en una pestaña en blanco.
+  const handleDescargarPdf = async () => {
+    setDescargandoPdf(true);
+    try {
+      const response = await fetch('/api/admin/reportes/inventario-pdf/', {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        let mensaje = 'No se pudo generar el PDF del inventario.';
+        try {
+          const data = await response.json();
+          mensaje = data.message || mensaje;
+        } catch {
+          // La respuesta no era JSON; se deja el mensaje por defecto.
+        }
+        throw new Error(mensaje);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement('a');
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const nombre = /filename="?([^";]+)"?/.exec(disposition)?.[1] || 'inventario-actual.pdf';
+      enlace.href = url;
+      enlace.download = nombre;
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      showError(error.message || 'No se pudo generar el PDF del inventario.');
+    } finally {
+      setDescargandoPdf(false);
+    }
+  };
+
   return (
     <section style={containerStyle(isMobile)}>
       <button type="button" onClick={onBack} style={backButtonStyle}>
@@ -128,6 +166,9 @@ function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCa
           <h2 style={titleStyle(isMobile)}>Reporte de ingredientes</h2>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" onClick={handleDescargarPdf} style={secondaryButtonStyle} disabled={descargandoPdf}>
+            {descargandoPdf ? 'Generando PDF...' : 'Descargar PDF'}
+          </button>
           {onCargaPorLote ? (
             <button type="button" onClick={onCargaPorLote} style={secondaryButtonStyle}>
               Cargar por lote (manual)

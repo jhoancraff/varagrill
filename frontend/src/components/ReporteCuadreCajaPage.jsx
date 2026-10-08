@@ -165,7 +165,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
                 <div style={desgloseSecondaryStyle}>${formatMonto(data.desglose_caja?.bs_fisico?.total_usd)}</div>
               </div>
               <div style={desgloseTileStyle}>
-                <div style={desgloseLabelStyle}>Bolívares · Digital</div>
+                <div style={desgloseLabelStyle}>Bolívares · Bancos</div>
                 <div style={desgloseValueStyle}>
                   {data.desglose_caja?.bs_digital?.total_bs !== null && data.desglose_caja?.bs_digital?.total_bs !== undefined
                     ? `Bs. ${formatMonto(data.desglose_caja.bs_digital.total_bs)}`

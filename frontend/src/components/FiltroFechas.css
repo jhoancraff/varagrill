@@ -6,6 +6,8 @@
   gap: 12px;
   width: 100%;
   flex: 1 1 100%;
+  /* Si el contenedor es una grilla de filtros, ocupa la fila completa y no una sola celda. */
+  grid-column: 1 / -1;
   padding: 14px;
   border-radius: 18px;
   border: 1px solid rgba(255, 77, 77, 0.28);

@@ -78,7 +78,9 @@ def _ultimas_correcciones_gasto(gasto_ids):
     return resultado
 
 
-def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None):
+def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_actual=None):
+    # tasa_actual: quien serializa muchos gastos (ej. el PDF) la consulta una sola vez y la pasa;
+    # si no llega, se consulta aqui como siempre.
     # saldo_pendiente se guarda con solo 2 decimales (ver docstring de VGGasto),
     # asi que reconvertirlo a bolivares pierde los centimos de monto (6
     # decimales) frente al total en bs del reporte de gastos, mostrando un
@@ -96,7 +98,8 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None):
     if gasto.moneda_origen == 'VES':
         tasa_para_bs = gasto.tasa_cambio_referencia
     else:
-        tasa_actual = obtener_tasa_actual()
+        if tasa_actual is None:
+            tasa_actual = obtener_tasa_actual()
         tasa_para_bs = tasa_actual.tasa if tasa_actual else gasto.tasa_cambio_referencia
 
     if not tasa_para_bs:

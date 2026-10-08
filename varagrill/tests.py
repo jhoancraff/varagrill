@@ -2856,3 +2856,72 @@ class ReporteInventarioPdfTests(TestCase):
         self.assertEqual(formatear_numero(Decimal('1022819.95'), 0, 2), '1.022.819,95')
         self.assertEqual(formatear_numero(Decimal('6000'), 0, 2), '6.000')
         self.assertEqual(formatear_numero(Decimal('-3239.27')), '-3.239,27')
+
+
+class BaseReportesPdfTests(TestCase):
+    """Lo comun a todos los reportes PDF (pdf_reportes/base.py y las ayudas de reportes_pdf_views.py)."""
+
+    def columnas(self):
+        from varagrill.pdf_reportes import Columna
+        return [Columna('Concepto', 0.6), Columna('Monto ($)', 0.4, 'derecha')]
+
+    def test_genera_pdf_vertical_y_horizontal(self):
+        from varagrill.pdf_reportes import generar_pdf_tabla
+        filas = [['Alquiler', '500,00'], ['Luz', '120,50']]
+        vertical = generar_pdf_tabla(titulo='Gastos', columnas=self.columnas(), filas=filas)
+        horizontal = generar_pdf_tabla(titulo='Gastos', columnas=self.columnas(), filas=filas, orientacion='horizontal')
+        self.assertTrue(vertical.startswith(b'%PDF'))
+        self.assertTrue(horizontal.startswith(b'%PDF'))
+        # A4 vertical es 595 x 842 pt; apaisado es 842 x 595.
+        self.assertIn(b'/MediaBox [ 0 0 595.2', vertical)
+        self.assertIn(b'/MediaBox [ 0 0 841.8', horizontal)
+
+    def test_acepta_resumen_total_subtitulo_y_textos_con_simbolos(self):
+        from varagrill.pdf_reportes import escapar, generar_pdf_tabla
+        pdf = generar_pdf_tabla(
+            titulo='Gastos <del mes> & más',
+            subtitulo='Del 01/10/2026 al 08/10/2026',
+            columnas=self.columnas(),
+            filas=[['Pan & Queso <extra>', '10,00']],
+            resumen=(f'<b>1</b> gasto de {escapar("Café & Té")}', 'Total: <b>$ 10,00</b>'),
+            fila_total=['Total', '$ 10,00'],
+        )
+        self.assertTrue(pdf.startswith(b'%PDF'))
+
+    def test_una_tabla_vacia_tambien_genera_pdf(self):
+        from varagrill.pdf_reportes import generar_pdf_tabla
+        pdf = generar_pdf_tabla(titulo='Vacio', columnas=self.columnas(), filas=[], fila_total=['Total', '$ 0,00'])
+        self.assertTrue(pdf.startswith(b'%PDF'))
+
+    def test_una_tabla_larga_ocupa_varias_paginas(self):
+        from varagrill.pdf_reportes import generar_pdf_tabla
+        pdf = generar_pdf_tabla(titulo='Largo', columnas=self.columnas(), filas=[[f'Fila {i}', '1,00'] for i in range(200)])
+        import re
+        self.assertGreater(len(re.findall(rb'/Type /Page(?!s)', pdf)), 3)
+
+    def test_rechaza_descripciones_incorrectas(self):
+        from varagrill.pdf_reportes import Columna, generar_pdf_tabla
+        with self.assertRaises(ValueError):
+            generar_pdf_tabla(titulo='X', columnas=[Columna('A', 0.5), Columna('B', 0.2)], filas=[])  # no suman 1
+        with self.assertRaises(ValueError):
+            generar_pdf_tabla(titulo='X', columnas=self.columnas(), filas=[['solo una celda']])
+        with self.assertRaises(ValueError):
+            generar_pdf_tabla(titulo='X', columnas=self.columnas(), filas=[], orientacion='diagonal')
+        with self.assertRaises(ValueError):
+            generar_pdf_tabla(titulo='X', columnas=[Columna('A', 1, 'arriba')], filas=[])
+
+    def test_responder_pdf_arma_el_nombre_y_evita_el_cache(self):
+        import datetime
+        from varagrill.reportes_pdf_views import responder_pdf
+        r = responder_pdf(b'%PDF-x', 'gastos', datetime.date(2026, 10, 8))
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="gastos-2026-10-08.pdf"')
+        self.assertEqual(r['Cache-Control'], 'no-store')
+
+    def test_pdf_solo_admin_rechaza_metodos_que_no_son_get(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        admin = VGUsuario.objects.create_superuser(
+            username='base_pdf_admin', password='claveAdmin123', cedula='95000003', email='base_pdf_admin@varagrill.test', id_role=admin_role,
+        )
+        self.client.force_login(admin)
+        self.assertEqual(self.client.post('/api/admin/reportes/inventario-pdf/').status_code, 405)

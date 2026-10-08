@@ -3,6 +3,7 @@ import ConfirmModal from './ConfirmModal';
 import MoneyInput from './MoneyInput';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw, formatMontoDocumento } from '../utils/currency';
+import { RangoFechas } from './FiltroFechas';
 
 function getCookie(name) {
   const all = `; ${document.cookie}`;
@@ -494,26 +495,12 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
       )}
 
       <form onSubmit={handleBuscar} style={buscadorFormStyle(isMobile)}>
-        <label style={dateFieldStyle}>
-          <span style={dateLabelStyle}>Desde</span>
-          <input
-            type="date"
-            value={desde}
-            onChange={(event) => setDesde(event.target.value)}
-            style={inputStyle}
-            className="admin-dark-select"
-          />
-        </label>
-        <label style={dateFieldStyle}>
-          <span style={dateLabelStyle}>Hasta</span>
-          <input
-            type="date"
-            value={hasta}
-            onChange={(event) => setHasta(event.target.value)}
-            style={inputStyle}
-            className="admin-dark-select"
-          />
-        </label>
+        <RangoFechas
+          desde={desde}
+          hasta={hasta}
+          onChange={(rango) => { setDesde(rango.desde); setHasta(rango.hasta); }}
+          max={null}
+        />
         <button type="submit" style={secondaryButtonStyle} disabled={loading}>
           {loading ? 'Buscando...' : 'Buscar'}
         </button>

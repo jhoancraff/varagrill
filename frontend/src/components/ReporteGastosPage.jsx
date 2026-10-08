@@ -3,6 +3,7 @@ import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 import { formatBs, formatBsRaw } from '../utils/currency';
+import { RangoFechas } from './FiltroFechas';
 
 function formatUsdBs(amount, tasa) {
   const usd = `$${Number(amount).toFixed(2)}`;
@@ -354,14 +355,12 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
 
       <section style={panelStyle}>
         <div style={filtrosRowStyle(isMobile)}>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Desde</span>
-            <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Hasta</span>
-            <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} style={inputStyle} />
-          </label>
+          <RangoFechas
+            desde={fechaDesde}
+            hasta={fechaHasta}
+            onChange={(rango) => { setFechaDesde(rango.desde); setFechaHasta(rango.hasta); }}
+            max={null}
+          />
           <label style={fieldStyle}>
             <span style={labelStyle}>Categoría</span>
             <select value={filtroCategoriaId} onChange={(e) => setFiltroCategoriaId(e.target.value)} style={inputStyle} className="admin-dark-select">

@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { getFechaSeleccionada, setFechaSeleccionada } from '../utils/fechaContabilidad';
 import { ESTADO_LOTE_ESTILO } from '../utils/lotesPos';
+import { DiaFecha } from './FiltroFechas';
 
 function todayIso() {
   const now = new Date();
@@ -65,16 +66,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
         <div>
           <h2 style={titleStyle(isMobile)}>Cuadre de caja diario</h2>
         </div>
-        <label className="no-print" style={dateLabelStyle}>
-          Fecha
-          <input
-            type="date"
-            value={fecha}
-            max={todayIso()}
-            onChange={(event) => setFecha(event.target.value)}
-            style={dateInputStyle}
-          />
-        </label>
+        <DiaFecha value={fecha} onChange={setFecha} />
       </div>
 
       {message ? <div style={noticeStyle} className="no-print">{message}</div> : null}
@@ -313,8 +305,6 @@ const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMob
 const headerRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 12 });
 const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
 const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3' };
-const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
 const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { formatMontoDocumento } from '../utils/currency';
+import { DiaFecha } from './FiltroFechas';
 
 function getCookie(name) {
   const all = `; ${document.cookie}`;
@@ -108,13 +109,7 @@ function FacturasHistorialPage({ isMobile, onBack, embedded = false }) {
       )}
 
       <form onSubmit={handleBuscar} style={buscadorFormStyle(isMobile)}>
-        <input
-          type="date"
-          value={fecha}
-          onChange={(event) => setFecha(event.target.value)}
-          style={inputStyle}
-          className="admin-dark-select"
-        />
+        <DiaFecha value={fecha} onChange={setFecha} max={null} />
         <button type="submit" style={secondaryButtonStyle} disabled={loading}>
           {loading ? 'Buscando...' : 'Buscar'}
         </button>

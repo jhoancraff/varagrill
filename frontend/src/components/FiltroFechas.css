@@ -1,0 +1,243 @@
+/* Filtros de fecha del sistema (RangoFechas y DiaFecha). */
+
+.vg-rango {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  flex: 1 1 100%;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 77, 77, 0.28);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+}
+
+.vg-rango__fechas {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vg-rango__union {
+  align-self: center;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.vg-rango__dias {
+  align-self: center;
+  margin-left: auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 77, 77, 0.14);
+  color: #ffd8d8;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.vg-rango__atajos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Casilla de una fecha */
+.vg-fecha {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 190px;
+  max-width: 280px;
+  min-height: 62px;
+  padding: 8px 16px 8px 8px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  background: #161010;
+  color: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.vg-fecha:hover {
+  border-color: #ff4d4d;
+  background: #1d1313;
+}
+
+.vg-fecha:focus-within {
+  border-color: #ff4d4d;
+  box-shadow: 0 0 0 3px rgba(255, 77, 77, 0.28);
+}
+
+.vg-fecha__icono {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #bf1f1f;
+  color: #fff;
+}
+
+.vg-fecha__texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vg-fecha__etiqueta {
+  color: #c8bbbb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vg-fecha__valor {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+/* El input real cubre toda la casilla y es invisible: el clic y el teclado caen en el. */
+.vg-fecha__nativo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  color-scheme: dark;
+}
+
+.vg-fecha__nativo::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Atajos */
+.vg-atajo {
+  min-height: 38px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2e6e6;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.vg-atajo:hover {
+  border-color: #ff4d4d;
+  background: rgba(255, 77, 77, 0.12);
+}
+
+.vg-atajo--activo {
+  border-color: #ff4d4d;
+  background: #bf1f1f;
+  color: #fff;
+}
+
+.vg-atajo--activo:hover {
+  background: #d02626;
+}
+
+/* Selector de un dia */
+.vg-dia {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.vg-dia .vg-fecha {
+  flex: 0 0 auto;
+  min-width: 200px;
+}
+
+.vg-dia .vg-atajo {
+  flex: 0 0 auto;
+}
+
+.vg-dia__flecha {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  background: #161010;
+  color: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.vg-dia__flecha:hover:not(:disabled) {
+  border-color: #ff4d4d;
+  background: #1d1313;
+}
+
+.vg-dia__flecha:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .vg-rango {
+    padding: 12px;
+  }
+
+  .vg-rango__union {
+    display: none;
+  }
+
+  .vg-fecha {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .vg-dia {
+    flex-wrap: wrap;
+  }
+
+  .vg-dia .vg-fecha {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+
+  .vg-rango__dias {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vg-fecha,
+  .vg-atajo,
+  .vg-dia__flecha {
+    transition: none;
+  }
+}
+
+@media print {
+  .vg-rango,
+  .vg-dia {
+    display: none !important;
+  }
+}

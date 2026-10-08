@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import { DiaFecha } from './FiltroFechas';
 
 function todayIso() {
   const now = new Date();
@@ -222,16 +223,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
         {rango ? (
           <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
         ) : (
-          <label className="no-print" style={dateLabelStyle}>
-            Fecha
-            <input
-              type="date"
-              value={fecha}
-              max={todayIso()}
-              onChange={(event) => setFecha(event.target.value)}
-              style={dateInputStyle}
-            />
-          </label>
+          <DiaFecha value={fecha} onChange={setFecha} />
         )}
       </div>
 
@@ -527,7 +519,6 @@ const headerRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-
 const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
 const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3' };
 const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
 const filtrosRowStyle = (isMobile) => ({
   display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
 });

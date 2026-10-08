@@ -66,7 +66,7 @@ from varagrill.api_views import (
     reporte_margen_productos_view,
     tasa_cambio_view,
 )
-from varagrill.reportes_pdf_views import reporte_inventario_pdf_view
+from varagrill.reportes_pdf_views import reporte_gastos_pdf_view, reporte_inventario_pdf_view
 from varagrill.ajustes_inventario_views import (
     admin_ajuste_inventario_agregar_view,
     admin_ajuste_inventario_descartar_view,
@@ -205,6 +205,7 @@ urlpatterns = [
     path('api/admin/reportes/margen-ganancia/', reporte_margen_ganancia_view, name='admin-reporte-margen-ganancia'),
     path('api/admin/reportes/margen-productos/', reporte_margen_productos_view, name='admin-reporte-margen-productos'),
     path('api/admin/reportes/inventario-pdf/', reporte_inventario_pdf_view, name='admin-reporte-inventario-pdf'),
+    path('api/admin/reportes/gastos-pdf/', reporte_gastos_pdf_view, name='admin-reporte-gastos-pdf'),
     path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),
     path('api/admin/reportes/movimiento-productos/', reporte_movimiento_productos_view, name='admin-reporte-movimiento-productos'),
     path('api/admin/reportes/flujo-bancario/', reporte_flujo_bancario_view, name='admin-reporte-flujo-bancario'),

@@ -2925,3 +2925,135 @@ class BaseReportesPdfTests(TestCase):
         )
         self.client.force_login(admin)
         self.assertEqual(self.client.post('/api/admin/reportes/inventario-pdf/').status_code, 405)
+
+
+class ReporteGastosPdfTests(TestCase):
+    URL = '/api/admin/reportes/gastos-pdf/'
+
+    def setUp(self):
+        from datetime import date
+        from varagrill.models import VGAbonoGasto, VGCategoriaGasto, VGGasto, VGMetodoPago
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='gpdf_admin', password='claveAdmin123', cedula='95000011', email='gpdf_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='gpdf_cajera', password='claveCajera123', cedula='95000012', email='gpdf_cajera@varagrill.test', id_role=cajera_role,
+        )
+        _set_tasa_actual('900.0000')
+        self.nomina = VGCategoriaGasto.objects.create(nombre='Nomina PDF test')
+        self.servicios = VGCategoriaGasto.objects.create(nombre='Servicios PDF test')
+        self.metodo = VGMetodoPago.objects.create(nombre='Banco PDF test', moneda='VES')
+
+        # $100 pagados con un abono a tasa 800 -> Bs 80.000 congelados (aunque hoy la tasa sea 900)
+        self.pagado_usd = VGGasto.objects.create(
+            categoria=self.nomina, descripcion='Quincena 1', monto=Decimal('100'), saldo_pendiente=0, estado_pago='pagado',
+            fecha_gasto=date(2026, 9, 5), tasa_cambio_referencia=Decimal('800.0000'),
+        )
+        VGAbonoGasto.objects.create(gasto=self.pagado_usd, monto=Decimal('100'), metodo_pago=self.metodo, tasa_cambio_referencia=Decimal('800.0000'))
+        # Gasto cargado en bolivares: Bs 20.000 a tasa 800 = $25
+        self.en_bs = VGGasto.objects.create(
+            categoria=self.servicios, descripcion='Internet', monto=Decimal('25'), saldo_pendiente=0, estado_pago='pagado',
+            fecha_gasto=date(2026, 9, 20), tasa_cambio_referencia=Decimal('800.0000'), moneda_origen='VES',
+        )
+        VGAbonoGasto.objects.create(gasto=self.en_bs, monto=Decimal('25'), metodo_pago=self.metodo, tasa_cambio_referencia=Decimal('800.0000'))
+        # Fuera del rango de septiembre
+        self.octubre = VGGasto.objects.create(
+            categoria=self.nomina, descripcion='De octubre', monto=Decimal('50'), saldo_pendiente=50,
+            fecha_gasto=date(2026, 10, 2), tasa_cambio_referencia=Decimal('900.0000'),
+        )
+
+    def descargar(self, desde='2026-09-01', hasta='2026-09-30'):
+        from unittest import mock
+        self.client.force_login(self.admin)
+        with mock.patch('varagrill.reportes_pdf_views.generar_pdf_gastos', return_value=b'%PDF-falso') as generar:
+            r = self.client.get(f'{self.URL}?fecha_desde={desde}&fecha_hasta={hasta}')
+        return r, generar
+
+    def test_solo_administradores_pueden_descargarlo(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+
+    def test_rechaza_un_rango_invertido(self):
+        self.client.force_login(self.admin)
+        r = self.client.get(f'{self.URL}?fecha_desde=2026-09-30&fecha_hasta=2026-09-01')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('fecha inicial', r.json()['message'])
+
+    def test_responde_un_pdf_real_con_el_rango_en_el_nombre(self):
+        self.client.force_login(self.admin)
+        r = self.client.get(f'{self.URL}?fecha_desde=2026-09-01&fecha_hasta=2026-09-30')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        self.assertEqual(r['Content-Disposition'], 'attachment; filename="gastos-2026-09-01-al-2026-09-30.pdf"')
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_un_rango_sin_gastos_tambien_genera_pdf(self):
+        self.client.force_login(self.admin)
+        r = self.client.get(f'{self.URL}?fecha_desde=2025-01-01&fecha_hasta=2025-01-31')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_incluye_solo_los_gastos_del_rango_con_los_montos_de_la_pantalla(self):
+        r, generar = self.descargar()
+        self.assertEqual(r.status_code, 200)
+        gastos, desde, hasta = generar.call_args.args[:3]
+        por_descripcion = {g['descripcion']: g for g in gastos}
+        self.assertEqual(set(por_descripcion), {'Quincena 1', 'Internet'})
+        self.assertEqual((str(desde), str(hasta)), ('2026-09-01', '2026-09-30'))
+        # Bs congelados con la tasa del abono (800), no con la de hoy (900)
+        self.assertEqual(Decimal(por_descripcion['Quincena 1']['total_bs']), Decimal('80000.00'))
+        self.assertEqual(Decimal(por_descripcion['Internet']['total_bs']), Decimal('20000.00'))
+
+    def test_agrupa_por_categoria_con_totales_en_bs_y_dolares(self):
+        from datetime import date
+        from varagrill.pdf_reportes import armar_bloques_gastos
+        gastos = [
+            {'id': 3, 'categoria_nombre': 'Servicios', 'descripcion': 'Luz', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 9),
+             'monto': '10', 'total_bs': '8000.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'},
+            {'id': 2, 'categoria_nombre': 'nomina', 'descripcion': 'Quincena 2', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 20),
+             'monto': '100', 'total_bs': '82000.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '820.0000'},
+            {'id': 1, 'categoria_nombre': 'nomina', 'descripcion': 'Quincena 1', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 5),
+             'monto': '100', 'total_bs': '80000.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'},
+        ]
+        bloques = armar_bloques_gastos(gastos)
+        self.assertEqual([b['categoria'] for b in bloques], ['nomina', 'Servicios'])
+        nomina = bloques[0]
+        # dentro de la categoria, por fecha
+        self.assertEqual([f['descripcion'] for f in nomina['filas']], ['Quincena 1', 'Quincena 2'])
+        self.assertEqual(nomina['total_bs'], Decimal('162000.00'))
+        self.assertEqual(nomina['total_usd'], Decimal('200.00'))
+        self.assertEqual(bloques[1]['total_bs'], Decimal('8000.00'))
+
+    def test_la_tasa_es_la_del_gasto_y_marca_los_que_no_estan_pagados(self):
+        from datetime import date
+        from varagrill.pdf_reportes import armar_bloques_gastos
+        from varagrill.pdf_reportes.gastos import tasa_del_gasto
+        # En dolares: tasa = bolivares / dolares (promedio ponderado si hubo abonos con tasas distintas)
+        usd = {'monto': '100', 'total_bs': '81000.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'}
+        self.assertEqual(tasa_del_gasto(usd), Decimal('810'))
+        # En bolivares conserva la tasa del dia en que se registro
+        ves = {'monto': '25', 'total_bs': '20000.00', 'moneda_origen': 'VES', 'tasa_cambio_referencia': '800.0000'}
+        self.assertEqual(tasa_del_gasto(ves), Decimal('800.0000'))
+        bloques = armar_bloques_gastos([
+            {'id': 1, 'categoria_nombre': 'Aseo', 'descripcion': 'Jabon', 'estado_pago': 'pendiente', 'fecha_gasto': date(2026, 9, 8),
+             'monto': '5', 'total_bs': '4500.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'},
+            {'id': 2, 'categoria_nombre': 'Aseo', 'descripcion': 'Cloro', 'estado_pago': 'abonada_parcial', 'fecha_gasto': date(2026, 9, 9),
+             'monto': '5', 'total_bs': '4500.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'},
+        ])
+        self.assertEqual([f['descripcion'] for f in bloques[0]['filas']], ['Jabon (pendiente)', 'Cloro (abonado parcial)'])
+
+    def test_un_gasto_sin_tasa_no_suma_en_bs_pero_si_en_dolares(self):
+        from datetime import date
+        from varagrill.pdf_reportes import armar_bloques_gastos
+        bloque = armar_bloques_gastos([
+            {'id': 1, 'categoria_nombre': 'Aseo', 'descripcion': 'Sin tasa', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 8),
+             'monto': '5', 'total_bs': None, 'moneda_origen': 'USD', 'tasa_cambio_referencia': None},
+            {'id': 2, 'categoria_nombre': 'Aseo', 'descripcion': 'Con tasa', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 9),
+             'monto': '10', 'total_bs': '8000.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'},
+        ])[0]
+        self.assertEqual(bloque['sin_tasa'], 1)
+        self.assertEqual(bloque['total_bs'], Decimal('8000.00'))
+        self.assertEqual(bloque['total_usd'], Decimal('15.00'))

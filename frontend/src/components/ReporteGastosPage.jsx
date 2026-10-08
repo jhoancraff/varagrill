@@ -3,6 +3,7 @@ import Toast from './Toast';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 import { formatBs, formatBsRaw } from '../utils/currency';
+import BotonDescargarPdf from './BotonDescargarPdf';
 import { RangoFechas } from './FiltroFechas';
 
 function formatUsdBs(amount, tasa) {
@@ -347,8 +348,16 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
         ← Volver
       </button>
 
-      <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <h2 style={titleStyle(isMobile)}>Reporte de gastos</h2>
+        {/* PDF por categoria del rango de fechas elegido (no aplica los demas filtros de la pantalla). */}
+        <BotonDescargarPdf
+          url="/api/admin/reportes/gastos-pdf/"
+          params={{ fecha_desde: fechaDesde, fecha_hasta: fechaHasta }}
+          onError={showError}
+        >
+          Descargar PDF por categoría
+        </BotonDescargarPdf>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />

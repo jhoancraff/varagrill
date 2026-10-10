@@ -257,6 +257,7 @@ def detalle_ventas_rango(desde, hasta):
                 continue
             metodo = pago.metodo_pago
             monto_bs = None
+            tasa = None
             if metodo.moneda == 'VES':
                 tasa = pago.tasa_cambio_referencia or nota.tasa_cambio_referencia
                 if tasa:
@@ -265,6 +266,8 @@ def detalle_ventas_rango(desde, hasta):
                 'id': pago.id,
                 'monto': pago.monto,
                 'monto_bs': monto_bs,
+                # Tasa (Bs/$) con la que se convirtio este pago: solo en metodos en bolivares.
+                'tasa': tasa,
                 'metodo_pago_id': metodo.id,
                 'metodo_pago_nombre': metodo.nombre,
                 'metodo_pago_moneda': metodo.moneda,

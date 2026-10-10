@@ -3261,3 +3261,329 @@ class TasaCuentaPrefacturaTests(TestCase):
         r = self.client.post(f'/api/prefacturas/{pf["id"]}/convertir/')
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(r.json()['factura']['tasa_cambio_referencia'], '120.0000')
+
+
+class ReporteFacturadoPdfTests(TestCase):
+    URL = '/api/admin/reportes/facturado-pdf/'
+
+    def setUp(self):
+        from datetime import datetime
+        from varagrill.models import VGMetodoPago, VGNotaEntrega, VGPago
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='fpdf_admin', password='claveAdmin123', cedula='95000021', email='fpdf_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='fpdf_cajera', password='claveCajera123', cedula='95000022', email='fpdf_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.efectivo = VGMetodoPago.objects.create(nombre='Efectivo PDF test', moneda='USD', es_efectivo=True)
+        self.banco = VGMetodoPago.objects.create(nombre='Pago movil PDF test', moneda='VES', cuenta_bancaria='Banesco')
+
+        def nota(total, estado, saldo, dia, hora):
+            creada = VGNotaEntrega.objects.create(
+                metodo_pago=self.efectivo, total=Decimal(total), saldo_pendiente=Decimal(saldo),
+                estado=estado, tasa_cambio_referencia=Decimal('100.0000'),
+            )
+            # fecha_emision es auto_now_add: se mueve de dia con update().
+            fecha = timezone.make_aware(datetime(2026, 9, dia, hora, 30))
+            VGNotaEntrega.objects.filter(pk=creada.pk).update(fecha_emision=fecha)
+            return creada
+
+        def pago(nota_entrega, metodo, monto, referencia=''):
+            return VGPago.objects.create(
+                nota_entrega=nota_entrega, monto=Decimal(monto), metodo_pago=metodo, estado='completado',
+                tasa_cambio_referencia=Decimal('100.0000'), referencia=referencia, creado_por=self.admin,
+            )
+
+        # Dia 10: una pagada en dos abonos (efectivo + pago movil) y una sin pagar
+        self.pagada = nota('30.00', 'pagada', '0', 10, 12)
+        pago(self.pagada, self.efectivo, '10.00')
+        pago(self.pagada, self.banco, '20.00', referencia='REF-998877')
+        self.pendiente = nota('12.50', 'pendiente_pago', '12.50', 10, 19)
+        # Dia 11: una anulada (el cuadre de caja tambien la suma al facturado)
+        self.anulada = nota('40.00', 'anulada', '0', 11, 13)
+        # Fuera del rango que se consulta
+        self.fuera = nota('99.00', 'pagada', '0', 20, 9)
+
+    def pedir(self, desde='2026-09-10', hasta='2026-09-11', usuario=None):
+        from unittest import mock
+        self.client.force_login(usuario or self.admin)
+        with mock.patch('varagrill.reportes_pdf_views.generar_pdf_facturado', return_value=b'%PDF-falso') as generar:
+            r = self.client.get(f'{self.URL}?desde={desde}&hasta={hasta}')
+        return r, generar
+
+    def test_lo_pueden_descargar_administradores_y_cajeras(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        for usuario in (self.admin, self.cajera):
+            r, _ = self.pedir(usuario=usuario)
+            self.assertEqual(r.status_code, 200, usuario.username)
+
+    def test_solo_acepta_get(self):
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.post(self.URL).status_code, 405)
+
+    def test_rechaza_rango_invertido_y_rango_demasiado_largo(self):
+        self.client.force_login(self.admin)
+        invertido = self.client.get(f'{self.URL}?desde=2026-09-11&hasta=2026-09-10')
+        self.assertEqual(invertido.status_code, 400)
+        largo = self.client.get(f'{self.URL}?desde=2026-01-01&hasta=2026-09-10')
+        self.assertEqual(largo.status_code, 400)
+        self.assertIn('92', largo.json()['message'])
+        basura = self.client.get(f'{self.URL}?fecha=no-es-fecha')
+        self.assertEqual(basura.status_code, 400)
+
+    def test_nombre_del_archivo_para_un_dia_y_para_un_rango(self):
+        self.client.force_login(self.admin)
+        dia = self.client.get(f'{self.URL}?fecha=2026-09-10')
+        self.assertEqual(dia['Content-Disposition'], 'attachment; filename="facturado-2026-09-10.pdf"')
+        rango = self.client.get(f'{self.URL}?desde=2026-09-10&hasta=2026-09-11')
+        self.assertEqual(rango['Content-Disposition'], 'attachment; filename="facturado-2026-09-10-al-2026-09-11.pdf"')
+        for r in (dia, rango):
+            self.assertEqual(r['Content-Type'], 'application/pdf')
+            self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_un_dia_sin_notas_tambien_genera_pdf(self):
+        self.client.force_login(self.admin)
+        r = self.client.get(f'{self.URL}?fecha=2025-01-01')
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_incluye_solo_las_notas_del_rango_y_su_total_es_el_del_cuadre(self):
+        r, generar = self.pedir()
+        self.assertEqual(r.status_code, 200)
+        notas, desde, hasta = generar.call_args.args[:3]
+        self.assertEqual({n['id'] for n in notas}, {self.pagada.id, self.pendiente.id, self.anulada.id})
+        self.assertEqual((str(desde), str(hasta)), ('2026-09-10', '2026-09-11'))
+
+        # El total que imprime el PDF es el "Facturado" que muestra el cuadre por rango.
+        cuadre = self.client.get('/api/admin/reportes/cuadre-caja-rango/?desde=2026-09-10&hasta=2026-09-11').json()
+        total_pdf = sum((Decimal(n['total']) for n in notas), Decimal('0'))
+        self.assertEqual(total_pdf, Decimal(cuadre['resumen_ventas']['total_vendido']))
+        self.assertEqual(total_pdf, Decimal('82.50'))
+
+    def test_arma_un_bloque_por_dia_con_una_fila_por_abono(self):
+        from varagrill.pdf_reportes import armar_dias_facturado
+        r, generar = self.pedir()
+        notas = generar.call_args.args[0]
+        dias = armar_dias_facturado(notas)
+
+        self.assertEqual([str(d['fecha']) for d in dias], ['2026-09-10', '2026-09-11'])
+        dia10, dia11 = dias
+        # la pagada en dos abonos ocupa dos filas, la pendiente una
+        self.assertEqual(len(dia10['filas']), 3)
+        self.assertEqual(dia10['cantidad'], 2)
+        self.assertEqual(dia10['total'], Decimal('42.50'))
+        primera, segunda, pendiente = dia10['filas']
+        self.assertTrue(primera[0].endswith('(abono 1 de 2)'))
+        self.assertEqual(segunda[0], 'Abono 2 de 2')
+        self.assertEqual(primera[1], '12:30')
+        self.assertEqual(primera[3], '30,00')
+        self.assertEqual(primera[4], 'Pagada')
+        self.assertEqual(primera[5], 'Efectivo PDF test ($)')
+        self.assertEqual(primera[8], '10,00')
+        self.assertEqual(primera[9], '—')  # en dolares no hay tasa
+        self.assertEqual(primera[10], '—')
+        # el abono en bolivares trae banco, referencia y los Bs con la tasa del pago (20 x 100)
+        self.assertEqual(segunda[5], 'Pago movil PDF test (Bs)')
+        self.assertEqual(segunda[6], 'Banesco')
+        self.assertEqual(segunda[7], 'REF-998877')
+        self.assertEqual(segunda[9], '100,00')
+        self.assertEqual(segunda[10], '2.000,00')
+        # sin pagos: estado Pendiente y guiones
+        self.assertEqual(pendiente[4], 'Pendiente')
+        self.assertEqual(pendiente[5:], ['—', '—', '—', '—', '—', '—'])
+        # la anulada se muestra como tal y cuenta en el total del dia
+        self.assertEqual(dia11['filas'][0][4], 'Anulada')
+        self.assertEqual((dia11['anuladas'], dia11['total_anuladas'], dia11['total']), (1, Decimal('40.00'), Decimal('40.00')))
+
+    def test_la_hora_se_agrupa_en_hora_local_no_en_utc(self):
+        from datetime import datetime
+        from varagrill.models import VGNotaEntrega
+        # 10:30 pm en Caracas ya es el dia siguiente en UTC: tiene que seguir en el dia 12.
+        tarde = VGNotaEntrega.objects.create(
+            metodo_pago=self.efectivo, total=Decimal('5.00'), saldo_pendiente=Decimal('5.00'),
+            estado='pendiente_pago', tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        VGNotaEntrega.objects.filter(pk=tarde.pk).update(
+            fecha_emision=timezone.make_aware(datetime(2026, 9, 12, 22, 30)),
+        )
+        r, generar = self.pedir(desde='2026-09-12', hasta='2026-09-12')
+        notas = generar.call_args.args[0]
+        self.assertEqual([n['id'] for n in notas], [tarde.id])
+        self.assertEqual(str(notas[0]['fecha_emision'].date()), '2026-09-12')
+
+
+class ReporteCuentasPorPagarPdfTests(TestCase):
+    URL = '/api/admin/reportes/cuentas-por-pagar-pdf/'
+
+    def setUp(self):
+        from datetime import date, datetime
+        from varagrill.models import VGAbonoCompra, VGCategoriaGasto, VGCompra, VGGasto, VGMetodoPago
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='cxp_admin', password='claveAdmin123', cedula='95000031', email='cxp_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='cxp_cajera', password='claveCajera123', cedula='95000032', email='cxp_cajera@varagrill.test', id_role=cajera_role,
+        )
+        _set_tasa_actual('900.0000')
+        self.metodo = VGMetodoPago.objects.create(nombre='Banco CxP PDF test', moneda='VES')
+        servicios = VGCategoriaGasto.objects.create(nombre='Servicios CxP test')
+
+        def compra(proveedor, total, saldo, estado_pago, fecha_factura, pagada_el=None):
+            creada = VGCompra.objects.create(
+                proveedor_nombre=proveedor, numero_factura_proveedor=f'F-{proveedor[-1]}', estado='recibido',
+                total=Decimal(total), saldo_pendiente=Decimal(saldo), estado_pago=estado_pago,
+                tasa_cambio_referencia=Decimal('800.0000'), moneda_origen='VES',
+                total_bs_factura=Decimal(total) * Decimal('800'), fecha_factura=fecha_factura,
+            )
+            if pagada_el:
+                VGCompra.objects.filter(pk=creada.pk).update(fecha_actualizacion=timezone.make_aware(datetime(*pagada_el, 10, 0)))
+            return creada
+
+        def gasto(descripcion, monto, estado_pago, fecha_gasto, pagado_el=None):
+            creado = VGGasto.objects.create(
+                categoria=servicios, descripcion=descripcion, monto=Decimal(monto),
+                saldo_pendiente=Decimal('0') if estado_pago == 'pagado' else Decimal(monto),
+                estado_pago=estado_pago, fecha_gasto=fecha_gasto, tasa_cambio_referencia=Decimal('800.0000'),
+            )
+            if pagado_el:
+                VGGasto.objects.filter(pk=creado.pk).update(fecha_actualizacion=timezone.make_aware(datetime(*pagado_el, 10, 0)))
+            return creado
+
+        self.lote_a = compra('Prov A', '100', '100', 'pendiente', date(2026, 9, 5))
+        self.lote_b = compra('Prov B', '200', '50', 'abonada_parcial', date(2026, 9, 20))
+        VGAbonoCompra.objects.create(
+            compra=self.lote_b, monto=Decimal('150'), metodo_pago=self.metodo, tasa_cambio_referencia=Decimal('800.0000'),
+        )
+        # facturado en agosto pero pagado en septiembre
+        self.lote_c = compra('Prov C', '80', '0', 'pagada', date(2026, 8, 10), pagada_el=(2026, 9, 15))
+        self.gasto_d = gasto('Luz septiembre', '30', 'pendiente', date(2026, 9, 12))
+        self.gasto_e = gasto('Agua agosto', '25', 'pagado', date(2026, 8, 30), pagado_el=(2026, 9, 2))
+        self.gasto_f = gasto('Luz octubre', '40', 'pendiente', date(2026, 10, 2))
+
+    def pedir(self, **filtros):
+        from unittest import mock
+        self.client.force_login(self.admin)
+        consulta = '&'.join(f'{k}={v}' for k, v in filtros.items())
+        with mock.patch('varagrill.reportes_pdf_views.generar_pdf_cuentas_por_pagar', return_value=b'%PDF-falso') as generar:
+            r = self.client.get(f'{self.URL}?{consulta}')
+        return r, generar
+
+    def ids(self, generar):
+        return {(c['tipo'], c['id']) for c in generar.call_args.args[0]}
+
+    def lote(self, c):
+        return ('compra', c.id)
+
+    def gasto(self, g):
+        return ('gasto', g.id)
+
+    def test_solo_administradores(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+
+    def test_rechaza_filtros_invalidos(self):
+        self.client.force_login(self.admin)
+        for consulta in ('tipo=otro', 'estado=otro', 'desde=nada', 'desde=2026-09-30&hasta=2026-09-01'):
+            self.assertEqual(self.client.get(f'{self.URL}?{consulta}').status_code, 400, consulta)
+
+    def test_por_defecto_trae_lo_pendiente_de_lotes_y_gastos(self):
+        r, generar = self.pedir()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(
+            self.ids(generar),
+            {self.lote(self.lote_a), self.lote(self.lote_b), self.gasto(self.gasto_d), self.gasto(self.gasto_f)},
+        )
+
+    def test_pagadas_se_filtran_por_la_fecha_en_que_se_pagaron(self):
+        r, generar = self.pedir(estado='pagadas', desde='2026-09-01', hasta='2026-09-30')
+        self.assertEqual(self.ids(generar), {self.lote(self.lote_c), self.gasto(self.gasto_e)})
+        # facturadas en agosto, pero pagadas en septiembre: no entran en un rango de agosto
+        r, generar = self.pedir(estado='pagadas', desde='2026-08-01', hasta='2026-08-31')
+        self.assertEqual(self.ids(generar), set())
+
+    def test_pendientes_se_filtran_por_la_fecha_de_la_cuenta(self):
+        r, generar = self.pedir(estado='pendientes', desde='2026-09-01', hasta='2026-09-30')
+        self.assertEqual(
+            self.ids(generar), {self.lote(self.lote_a), self.lote(self.lote_b), self.gasto(self.gasto_d)},
+        )
+
+    def test_un_solo_extremo_del_rango_tambien_filtra(self):
+        r, generar = self.pedir(estado='pendientes', desde='2026-09-15')
+        self.assertEqual(self.ids(generar), {self.lote(self.lote_b), self.gasto(self.gasto_f)})
+        r, generar = self.pedir(estado='pendientes', hasta='2026-09-10')
+        self.assertEqual(self.ids(generar), {self.lote(self.lote_a)})
+
+    def test_filtra_por_tipo(self):
+        r, generar = self.pedir(tipo='compra')
+        self.assertEqual({t for t, _ in self.ids(generar)}, {'compra'})
+        self.assertEqual(len(self.ids(generar)), 2)
+        r, generar = self.pedir(tipo='gasto')
+        self.assertEqual(self.ids(generar), {self.gasto(self.gasto_d), self.gasto(self.gasto_f)})
+
+    def test_todos_junta_pendientes_y_pagadas_del_rango(self):
+        r, generar = self.pedir(estado='todos', desde='2026-09-01', hasta='2026-09-30')
+        self.assertEqual(
+            self.ids(generar),
+            {
+                self.lote(self.lote_a), self.lote(self.lote_b), self.lote(self.lote_c),
+                self.gasto(self.gasto_d), self.gasto(self.gasto_e),
+            },
+        )
+
+    def test_los_montos_son_los_de_la_pantalla(self):
+        r, generar = self.pedir(tipo='compra', estado='pendientes')
+        por_id = {c['id']: c for c in generar.call_args.args[0]}
+        b = por_id[self.lote_b.id]
+        pantalla = next(
+            c for c in self.client.get('/api/cuentas-por-pagar/').json()['compras']
+            if c['tipo'] == 'compra' and c['id'] == self.lote_b.id
+        )
+        self.assertEqual((b['total'], b['saldo'], b['total_bs'], b['saldo_bs']),
+                         (pantalla['total'], pantalla['saldo_pendiente'], pantalla['total_bs'], pantalla['saldo_pendiente_bs']))
+        self.assertEqual(b['estado'], 'abonada_parcial')
+        self.assertEqual(Decimal(b['saldo']), Decimal('50'))
+        self.assertEqual(Decimal(b['saldo_bs']), Decimal('40000.00'))  # 50 x 800
+
+    def test_nombre_del_archivo_segun_los_filtros(self):
+        self.client.force_login(self.admin)
+        for consulta, esperado in (
+            ('estado=pagadas&tipo=gasto&desde=2026-09-01&hasta=2026-09-30', 'cuentas-por-pagar-pagadas-gastos-2026-09-01-al-2026-09-30.pdf'),
+            ('estado=todos&tipo=compra&desde=2026-09-01', 'cuentas-por-pagar-todas-lotes-desde-2026-09-01.pdf'),
+        ):
+            r = self.client.get(f'{self.URL}?{consulta}')
+            self.assertEqual(r['Content-Disposition'], f'attachment; filename="{esperado}"')
+            self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_arma_un_bloque_por_tipo_con_totales_que_cuadran(self):
+        from datetime import date
+        from varagrill.pdf_reportes import armar_bloques_cuentas
+        base = {'estado': 'pendiente', 'fecha_pago': None, 'detalle': ''}
+        cuentas = [
+            {**base, 'tipo': 'gasto', 'id': 7, 'titulo': 'Aseo', 'fecha': date(2026, 9, 9), 'total': '10.004', 'total_bs': '9000.00', 'saldo': '10.004', 'saldo_bs': '9000.00'},
+            {**base, 'tipo': 'compra', 'id': 2, 'titulo': 'Prov', 'fecha': date(2026, 9, 20), 'total': '20.005', 'total_bs': '18000.00', 'saldo': '5.00', 'saldo_bs': '4500.00'},
+            {**base, 'tipo': 'compra', 'id': 1, 'titulo': 'Prov', 'fecha': date(2026, 9, 5), 'total': '10', 'total_bs': None, 'saldo': '10', 'saldo_bs': None},
+        ]
+        bloques = armar_bloques_cuentas(cuentas)
+        self.assertEqual([b['tipo'] for b in bloques], ['compra', 'gasto'])
+        lotes = bloques[0]
+        # ordenados por fecha; el total suma los montos ya redondeados a 2 decimales
+        self.assertEqual([f[0] for f in lotes['filas']], ['#1', '#2'])
+        self.assertEqual(lotes['total'], Decimal('30.01'))
+        self.assertEqual(lotes['saldo'], Decimal('15.00'))
+        # la cuenta sin tasa no suma en Bs y queda marcada
+        self.assertEqual(lotes['total_bs'], Decimal('18000.00'))
+        self.assertEqual(lotes['sin_tasa'], 1)
+        self.assertEqual(lotes['filas'][0][6], '—')
+
+    def test_responde_un_pdf_real_aunque_no_haya_cuentas(self):
+        self.client.force_login(self.admin)
+        for consulta in ('', 'estado=todos', 'estado=pagadas&desde=2025-01-01&hasta=2025-01-31'):
+            r = self.client.get(f'{self.URL}?{consulta}')
+            self.assertEqual(r.status_code, 200, consulta)
+            self.assertEqual(r['Content-Type'], 'application/pdf')
+            self.assertTrue(r.content.startswith(b'%PDF'), consulta)

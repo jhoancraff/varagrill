@@ -23,7 +23,9 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
-from reportlab.platypus import CondPageBreak, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    CondPageBreak, Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+)
 
 NOMBRE_NEGOCIO = 'Varagrill'
 
@@ -35,6 +37,10 @@ GRIS_FILA = colors.HexColor('#f6f1f1')
 GRIS_LINEA = colors.HexColor('#ddd3d3')
 
 MARGEN_LATERAL = 15 * mm
+
+# Una seccion con titulo y hasta estas filas se mantiene entera (si no cabe en lo que queda de la
+# pagina pasa completa a la siguiente); una mas larga se parte repitiendo el encabezado.
+FILAS_SECCION_SIN_PARTIR = 20
 
 # base.py -> pdf_reportes/ -> varagrill/ -> raiz del proyecto
 _RAIZ_PROYECTO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -268,7 +274,11 @@ def generar_pdf_reporte(
             elementos.append(Paragraph(texto, estilos['seccion']))
         elif indice > 0:
             elementos.append(Spacer(1, 6 * mm))
-        elementos.append(_construir_tabla(seccion, ancho_util, estilos))
+        tabla = _construir_tabla(seccion, ancho_util, estilos)
+        if seccion.titulo and len(seccion.filas) <= FILAS_SECCION_SIN_PARTIR:
+            elementos.append(KeepTogether([elementos.pop(), tabla]))
+        else:
+            elementos.append(tabla)
 
     documento.build(elementos, canvasmaker=_fabrica_lienzo(f'{NOMBRE_NEGOCIO} · {titulo}'))
     return buffer.getvalue()

@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import useMobileBackHandler from '../hooks/useMobileBackHandler';
 import { getFechaSeleccionada, getRangoSeleccionado, setFechaSeleccionada } from '../utils/fechaContabilidad';
+import BotonDescargarPdf from './BotonDescargarPdf';
 import { DiaFecha } from './FiltroFechas';
 
 function todayIso() {
@@ -211,9 +212,14 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
         <button type="button" onClick={onBack} style={backButtonStyle}>
           ← Volver a Cuadre de caja{rango ? ' por rango' : ''}
         </button>
-        <button type="button" onClick={() => window.print()} style={printButtonStyle}>
-          Imprimir / Guardar PDF
-        </button>
+        {/* PDF de las notas de entrega de este dia (o del rango que viene del cuadre por rango). */}
+        <BotonDescargarPdf
+          url="/api/admin/reportes/facturado-pdf/"
+          params={rango ? { desde: rango.desde, hasta: rango.hasta } : { fecha }}
+          onError={setMessage}
+        >
+          Descargar PDF
+        </BotonDescargarPdf>
       </div>
 
       <div style={headerRowStyle(isMobile)}>
@@ -555,7 +561,6 @@ const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', 
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
 const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginTop: 2 };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 const notaLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
 

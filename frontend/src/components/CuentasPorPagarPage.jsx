@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
+import BotonDescargarPdf from './BotonDescargarPdf';
 import ReporteNotasCreditoCompra from './ReporteNotasCreditoCompra';
 import { RangoFechas } from './FiltroFechas';
 
@@ -100,6 +101,14 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const [filtroTipo, setFiltroTipo] = useState('todos');
   const [pagina, setPagina] = useState(1);
   const detailPanelRef = useRef(null);
+  // Reporte PDF: tiene sus propios filtros (no depende de la pestana ni de la busqueda de la pantalla).
+  const [reporteAbierto, setReporteAbierto] = useState(false);
+  const [reporteTipo, setReporteTipo] = useState('todos');
+  const [reporteEstado, setReporteEstado] = useState('pendientes');
+  const [reporteConFechas, setReporteConFechas] = useState(false);
+  const [reporteDesde, setReporteDesde] = useState(startOfMonthIso());
+  const [reporteHasta, setReporteHasta] = useState(todayIso());
+  const [reporteError, setReporteError] = useState('');
 
   const fetchCompras = useCallback(async () => {
     if (vista === 'notas_credito') {
@@ -131,6 +140,21 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setCompraDetalle(null);
     fetchCompras();
   }, [fetchCompras]);
+
+  const alternarReporte = () => {
+    if (!reporteAbierto) {
+      // Al abrirlo arranca con lo que se esta viendo (la pestana, el tipo y el rango de "Facturas pagadas").
+      setReporteEstado(vista === 'pagadas' ? 'pagadas' : 'pendientes');
+      setReporteTipo(filtroTipo);
+      if (vista === 'pagadas') {
+        setReporteConFechas(true);
+        setReporteDesde(historialDesde);
+        setReporteHasta(historialHasta);
+      }
+      setReporteError('');
+    }
+    setReporteAbierto((abierto) => !abierto);
+  };
 
   const cambiarVista = (nuevaVista) => {
     setVista(nuevaVista);
@@ -386,7 +410,81 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
         <button type="button" onClick={() => cambiarVista('notas_credito')} style={tabButtonStyle(vista === 'notas_credito')}>
           Notas de crédito
         </button>
+        <button type="button" onClick={alternarReporte} style={{ ...tabButtonStyle(reporteAbierto), marginLeft: 'auto' }}>
+          Reporte PDF
+        </button>
       </div>
+
+      {reporteAbierto ? (
+        <section style={reportePanelStyle}>
+          <div style={{ color: '#fff', fontWeight: 700 }}>Reporte de cuentas por pagar en PDF</div>
+          <div style={reporteFiltrosStyle(isMobile)}>
+            <label style={reporteLabelStyle}>
+              Qué incluir
+              <select
+                value={reporteTipo}
+                onChange={(event) => setReporteTipo(event.target.value)}
+                style={selectStyle}
+                className="admin-dark-select"
+              >
+                <option value="todos">Lotes y gastos</option>
+                <option value="compra">Solo lotes</option>
+                <option value="gasto">Solo gastos</option>
+              </select>
+            </label>
+            <label style={reporteLabelStyle}>
+              Estado
+              <select
+                value={reporteEstado}
+                onChange={(event) => setReporteEstado(event.target.value)}
+                style={selectStyle}
+                className="admin-dark-select"
+              >
+                <option value="pendientes">Pendientes (incluye abonadas)</option>
+                <option value="pagadas">Pagadas</option>
+                <option value="todos">Todas</option>
+              </select>
+            </label>
+          </div>
+
+          <label style={reporteCheckStyle}>
+            <input
+              type="checkbox"
+              checked={reporteConFechas}
+              onChange={(event) => setReporteConFechas(event.target.checked)}
+            />
+            Filtrar por rango de fechas
+          </label>
+          {reporteConFechas ? (
+            <>
+              <RangoFechas
+                desde={reporteDesde}
+                hasta={reporteHasta}
+                onChange={(rango) => { setReporteDesde(rango.desde); setReporteHasta(rango.hasta); }}
+              />
+              <div style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+                Las pendientes se filtran por la fecha de la factura (lotes) o del gasto; las pagadas, por la fecha en que se pagaron.
+              </div>
+            </>
+          ) : null}
+
+          {reporteError ? <div style={errorStyle}>{reporteError}</div> : null}
+          <div>
+            <BotonDescargarPdf
+              url="/api/admin/reportes/cuentas-por-pagar-pdf/"
+              params={{
+                tipo: reporteTipo,
+                estado: reporteEstado,
+                desde: reporteConFechas ? reporteDesde : '',
+                hasta: reporteConFechas ? reporteHasta : '',
+              }}
+              onError={setReporteError}
+            >
+              Descargar PDF
+            </BotonDescargarPdf>
+          </div>
+        </section>
+      ) : null}
 
       {vista === 'notas_credito' ? <ReporteNotasCreditoCompra isMobile={isMobile} /> : null}
       {vista !== 'notas_credito' ? (
@@ -802,6 +900,10 @@ const comprobanteLinkStyle = { display: 'block', marginTop: 8, border: 'none', b
 const miniPrintButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
 
 const tabsRowStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
+const reportePanelStyle = { display: 'grid', gap: 12, padding: '16px 18px', borderRadius: 20, border: '1px solid rgba(255, 255, 255, 0.1)', background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)' };
+const reporteFiltrosStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 260px))', gap: 12 });
+const reporteLabelStyle = { display: 'grid', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
+const reporteCheckStyle = { display: 'flex', alignItems: 'center', gap: 8, color: '#f2e6e6', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 const tabButtonStyle = (activo) => ({
   border: activo ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.14)',
   borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer',

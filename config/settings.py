@@ -187,6 +187,10 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'America/Caracas'
 
+# Minutos que se respeta la tasa de una pre-factura al emitir la nota de entrega / factura de esos
+# mismos pedidos (ver varagrill/tasa_cuenta.py).
+VENTANA_TASA_PREFACTURA_MIN = int(os.getenv('VENTANA_TASA_PREFACTURA_MIN', '60'))
+
 USE_I18N = True
 
 USE_TZ = True

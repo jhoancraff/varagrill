@@ -77,6 +77,7 @@ from .notifications import send_whatsapp_new_order_alert
 from .reportes import tasa_para_fecha
 from .serializers import MesaSerializer, ProductoSerializer
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
+from .tasa_cuenta import prefacturas_con_tasa_vigente, resolver_tasa_cuenta
 
 logger = logging.getLogger(__name__)
 
@@ -6469,6 +6470,8 @@ def pedidos_cobro_view(request):
         )
         return _auth_response({
             'ok': True,
+            # Pre-facturas cuya tasa sigue valida (ver tasa_cuenta.py): la pantalla de cobro muestra los Bs con esa tasa.
+            'prefacturas_tasa_vigente': prefacturas_con_tasa_vigente(),
             'pedidos': [
                 {
                     'id': pedido.id,
@@ -6627,7 +6630,10 @@ def pedidos_cobro_view(request):
         preparation_cost_map = _compute_preparation_cost_map(components_by_preparation, ingredient_costs, yields_by_preparation)
         unit_cost_cache = {}
 
-        tasa_cambio_pago = tasa_cambio_para_registro()
+        # La tasa que se le dijo al cliente en su pre-factura (si sigue vigente y cubre estos pedidos) manda sobre la
+        # tasa BCV de este instante; 'usar_tasa_actual' es la salida explicita de la cajera (ver tasa_cuenta.py).
+        tasa_resuelta = resolver_tasa_cuenta(pedido_ids, usar_tasa_actual=bool(data.get('usar_tasa_actual')))
+        tasa_cambio_pago = tasa_resuelta['tasa']
         total_cobrado = Decimal('0')
         for pedido in pedidos:
             # El dinero de la nota de entrega se cobra aparte, en uno o varios
@@ -6737,6 +6743,10 @@ def pedidos_cobro_view(request):
             'descuento_monto': str(descuento_monto),
             'descuento_motivo': descuento_motivo,
             'pedidos': [pedido.id for pedido in pedidos],
+            'tasa_cambio_referencia': str(tasa_cambio_pago) if tasa_cambio_pago is not None else None,
+            'tasa_origen': tasa_resuelta['origen'],
+            'tasa_prefactura': (f"PF-{tasa_resuelta['prefactura'].numero:06d}" if tasa_resuelta['prefactura'] else None),
+            'tasa_prefactura_vencida': tasa_resuelta['vencio'],
         },
     }, status=201)
 

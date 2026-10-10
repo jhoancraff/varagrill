@@ -22,6 +22,11 @@ const emptyNotaCliente = { cedula: '', apellido: '', nombre: '' };
 // solo queda oculto detras de esta bandera.
 const FACTURACION_HABILITADA = false;
 
+function formatTasa(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '';
+}
+
 function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos = false, canGestionarItems = false, mesasCatalogo = [], onArmarCanje }) {
   const tasaCambio = useExchangeRate();
   const [pedidos, setPedidos] = useState([]);
@@ -37,6 +42,10 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   // existe ese cliente (ver buscarClientePorCedula/pedidos_cobro_view).
   const [notaClienteByGroup, setNotaClienteByGroup] = useState({});
   const [prefacturaByGroup, setPrefacturaByGroup] = useState({});
+  // Pre-facturas (cuentas del cliente) cuya tasa sigue vigente — ver tasa_cuenta.py: mientras la cuenta que se le
+  // dio al cliente este dentro de la ventana, la nota de entrega nace con ESA tasa, aunque la BCV cambie.
+  const [prefacturasTasa, setPrefacturasTasa] = useState([]);
+  const [usarTasaActualByGroup, setUsarTasaActualByGroup] = useState({});
   // Descuento manual opcional al cobrar (ver pedidos_cobro_view/VGNotaEntrega):
   // se activa con un check que primero pide confirmación (por eso el estado
   // guarda si ya está desbloqueado, no solo si el checkbox está marcado — ver
@@ -166,6 +175,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         return;
       }
       setPedidos(Array.isArray(data.pedidos) ? data.pedidos : []);
+      setPrefacturasTasa(Array.isArray(data.prefacturas_tasa_vigente) ? data.prefacturas_tasa_vigente : []);
       setError('');
     } catch (requestError) {
       setError('Error de red al cargar los pedidos para cobrar.');
@@ -338,6 +348,18 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     ))
     : sortedGroups;
 
+  // Cuenta (pre-factura) vigente que cubre TODOS los pedidos seleccionados de un grupo, o null.
+  const tasaCuentaDelGrupo = (group) => {
+    const ids = Array.from(selectedByGroup[group.key] || []);
+    if (ids.length === 0) return null;
+    return prefacturasTasa.find((cuenta) => ids.every((id) => cuenta.pedido_ids.includes(id))) || null;
+  };
+  // Tasa con la que se muestran y se cobran los Bs de ese grupo: la de la cuenta mientras valga, o la actual.
+  const tasaDelGrupo = (group) => {
+    const cuenta = tasaCuentaDelGrupo(group);
+    return cuenta && !usarTasaActualByGroup[group.key] ? Number(cuenta.tasa) : tasaCambio;
+  };
+
   const selectedGroup = groups.find((group) => group.key === selectedGroupKey) || null;
   const selectedSet = selectedGroup ? (selectedByGroup[selectedGroup.key] || new Set()) : new Set();
   const selectedTotal = selectedGroup
@@ -346,6 +368,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const selectedGroupFullTotal = selectedGroup
     ? selectedGroup.pedidos.reduce((sum, pedido) => sum + Number(pedido.total), 0)
     : 0;
+  const tasaCuenta = selectedGroup ? tasaCuentaDelGrupo(selectedGroup) : null;
+  const usarTasaActual = selectedGroup ? Boolean(usarTasaActualByGroup[selectedGroup.key]) : false;
+  const tasaGrupo = selectedGroup ? tasaDelGrupo(selectedGroup) : tasaCambio;
   const cliente = selectedGroup ? (clienteByGroup[selectedGroup.key] || emptyCliente) : emptyCliente;
   // Lo que escribió el mesero al tomar el pedido (cédula y nombre del cliente) llega
   // precargado a la caja; la cajera solo lo edita si hace falta. Una vez que ella
@@ -496,6 +521,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
       delete copy[groupKey];
       return copy;
     });
+    setUsarTasaActualByGroup((current) => {
+      const copy = { ...current };
+      delete copy[groupKey];
+      return copy;
+    });
     setDescuentoActivoByGroup((current) => {
       const copy = { ...current };
       delete copy[groupKey];
@@ -632,6 +662,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           cliente_numero_documento: notaCliente.cedula.trim(),
           cliente_nombre: notaCliente.nombre.trim(),
           cliente_apellido: notaCliente.apellido.trim(),
+          usar_tasa_actual: Boolean(usarTasaActualByGroup[group.key]),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -647,7 +678,9 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         + `${formatMontoDocumento(data.nota_entrega.total, data.nota_entrega.moneda, tasaCambio)} `
         + `(${data.nota_entrega.pedidos.length} pedido(s))`
         + `${descuentoAplicado > 0 ? ` con descuento de $${descuentoAplicado.toFixed(2)}` : ''}. Pendiente de cobro — `
-        + `abona desde el reporte de notas de entrega.`,
+        + `abona desde el reporte de notas de entrega.`
+        + `${data.nota_entrega.tasa_origen === 'prefactura' ? ` Se respetó la tasa de la cuenta ${data.nota_entrega.tasa_prefactura} (Bs ${formatTasa(data.nota_entrega.tasa_cambio_referencia)}).` : ''}`
+        + `${data.nota_entrega.tasa_prefactura_vencida ? ` Atención: la tasa de la cuenta ya venció, se usó la tasa de hoy (Bs ${formatTasa(data.nota_entrega.tasa_cambio_referencia)}).` : ''}`,
       );
       setNotasRefreshToken((current) => current + 1);
       clearGroupState(group.key);
@@ -670,7 +703,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   // entrega/factura) y no aporta nada — sin método de pago el backend
   // simplemente muestra la cuenta en USD (ver _resolve_moneda), y como esto
   // no genera ningún pago real tampoco afecta el cuadre de caja.
-  const handleGenerarPrefactura = async (group) => {
+  const handleGenerarPrefactura = async (group, { renovar = false } = {}) => {
     const selectedIds = Array.from(selectedByGroup[group.key] || []);
     if (selectedIds.length === 0) {
       return;
@@ -682,15 +715,21 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
         credentials: 'include',
-        body: JSON.stringify({ pedido_ids: selectedIds }),
+        body: JSON.stringify({ pedido_ids: selectedIds, renovar_tasa: renovar }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         showError(data.message || 'No se pudo generar la cuenta del cliente.');
         return;
       }
-      showSuccess(`Cuenta del cliente ${data.prefactura.codigo} generada.`);
+      showSuccess(
+        data.tasa_reutilizada
+          ? `Cuenta del cliente ${data.prefactura.codigo} generada con la misma tasa de la cuenta anterior (Bs ${formatTasa(data.prefactura.tasa_cambio_referencia)}, vigente ${data.prefactura.tasa_minutos_restantes} min más).`
+          : `Cuenta del cliente ${data.prefactura.codigo} generada con la tasa de hoy (Bs ${formatTasa(data.prefactura.tasa_cambio_referencia)}).`,
+      );
       setPrefacturaByGroup((current) => ({ ...current, [group.key]: data.prefactura }));
+      // Para que la pantalla de cobro tome de una vez la tasa de esta cuenta (si no, esperaria al refresco de 15 s).
+      fetchPedidos();
     } catch (requestError) {
       showError('Error de red al generar la cuenta del cliente.');
     } finally {
@@ -847,7 +886,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     // La nota de entrega ya no declara método de pago al emitirse (se elige al
     // abonarla), así que el monto se muestra en dólares y en bolívares.
     const labelUsdBs = (monto) => {
-      const bs = formatBs(monto, tasaCambio);
+      const bs = formatBs(monto, tasaDelGrupo(group));
       return bs ? `$${Number(monto).toFixed(2)} (${bs})` : `$${Number(monto).toFixed(2)}`;
     };
     const totalLabel = labelUsdBs(selectedTotal);
@@ -1019,7 +1058,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                             </label>
                             <span style={orderPriceStyle}>
                               ${pedido.total}
-                              <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
+                              <BsAmount amountUsd={pedido.total} tasa={tasaGrupo} />
                             </span>
                           </div>
                           <div style={orderRowBottomStyle}>
@@ -1060,12 +1099,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                               {groupItemsByPlato(items).platos.map(({ grupoId, items: grupoItems }) => (
                                 <div key={`plato-${grupoId}`} style={platoGroupStyle}>
                                   <div style={platoGroupTitleStyle}>Plato {grupoId}</div>
-                                  {grupoItems.map((item) => renderDetailItemRow(item, tasaCambio, {
+                                  {grupoItems.map((item) => renderDetailItemRow(item, tasaGrupo, {
                                     canGestionarItems, onAjustarItem: (modo, it) => abrirAjuste(modo, it, pedido), soloItem: items.length <= 1,
                                   }))}
                                 </div>
                               ))}
-                              {groupItemsByPlato(items).sueltos.map((item) => renderDetailItemRow(item, tasaCambio, {
+                              {groupItemsByPlato(items).sueltos.map((item) => renderDetailItemRow(item, tasaGrupo, {
                                 canGestionarItems, onAjustarItem: (modo, it) => abrirAjuste(modo, it, pedido), soloItem: items.length <= 1,
                               }))}
                             </div>
@@ -1081,13 +1120,13 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                             ) : null}
 
                             <div style={detailTotalsStyle}>
-                              <span>Subtotal: ${pedido.subtotal}<BsAmount amountUsd={pedido.subtotal} tasa={tasaCambio} /></span>
-                              {Number(pedido.impuesto) > 0 ? <span>Impuesto: ${pedido.impuesto}<BsAmount amountUsd={pedido.impuesto} tasa={tasaCambio} /></span> : null}
-                              {Number(pedido.descuento) > 0 ? <span>Descuento: -${pedido.descuento}<BsAmount amountUsd={pedido.descuento} tasa={tasaCambio} /></span> : null}
-                              {Number(pedido.propina) > 0 ? <span>Propina: ${pedido.propina}<BsAmount amountUsd={pedido.propina} tasa={tasaCambio} /></span> : null}
+                              <span>Subtotal: ${pedido.subtotal}<BsAmount amountUsd={pedido.subtotal} tasa={tasaGrupo} /></span>
+                              {Number(pedido.impuesto) > 0 ? <span>Impuesto: ${pedido.impuesto}<BsAmount amountUsd={pedido.impuesto} tasa={tasaGrupo} /></span> : null}
+                              {Number(pedido.descuento) > 0 ? <span>Descuento: -${pedido.descuento}<BsAmount amountUsd={pedido.descuento} tasa={tasaGrupo} /></span> : null}
+                              {Number(pedido.propina) > 0 ? <span>Propina: ${pedido.propina}<BsAmount amountUsd={pedido.propina} tasa={tasaGrupo} /></span> : null}
                               <span style={{ fontWeight: 800, color: '#fff' }}>
                                 Total: ${pedido.total}
-                                <BsAmount amountUsd={pedido.total} tasa={tasaCambio} style={{ color: '#e0c9a3' }} />
+                                <BsAmount amountUsd={pedido.total} tasa={tasaGrupo} style={{ color: '#e0c9a3' }} />
                               </span>
                             </div>
                           </div>
@@ -1164,10 +1203,27 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </>
                     ) : null}
 
+                    {tasaCuenta ? (
+                      <div style={tasaCuentaAvisoStyle}>
+                        <div>
+                          Cuenta {tasaCuenta.codigo} · tasa <strong>Bs {formatTasa(tasaCuenta.tasa)}</strong> · vigente {tasaCuenta.minutos_restantes} min más.
+                          {' '}Los Bs de abajo usan esa tasa, la misma que se le dijo al cliente.
+                        </div>
+                        <label style={tasaCuentaOpcionStyle}>
+                          <input
+                            type="checkbox"
+                            checked={usarTasaActual}
+                            onChange={(event) => setUsarTasaActualByGroup((current) => ({ ...current, [selectedGroup.key]: event.target.checked }))}
+                          />
+                          Cobrar con la tasa actual{tasaCambio ? ` (Bs ${formatTasa(tasaCambio)})` : ''}
+                        </label>
+                      </div>
+                    ) : null}
+
                     <div style={groupFooterStyle(isMobile)}>
                       <div style={{ color: '#fff', fontWeight: 700 }}>
                         Total seleccionado: ${selectedTotal.toFixed(2)}
-                        <BsAmount amountUsd={selectedTotal} tasa={tasaCambio} />
+                        <BsAmount amountUsd={selectedTotal} tasa={tasaGrupo} />
                       </div>
                       {FACTURACION_HABILITADA ? (
                         <select
@@ -1249,6 +1305,17 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                       </span>
                     </div>
 
+                    {prefactura.tasa_cambio_referencia ? (
+                      <div style={tasaCuentaAvisoStyle}>
+                        <div>
+                          Tasa de esta cuenta: <strong>Bs {formatTasa(prefactura.tasa_cambio_referencia)}</strong>
+                          {prefactura.tasa_minutos_restantes > 0
+                            ? ` · vigente ${prefactura.tasa_minutos_restantes} min más`
+                            : ' · ya venció: al cobrar se usará la tasa de hoy'}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
                         type="button"
@@ -1257,6 +1324,15 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                         disabled={isBusy}
                       >
                         ← Volver
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerarPrefactura(selectedGroup, { renovar: true })}
+                        style={secondaryButtonStyle}
+                        disabled={isBusy}
+                        title="Congela la tasa de hoy para esta cuenta y reinicia los minutos de vigencia"
+                      >
+                        Renovar tasa
                       </button>
                       {FACTURACION_HABILITADA ? (
                         <button
@@ -1983,6 +2059,12 @@ const clienteFormStyle = {
   gap: 8,
 };
 
+const tasaCuentaAvisoStyle = {
+  display: 'grid', gap: 8, padding: '10px 14px', borderRadius: 12,
+  border: '1px solid rgba(255, 207, 125, 0.45)', background: 'rgba(255, 207, 125, 0.08)',
+  color: '#ffe3a3', fontSize: 14, lineHeight: 1.5,
+};
+const tasaCuentaOpcionStyle = { display: 'flex', alignItems: 'center', gap: 8, color: '#f2e6e6', fontWeight: 600, cursor: 'pointer' };
 const clienteHintStyle = {
   margin: 0,
   color: '#a89999',

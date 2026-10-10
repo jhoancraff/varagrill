@@ -3057,3 +3057,207 @@ class ReporteGastosPdfTests(TestCase):
         self.assertEqual(bloque['sin_tasa'], 1)
         self.assertEqual(bloque['total_bs'], Decimal('8000.00'))
         self.assertEqual(bloque['total_usd'], Decimal('15.00'))
+
+
+class TasaCuentaPrefacturaTests(TestCase):
+    """
+    La nota de entrega (y la factura) heredan la tasa de la pre-factura que se le dio al cliente mientras
+    siga vigente y dentro de la ventana (60 min), aunque la tasa BCV cambie en el medio. Ver tasa_cuenta.py.
+    """
+
+    def setUp(self):
+        from varagrill.models import VGPreFactura
+        self.VGPreFactura = VGPreFactura
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.user = VGUsuario.objects.create_user(
+            username='tc_cajera', password='claveCajera123', cedula='96000001', email='tc_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.client.force_login(self.user)
+        self.category = VGCategoriaProducto.objects.create(nombre='Platos TC')
+        self.plato = VGProducto.objects.create(nombre='Plato TC', categoria=self.category, precio_venta='10.00', disponible=True)
+        self.efectivo = VGMetodoPago.objects.create(nombre='Efectivo TC', moneda='USD', es_efectivo=True)
+        self.banco_bs = VGMetodoPago.objects.create(nombre='Banco Bs TC', moneda='VES')
+        _set_tasa_actual('100.0000')
+
+    def pedido(self, total='10.00'):
+        pedido = VGPedido.objects.create(usuario=self.user, tipo_pedido='local', estado='entregado', subtotal=total, total=total)
+        VGDetallePedido.objects.create(pedido=pedido, producto=self.plato, cantidad=1, precio_unitario=total, estado='entregado')
+        return pedido
+
+    def prefactura(self, pedidos, **extra):
+        r = self.client.post('/api/prefacturas/', data=json.dumps({'pedido_ids': [p.id for p in pedidos], **extra}), content_type='application/json')
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()
+
+    def cobrar(self, pedidos, **extra):
+        r = self.client.post('/api/pedidos/cobro/', data=json.dumps({
+            'pedido_ids': [p.id for p in pedidos], 'metodo_pago_id': self.efectivo.id,
+            'cliente_numero_documento': '96000111', 'cliente_nombre': 'Cliente TC', **extra,
+        }), content_type='application/json')
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()['nota_entrega']
+
+    def tasa_de_la_nota(self, nota):
+        from varagrill.models import VGNotaEntrega
+        return VGNotaEntrega.objects.get(pk=nota['id']).tasa_cambio_referencia
+
+    def envejecer(self, prefactura_id, minutos):
+        from datetime import timedelta
+        pasado = timezone.now() - timedelta(minutes=minutos)
+        self.VGPreFactura.objects.filter(pk=prefactura_id).update(tasa_fijada_en=pasado, fecha_emision=pasado)
+
+    def test_la_nota_conserva_la_tasa_de_la_prefactura_aunque_la_tasa_suba(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        _set_tasa_actual('120.0000')
+        nota = self.cobrar([pedido])
+        self.assertEqual(self.tasa_de_la_nota(nota), Decimal('100.0000'))
+        self.assertEqual(nota['tasa_origen'], 'prefactura')
+        self.assertEqual(nota['tasa_prefactura'], pf['codigo'])
+        self.assertEqual(nota['tasa_cambio_referencia'], '100.0000')
+
+    def test_la_nota_conserva_la_tasa_de_la_prefactura_aunque_la_tasa_baje(self):
+        pedido = self.pedido()
+        self.prefactura([pedido])
+        _set_tasa_actual('80.0000')
+        self.assertEqual(self.tasa_de_la_nota(self.cobrar([pedido])), Decimal('100.0000'))
+
+    def test_pasada_la_ventana_se_usa_la_tasa_actual_y_se_avisa(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        self.envejecer(pf['id'], 61)
+        _set_tasa_actual('120.0000')
+        nota = self.cobrar([pedido])
+        self.assertEqual(self.tasa_de_la_nota(nota), Decimal('120.0000'))
+        self.assertEqual(nota['tasa_origen'], 'actual')
+        self.assertTrue(nota['tasa_prefactura_vencida'])
+
+    def test_dentro_de_la_ventana_todavia_vale(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        self.envejecer(pf['id'], 59)
+        _set_tasa_actual('120.0000')
+        self.assertEqual(self.tasa_de_la_nota(self.cobrar([pedido])), Decimal('100.0000'))
+
+    def test_sin_prefactura_se_usa_la_tasa_actual_como_siempre(self):
+        pedido = self.pedido()
+        _set_tasa_actual('120.0000')
+        nota = self.cobrar([pedido])
+        self.assertEqual(self.tasa_de_la_nota(nota), Decimal('120.0000'))
+        self.assertEqual(nota['tasa_origen'], 'actual')
+        self.assertFalse(nota['tasa_prefactura_vencida'])
+
+    def test_una_prefactura_anulada_se_ignora(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        self.assertEqual(self.client.post(f'/api/prefacturas/{pf["id"]}/anular/').status_code, 200)
+        _set_tasa_actual('120.0000')
+        self.assertEqual(self.tasa_de_la_nota(self.cobrar([pedido])), Decimal('120.0000'))
+
+    def test_si_la_prefactura_cubre_solo_una_parte_de_lo_que_se_cobra_no_aplica(self):
+        a, b = self.pedido(), self.pedido()
+        self.prefactura([a])
+        _set_tasa_actual('120.0000')
+        self.assertEqual(self.tasa_de_la_nota(self.cobrar([a, b])), Decimal('120.0000'))
+
+    def test_si_la_prefactura_cubre_mas_de_lo_que_se_cobra_si_aplica(self):
+        a, b = self.pedido(), self.pedido()
+        self.prefactura([a, b])
+        _set_tasa_actual('120.0000')
+        self.assertEqual(self.tasa_de_la_nota(self.cobrar([a])), Decimal('100.0000'))
+
+    def test_la_cajera_puede_elegir_cobrar_a_la_tasa_actual(self):
+        pedido = self.pedido()
+        self.prefactura([pedido])
+        _set_tasa_actual('120.0000')
+        nota = self.cobrar([pedido], usar_tasa_actual=True)
+        self.assertEqual(self.tasa_de_la_nota(nota), Decimal('120.0000'))
+        self.assertEqual(nota['tasa_origen'], 'actual')
+
+    def test_generar_la_prefactura_dos_veces_conserva_la_tasa_de_la_primera(self):
+        pedido = self.pedido()
+        primera = self.prefactura([pedido])
+        _set_tasa_actual('120.0000')
+        segunda = self.prefactura([pedido])
+        self.assertFalse(primera['tasa_reutilizada'])
+        self.assertTrue(segunda['tasa_reutilizada'])
+        self.assertEqual(segunda['prefactura']['tasa_cambio_referencia'], '100.0000')
+        self.assertNotEqual(primera['prefactura']['id'], segunda['prefactura']['id'])
+        self.assertEqual(
+            self.VGPreFactura.objects.get(pk=primera['prefactura']['id']).tasa_fijada_en,
+            self.VGPreFactura.objects.get(pk=segunda['prefactura']['id']).tasa_fijada_en,
+        )
+
+    def test_renovar_la_tasa_congela_la_de_hoy_y_la_nota_usa_la_mas_reciente(self):
+        pedido = self.pedido()
+        self.prefactura([pedido])
+        _set_tasa_actual('110.0000')
+        renovada = self.prefactura([pedido], renovar_tasa=True)
+        self.assertFalse(renovada['tasa_reutilizada'])
+        self.assertEqual(renovada['prefactura']['tasa_cambio_referencia'], '110.0000')
+        _set_tasa_actual('130.0000')
+        self.assertEqual(self.tasa_de_la_nota(self.cobrar([pedido])), Decimal('110.0000'))
+
+    def test_reimprimir_no_estira_la_tasa_vieja_mas_alla_de_la_ventana(self):
+        pedido = self.pedido()
+        primera = self.prefactura([pedido])['prefactura']
+        self.envejecer(primera['id'], 50)
+        segunda = self.prefactura([pedido])
+        self.assertTrue(segunda['tasa_reutilizada'])
+        # la copia hereda la hora de congelado de la primera: a los 61 min ya no vale ninguna de las dos
+        self.envejecer(primera['id'], 61)
+        self.envejecer(segunda['prefactura']['id'], 61)
+        _set_tasa_actual('120.0000')
+        tercera = self.prefactura([pedido])
+        self.assertFalse(tercera['tasa_reutilizada'])
+        self.assertEqual(tercera['prefactura']['tasa_cambio_referencia'], '120.0000')
+
+    def test_el_abono_en_bolivares_saldando_la_nota_cuadra_con_lo_que_se_cotizo(self):
+        from varagrill.models import VGNotaEntrega, VGPago
+        pedido = self.pedido('10.00')
+        self.prefactura([pedido])          # el cliente ve $10 = Bs 1.000 a tasa 100
+        _set_tasa_actual('120.0000')       # la tasa sube mientras espera
+        nota = self.cobrar([pedido])
+        r = self.client.post(
+            f'/api/notas-entrega/{nota["id"]}/abonos/',
+            data=json.dumps({'monto': '1000.00', 'metodo_pago_id': self.banco_bs.id, 'referencia': 'REF-TC-1'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 201, r.content)
+        nota_db = VGNotaEntrega.objects.get(pk=nota['id'])
+        self.assertEqual(nota_db.estado, 'pagada')
+        self.assertEqual(nota_db.saldo_pendiente, Decimal('0'))
+        pago = VGPago.objects.get(nota_entrega=nota_db)
+        self.assertEqual(pago.tasa_cambio_referencia, Decimal('100.0000'))
+        self.assertEqual((pago.monto * pago.tasa_cambio_referencia).quantize(Decimal('0.01')), Decimal('1000.00'))
+
+    def test_el_listado_de_cobro_trae_las_prefacturas_con_tasa_vigente(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        r = self.client.get('/api/pedidos/cobro/')
+        self.assertEqual(r.status_code, 200)
+        vigentes = r.json()['prefacturas_tasa_vigente']
+        self.assertEqual(len(vigentes), 1)
+        self.assertEqual(vigentes[0]['codigo'], pf['codigo'])
+        self.assertEqual(Decimal(vigentes[0]['tasa']), Decimal('100.0000'))
+        self.assertEqual(vigentes[0]['pedido_ids'], [pedido.id])
+        self.assertIn(vigentes[0]['minutos_restantes'], (59, 60))
+        self.envejecer(pf['id'], 61)
+        self.assertEqual(self.client.get('/api/pedidos/cobro/').json()['prefacturas_tasa_vigente'], [])
+
+    def test_convertir_la_prefactura_en_factura_conserva_su_tasa(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        _set_tasa_actual('120.0000')
+        r = self.client.post(f'/api/prefacturas/{pf["id"]}/convertir/')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['factura']['tasa_cambio_referencia'], '100.0000')
+
+    def test_convertir_una_prefactura_vencida_usa_la_tasa_actual(self):
+        pedido = self.pedido()
+        pf = self.prefactura([pedido])['prefactura']
+        self.envejecer(pf['id'], 61)
+        _set_tasa_actual('120.0000')
+        r = self.client.post(f'/api/prefacturas/{pf["id"]}/convertir/')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['factura']['tasa_cambio_referencia'], '120.0000')

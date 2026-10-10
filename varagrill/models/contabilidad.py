@@ -516,6 +516,14 @@ class VGPreFactura(VGAuditoria):
         help_text="Moneda en la que se muestra esta cuenta (tomada del método de pago elegido al generarla). Los montos siempre se calculan en USD por dentro; esto solo controla en qué moneda se despliega/imprime.",
     )
     tasa_cambio_referencia = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    tasa_fijada_en = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            "Cuando se congelo la tasa de esta cuenta. Una pre-factura generada de nuevo para los mismos pedidos "
+            "dentro de la ventana hereda tasa y hora de la anterior (reimprimir no estira la tasa vieja); la "
+            "ventana de VENTANA_TASA_PREFACTURA_MIN cuenta desde aqui. Vacio = usa fecha_emision (ver tasa_cuenta.py)."
+        ),
+    )
     estado = models.CharField(max_length=20, choices=ESTADOS, default="vigente")
     notas = models.TextField(blank=True)
 

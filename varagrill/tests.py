@@ -4086,3 +4086,48 @@ class EstadoResultadosCostoDeVentasTests(TestCase):
         r = self.client.get(f'/api/admin/reportes/margen-ganancia/?desde={self.hoy.isoformat()}&hasta={self.hoy.isoformat()}')
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(estado['costo_ventas'], r.json()['totales']['costo_con_margen_total'])
+
+    def test_avisa_de_los_productos_vendidos_sin_costo_configurado(self):
+        # costo congelado 0: es el plato sin receta ni ingredientes anclados (el caso de las ventas viejas)
+        self.venta(cantidad=2, precio='10.00', costo='0.00')   # vende 20, costo 0
+        self.venta(cantidad=1, precio='30.00', costo='12.50')  # con costo: no entra al aviso
+        data = self.reporte()
+        aviso = data['ventas_sin_costo']
+        self.assertEqual(aviso['total'], '20.00')
+        self.assertEqual(aviso['pct_de_ventas'], '40.00')
+        self.assertEqual(len(aviso['productos']), 1)
+        fila = aviso['productos'][0]
+        self.assertEqual(fila['producto_id'], self.plato.id)
+        self.assertEqual(fila['nombre'], 'Plato ER')
+        self.assertEqual(fila['motivo'], 'sin_receta')
+        self.assertEqual(fila['unidades'], '2.00')
+        self.assertEqual(fila['ventas'], '20.00')
+
+    def test_sin_ventas_sin_costo_el_aviso_viene_vacio(self):
+        self.venta(cantidad=1, precio='10.00', costo='4.00')
+        aviso = self.reporte()['ventas_sin_costo']
+        self.assertEqual(aviso, {'total': '0.00', 'pct_de_ventas': '0.00', 'productos': []})
+
+    def test_el_aviso_cuenta_solo_la_parte_cobrada_de_una_nota_abonada(self):
+        # vende 40, cobro 10 (25%): de esa venta sin costo, 10 cuentan
+        self.venta(cantidad=2, precio='20.00', costo='0.00', estado='abonada_parcial', saldo='30.00')
+        aviso = self.reporte()['ventas_sin_costo']
+        self.assertEqual(aviso['total'], '10.00')
+        self.assertEqual(aviso['pct_de_ventas'], '100.00')
+
+    def test_distingue_el_producto_con_receta_cuyo_costo_es_cero(self):
+        from varagrill.models import VGIngrediente, VGRecetaProducto
+        ingrediente = VGIngrediente.objects.create(
+            nombre='Ingrediente ER', unidad_medida='g', stock_actual=Decimal('1000'), costo_unitario=Decimal('0'),
+        )
+        VGRecetaProducto.objects.create(producto=self.plato, ingrediente=ingrediente, cantidad_requerida=Decimal('100'))
+        self.venta(cantidad=1, precio='10.00', costo='0.00')
+        fila = self.reporte()['ventas_sin_costo']['productos'][0]
+        self.assertEqual(fila['motivo'], 'costo_cero')
+
+    def test_el_cargo_de_delivery_no_cuenta_como_venta_sin_costo(self):
+        # nota de 15: 10 del plato (con costo) + 5 de delivery (no es un producto)
+        self.venta(cantidad=1, precio='10.00', costo='4.00', total='15.00')
+        data = self.reporte()
+        self.assertEqual(data['ventas_total'], '15.00')
+        self.assertEqual(data['ventas_sin_costo']['productos'], [])

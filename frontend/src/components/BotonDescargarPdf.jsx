@@ -26,11 +26,11 @@ function BotonDescargarPdf({ url, params, onError, style, children = 'Descargar 
 }
 
 const baseStyle = {
-  border: '1px solid rgba(255,255,255,0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '10px 16px',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };

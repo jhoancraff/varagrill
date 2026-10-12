@@ -242,11 +242,11 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
 
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Efectivo del rango</div>
-            <div style={{ display: 'grid', gap: 8, color: '#f2e6e6' }}>
+            <div style={{ display: 'grid', gap: 8, color: 'var(--vg-f-f2e6e6)' }}>
               <div>Efectivo esperado (ventas − gastos en efectivo, sumado día por día): <strong>${formatMonto(data.efectivo_esperado)}</strong></div>
               <div>Total consignado en el rango: <strong>${formatMonto(data.total_consignado)}</strong></div>
               {Number(data.gastos_efectivo) > 0 ? (
-                <div style={{ color: '#ff9d9d' }}>Gastos pagados en efectivo en el rango: −${formatMonto(data.gastos_efectivo)}</div>
+                <div style={{ color: 'var(--vg-f-ff9d9d)' }}>Gastos pagados en efectivo en el rango: −${formatMonto(data.gastos_efectivo)}</div>
               ) : null}
             </div>
           </section>
@@ -285,34 +285,34 @@ function ReporteCuadreCajaRangoPage({ isMobile, onBack, onNavigate }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 680, lineHeight: 1.6 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 680, lineHeight: 1.6 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 const statusRowStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
 const statusChipStyle = (closed) => ({
   display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: 999,
   fontSize: 12, fontWeight: 700,
-  color: closed ? '#8fffb0' : '#ffcf7d',
+  color: closed ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ffcf7d)',
   background: closed ? 'rgba(70,200,120,0.14)' : 'rgba(255,190,120,0.14)',
-  border: closed ? '1px solid rgba(80,200,130,0.3)' : '1px solid rgba(255,190,120,0.3)',
+  border: closed ? '1px solid var(--vg-f-50c882-a300)' : '1px solid var(--vg-f-ffbe78-a300)',
 });
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const diasTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,0.8fr) minmax(120px,0.8fr) minmax(160px,1fr)', minWidth: 620, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
-const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
+const diasTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(120px,0.8fr) minmax(120px,0.8fr) minmax(160px,1fr)', minWidth: 620, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };
+const secondaryAmountStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12, marginLeft: 6 };
 const desgloseGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
 const ventasGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
-const verDetalleLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
-const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
-const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const desgloseValueStyle = { color: '#fff', fontSize: 20, fontWeight: 800 };
-const desgloseSecondaryStyle = { color: '#c8bbbb', fontSize: 12.5 };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const verDetalleLinkStyle = { border: 'none', background: 'none', color: 'var(--vg-f-ff9d9d)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
+const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
+const desgloseLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const desgloseValueStyle = { color: 'var(--vg-text-strong)', fontSize: 20, fontWeight: 800 };
+const desgloseSecondaryStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default ReporteCuadreCajaRangoPage;

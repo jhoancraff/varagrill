@@ -813,13 +813,13 @@ function NewOrderPage({
       <Toast toast={toast} onClose={hideToast} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#f7a5a5', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--vg-f-f7a5a5)', marginBottom: 8 }}>
             Toma de pedido
           </div>
-          <div style={{ fontSize: isMobile ? 24 : 32, fontWeight: 700, color: '#fff' }}>
+          <div style={{ fontSize: isMobile ? 24 : 32, fontWeight: 700, color: 'var(--vg-text-strong)' }}>
             Nuevo pedido
           </div>
-          <div style={{ color: '#c6c6c6', marginTop: 8, fontSize: 14 }}>
+          <div style={{ color: 'var(--vg-f-c6c6c6)', marginTop: 8, fontSize: 14 }}>
             Mesero: {waiterName || 'Usuario'}
           </div>
         </div>
@@ -969,7 +969,7 @@ function NewOrderPage({
                   {puedeCambiarMontoDelivery ? <option value="otro">Otro monto</option> : null}
                 </select>
                 {zonasDelivery.length === 0 ? (
-                  <span style={{ color: '#c8bbbb', fontSize: 12 }}>
+                  <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12 }}>
                     No hay zonas activas: configúralas en Administración → Zonas de delivery.
                   </span>
                 ) : null}
@@ -987,7 +987,7 @@ function NewOrderPage({
                   style={inputStyle(isCompact)}
                 />
                 {puedeCambiarMontoDelivery && zonaDeliveryElegida && Number(cargoDelivery) !== Number(zonaDeliveryElegida.tarifa) ? (
-                  <span style={{ color: '#ffcf7d', fontSize: 12 }}>
+                  <span style={{ color: 'var(--vg-f-ffcf7d)', fontSize: 12 }}>
                     Monto distinto a la tarifa de la zona (${Number(zonaDeliveryElegida.tarifa).toFixed(2)}).
                   </span>
                 ) : null}
@@ -1186,9 +1186,9 @@ function NewOrderPage({
             <span aria-hidden="true">🛒</span>
             <span style={mobileCartBadgeStyle}>{cartCount}</span>
           </button>
-          <div style={{ color: '#fff', fontWeight: 700 }}>
+          <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
             ${totalEstimado.toFixed(2)}
-            <BsAmount amountUsd={totalEstimado} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
+            <BsAmount amountUsd={totalEstimado} tasa={tasaCambio} style={{ color: 'var(--vg-f-e0e0e0)' }} />
           </div>
           <button type="button" onClick={handleSubmit} style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
             {isSubmitting ? 'Guardando...' : 'Registrar pedido'}
@@ -1614,12 +1614,12 @@ function OpcionesProductoModal({ product, products, pesoGramos, onClose, onConfi
                     : (grupo.obligatorio ? ' *' : ' (opcional)') + (grupo.seleccion_multiple ? ' — puedes elegir varias' : '')}
                 </span>
                 {raciones !== null ? (
-                  <div style={{ color: '#ffcf7d', fontSize: 12, fontWeight: 700 }}>
+                  <div style={{ color: 'var(--vg-f-ffcf7d)', fontSize: 12, fontWeight: 700 }}>
                     Con {pesoGramos}g corresponden {raciones} {raciones === 1 ? 'ración' : 'raciones'} de cada opción elegida.
                   </div>
                 ) : null}
                 {esDinamico && pool.length === 0 ? (
-                  <div style={{ color: '#c8bbbb', fontSize: 13 }}>No hay opciones disponibles en este momento.</div>
+                  <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>No hay opciones disponibles en este momento.</div>
                 ) : null}
                 <div style={{ display: 'grid', gap: 8 }}>
                   {(esDinamico ? pool : grupo.opciones).map((opcion) => {
@@ -1636,7 +1636,7 @@ function OpcionesProductoModal({ product, products, pesoGramos, onClose, onConfi
                       >
                         <span>{opcion.nombre}</span>
                         {!esDinamico && Number(opcion.precio_adicional) > 0 ? (
-                          <span style={{ color: '#ffcf7d', fontWeight: 700 }}>+${Number(opcion.precio_adicional).toFixed(2)}</span>
+                          <span style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 700 }}>+${Number(opcion.precio_adicional).toFixed(2)}</span>
                         ) : null}
                       </button>
                     );
@@ -1646,7 +1646,7 @@ function OpcionesProductoModal({ product, products, pesoGramos, onClose, onConfi
             );
           })}
 
-          {error ? <div style={{ color: '#ff9d9d', fontSize: 13 }}>{error}</div> : null}
+          {error ? <div style={{ color: 'var(--vg-f-ff9d9d)', fontSize: 13 }}>{error}</div> : null}
 
           {gruposSinElegir ? (
             <div style={avisoAcompananteStyle}>
@@ -1720,11 +1720,11 @@ function cryptoRandomId() {
 }
 
 const orderContainerStyle = (isCompact) => ({
-  background: 'linear-gradient(180deg, rgba(18, 8, 8, 0.96) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  border: '1px solid rgba(255, 95, 95, 0.18)',
+  background: 'linear-gradient(180deg, var(--vg-s-120808-a960) 0%, var(--vg-s-080808-a980) 100%)',
+  border: '1px solid var(--vg-f-ff5f5f-a180)',
   borderRadius: 24,
   padding: isCompact ? 14 : 20,
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 30px rgba(0,0,0,0.32)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 30px rgba(0, 0, 0, calc(0.32 * var(--vg-shadow-k)))',
   paddingBottom: isCompact ? 76 : 20,
 });
 
@@ -1735,16 +1735,16 @@ const fieldWrapStyle = {
 
 const labelStyle = {
   fontSize: 12,
-  color: '#f1b8b8',
+  color: 'var(--vg-f-f1b8b8)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
 };
 
 const noAplicaMesaStyle = (isCompact) => ({
   borderRadius: 12,
-  border: '1px dashed rgba(255,255,255,0.14)',
-  background: 'rgba(255,255,255,0.02)',
-  color: '#a89999',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  background: 'rgba(var(--vg-ink), 0.02)',
+  color: 'var(--vg-f-a89999)',
   padding: isCompact ? '12px 12px' : '10px 12px',
   fontSize: isCompact ? 15 : 13.5,
   minHeight: isCompact ? 46 : 40,
@@ -1756,9 +1756,9 @@ const noAplicaMesaStyle = (isCompact) => ({
 const inputStyle = (isCompact) => ({
   width: '100%',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'rgba(12, 12, 12, 0.95)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-0c0c0c-a950)',
+  color: 'var(--vg-text-strong)',
   padding: isCompact ? '12px 12px' : '10px 12px',
   fontSize: isCompact ? 16 : 14,
   minHeight: isCompact ? 46 : 40,
@@ -1772,7 +1772,7 @@ const primaryButtonStyle = (isCompact) => ({
   border: 'none',
   borderRadius: 999,
   padding: isCompact ? '12px 16px' : '10px 16px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
@@ -1780,11 +1780,11 @@ const primaryButtonStyle = (isCompact) => ({
 });
 
 const ghostButtonStyle = (isCompact) => ({
-  border: '1px solid rgba(255, 115, 115, 0.34)',
+  border: '1px solid var(--vg-f-ff7373-a340)',
   borderRadius: 999,
   padding: isCompact ? '11px 16px' : '10px 16px',
-  background: 'rgba(255,255,255,0.03)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   cursor: 'pointer',
   width: isCompact ? '100%' : 'auto',
@@ -1796,7 +1796,7 @@ const promoInlineBadgeStyle = {
   marginLeft: 8,
   padding: '2px 8px',
   borderRadius: 999,
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontSize: 10,
   fontWeight: 800,
@@ -1804,11 +1804,11 @@ const promoInlineBadgeStyle = {
 };
 
 const catalogTypeChipStyle = (active, isCompact) => ({
-  border: active ? '1px solid rgba(255, 106, 106, 0.6)' : '1px solid rgba(255,255,255,0.18)',
+  border: active ? '1px solid var(--vg-f-ff6a6a-a600)' : '1px solid rgba(var(--vg-ink), 0.18)',
   borderRadius: 999,
   padding: isCompact ? '9px 14px' : '7px 12px',
-  background: active ? 'rgba(191, 31, 31, 0.28)' : 'rgba(255,255,255,0.03)',
-  color: '#fff',
+  background: active ? 'rgba(191, 31, 31, 0.28)' : 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -1820,9 +1820,9 @@ const catalogTypeChipStyle = (active, isCompact) => ({
 const addRoundBannerStyle = {
   marginTop: 14,
   borderRadius: 12,
-  border: '1px solid rgba(88, 166, 255, 0.4)',
+  border: '1px solid var(--vg-f-58a6ff-a400)',
   background: 'rgba(30, 64, 110, 0.35)',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   padding: '10px 12px',
   fontSize: 13,
   lineHeight: 1.5,
@@ -1831,9 +1831,9 @@ const addRoundBannerStyle = {
 const offlineBannerStyle = (isOnline, hasQueue) => ({
   marginTop: 14,
   borderRadius: 12,
-  border: isOnline ? '1px solid rgba(88, 208, 132, 0.35)' : '1px solid rgba(223, 162, 95, 0.45)',
-  background: isOnline ? 'rgba(22, 76, 39, 0.35)' : 'rgba(86, 57, 19, 0.4)',
-  color: '#fff',
+  border: isOnline ? '1px solid var(--vg-f-58d084-a350)' : '1px solid var(--vg-f-dfa25f-a450)',
+  background: isOnline ? 'var(--vg-s-164c27-a350)' : 'var(--vg-s-563913-a400)',
+  color: 'var(--vg-text-strong)',
   padding: '9px 12px',
   display: 'flex',
   alignItems: 'center',
@@ -1844,12 +1844,12 @@ const offlineBannerStyle = (isOnline, hasQueue) => ({
 });
 
 const syncQueueButtonStyle = {
-  border: '1px solid rgba(255,255,255,0.24)',
+  border: '1px solid rgba(var(--vg-ink), 0.24)',
   borderRadius: 999,
   padding: '7px 12px',
   minHeight: 34,
-  color: '#fff',
-  background: 'rgba(255,255,255,0.06)',
+  color: 'var(--vg-text-strong)',
+  background: 'rgba(var(--vg-ink), 0.06)',
   cursor: 'pointer',
 };
 
@@ -1874,7 +1874,7 @@ const catalogBarStyle = {
   display: 'grid',
   gap: 8,
   padding: '8px 0',
-  background: 'linear-gradient(180deg, rgba(16, 7, 7, 0.98) 0%, rgba(16, 7, 7, 0.94) 80%, rgba(16, 7, 7, 0) 100%)',
+  background: 'linear-gradient(180deg, var(--vg-s-100707-a980) 0%, var(--vg-s-100707-a940) 80%, var(--vg-s-100707-a0) 100%)',
 };
 
 const searchInputStyle = (isCompact) => ({
@@ -1905,8 +1905,8 @@ const emptyGridStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 16,
-  border: '1px dashed rgba(255,255,255,0.14)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  color: 'var(--vg-f-c8bbbb)',
   fontSize: 13,
 };
 
@@ -1917,8 +1917,8 @@ const productCardStyle = (hasPromotion) => ({
   padding: 0,
   overflow: 'hidden',
   borderRadius: 16,
-  border: hasPromotion ? '1px solid rgba(120, 220, 160, 0.5)' : '1px solid rgba(255,255,255,0.12)',
-  background: hasPromotion ? 'rgba(70, 200, 120, 0.06)' : 'rgba(255,255,255,0.03)',
+  border: hasPromotion ? '1px solid var(--vg-f-78dca0-a500)' : '1px solid rgba(var(--vg-ink), 0.12)',
+  background: hasPromotion ? 'rgba(70, 200, 120, 0.06)' : 'rgba(var(--vg-ink), 0.03)',
 });
 
 const resetButtonStyle = {
@@ -1948,20 +1948,20 @@ const cardQuantityBadgeStyle = {
   height: 20,
   padding: '0 6px',
   borderRadius: 999,
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontSize: 12,
   fontWeight: 800,
   display: 'grid',
   placeItems: 'center',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+  boxShadow: '0 2px 8px rgba(0, 0, 0, calc(0.4 * var(--vg-shadow-k)))',
 };
 
 const productImageWrapStyle = {
   position: 'relative',
   width: '100%',
   aspectRatio: '4 / 3',
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(var(--vg-ink), 0.04)',
 };
 
 const productImageStyle = {
@@ -1979,7 +1979,7 @@ const productImagePlaceholderStyle = {
   fontSize: 26,
   fontWeight: 800,
   color: '#7a5f5f',
-  background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+  background: 'linear-gradient(135deg, rgba(var(--vg-ink), 0.05) 0%, rgba(var(--vg-ink), 0.02) 100%)',
 };
 
 const cardPromoBadgeStyle = {
@@ -1988,7 +1988,7 @@ const cardPromoBadgeStyle = {
   left: 6,
   padding: '2px 7px',
   borderRadius: 999,
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontSize: 10,
   fontWeight: 800,
@@ -2001,7 +2001,7 @@ const productCardBodyStyle = {
 };
 
 const productCardNameStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 12.5,
   lineHeight: 1.25,
@@ -2012,7 +2012,7 @@ const productCardNameStyle = {
 };
 
 const productCardDescStyle = {
-  color: '#c2adad',
+  color: 'var(--vg-f-c2adad)',
   fontSize: 10.5,
   lineHeight: 1.3,
   display: '-webkit-box',
@@ -2035,19 +2035,19 @@ const productCardPriceGroupStyle = {
 };
 
 const priceStyle = {
-  color: '#ffd9d9',
+  color: 'var(--vg-f-ffd9d9)',
   fontWeight: 700,
   fontSize: 12.5,
 };
 
 const priceStrikeStyle = {
-  color: '#8f7676',
+  color: 'var(--vg-f-8f7676)',
   textDecoration: 'line-through',
   fontSize: 10.5,
 };
 
 const pricePromoStyle = {
-  color: '#7dffa0',
+  color: 'var(--vg-f-7dffa0)',
   fontWeight: 800,
   fontSize: 12.5,
 };
@@ -2056,9 +2056,9 @@ const addIconStyle = {
   width: 20,
   height: 20,
   borderRadius: '50%',
-  background: 'rgba(255,255,255,0.08)',
-  border: '1px solid rgba(255,255,255,0.18)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.08)',
+  border: '1px solid rgba(var(--vg-ink), 0.18)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 800,
   fontSize: 14,
   display: 'grid',
@@ -2073,8 +2073,8 @@ const cartPanelStyle = (isCompact) => ({
   gap: 10,
   padding: 14,
   borderRadius: 18,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.12)',
+  background: 'rgba(var(--vg-ink), 0.03)',
   ...(isCompact ? {} : { position: 'sticky', top: 8, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }),
 });
 
@@ -2085,7 +2085,7 @@ const cartHeaderStyle = {
 };
 
 const cartTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 16,
 };
@@ -2094,8 +2094,8 @@ const cartCountBadgeStyle = {
   padding: '4px 10px',
   borderRadius: 999,
   background: 'rgba(255, 141, 141, 0.14)',
-  border: '1px solid rgba(255, 141, 141, 0.22)',
-  color: '#ffc5c5',
+  border: '1px solid var(--vg-f-ff8d8d-a220)',
+  color: 'var(--vg-f-ffc5c5)',
   fontSize: 12,
   fontWeight: 700,
 };
@@ -2120,11 +2120,11 @@ const armarPlatoButtonStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 6,
-  border: '1px dashed rgba(125, 200, 255, 0.45)',
+  border: '1px dashed var(--vg-f-7dc8ff-a450)',
   borderRadius: 999,
   padding: '8px 14px',
   background: 'rgba(90, 170, 255, 0.08)',
-  color: '#bfe0ff',
+  color: 'var(--vg-f-bfe0ff)',
   fontWeight: 700,
   fontSize: 13,
   cursor: 'pointer',
@@ -2135,18 +2135,18 @@ const armarPlatoLabelStyle = {
   padding: '6px 12px',
   borderRadius: 999,
   background: 'rgba(90, 170, 255, 0.16)',
-  border: '1px solid rgba(125, 200, 255, 0.4)',
-  color: '#bfe0ff',
+  border: '1px solid var(--vg-f-7dc8ff-a400)',
+  color: 'var(--vg-f-bfe0ff)',
   fontSize: 12.5,
   fontWeight: 700,
 };
 
 const nuevoPlatoButtonStyle = {
-  border: '1px solid rgba(125, 200, 255, 0.4)',
+  border: '1px solid var(--vg-f-7dc8ff-a400)',
   borderRadius: 999,
   padding: '7px 12px',
   background: 'rgba(90, 170, 255, 0.1)',
-  color: '#bfe0ff',
+  color: 'var(--vg-f-bfe0ff)',
   fontWeight: 700,
   fontSize: 12.5,
   cursor: 'pointer',
@@ -2154,11 +2154,11 @@ const nuevoPlatoButtonStyle = {
 };
 
 const terminarArmadoButtonStyle = {
-  border: '1px solid rgba(255,255,255,0.18)',
+  border: '1px solid rgba(var(--vg-ink), 0.18)',
   borderRadius: 999,
   padding: '7px 12px',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 12.5,
   cursor: 'pointer',
@@ -2170,7 +2170,7 @@ const platoGroupStyle = (isActive) => ({
   gap: 8,
   padding: 8,
   borderRadius: 14,
-  border: isActive ? '1px solid rgba(255, 176, 59, 0.6)' : '1px solid rgba(110, 220, 150, 0.35)',
+  border: isActive ? '1px solid var(--vg-f-ffb03b-a600)' : '1px solid var(--vg-f-6edc96-a350)',
   background: isActive ? 'rgba(255, 176, 59, 0.09)' : 'rgba(80, 200, 130, 0.07)',
   boxShadow: isActive ? '0 0 0 2px rgba(255, 176, 59, 0.14)' : 'none',
 });
@@ -2179,7 +2179,7 @@ const platoGroupHeaderStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 800,
   fontSize: 12.5,
   textTransform: 'uppercase',
@@ -2204,11 +2204,11 @@ const platoStatusBadgeStyle = (isActive) => ({
   letterSpacing: '0.03em',
   textTransform: 'uppercase',
   background: isActive ? 'rgba(255, 176, 59, 0.2)' : 'rgba(80, 200, 130, 0.2)',
-  color: isActive ? '#ffcf8a' : '#8ff0b8',
+  color: isActive ? 'var(--vg-f-ffcf8a)' : 'var(--vg-f-8ff0b8)',
 });
 
 const platoGroupSubtotalStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
 };
 
@@ -2222,12 +2222,12 @@ const ungroupedGroupStyle = {
   gap: 8,
   padding: 8,
   borderRadius: 14,
-  border: '1px dashed rgba(255, 255, 255, 0.18)',
-  background: 'rgba(255, 255, 255, 0.02)',
+  border: '1px dashed rgba(var(--vg-ink), 0.18)',
+  background: 'rgba(var(--vg-ink), 0.02)',
 };
 
 const ungroupedHeaderStyle = {
-  color: '#c8bbbb',
+  color: 'var(--vg-f-c8bbbb)',
   fontWeight: 800,
   fontSize: 12.5,
   textTransform: 'uppercase',
@@ -2236,7 +2236,7 @@ const ungroupedHeaderStyle = {
 };
 
 const pesoUnitPriceHintStyle = {
-  color: '#9a8686',
+  color: 'var(--vg-f-9a8686)',
   fontSize: 11,
   marginTop: -4,
 };
@@ -2251,9 +2251,9 @@ const pesoInputStyle = {
   width: 90,
   textAlign: 'center',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'rgba(12, 12, 12, 0.95)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-0c0c0c-a950)',
+  color: 'var(--vg-text-strong)',
   padding: '10px 8px',
   fontSize: 16,
   colorScheme: 'dark',
@@ -2263,8 +2263,8 @@ const cartEmptyStyle = {
   padding: '18px 10px',
   textAlign: 'center',
   borderRadius: 12,
-  border: '1px dashed rgba(255,255,255,0.14)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  color: 'var(--vg-f-c8bbbb)',
   fontSize: 13,
 };
 
@@ -2273,7 +2273,7 @@ const cartLineStyle = {
   gap: 6,
   padding: 10,
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.1)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
   background: 'rgba(0,0,0,0.2)',
 };
 
@@ -2285,7 +2285,7 @@ const cartLineTopStyle = {
 };
 
 const cartLineNameStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   fontSize: 13,
 };
@@ -2293,7 +2293,7 @@ const cartLineNameStyle = {
 const cartRemoveButtonStyle = {
   border: 'none',
   background: 'transparent',
-  color: '#e8a9a9',
+  color: 'var(--vg-f-e8a9a9)',
   fontSize: 18,
   lineHeight: 1,
   cursor: 'pointer',
@@ -2312,7 +2312,7 @@ const qtyStepperStyle = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  border: '1px solid rgba(255,255,255,0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '2px 6px',
 };
@@ -2320,7 +2320,7 @@ const qtyStepperStyle = {
 const qtyButtonStyle = {
   border: 'none',
   background: 'transparent',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 16,
   fontWeight: 700,
   cursor: 'pointer',
@@ -2330,7 +2330,7 @@ const qtyButtonStyle = {
 };
 
 const qtyValueStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 13,
   minWidth: 14,
@@ -2338,7 +2338,7 @@ const qtyValueStyle = {
 };
 
 const cartLineSubtotalStyle = {
-  color: '#ffd9d9',
+  color: 'var(--vg-f-ffd9d9)',
   fontWeight: 700,
   fontSize: 13,
 };
@@ -2347,9 +2347,9 @@ const cartNotesInputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.1)',
-  background: 'rgba(255,255,255,0.03)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   padding: '7px 9px',
   fontSize: 12,
   outline: 'none',
@@ -2359,7 +2359,7 @@ const addonSectionStyle = {
   display: 'grid',
   gap: 6,
   paddingTop: 4,
-  borderTop: '1px dashed rgba(255,255,255,0.12)',
+  borderTop: '1px dashed rgba(var(--vg-ink), 0.12)',
 };
 
 const opcionesElegidasWrapStyle = {
@@ -2371,9 +2371,9 @@ const opcionesElegidasWrapStyle = {
 const opcionElegidaChipStyle = {
   padding: '4px 9px',
   borderRadius: 999,
-  border: '1px solid rgba(125, 200, 255, 0.35)',
+  border: '1px solid var(--vg-f-7dc8ff-a350)',
   background: 'rgba(90, 170, 255, 0.08)',
-  color: '#bfe0ff',
+  color: 'var(--vg-f-bfe0ff)',
   fontSize: 12,
   fontWeight: 600,
 };
@@ -2387,9 +2387,9 @@ const opcionButtonStyle = (isSelected, disabled = false) => ({
   boxSizing: 'border-box',
   textAlign: 'left',
   borderRadius: 12,
-  border: isSelected ? '1px solid rgba(255, 132, 132, 0.7)' : '1px solid rgba(255, 255, 255, 0.14)',
-  background: isSelected ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
-  color: disabled ? '#8a7a7a' : '#fff',
+  border: isSelected ? '1px solid var(--vg-f-ff8484-a700)' : '1px solid rgba(var(--vg-ink), 0.14)',
+  background: isSelected ? 'rgba(255, 90, 90, 0.16)' : 'rgba(var(--vg-ink), 0.03)',
+  color: disabled ? 'var(--vg-f-8a7a7a)' : 'var(--vg-text-strong)',
   padding: '10px 12px',
   fontSize: 14,
   fontWeight: isSelected ? 700 : 500,
@@ -2404,14 +2404,14 @@ const addonChipStyle = {
   gap: 8,
   padding: '4px 8px',
   borderRadius: 999,
-  border: '1px solid rgba(255,196,110,0.3)',
+  border: '1px solid var(--vg-f-ffc46e-a300)',
   background: 'rgba(255,166,0,0.08)',
-  color: '#ffcf85',
+  color: 'var(--vg-f-ffcf85)',
   fontSize: 12,
 };
 
 const addonPriceStyle = {
-  color: '#ffcf85',
+  color: 'var(--vg-f-ffcf85)',
   fontWeight: 700,
   fontSize: 12,
 };
@@ -2423,9 +2423,9 @@ const addAddonButtonStyle = (active) => ({
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 10,
-  border: active ? '1px solid rgba(255,196,110,0.55)' : '1px dashed rgba(255,196,110,0.4)',
+  border: active ? '1px solid var(--vg-f-ffc46e-a550)' : '1px dashed var(--vg-f-ffc46e-a400)',
   background: active ? 'rgba(255,166,0,0.16)' : 'rgba(255,166,0,0.06)',
-  color: '#ffcf85',
+  color: 'var(--vg-f-ffcf85)',
   padding: '9px 10px',
   fontSize: 12.5,
   fontWeight: 700,
@@ -2449,7 +2449,7 @@ const addonPickerPanelStyle = {
   gap: 4,
   padding: 6,
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.1)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
   background: 'rgba(0,0,0,0.25)',
   maxHeight: 180,
   overflowY: 'auto',
@@ -2464,8 +2464,8 @@ const addonPickerOptionStyle = {
   boxSizing: 'border-box',
   border: 'none',
   borderRadius: 8,
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   padding: '9px 10px',
   fontSize: 13,
   textAlign: 'left',
@@ -2474,20 +2474,20 @@ const addonPickerOptionStyle = {
 };
 
 const addonPickerOptionPriceStyle = {
-  color: '#ffcf85',
+  color: 'var(--vg-f-ffcf85)',
   fontWeight: 700,
   fontSize: 12.5,
   whiteSpace: 'nowrap',
 };
 
-const deliveryLineStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: '#d2c3c3', fontSize: 13 };
+const deliveryLineStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: 'var(--vg-f-d2c3c3)', fontSize: 13 };
 const cartTotalRowStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   paddingTop: 8,
-  borderTop: '1px solid rgba(255,255,255,0.1)',
-  color: '#fff',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.1)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
 };
 
@@ -2514,10 +2514,10 @@ const mobileCartBarStyle = (keyboardOffset) => ({
   gap: 10,
   padding: '10px 14px',
   borderRadius: 14,
-  background: 'rgba(18, 8, 8, 0.96)',
+  background: 'var(--vg-s-120808-a960)',
   backdropFilter: 'blur(2px)',
-  border: '1px solid rgba(255,255,255,0.14)',
-  boxShadow: '0 12px 30px rgba(0,0,0,0.4)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.4 * var(--vg-shadow-k)))',
   zIndex: 15,
 });
 
@@ -2527,9 +2527,9 @@ const mobileCartIconButtonStyle = {
   width: 44,
   height: 44,
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.18)',
-  background: 'rgba(255,255,255,0.08)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.18)',
+  background: 'rgba(var(--vg-ink), 0.08)',
+  color: 'var(--vg-text-strong)',
   fontSize: 20,
   display: 'grid',
   placeItems: 'center',
@@ -2544,13 +2544,13 @@ const mobileCartBadgeStyle = {
   height: 20,
   padding: '0 5px',
   borderRadius: 999,
-  background: '#ff4d4d',
+  background: 'var(--vg-accent-primary)',
   color: '#fff',
   fontSize: 11.5,
   fontWeight: 800,
   display: 'grid',
   placeItems: 'center',
-  border: '2px solid rgba(18, 8, 8, 0.96)',
+  border: '2px solid var(--vg-s-120808-a960)',
 };
 
 // --- Modal de resumen del carrito (movil) ---
@@ -2563,9 +2563,9 @@ const cartModalCardStyle = {
   display: 'grid',
   gridTemplateRows: 'auto 1fr auto',
   borderRadius: 20,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
-  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'linear-gradient(180deg, var(--vg-s-160a0a-a980) 0%, var(--vg-s-0a0a0a-a990) 100%)',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.5 * var(--vg-shadow-k)))',
   overflow: 'hidden',
 };
 
@@ -2574,7 +2574,7 @@ const cartModalHeaderStyle = {
   alignItems: 'center',
   gap: 10,
   padding: '16px 48px 16px 18px',
-  borderBottom: '1px solid rgba(255,255,255,0.1)',
+  borderBottom: '1px solid rgba(var(--vg-ink), 0.1)',
 };
 
 const cartModalCloseButtonStyle = {
@@ -2586,7 +2586,7 @@ const cartModalCloseButtonStyle = {
   borderRadius: '50%',
   border: 'none',
   background: 'rgba(0,0,0,0.55)',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 20,
   lineHeight: 1,
   cursor: 'pointer',
@@ -2606,7 +2606,7 @@ const cartModalFooterStyle = {
   display: 'grid',
   gap: 10,
   padding: 16,
-  borderTop: '1px solid rgba(255,255,255,0.1)',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.1)',
 };
 
 // --- Modal de descripción del producto ---
@@ -2628,9 +2628,9 @@ const modalCardStyle = {
   maxHeight: '88vh',
   overflowY: 'auto',
   borderRadius: 20,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'linear-gradient(180deg, rgba(22, 10, 10, 0.98) 0%, rgba(10, 10, 10, 0.99) 100%)',
-  boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'linear-gradient(180deg, var(--vg-s-160a0a-a980) 0%, var(--vg-s-0a0a0a-a990) 100%)',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.5 * var(--vg-shadow-k)))',
 };
 
 const modalCloseButtonStyle = {
@@ -2643,7 +2643,7 @@ const modalCloseButtonStyle = {
   borderRadius: '50%',
   border: 'none',
   background: 'rgba(0,0,0,0.55)',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 20,
   lineHeight: 1,
   cursor: 'pointer',
@@ -2655,7 +2655,7 @@ const modalImageWrapStyle = {
   position: 'relative',
   width: '100%',
   aspectRatio: '4 / 3',
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(var(--vg-ink), 0.04)',
 };
 
 const modalBodyStyle = {
@@ -2665,35 +2665,35 @@ const modalBodyStyle = {
 };
 
 const modalTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 20,
   lineHeight: 1.25,
 };
 
 const modalCategoryStyle = {
-  color: '#f1b8b8',
+  color: 'var(--vg-f-f1b8b8)',
   fontSize: 12,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
 };
 
 const modalDescStyle = {
-  color: '#e6dcdc',
+  color: 'var(--vg-f-e6dcdc)',
   fontSize: 14,
   lineHeight: 1.5,
   margin: 0,
 };
 
 const modalDescEmptyStyle = {
-  color: '#9a8686',
+  color: 'var(--vg-f-9a8686)',
   fontSize: 13,
   fontStyle: 'italic',
   margin: 0,
 };
 
 const modalSectionLabelStyle = {
-  color: '#f1b8b8',
+  color: 'var(--vg-f-f1b8b8)',
   fontSize: 11,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
@@ -2709,14 +2709,14 @@ const modalCompositionListStyle = {
 const compositionChipStyle = {
   padding: '4px 10px',
   borderRadius: 999,
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.14)',
-  color: '#e6dcdc',
+  background: 'rgba(var(--vg-ink), 0.06)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  color: 'var(--vg-f-e6dcdc)',
   fontSize: 12,
 };
 
 const modalPrepTimeStyle = {
-  color: '#c8bbbb',
+  color: 'var(--vg-f-c8bbbb)',
   fontSize: 12.5,
 };
 
@@ -2727,7 +2727,7 @@ const modalFooterStyle = {
   gap: 12,
   marginTop: 6,
   paddingTop: 12,
-  borderTop: '1px solid rgba(255,255,255,0.1)',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.1)',
 };
 
 const avisoAcompananteStyle = {
@@ -2735,9 +2735,9 @@ const avisoAcompananteStyle = {
   gap: 10,
   padding: '12px 14px',
   borderRadius: 14,
-  border: '1px solid rgba(255, 190, 120, 0.35)',
+  border: '1px solid var(--vg-f-ffbe78-a350)',
   background: 'rgba(255, 170, 60, 0.1)',
-  color: '#ffe1b8',
+  color: 'var(--vg-f-ffe1b8)',
   fontSize: 13,
   marginTop: 6,
 };
@@ -2746,7 +2746,7 @@ const modalAddButtonStyle = {
   border: 'none',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

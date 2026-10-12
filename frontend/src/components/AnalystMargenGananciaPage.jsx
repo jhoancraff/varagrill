@@ -149,7 +149,7 @@ function AnalystMargenGananciaPage({ isMobile, onBack, onVerDetalle }) {
                   const sinDato = !fila.tiene_receta;
                   const bajo = !sinDato && Number(fila.precio_real) < Number(fila.precio_sugerido);
                   const negativa = !sinDato && Number(fila.ganancia) < 0;
-                  const colorGanancia = sinDato ? '#7a6f6f' : negativa ? '#ff9d9d' : '#8fffb0';
+                  const colorGanancia = sinDato ? '#7a6f6f' : negativa ? 'var(--vg-f-ff9d9d)' : 'var(--vg-f-8fffb0)';
                   return (
                     <div key={fila.producto_id} style={rowFragmentStyle}>
                       <div style={{ ...cellStyle, ...cellProductoStyle }}>
@@ -159,10 +159,10 @@ function AnalystMargenGananciaPage({ isMobile, onBack, onVerDetalle }) {
                           {!fila.disponible ? <span style={tagMutedStyle}>no disponible</span> : null}
                           {sinDato ? <span style={tagWarnStyle}>sin receta</span> : null}
                         </div>
-                        <div style={{ fontSize: 11.5, color: '#a89999' }}>{fila.categoria}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--vg-f-a89999)' }}>{fila.categoria}</div>
                         {fila.ingredientes_sin_costo && fila.ingredientes_sin_costo.length > 0 ? (
                           <div
-                            style={{ fontSize: 11.5, color: '#ffcf7d', fontWeight: 700 }}
+                            style={{ fontSize: 11.5, color: 'var(--vg-f-ffcf7d)', fontWeight: 700 }}
                             title="Ese ingrediente no tiene precio de compra registrado: aporta $0 y el costo del producto queda incompleto."
                           >
                             Falta el costo de: {fila.ingredientes_sin_costo.join(', ')}
@@ -174,15 +174,15 @@ function AnalystMargenGananciaPage({ isMobile, onBack, onVerDetalle }) {
                       <div style={cellStyle}><CeldaMonto value={fila.costo_a_tomar} sinDato={sinDato} /></div>
                       <div style={cellStyle}>
                         {formatPct(fila.margen_ganancia_pct)}
-                        <span style={{ fontSize: 10.5, color: '#a89999' }}>{fila.margen_ganancia_propio ? 'propio' : 'por defecto'}</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--vg-f-a89999)' }}>{fila.margen_ganancia_propio ? 'propio' : 'por defecto'}</span>
                       </div>
                       <div style={cellStyle}><CeldaMonto value={fila.precio_sugerido} sinDato={sinDato} /></div>
                       <div
-                        style={{ ...cellStyle, fontWeight: 800, color: bajo ? '#ffcf7d' : '#f2e6e6' }}
+                        style={{ ...cellStyle, fontWeight: 800, color: bajo ? 'var(--vg-f-ffcf7d)' : 'var(--vg-f-f2e6e6)' }}
                         title={bajo ? 'El precio real está por debajo del sugerido' : undefined}
                       >
                         ${formatMonto(fila.precio_real)}
-                        {bajo ? <span style={{ fontSize: 10.5, color: '#ffcf7d' }}>bajo el sugerido</span> : null}
+                        {bajo ? <span style={{ fontSize: 10.5, color: 'var(--vg-f-ffcf7d)' }}>bajo el sugerido</span> : null}
                       </div>
                       <div style={{ ...cellStyle, fontWeight: 800, color: colorGanancia }}>
                         <CeldaMonto value={fila.ganancia} sinDato={sinDato} />
@@ -209,10 +209,10 @@ function AnalystMargenGananciaPage({ isMobile, onBack, onVerDetalle }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 720, lineHeight: 1.6 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 720, lineHeight: 1.6 };
 const chipsRowStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
-const chipStyle = { display: 'inline-flex', padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };
+const chipStyle = { display: 'inline-flex', padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.06)' };
 const filtersRowStyle = (isMobile) => ({
   display: 'flex',
   gap: 12,
@@ -220,34 +220,34 @@ const filtersRowStyle = (isMobile) => ({
   alignItems: isMobile ? 'stretch' : 'center',
   flexDirection: isMobile ? 'column' : 'row',
 });
-const searchInputStyle = { flex: 1, minWidth: 220, maxWidth: 420, boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 14 };
-const selectStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 14 };
-const checkLabelStyle = { display: 'inline-flex', alignItems: 'center', gap: 8, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const searchInputStyle = { flex: 1, minWidth: 220, maxWidth: 420, boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', fontSize: 14 };
+const selectStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', fontSize: 14 };
+const checkLabelStyle = { display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = {
   display: 'grid',
   gridTemplateColumns: 'minmax(190px,1.6fr) repeat(6, minmax(110px,1fr)) repeat(2, minmax(100px,0.9fr))',
   minWidth: 1150,
-  border: '1px solid rgba(255,255,255,0.08)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
   borderRadius: 14,
   overflow: 'hidden',
 };
-const headStyle = { padding: '12px 12px', color: '#ffd0d0', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 800, textAlign: 'center', display: 'grid', alignContent: 'center' };
+const headStyle = { padding: '12px 12px', color: 'var(--vg-f-ffd0d0)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 800, textAlign: 'center', display: 'grid', alignContent: 'center' };
 const headProductoStyle = { background: 'rgba(255, 120, 120, 0.22)', textAlign: 'left' };
 const headBaseStyle = { ...headStyle, background: 'rgba(255, 120, 120, 0.22)' };
-const headResultStyle = { ...headStyle, background: 'rgba(255,255,255,0.07)', color: '#f2e6e6' };
-const cellStyle = { padding: '14px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center', justifyItems: 'center', textAlign: 'center', gap: 2 };
+const headResultStyle = { ...headStyle, background: 'rgba(var(--vg-ink), 0.07)', color: 'var(--vg-f-f2e6e6)' };
+const cellStyle = { padding: '14px 12px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center', justifyItems: 'center', textAlign: 'center', gap: 2 };
 const cellProductoStyle = { justifyItems: 'start', textAlign: 'left' };
 const rowFragmentStyle = { display: 'contents' };
-const tagStyle = { marginLeft: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(120, 180, 255, 0.16)', color: '#9ecbff', fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' };
-const tagMutedStyle = { ...tagStyle, background: 'rgba(255,255,255,0.08)', color: '#c8bbbb' };
-const tagWarnStyle = { ...tagStyle, background: 'rgba(255, 200, 120, 0.16)', color: '#ffcf7d' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const summaryStyle = { color: '#c8bbbb', fontSize: 13 };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const detalleButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const tagStyle = { marginLeft: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(120, 180, 255, 0.16)', color: 'var(--vg-f-9ecbff)', fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' };
+const tagMutedStyle = { ...tagStyle, background: 'rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-c8bbbb)' };
+const tagWarnStyle = { ...tagStyle, background: 'rgba(255, 200, 120, 0.16)', color: 'var(--vg-f-ffcf7d)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
+const summaryStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 13 };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
+const detalleButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default AnalystMargenGananciaPage;

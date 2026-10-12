@@ -127,20 +127,20 @@ function ComprobantePagoPage({ isMobile, onBack, tipo, documentoId, abonoId }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const errorStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const errorStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 
 const voucherStyle = {
   display: 'grid', gap: 14, padding: '28px 32px', borderRadius: 16, background: '#fff', color: '#161010',
   maxWidth: 560, margin: '0 auto', width: '100%', boxSizing: 'border-box', border: '1px solid rgba(0,0,0,0.08)',
 };
-const voucherHeaderStyle = { textAlign: 'center', borderBottom: '1px solid #ddd', paddingBottom: 12 };
+const voucherHeaderStyle = { textAlign: 'center', borderBottom: '1px solid var(--vg-f-dddddd)', paddingBottom: 12 };
 const voucherTitleStyle = { textAlign: 'center', fontSize: 20, fontWeight: 800, letterSpacing: '0.04em' };
 const voucherGridStyle = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 14 };
-const voucherLabelStyle = { display: 'block', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#999' };
-const voucherMontoStyle = { textAlign: 'center', padding: '14px 0', borderTop: '1px dashed #ccc', borderBottom: '1px dashed #ccc' };
+const voucherLabelStyle = { display: 'block', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--vg-f-999999)' };
+const voucherMontoStyle = { textAlign: 'center', padding: '14px 0', borderTop: '1px dashed var(--vg-f-cccccc)', borderBottom: '1px dashed var(--vg-f-cccccc)' };
 const firmaRowStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 24, marginTop: 20 });
-const firmaBoxStyle = { borderTop: '1px solid #999', paddingTop: 6, textAlign: 'center', fontSize: 12, color: '#666' };
+const firmaBoxStyle = { borderTop: '1px solid var(--vg-f-999999)', paddingTop: 6, textAlign: 'center', fontSize: 12, color: '#666' };
 
 export default ComprobantePagoPage;

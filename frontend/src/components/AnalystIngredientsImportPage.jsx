@@ -4,11 +4,11 @@ import Toast from './Toast';
 import useToast from '../hooks/useToast';
 
 const ACCION_LABELS = {
-  nuevo: { label: 'Nuevo', color: '#8ff0b8', background: 'rgba(80, 200, 130, 0.18)' },
-  actualizar: { label: 'Actualizar', color: '#ffcf8a', background: 'rgba(255, 176, 59, 0.18)' },
-  sin_cambios: { label: 'Sin cambios', color: '#c8bbbb', background: 'rgba(255, 255, 255, 0.08)' },
-  ignorado: { label: 'Ignorado', color: '#c8bbbb', background: 'rgba(255, 255, 255, 0.06)' },
-  error: { label: 'Error', color: '#ffb0b0', background: 'rgba(220, 38, 38, 0.2)' },
+  nuevo: { label: 'Nuevo', color: 'var(--vg-f-8ff0b8)', background: 'rgba(80, 200, 130, 0.18)' },
+  actualizar: { label: 'Actualizar', color: 'var(--vg-f-ffcf8a)', background: 'rgba(255, 176, 59, 0.18)' },
+  sin_cambios: { label: 'Sin cambios', color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.08)' },
+  ignorado: { label: 'Ignorado', color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.06)' },
+  error: { label: 'Error', color: 'var(--vg-f-ffb0b0)', background: 'rgba(220, 38, 38, 0.2)' },
 };
 
 const SELECTABLE_ACCIONES = new Set(['nuevo', 'actualizar']);
@@ -304,7 +304,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                     </div>
                     <div key={`name-${row.fila}`} style={cellPrimaryStyle}>
                       <div style={{ fontWeight: 700 }}>{row.nombre}</div>
-                      <div style={{ fontSize: 11, color: '#a89999' }}>Fila {row.fila}</div>
+                      <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>Fila {row.fila}</div>
                     </div>
                     <div key={`unit-${row.fila}`} style={cellStyle}>
                       <input
@@ -364,9 +364,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                     <div key={`state-${row.fila}`} style={cellStyle}>
                       <span style={countBadgeStyle(badge)}>{badge.label}</span>
                     </div>
-                    <div key={`detail-${row.fila}`} style={{ ...cellStyle, fontSize: 12, color: '#c8bbbb' }}>
+                    <div key={`detail-${row.fila}`} style={{ ...cellStyle, fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>
                       {row.ingrediente_id ? <div>Stock actual: {row.stock_actual} {row.unidad_actual}</div> : null}
-                      {row.stock_nuevo ? <div style={{ color: '#8fffb0', fontWeight: 700 }}>Nuevo stock: {row.stock_nuevo} {row.unidad_actual}</div> : null}
+                      {row.stock_nuevo ? <div style={{ color: 'var(--vg-f-8fffb0)', fontWeight: 700 }}>Nuevo stock: {row.stock_nuevo} {row.unidad_actual}</div> : null}
                       {row.precio_compra_actual ? (
                         <div>Ya tiene: envase {row.contenido_envase_actual}, real {row.peso_real_actual}, precio {row.precio_compra_actual}</div>
                       ) : null}
@@ -379,7 +379,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           </div>
 
           <div style={totalEstimadoBoxStyle}>
-            <div style={{ color: '#c8bbbb', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
+            <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>
               Total a pagar por esta factura (obligatorio)
             </div>
 
@@ -413,7 +413,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           </div>
 
           <div style={confirmRowStyle(isMobile)}>
-            <div style={{ color: '#c8bbbb', fontSize: 13 }}>{selectedCount} fila(s) seleccionada(s) para importar</div>
+            <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>{selectedCount} fila(s) seleccionada(s) para importar</div>
             <button
               type="button"
               onClick={handleConfirmClick}
@@ -454,14 +454,14 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
             ) : null}
           </div>
           {summary.compra_total ? (
-            <div style={{ color: '#ffcf7d', fontWeight: 800, fontSize: 16 }}>
+            <div style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 800, fontSize: 16 }}>
               Total de la factura a pagar: ${Number(summary.compra_total).toFixed(2)}
             </div>
           ) : null}
           {summary.errores && summary.errores.length > 0 ? (
             <div style={{ display: 'grid', gap: 4 }}>
               {summary.errores.map((error, index) => (
-                <div key={index} style={{ color: '#ffb0b0', fontSize: 13 }}>{error}</div>
+                <div key={index} style={{ color: 'var(--vg-f-ffb0b0)', fontSize: 13 }}>{error}</div>
               ))}
             </div>
           ) : null}
@@ -473,35 +473,35 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6, maxWidth: 760 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.6, maxWidth: 760 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
 
 const uploadRowStyle = (isMobile) => ({ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
-const templateLinkStyle = { color: '#bfe0ff', fontWeight: 700, textDecoration: 'none', border: '1px solid rgba(125, 200, 255, 0.4)', borderRadius: 999, padding: '9px 14px', background: 'rgba(90, 170, 255, 0.08)' };
-const fileInputStyle = { color: '#fff', flex: 1, minWidth: 200 };
-const hintStyle = { margin: 0, color: '#a89999', fontSize: 12.5 };
+const templateLinkStyle = { color: 'var(--vg-f-bfe0ff)', fontWeight: 700, textDecoration: 'none', border: '1px solid var(--vg-f-7dc8ff-a400)', borderRadius: 999, padding: '9px 14px', background: 'rgba(90, 170, 255, 0.08)' };
+const fileInputStyle = { color: 'var(--vg-text-strong)', flex: 1, minWidth: 200 };
+const hintStyle = { margin: 0, color: 'var(--vg-f-a89999)', fontSize: 12.5 };
 
 const summaryRowStyle = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 };
 const countsRowStyle = { display: 'flex', flexWrap: 'wrap', gap: 8 };
 const countBadgeStyle = (badge) => ({
   display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 999,
   fontSize: 11.5, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase',
-  color: badge ? badge.color : '#fff', background: badge ? badge.background : 'rgba(255,255,255,0.08)',
+  color: badge ? badge.color : 'var(--vg-text-strong)', background: badge ? badge.background : 'rgba(var(--vg-ink), 0.08)',
 });
 
 const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr 1fr', gap: 10 });
 
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 100px 90px 100px 100px 100px 110px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 1320 };
-const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
-const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
+const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.1)' };
+const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
 const cellPrimaryStyle = { ...cellStyle };
-const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '6px 8px', color: '#fff', fontSize: 13 };
+const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '6px 8px', color: 'var(--vg-text-strong)', fontSize: 13 };
 
 const confirmRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
-const totalEstimadoBoxStyle = { display: 'grid', gap: 8, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255, 176, 59, 0.35)', background: 'rgba(255, 176, 59, 0.08)' };
+const totalEstimadoBoxStyle = { display: 'grid', gap: 8, padding: '14px 16px', borderRadius: 14, border: '1px solid var(--vg-f-ffb03b-a350)', background: 'rgba(255, 176, 59, 0.08)' };
 const compararBsRowStyle = (isMobile) => ({ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 4, alignItems: isMobile ? 'stretch' : 'center', flexDirection: isMobile ? 'column' : 'row' });
 const monedaToggleStyle = { display: 'flex', gap: 6 };
 const monedaToggleButtonStyle = (activo) => ({
@@ -511,7 +511,7 @@ const monedaToggleButtonStyle = (activo) => ({
   color: activo ? '#04140a' : '#d2c4c4',
 });
 
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 
 export default AnalystIngredientsImportPage;

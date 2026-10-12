@@ -211,7 +211,7 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
             </div>
 
             <div style={helperCardStyle}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={form.es_adicional}
@@ -351,26 +351,26 @@ function AnalystNewPreparationPage({ isMobile, onBack }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const emptyStyle = { minHeight: 70, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const emptyStyle = { minHeight: 70, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const gridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 12 });
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f0b4b4', fontSize: 13, fontWeight: 700 };
-const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
-const helperCardStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' };
-const helperTitleStyle = { color: '#fff', fontWeight: 700 };
+const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 13, fontWeight: 700 };
+const inputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)' };
+const helperCardStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.08)', background: 'rgba(var(--vg-ink), 0.02)' };
+const helperTitleStyle = { color: 'var(--vg-text-strong)', fontWeight: 700 };
 const composerStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(220px,2fr) minmax(120px,1fr) auto', gap: 10 });
 const pickerWrapStyle = { position: 'relative' };
-const pickerListStyle = { position: 'absolute', zIndex: 10, top: 'calc(100% + 6px)', left: 0, right: 0, maxHeight: 220, overflowY: 'auto', borderRadius: 12, border: '1px solid rgba(255,132,132,0.4)', background: '#140d0d' };
-const pickerItemStyle = { width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: '#ffeaea', padding: '10px 12px', cursor: 'pointer' };
-const componentRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', color: '#fff' };
-const costSummaryStyle = { display: 'flex', gap: 20, flexWrap: 'wrap', padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(125,255,160,0.25)', background: 'rgba(70,200,120,0.08)' };
-const costLabelStyle = { color: '#c2f0d2', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' };
-const costValueStyle = { color: '#7dffa0', fontSize: 20, fontWeight: 800 };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '8px 12px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
+const pickerListStyle = { position: 'absolute', zIndex: 10, top: 'calc(100% + 6px)', left: 0, right: 0, maxHeight: 220, overflowY: 'auto', borderRadius: 12, border: '1px solid var(--vg-f-ff8484-a400)', background: 'var(--vg-s-140d0d)' };
+const pickerItemStyle = { width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: 'var(--vg-f-ffeaea)', padding: '10px 12px', cursor: 'pointer' };
+const componentRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.08)', background: 'rgba(var(--vg-ink), 0.03)', color: 'var(--vg-text-strong)' };
+const costSummaryStyle = { display: 'flex', gap: 20, flexWrap: 'wrap', padding: '14px 16px', borderRadius: 14, border: '1px solid var(--vg-f-7dffa0-a250)', background: 'rgba(70,200,120,0.08)' };
+const costLabelStyle = { color: 'var(--vg-f-c2f0d2)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' };
+const costValueStyle = { color: 'var(--vg-f-7dffa0)', fontSize: 20, fontWeight: 800 };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
+const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '8px 12px', background: 'rgba(145,33,33,0.25)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer' };
 
 export default AnalystNewPreparationPage;

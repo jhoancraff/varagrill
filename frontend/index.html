@@ -12,8 +12,17 @@
     <link rel="apple-touch-icon" href="/assets/varagrill-logo.jpg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Varagrill</title>
+    <script>
+      // Aplica el tema guardado antes del primer pintado, para que no haya un destello del otro tema.
+      (function () {
+        try {
+          var theme = window.localStorage.getItem('varagrill_theme');
+          if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme);
+        } catch (error) { /* sin almacenamiento: tema oscuro */ }
+      })();
+    </script>
   </head>
-  <body style="margin: 0; background: #050505; overscroll-behavior: none;">
+  <body style="margin: 0; background: var(--vg-bg-base, #050505); overscroll-behavior: none;">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

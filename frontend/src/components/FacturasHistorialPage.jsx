@@ -128,16 +128,16 @@ function FacturasHistorialPage({ isMobile, onBack, embedded = false }) {
           {facturas.map((factura) => (
             <div key={factura.id} style={facturaRowStyle}>
               <div style={{ display: 'grid', gap: 2 }}>
-                <div style={{ color: '#fff', fontWeight: 700 }}>
+                <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
                   Factura {factura.codigo}
                   <span style={estadoBadgeStyle(factura.estado)}>{estadoLabel(factura.estado)}</span>
                 </div>
-                <div style={{ color: '#d2c4c4', fontSize: 13 }}>
+                <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13 }}>
                   {factura.cliente ? factura.cliente.nombre : 'Consumidor Final'}
                   {' · '}
                   {new Date(factura.fecha_emision).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' })}
                 </div>
-                <div style={{ color: '#ffcf7d', fontWeight: 700 }}>
+                <div style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 700 }}>
                   {formatMontoDocumento(factura.total, factura.moneda, factura.tasa_cambio_referencia)}
                 </div>
               </div>
@@ -164,7 +164,7 @@ const containerStyle = (isMobile, embedded) => ({
 });
 
 const embeddedHeaderStyle = {
-  color: '#ffb0b0',
+  color: 'var(--vg-f-ffb0b0)',
   fontWeight: 800,
   fontSize: 13,
   textTransform: 'uppercase',
@@ -183,30 +183,30 @@ const eyebrowStyle = {
   fontSize: 12,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
-  color: '#f7a5a5',
+  color: 'var(--vg-f-f7a5a5)',
   marginBottom: 8,
 };
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 26 : 32,
   fontWeight: 700,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 640,
 };
 
 const backButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(255, 115, 115, 0.34)',
+  border: '1px solid var(--vg-f-ff7373-a340)',
   borderRadius: 999,
   padding: isMobile ? '11px 16px' : '10px 16px',
-  background: 'rgba(255,255,255,0.03)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   cursor: 'pointer',
   width: isMobile ? '100%' : 'auto',
@@ -221,19 +221,19 @@ const buscadorFormStyle = (isMobile) => ({
 const inputStyle = {
   boxSizing: 'border-box',
   borderRadius: 12,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: '#161010',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-161010)',
   padding: '9px 10px',
-  color: '#fff4f4',
+  color: 'var(--vg-f-fff4f4)',
   fontSize: 13,
 };
 
 const secondaryButtonStyle = {
-  border: '1px solid rgba(255, 173, 173, 0.35)',
+  border: '1px solid var(--vg-f-ffadad-a350)',
   borderRadius: 12,
   padding: '9px 14px',
-  background: 'rgba(255, 255, 255, 0.02)',
-  color: '#ffe0e0',
+  background: 'rgba(var(--vg-ink), 0.02)',
+  color: 'var(--vg-f-ffe0e0)',
   fontWeight: 600,
   cursor: 'pointer',
 };
@@ -243,9 +243,9 @@ const emptyStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 24,
-  border: '1px dashed rgba(255, 255, 255, 0.14)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
+  color: 'var(--vg-f-c8bbbb)',
   textAlign: 'center',
   padding: 20,
 };
@@ -253,16 +253,16 @@ const emptyStateStyle = {
 const errorStyle = {
   padding: '12px 14px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 145, 145, 0.22)',
+  border: '1px solid var(--vg-f-ff9191-a220)',
   background: 'rgba(255, 98, 98, 0.12)',
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const feedbackStyle = (feedbackType) => ({
   borderRadius: 12,
-  border: feedbackType === 'error' ? '1px solid rgba(223, 102, 102, 0.5)' : '1px solid rgba(82, 206, 123, 0.35)',
-  background: feedbackType === 'error' ? 'rgba(102, 29, 29, 0.55)' : 'rgba(31, 89, 48, 0.45)',
-  color: feedbackType === 'error' ? '#ffe2e2' : '#dbffe4',
+  border: feedbackType === 'error' ? '1px solid var(--vg-f-df6666-a500)' : '1px solid var(--vg-f-52ce7b-a350)',
+  background: feedbackType === 'error' ? 'var(--vg-s-661d1d-a550)' : 'var(--vg-s-1f5930-a450)',
+  color: feedbackType === 'error' ? 'var(--vg-f-ffe2e2)' : 'var(--vg-f-dbffe4)',
   padding: '10px 12px',
   fontSize: 13,
 });
@@ -280,8 +280,8 @@ const facturaRowStyle = {
   flexWrap: 'wrap',
   padding: '14px 16px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
 };
 
 const estadoBadgeStyle = (estado) => ({
@@ -292,7 +292,7 @@ const estadoBadgeStyle = (estado) => ({
   fontWeight: 800,
   textTransform: 'uppercase',
   background: estado === 'anulada' ? 'rgba(255, 145, 145, 0.16)' : 'rgba(255, 200, 120, 0.16)',
-  color: estado === 'anulada' ? '#ff9b9b' : '#ffcf7d',
+  color: estado === 'anulada' ? 'var(--vg-f-ff9b9b)' : 'var(--vg-f-ffcf7d)',
 });
 
 export default FacturasHistorialPage;

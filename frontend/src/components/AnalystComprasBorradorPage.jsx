@@ -295,8 +295,8 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                         onClick={() => handleSelectExisting(item)}
                         style={suggestionRowStyle}
                       >
-                        <span style={{ color: '#fff', fontWeight: 600 }}>{item.nombre}</span>
-                        <span style={{ color: '#e8bcbc', fontSize: 12 }}>{item.unidad_medida || ''}</span>
+                        <span style={{ color: 'var(--vg-text-strong)', fontWeight: 600 }}>{item.nombre}</span>
+                        <span style={{ color: 'var(--vg-f-e8bcbc)', fontSize: 12 }}>{item.unidad_medida || ''}</span>
                       </button>
                     ))}
                   </div>
@@ -318,7 +318,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
               ) : (
                 <div style={fieldStyle}>
                   <span style={labelStyle}>Unidad actual</span>
-                  <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: '#c8bbbb' }}>{exactMatch.unidad_medida}</div>
+                  <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', color: 'var(--vg-f-c8bbbb)' }}>{exactMatch.unidad_medida}</div>
                 </div>
               )}
 
@@ -374,7 +374,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                           {detalle.precio_total_bs ? (
                             editingId === detalle.id ? (
                               <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
-                                <span style={{ color: '#c8bbbb', fontSize: 11.5 }}>Bs.</span>
+                                <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 11.5 }}>Bs.</span>
                                 <input
                                   type="number"
                                   step="0.01"
@@ -386,7 +386,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                                 />
                               </div>
                             ) : (
-                              <div style={{ color: '#c8bbbb', fontSize: 11.5 }}>Bs. {detalle.precio_total_bs}</div>
+                              <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 11.5 }}>Bs. {detalle.precio_total_bs}</div>
                             )
                           ) : null}
                         </div>
@@ -409,7 +409,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                     ))}
                   </div>
                 </div>
-                <div style={{ color: '#ffcf7d', fontWeight: 800, textAlign: 'right' }}>Total del lote: ${borrador.total}</div>
+                <div style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 800, textAlign: 'right' }}>Total del lote: ${borrador.total}</div>
               </>
             )}
           </section>
@@ -477,7 +477,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
           {summary ? (
             <section style={panelStyle}>
               <div style={sectionTitleStyle}>Compra registrada</div>
-              <p style={{ color: '#d2c3c3', margin: 0 }}>
+              <p style={{ color: 'var(--vg-f-d2c3c3)', margin: 0 }}>
                 Lote #{summary.id} — {summary.proveedor_nombre} — Total ${summary.total}. Cuenta por pagar generada con
                 saldo pendiente de ${summary.saldo_pendiente}.
               </p>
@@ -491,16 +491,16 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6, maxWidth: 760 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
-const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.6, maxWidth: 760 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
+const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 
 const itemFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr 1fr 1fr auto', gap: 10, alignItems: 'end' });
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f0b4b4', fontSize: 12.5, fontWeight: 700 };
-const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '9px 10px', color: '#fff', fontSize: 13 };
+const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 12.5, fontWeight: 700 };
+const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '9px 10px', color: 'var(--vg-text-strong)', fontSize: 13 };
 const monedaToggleStyle = { display: 'flex', gap: 6 };
 const monedaToggleButtonStyle = (activo) => ({
   flex: 1, border: activo ? 'none' : '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '6px 8px',
@@ -508,24 +508,24 @@ const monedaToggleButtonStyle = (activo) => ({
   background: activo ? 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)' : 'rgba(255,255,255,0.04)',
   color: activo ? '#04140a' : '#d2c4c4',
 });
-const hintStyle = { margin: 0, color: '#a89999', fontSize: 12 };
+const hintStyle = { margin: 0, color: 'var(--vg-f-a89999)', fontSize: 12 };
 
-const suggestionsPanelStyle = { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 5, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(10, 8, 8, 0.98)', boxShadow: '0 12px 30px rgba(0,0,0,0.4)', padding: 8, display: 'grid', gap: 4, maxHeight: 220, overflowY: 'auto' };
-const suggestionsHintStyle = { color: '#e8bcbc', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 6px' };
-const suggestionRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', textAlign: 'left' };
+const suggestionsPanelStyle = { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 5, borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-0a0808-a980)', boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.4 * var(--vg-shadow-k)))', padding: 8, display: 'grid', gap: 4, maxHeight: 220, overflowY: 'auto' };
+const suggestionsHintStyle = { color: 'var(--vg-f-e8bcbc)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 6px' };
+const suggestionRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 10, padding: '8px 10px', background: 'rgba(var(--vg-ink), 0.04)', cursor: 'pointer', textAlign: 'left' };
 
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.4fr) 130px 130px 130px minmax(160px,auto)', gap: '10px 12px', alignItems: 'center', minWidth: 780 };
-const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
-const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
+const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.1)' };
+const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
 const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };
 
 const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr auto', gap: 10 });
 
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
-const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
+const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.25)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 const smallActionButtonStyle = { border: 'none', borderRadius: 999, padding: '6px 12px', background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)', color: '#04140a', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
-const smallSecondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '6px 12px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const smallSecondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '6px 12px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
 export default AnalystComprasBorradorPage;

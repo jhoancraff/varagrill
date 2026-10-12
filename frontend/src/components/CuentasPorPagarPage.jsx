@@ -417,7 +417,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 
       {reporteAbierto ? (
         <section style={reportePanelStyle}>
-          <div style={{ color: '#fff', fontWeight: 700 }}>Reporte de cuentas por pagar en PDF</div>
+          <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>Reporte de cuentas por pagar en PDF</div>
           <div style={reporteFiltrosStyle(isMobile)}>
             <label style={reporteLabelStyle}>
               Qué incluir
@@ -462,7 +462,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 hasta={reporteHasta}
                 onChange={(rango) => { setReporteDesde(rango.desde); setReporteHasta(rango.hasta); }}
               />
-              <div style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+              <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>
                 Las pendientes se filtran por la fecha de la factura (lotes) o del gasto; las pagadas, por la fecha en que se pagaron.
               </div>
             </>
@@ -562,17 +562,17 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 style={compraCardStyle(selectedCompraId === compra.id)}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ color: '#fff', fontWeight: 700 }}>
+                  <span style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
                     {compra.tipo === 'gasto' ? `Gasto #${compra.id}` : `Lote #${compra.id}`}
                   </span>
                   <span style={estadoBadgeStyle(compra.estado_pago)}>{estadoLabel(compra.estado_pago)}</span>
                 </div>
-                <div style={{ color: '#d2c4c4', fontSize: 13 }}>
+                <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13 }}>
                   {compra.tipo === 'gasto' ? (compra.categoria_nombre || compra.descripcion) : compra.proveedor_nombre}
                   {compra.numero_factura_proveedor ? ` · Factura ${compra.numero_factura_proveedor}` : ''}
                   {compra.numero_comprobante ? ` · Comp. ${compra.numero_comprobante}` : ''}
                 </div>
-                <div style={{ color: vista === 'pagadas' ? '#9fe3b0' : '#ffcf7d', fontWeight: 700 }}>
+                <div style={{ color: vista === 'pagadas' ? 'var(--vg-f-9fe3b0)' : 'var(--vg-f-ffcf7d)', fontWeight: 700 }}>
                   {vista === 'pagadas'
                     ? `Total pagado: ${formatUsdBs(compra.tipo === 'gasto' ? compra.monto : compra.total, compra.tasa_cambio_referencia ?? tasaCambio, compra.total_bs)}`
                     : `Saldo: ${formatSaldoUsdBs(compra.saldo_pendiente, compra.tasa_cambio_referencia ?? tasaCambio, compra.saldo_pendiente_bs)}`}
@@ -611,12 +611,12 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
               <div style={emptyStateStyle}>Cargando compra...</div>
             ) : (
               <>
-                <div style={{ color: '#ffb0b0', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                <div style={{ color: 'var(--vg-f-ffb0b0)', fontWeight: 800, fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                   {compraDetalle.tipo === 'gasto'
                     ? `Gasto #${compraDetalle.id} · ${compraDetalle.categoria_nombre}`
                     : `Lote #${compraDetalle.id} · ${compraDetalle.proveedor_nombre}`}
                 </div>
-                <div style={{ color: '#d2c4c4', fontSize: 13 }}>
+                <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13 }}>
                   {compraDetalle.numero_factura_proveedor ? `Factura ${compraDetalle.numero_factura_proveedor} · ` : ''}
                   {compraDetalle.numero_comprobante ? `Comprobante ${compraDetalle.numero_comprobante} · ` : ''}
                   {compraDetalle.tipo === 'gasto' && compraDetalle.descripcion ? `${compraDetalle.descripcion} · ` : ''}
@@ -635,10 +635,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 ) : null}
 
                 <div style={detailTotalsStyle}>
-                  <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.total_bs)}</span>
-                  <span style={{ fontWeight: 800, color: '#ffcf7d' }}>Saldo pendiente: {formatSaldoUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.saldo_pendiente_bs)}</span>
+                  <span style={{ fontWeight: 800, color: 'var(--vg-text-strong)' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.total_bs)}</span>
+                  <span style={{ fontWeight: 800, color: 'var(--vg-f-ffcf7d)' }}>Saldo pendiente: {formatSaldoUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.saldo_pendiente_bs)}</span>
                   {compraDetalle.tipo === 'compra' && tasaAbonoManual && !esEstadoSaldado(compraDetalle.estado_pago) ? (
-                    <span style={{ fontWeight: 800, color: '#9fe3b0' }}>
+                    <span style={{ fontWeight: 800, color: 'var(--vg-f-9fe3b0)' }}>
                       A tu tasa ({tasaAbonoNum}): {formatBsRaw(Number(compraDetalle.saldo_pendiente) * tasaAbonoNum)}
                     </span>
                   ) : null}
@@ -646,12 +646,12 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 
                 {compraDetalle.abonos.length > 0 ? (
                   <div style={{ display: 'grid', gap: 4 }}>
-                    <div style={{ color: '#9fe3b0', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>Abonos registrados</div>
+                    <div style={{ color: 'var(--vg-f-9fe3b0)', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>Abonos registrados</div>
                     {compraDetalle.abonos.map((abono) => (
                       <div key={abono.id} style={lineaRowStyle}>
                         <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {abono.tasa_manual ? <span title={`Pagado a tasa propia: ${abono.tasa_cambio_referencia}`} style={{ color: '#ffcf7d', fontSize: 11.5 }}>tasa {abono.tasa_cambio_referencia}</span> : null}
+                          {abono.tasa_manual ? <span title={`Pagado a tasa propia: ${abono.tasa_cambio_referencia}`} style={{ color: 'var(--vg-f-ffcf7d)', fontSize: 11.5 }}>tasa {abono.tasa_cambio_referencia}</span> : null}
                           {formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio, abono.monto_bs)}
                           {onVerComprobante ? (
                             <button type="button" onClick={() => onVerComprobante(compraDetalle.tipo, compraDetalle.id, abono.id)} style={miniPrintButtonStyle} title="Ver comprobante">
@@ -666,7 +666,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
 
                 {compraDetalle.tipo === 'compra' && (compraDetalle.notas_credito || []).length > 0 ? (
                   <div style={{ display: 'grid', gap: 4 }}>
-                    <div style={{ color: '#9ecbff', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>
+                    <div style={{ color: 'var(--vg-f-9ecbff)', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>
                       Notas de crédito del proveedor · total original {formatUsdBs(compraDetalle.total_original, compraDetalle.tasa_cambio_referencia ?? tasaCambio)}
                     </div>
                     {compraDetalle.notas_credito.map((nota) => (
@@ -691,8 +691,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                 {compraDetalle.tipo === 'compra' && !esEstadoSaldado(compraDetalle.estado_pago) ? (
                   ncAbierta ? (
                     <form onSubmit={handleRegistrarNotaCredito} style={ncFormStyle}>
-                      <div style={{ color: '#fff', fontWeight: 700 }}>Nota de crédito del proveedor</div>
-                      <div style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+                      <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>Nota de crédito del proveedor</div>
+                      <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>
                         Baja lo que se le debe al proveedor por esta factura (no puede ser mayor que el saldo pendiente). No cambia el inventario ni los abonos ya hechos.
                       </div>
                       <div style={monedaToggleStyle}>
@@ -768,7 +768,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                     />
                     {selectedTipo === 'compra' ? (
                       <div style={{ display: 'grid', gap: 4 }}>
-                        <label style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+                        <label style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>
                           Tasa de este pago (Bs por $) — cámbiala si el proveedor cobró a otra tasa
                         </label>
                         <input
@@ -781,7 +781,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                           style={inputStyle}
                         />
                         {Number.isFinite(tasaEfectiva) && tasaEfectiva > 0 ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', color: tasaAbonoManual ? '#ffcf7d' : '#c8bbbb', fontSize: 12.5, fontWeight: 700 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', color: tasaAbonoManual ? 'var(--vg-f-ffcf7d)' : 'var(--vg-f-c8bbbb)', fontSize: 12.5, fontWeight: 700 }}>
                             <span>
                               Saldo ${Number(compraDetalle.saldo_pendiente).toFixed(2)} × {tasaEfectiva} = {formatBsRaw(Number(compraDetalle.saldo_pendiente) * tasaEfectiva)}
                               {tasaAbonoManual ? ' (con tu tasa)' : ''}
@@ -796,7 +796,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                           </div>
                         ) : null}
                         {vistaPreviaAbono ? (
-                          <div style={{ color: tasaAbonoManual ? '#ffcf7d' : '#9fe3b0', fontSize: 12.5, fontWeight: 700 }}>
+                          <div style={{ color: tasaAbonoManual ? 'var(--vg-f-ffcf7d)' : 'var(--vg-f-9fe3b0)', fontSize: 12.5, fontWeight: 700 }}>
                             {vistaPreviaAbono}{tasaAbonoManual ? ' · con tu tasa' : ''}
                           </div>
                         ) : null}
@@ -817,7 +817,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                     </button>
                   </form>
                 ) : (
-                  <div style={{ color: '#9fe3b0', fontWeight: 700 }}>Esta cuenta ya esta saldada.</div>
+                  <div style={{ color: 'var(--vg-f-9fe3b0)', fontWeight: 700 }}>Esta cuenta ya esta saldada.</div>
                 )}
               </>
             )}
@@ -830,8 +830,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   );
 }
 
-const ncFormStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 16, border: '1px solid rgba(120, 180, 255, 0.35)', background: 'rgba(59, 130, 246, 0.07)' };
-const ncOpenButtonStyle = { border: '1px dashed rgba(120, 180, 255, 0.5)', borderRadius: 14, padding: '10px 14px', background: 'rgba(59, 130, 246, 0.08)', color: '#cfe4ff', fontWeight: 700, cursor: 'pointer', textAlign: 'left' };
+const ncFormStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 16, border: '1px solid var(--vg-f-78b4ff-a350)', background: 'rgba(59, 130, 246, 0.07)' };
+const ncOpenButtonStyle = { border: '1px dashed var(--vg-f-78b4ff-a500)', borderRadius: 14, padding: '10px 14px', background: 'rgba(59, 130, 246, 0.08)', color: 'var(--vg-f-cfe4ff)', fontWeight: 700, cursor: 'pointer', textAlign: 'left' };
 
 function estadoLabel(estado) {
   if (estado === 'pendiente') return 'Pendiente';
@@ -846,18 +846,18 @@ function esEstadoSaldado(estado) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 4 : 8 });
 const headerWrapStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 12 });
-const eyebrowStyle = { fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#f7a5a5', marginBottom: 8 };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32, fontWeight: 700 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6, maxWidth: 640 };
-const backButtonStyle = (isMobile) => ({ border: '1px solid rgba(255, 115, 115, 0.34)', borderRadius: 999, padding: isMobile ? '11px 16px' : '10px 16px', background: 'rgba(255,255,255,0.03)', color: '#fff', fontWeight: 600, cursor: 'pointer', width: isMobile ? '100%' : 'auto' });
+const eyebrowStyle = { fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--vg-f-f7a5a5)', marginBottom: 8 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32, fontWeight: 700 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.6, maxWidth: 640 };
+const backButtonStyle = (isMobile) => ({ border: '1px solid var(--vg-f-ff7373-a340)', borderRadius: 999, padding: isMobile ? '11px 16px' : '10px 16px', background: 'rgba(var(--vg-ink), 0.03)', color: 'var(--vg-text-strong)', fontWeight: 600, cursor: 'pointer', width: isMobile ? '100%' : 'auto' });
 
-const emptyStateStyle = { minHeight: 100, display: 'grid', placeItems: 'center', borderRadius: 24, border: '1px dashed rgba(255, 255, 255, 0.14)', background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)', color: '#c8bbbb', textAlign: 'center', padding: 20 };
-const errorStyle = { padding: '12px 14px', borderRadius: 16, border: '1px solid rgba(255, 145, 145, 0.22)', background: 'rgba(255, 98, 98, 0.12)', color: '#ffd8d8' };
+const emptyStateStyle = { minHeight: 100, display: 'grid', placeItems: 'center', borderRadius: 24, border: '1px dashed rgba(var(--vg-ink), 0.14)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)', color: 'var(--vg-f-c8bbbb)', textAlign: 'center', padding: 20 };
+const errorStyle = { padding: '12px 14px', borderRadius: 16, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255, 98, 98, 0.12)', color: 'var(--vg-f-ffd8d8)' };
 const feedbackStyle = (feedbackType) => ({
   borderRadius: 12,
-  border: feedbackType === 'error' ? '1px solid rgba(223, 102, 102, 0.5)' : '1px solid rgba(82, 206, 123, 0.35)',
-  background: feedbackType === 'error' ? 'rgba(102, 29, 29, 0.55)' : 'rgba(31, 89, 48, 0.45)',
-  color: feedbackType === 'error' ? '#ffe2e2' : '#dbffe4',
+  border: feedbackType === 'error' ? '1px solid var(--vg-f-df6666-a500)' : '1px solid var(--vg-f-52ce7b-a350)',
+  background: feedbackType === 'error' ? 'var(--vg-s-661d1d-a550)' : 'var(--vg-s-1f5930-a450)',
+  color: feedbackType === 'error' ? 'var(--vg-f-ffe2e2)' : 'var(--vg-f-dbffe4)',
   padding: '10px 12px',
   fontSize: 13,
 });
@@ -865,50 +865,50 @@ const feedbackStyle = (feedbackType) => ({
 const layoutStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(260px, 340px) 1fr', gap: 16, alignItems: 'start' });
 const listColumnStyle = { display: 'grid', gap: 10 };
 const listStyle = { display: 'grid', gap: 10 };
-const busquedaInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff4f4', fontSize: 13 };
+const busquedaInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-f-fff4f4)', fontSize: 13 };
 const filtrosBusquedaRowStyle = (isMobile) => ({ display: 'flex', gap: 10, flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center' });
 const tipoFiltroSelectStyle = {
-  flexShrink: 0, minWidth: 140, boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)',
-  background: '#161010', padding: '10px 12px', color: '#fff4f4', fontSize: 13, appearance: 'auto', colorScheme: 'dark', cursor: 'pointer',
+  flexShrink: 0, minWidth: 140, boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-f-fff4f4)', fontSize: 13, appearance: 'auto', colorScheme: 'dark', cursor: 'pointer',
 };
 const paginacionStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 4 };
-const paginacionTextoStyle = { color: '#c8bbbb', fontSize: 12, fontWeight: 700 };
+const paginacionTextoStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12, fontWeight: 700 };
 const paginacionBotonStyle = (deshabilitado) => ({
-  border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '7px 12px', fontSize: 12, fontWeight: 700,
-  background: 'rgba(255,255,255,0.04)', color: deshabilitado ? '#6b6060' : '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '7px 12px', fontSize: 12, fontWeight: 700,
+  background: 'rgba(var(--vg-ink), 0.04)', color: deshabilitado ? '#6b6060' : 'var(--vg-text-strong)',
   cursor: deshabilitado ? 'not-allowed' : 'pointer', opacity: deshabilitado ? 0.6 : 1,
 });
 const compraCardStyle = (selected) => ({
   display: 'grid', gap: 6, textAlign: 'left', padding: '14px 16px', borderRadius: 16,
-  border: selected ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.1)',
-  background: selected ? 'rgba(255, 90, 90, 0.12)' : 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  color: '#fff', cursor: 'pointer',
+  border: selected ? '1px solid var(--vg-f-ff8282-a600)' : '1px solid rgba(var(--vg-ink), 0.1)',
+  background: selected ? 'rgba(255, 90, 90, 0.12)' : 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
+  color: 'var(--vg-text-strong)', cursor: 'pointer',
 });
 const estadoBadgeStyle = (estado) => ({
   padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', height: 'fit-content',
   background: estado === 'pendiente' ? 'rgba(255, 145, 145, 0.16)' : 'rgba(255, 200, 120, 0.16)',
-  color: estado === 'pendiente' ? '#ff9b9b' : '#ffcf7d',
+  color: estado === 'pendiente' ? 'var(--vg-f-ff9b9b)' : 'var(--vg-f-ffcf7d)',
 });
-const detailPanelStyle = { display: 'grid', gap: 12, padding: '18px 18px', borderRadius: 20, background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)', border: '1px solid rgba(255, 255, 255, 0.1)', boxShadow: '0 12px 28px rgba(0,0,0,0.24)', minHeight: 200 };
-const lineaRowStyle = { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#e8dede' };
-const detailTotalsStyle = { display: 'flex', flexWrap: 'wrap', gap: 14, paddingTop: 8, borderTop: '1px solid rgba(255, 255, 255, 0.06)', color: '#d2c4c4', fontSize: 13 };
-const abonoFormStyle = () => ({ display: 'grid', gap: 10, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.08)' });
-const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255, 255, 255, 0.14)', background: '#161010', padding: '9px 10px', color: '#fff4f4', fontSize: 13 };
+const detailPanelStyle = { display: 'grid', gap: 12, padding: '18px 18px', borderRadius: 20, background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)', border: '1px solid rgba(var(--vg-ink), 0.1)', boxShadow: '0 12px 28px rgba(0, 0, 0, calc(0.24 * var(--vg-shadow-k)))', minHeight: 200 };
+const lineaRowStyle = { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--vg-f-e8dede)' };
+const detailTotalsStyle = { display: 'flex', flexWrap: 'wrap', gap: 14, paddingTop: 8, borderTop: '1px solid rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-d2c4c4)', fontSize: 13 };
+const abonoFormStyle = () => ({ display: 'grid', gap: 10, paddingTop: 10, borderTop: '1px solid rgba(var(--vg-ink), 0.08)' });
+const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '9px 10px', color: 'var(--vg-f-fff4f4)', fontSize: 13 };
 const selectStyle = { ...inputStyle, appearance: 'auto', colorScheme: 'dark', cursor: 'pointer' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)', color: '#04140a', fontWeight: 800, cursor: 'pointer' };
 const comprobanteLinkStyle = { display: 'block', marginTop: 8, border: 'none', background: 'transparent', color: 'inherit', textDecoration: 'underline', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 13 };
-const miniPrintButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
+const miniPrintButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(var(--vg-ink), 0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
 
 const tabsRowStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
-const reportePanelStyle = { display: 'grid', gap: 12, padding: '16px 18px', borderRadius: 20, border: '1px solid rgba(255, 255, 255, 0.1)', background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)' };
+const reportePanelStyle = { display: 'grid', gap: 12, padding: '16px 18px', borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
 const reporteFiltrosStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 260px))', gap: 12 });
-const reporteLabelStyle = { display: 'grid', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const reporteCheckStyle = { display: 'flex', alignItems: 'center', gap: 8, color: '#f2e6e6', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
+const reporteLabelStyle = { display: 'grid', gap: 6, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700 };
+const reporteCheckStyle = { display: 'flex', alignItems: 'center', gap: 8, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 const tabButtonStyle = (activo) => ({
-  border: activo ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.14)',
+  border: activo ? '1px solid var(--vg-f-ff8282-a600)' : '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-  background: activo ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
-  color: activo ? '#ffb0b0' : '#d2c4c4',
+  background: activo ? 'rgba(255, 90, 90, 0.16)' : 'rgba(var(--vg-ink), 0.03)',
+  color: activo ? 'var(--vg-f-ffb0b0)' : 'var(--vg-f-d2c4c4)',
 });
 const monedaToggleStyle = { display: 'flex', gap: 8 };
 const monedaToggleButtonStyle = (activo) => ({

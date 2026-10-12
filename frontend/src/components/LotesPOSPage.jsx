@@ -176,9 +176,9 @@ function LotesPOSPage({ isMobile, onBack }) {
             </select>
           </label>
         </div>
-        <div style={{ color: '#c8bbbb', fontSize: 13 }}>
-          {porAcreditar.cantidad} lote(s) sin acreditar · <strong style={{ color: '#ffe3a3' }}>${formatMonto(porAcreditar.total)}</strong> por acreditar
-          <span style={{ color: '#a89999' }}> (los lotes abiertos o cerrados siempre se muestran, sin importar el rango)</span>
+        <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>
+          {porAcreditar.cantidad} lote(s) sin acreditar · <strong style={{ color: 'var(--vg-f-ffe3a3)' }}>${formatMonto(porAcreditar.total)}</strong> por acreditar
+          <span style={{ color: 'var(--vg-f-a89999)' }}> (los lotes abiertos o cerrados siempre se muestran, sin importar el rango)</span>
         </div>
 
         {loading ? <div style={emptyStyle}>Cargando lotes...</div> : null}
@@ -349,27 +349,27 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
     <div style={backdropStyle} onClick={saving ? undefined : onClose}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
         <div style={modalTitleStyle}>{modo === 'detalle' ? `${lote.codigo} — detalle` : `${MOTIVO_TITULOS[modo]} ${lote.codigo}`}</div>
-        <div style={{ color: '#c8bbbb', fontSize: 13 }}>
+        <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>
           {lote.metodo_pago_nombre}{lote.cuenta_bancaria ? ` · ${lote.cuenta_bancaria}` : ''} · operado el {formatFecha(lote.fecha_operacion)} · {lote.num_pagos} cobro(s)
         </div>
-        <div style={{ color: '#fff', fontWeight: 800, fontSize: 20 }}>
-          ${formatMonto(lote.monto_usd)} <span style={{ color: '#c8bbbb', fontSize: 14, fontWeight: 600 }}>· Bs {formatMonto(lote.monto_bs)}</span>
+        <div style={{ color: 'var(--vg-text-strong)', fontWeight: 800, fontSize: 20 }}>
+          ${formatMonto(lote.monto_usd)} <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 14, fontWeight: 600 }}>· Bs {formatMonto(lote.monto_bs)}</span>
         </div>
 
         {modo === 'detalle' ? (
           <div style={{ display: 'grid', gap: 10 }}>
-            <div style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+            <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>
               {lote.fecha_cierre ? `Cerrado ${formatFechaHora(lote.fecha_cierre)}${lote.cerrado_por ? ` por ${lote.cerrado_por}` : ''}` : 'Abierto'}
               {lote.estado === 'acreditado' ? ` · Acreditado ${formatFechaHora(lote.fecha_acreditacion)}${lote.acreditado_por ? ` por ${lote.acreditado_por}` : ''}` : ''}
             </div>
-            {lote.notas ? <div style={{ color: '#d2c3c3', fontSize: 12.5, whiteSpace: 'pre-wrap' }}>{lote.notas}</div> : null}
+            {lote.notas ? <div style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 12.5, whiteSpace: 'pre-wrap' }}>{lote.notas}</div> : null}
             {lote.pagos ? (
               <div style={{ display: 'grid', gap: 4 }}>
                 <div style={sectionLabelStyle}>Cobros del lote</div>
                 {lote.pagos.map((pago) => (
                   <div
                     key={pago.id}
-                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, color: pago.estado === 'anulado' ? '#8c7f7f' : '#f2e6e6', textDecoration: pago.estado === 'anulado' ? 'line-through' : 'none' }}
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, color: pago.estado === 'anulado' ? 'var(--vg-f-8c7f7f)' : 'var(--vg-f-f2e6e6)', textDecoration: pago.estado === 'anulado' ? 'line-through' : 'none' }}
                   >
                     <span>{pago.origen} · {formatFechaHora(pago.fecha_pago)}{pago.referencia ? ` · ${pago.referencia}` : ''}</span>
                     <span>
@@ -395,7 +395,7 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
             ) : null}
             {moviendo ? (
               <form onSubmit={moverCobro} style={moverFormStyle}>
-                <div style={{ color: '#fff', fontWeight: 700 }}>
+                <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
                   Mover el cobro de {moviendo.origen} (${formatMonto(moviendo.monto_usd)}) fuera de {lote.codigo}
                 </div>
                 <label style={fieldStyle}>¿A dónde va?
@@ -431,7 +431,7 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
           </div>
         ) : (
           <form onSubmit={submit} style={{ display: 'grid', gap: 12 }}>
-            <div style={{ color: '#d2c3c3', fontSize: 13.5 }}>{MOTIVO_AYUDA[modo]}</div>
+            <div style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 13.5 }}>{MOTIVO_AYUDA[modo]}</div>
             <label style={fieldStyle}>Motivo (obligatorio, queda anotado en el lote)
               <input type="text" value={motivo} onChange={(event) => setMotivo(event.target.value)} style={inputStyle} autoFocus />
             </label>
@@ -450,33 +450,33 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 720, lineHeight: 1.6 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 720, lineHeight: 1.6 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 const filtrosStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(150px, 220px))', gap: 12 });
-const fieldStyle = { display: 'grid', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
-const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', width: '100%', boxSizing: 'border-box' };
-const mutedStyle = { color: '#a89999', fontSize: 12, display: 'block' };
-const sectionLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' };
+const fieldStyle = { display: 'grid', gap: 6, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700 };
+const inputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', width: '100%', boxSizing: 'border-box' };
+const mutedStyle = { color: 'var(--vg-f-a89999)', fontSize: 12, display: 'block' };
+const sectionLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.7fr) minmax(150px,1fr) minmax(100px,0.6fr) minmax(70px,0.4fr) minmax(140px,0.9fr) minmax(120px,0.7fr) minmax(260px,1.5fr)', minWidth: 950, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center', gap: 2 };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.7fr) minmax(150px,1fr) minmax(100px,0.6fr) minmax(70px,0.4fr) minmax(140px,0.9fr) minmax(120px,0.7fr) minmax(260px,1.5fr)', minWidth: 950, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '12px 14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center', gap: 2 };
 const cellActionsStyle = { ...cellStyle, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' };
 const badgeStyle = { fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em', width: 'fit-content' };
-const miniButtonStyle = { border: '1px solid rgba(255,255,255,0.18)', borderRadius: 999, padding: '6px 12px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
+const miniButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.18)', borderRadius: 999, padding: '6px 12px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
 const miniPrimaryStyle = { ...miniButtonStyle, border: 'none', background: 'linear-gradient(90deg, #15803d 0%, #22c55e 100%)', padding: '7px 16px', fontSize: 13 };
-const miniDangerStyle = { ...miniButtonStyle, border: '1px solid rgba(255,126,126,0.4)', background: 'rgba(145,33,33,0.25)', color: '#ffd3d3' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.18)', borderRadius: 999, padding: '10px 18px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 18px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '10px 18px', background: 'rgba(145,33,33,0.45)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
+const miniDangerStyle = { ...miniButtonStyle, border: '1px solid var(--vg-f-ff7e7e-a400)', background: 'rgba(145,33,33,0.25)', color: 'var(--vg-f-ffd3d3)' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.18)', borderRadius: 999, padding: '10px 18px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 18px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '10px 18px', background: 'rgba(145,33,33,0.45)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 const backdropStyle = { position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.65)', display: 'grid', placeItems: 'center', zIndex: 1000, padding: 16, overflowY: 'auto' };
-const modalCardStyle = { width: 'min(640px, 100%)', maxHeight: '92vh', overflowY: 'auto', display: 'grid', gap: 14, padding: 22, borderRadius: 20, border: '1px solid rgba(255,255,255,0.14)', background: '#140b0b', boxShadow: '0 30px 80px rgba(0,0,0,0.6)' };
-const moverButtonStyle = { marginLeft: 10, border: '1px solid rgba(255,255,255,0.18)', borderRadius: 999, padding: '2px 10px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
-const moverFormStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 14, border: '1px solid rgba(255,207,133,0.35)', background: 'rgba(255,207,133,0.05)' };
-const modalTitleStyle = { color: '#fff', fontSize: 21, fontWeight: 800 };
+const modalCardStyle = { width: 'min(640px, 100%)', maxHeight: '92vh', overflowY: 'auto', display: 'grid', gap: 14, padding: 22, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-140b0b)', boxShadow: '0 30px 80px rgba(0, 0, 0, calc(0.6 * var(--vg-shadow-k)))' };
+const moverButtonStyle = { marginLeft: 10, border: '1px solid rgba(var(--vg-ink), 0.18)', borderRadius: 999, padding: '2px 10px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const moverFormStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 14, border: '1px solid var(--vg-f-ffcf85-a350)', background: 'rgba(255,207,133,0.05)' };
+const modalTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 21, fontWeight: 800 };
 
 export default LotesPOSPage;

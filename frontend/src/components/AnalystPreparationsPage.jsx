@@ -166,8 +166,8 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <style>
         {`.subrecipe-picker-option:hover { background: rgba(255, 90, 90, 0.16); }
-          .subrecipe-picker-option:focus-visible { outline: 1px solid rgba(255, 132, 132, 0.8); }
-          .subrecipe-dark-select option { background: #120b0b; color: #fff4f4; }
+          .subrecipe-picker-option:focus-visible { outline: 1px solid var(--vg-f-ff8484-a800); }
+          .subrecipe-dark-select option { background: var(--vg-s-120b0b); color: var(--vg-f-fff4f4); }
         `}
       </style>
       <div style={badgeStyle}>Preparaciones</div>
@@ -308,7 +308,7 @@ const badgeStyle = {
   padding: '7px 12px',
   borderRadius: 999,
   background: 'rgba(255, 163, 163, 0.12)',
-  color: '#ffb5b5',
+  color: 'var(--vg-f-ffb5b5)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -317,13 +317,13 @@ const badgeStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 28 : 34,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 760,
 };
@@ -341,8 +341,8 @@ const panelStyle = {
   gap: 16,
   padding: '20px 18px',
   borderRadius: 24,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
 };
 
 const formGridStyle = (isMobile) => ({
@@ -357,7 +357,7 @@ const fieldStyle = {
 };
 
 const labelStyle = {
-  color: '#f0b4b4',
+  color: 'var(--vg-f-f0b4b4)',
   fontSize: 13,
   fontWeight: 700,
 };
@@ -366,10 +366,10 @@ const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 14,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: '#161010',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-161010)',
   padding: '11px 12px',
-  color: '#fff4f4',
+  color: 'var(--vg-f-fff4f4)',
   fontSize: 14,
 };
 
@@ -385,17 +385,17 @@ const helperCardStyle = {
   gap: 10,
   padding: '16px',
   borderRadius: 18,
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  background: 'rgba(255, 255, 255, 0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
+  background: 'rgba(var(--vg-ink), 0.03)',
 };
 
 const helperTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
 };
 
 const helperTextStyle = {
-  color: '#d2c4c4',
+  color: 'var(--vg-f-d2c4c4)',
   lineHeight: 1.6,
 };
 
@@ -420,9 +420,9 @@ const pickerListStyle = {
   maxHeight: 260,
   overflowY: 'auto',
   borderRadius: 16,
-  border: '1px solid rgba(255, 255, 255, 0.12)',
-  background: '#120b0b',
-  boxShadow: '0 16px 36px rgba(0, 0, 0, 0.35)',
+  border: '1px solid rgba(var(--vg-ink), 0.12)',
+  background: 'var(--vg-s-120b0b)',
+  boxShadow: '0 16px 36px rgba(0, 0, 0, calc(0.35 * var(--vg-shadow-k)))',
 };
 
 const pickerItemStyle = {
@@ -432,7 +432,7 @@ const pickerItemStyle = {
   padding: '12px 14px',
   background: 'transparent',
   border: 'none',
-  color: '#fff4f4',
+  color: 'var(--vg-f-fff4f4)',
   cursor: 'pointer',
 };
 
@@ -441,13 +441,13 @@ const pickerItemTitleStyle = {
 };
 
 const pickerItemMetaStyle = {
-  color: '#cfb8b8',
+  color: 'var(--vg-f-cfb8b8)',
   fontSize: 12,
 };
 
 const pickerEmptyStyle = {
   padding: '14px',
-  color: '#cfb8b8',
+  color: 'var(--vg-f-cfb8b8)',
   fontSize: 13,
 };
 
@@ -457,7 +457,7 @@ const componentsPanelStyle = {
 };
 
 const sectionTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 19,
   fontWeight: 700,
 };
@@ -469,18 +469,18 @@ const componentCardStyle = {
   gap: 12,
   padding: '14px 16px',
   borderRadius: 18,
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  background: 'rgba(255, 255, 255, 0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
+  background: 'rgba(var(--vg-ink), 0.03)',
   flexWrap: 'wrap',
 };
 
 const componentTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
 };
 
 const componentMetaStyle = {
-  color: '#d2c4c4',
+  color: 'var(--vg-f-d2c4c4)',
   fontSize: 13,
 };
 
@@ -489,55 +489,55 @@ const emptyStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 18,
-  border: '1px dashed rgba(255, 255, 255, 0.12)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.12)',
+  color: 'var(--vg-f-c8bbbb)',
 };
 
 const noticeStyle = {
   padding: '12px 14px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 145, 145, 0.22)',
+  border: '1px solid var(--vg-f-ff9191-a220)',
   background: 'rgba(255, 98, 98, 0.12)',
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const primaryButtonStyle = {
   border: 'none',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const secondaryButtonStyle = {
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '10px 16px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const dangerButtonStyle = {
-  border: '1px solid rgba(255, 125, 125, 0.28)',
+  border: '1px solid var(--vg-f-ff7d7d-a280)',
   borderRadius: 999,
   padding: '10px 16px',
   background: 'rgba(255, 82, 82, 0.18)',
-  color: '#ffd5d5',
+  color: 'var(--vg-f-ffd5d5)',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const backButtonStyle = {
   justifySelf: 'flex-start',
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };

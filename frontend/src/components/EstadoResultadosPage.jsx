@@ -115,7 +115,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
                   </button>
                 ) : null}
               </span>
-              <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
+              <span style={{ ...lineValueStyle, color: 'var(--vg-f-ff9d9d)' }}>
                 −${formatMonto(data.costo_ventas)}
                 <BsAmount amountUsd={data.costo_ventas} bs={data.costo_ventas_bs} tasa={tasaCambio} />
               </span>
@@ -128,7 +128,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
             ) : null}
             {ventasSinCosto.length > 0 ? (
               <div style={alertaCostoStyle}>
-                <div style={{ fontWeight: 800, color: '#ffd9a0' }}>
+                <div style={{ fontWeight: 800, color: 'var(--vg-f-ffd9a0)' }}>
                   Ventas sin costo configurado: ${formatMonto(data.ventas_sin_costo.total)} ({formatMonto(data.ventas_sin_costo.pct_de_ventas)}% de las ventas)
                 </div>
                 <div style={{ marginTop: 4 }}>
@@ -139,8 +139,8 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
                 <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
                   {ventasSinCosto.map((fila) => (
                     <div key={fila.producto_id} style={alertaFilaStyle}>
-                      <span style={{ color: '#fff', fontWeight: 700 }}>{fila.nombre}</span>
-                      <span style={{ color: '#d9c7a6' }}>
+                      <span style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>{fila.nombre}</span>
+                      <span style={{ color: 'var(--vg-f-d9c7a6)' }}>
                         {fila.motivo === 'sin_receta'
                           ? 'Sin receta, subreceta ni ingredientes anclados'
                           : 'Tiene receta, pero sus ingredientes cuestan $0'}
@@ -156,7 +156,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
 
             <div style={subtotalRowStyle(utilidadBrutaPositiva)}>
               <span style={{ ...lineLabelStyle, fontWeight: 800 }}>= Utilidad bruta</span>
-              <span style={{ fontSize: 17, fontWeight: 800, color: utilidadBrutaPositiva ? '#8fffb0' : '#ff9d9d', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 17, fontWeight: 800, color: utilidadBrutaPositiva ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)', whiteSpace: 'nowrap' }}>
                 ${formatMonto(data.utilidad_bruta)} ({formatMonto(data.utilidad_bruta_pct)}%)
                 <BsAmount amountUsd={data.utilidad_bruta} bs={data.utilidad_bruta_bs ?? undefined} tasa={tasaCambio} style={{ opacity: 0.85 }} />
               </span>
@@ -176,7 +176,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
                   </button>
                 ) : null}
               </span>
-              <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
+              <span style={{ ...lineValueStyle, color: 'var(--vg-f-ff9d9d)' }}>
                 −${formatMonto(data.gastos_total)}
                 <BsAmount amountUsd={data.gastos_total} bs={data.gastos_total_bs} tasa={tasaCambio} />
               </span>
@@ -194,7 +194,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
 
             <div style={finalRowStyle(utilidadNetaPositiva)}>
               <span style={{ ...lineLabelStyle, fontSize: 16, fontWeight: 800 }}>= Utilidad neta</span>
-              <span style={{ fontSize: 22, fontWeight: 800, color: utilidadNetaPositiva ? '#8fffb0' : '#ff9d9d' }}>
+              <span style={{ fontSize: 22, fontWeight: 800, color: utilidadNetaPositiva ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)' }}>
                 ${formatMonto(data.utilidad_neta)} ({formatMonto(data.utilidad_neta_pct)}%)
                 <BsAmount amountUsd={data.utilidad_neta} bs={data.utilidad_neta_bs ?? undefined} tasa={tasaCambio} style={{ opacity: 0.85 }} />
               </span>
@@ -212,40 +212,40 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 640, lineHeight: 1.6 };
-const panelStyle = { display: 'grid', gap: 16, padding: 22, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 640, lineHeight: 1.6 };
+const panelStyle = { display: 'grid', gap: 16, padding: 22, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 
 const waterfallStyle = { display: 'grid', gap: 10, maxWidth: 560 };
 const lineRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 };
-const lineLabelStyle = { color: '#d2c3c3', fontSize: 14.5 };
-const lineValueStyle = { color: '#fff', fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap' };
-const categoriaChipStyle = { display: 'inline-flex', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };
-const avisoStyle = { color: '#a89999', fontSize: 12.5, lineHeight: 1.5 };
+const lineLabelStyle = { color: 'var(--vg-f-d2c3c3)', fontSize: 14.5 };
+const lineValueStyle = { color: 'var(--vg-text-strong)', fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap' };
+const categoriaChipStyle = { display: 'inline-flex', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.06)' };
+const avisoStyle = { color: 'var(--vg-f-a89999)', fontSize: 12.5, lineHeight: 1.5 };
 const alertaCostoStyle = {
-  padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255, 190, 90, 0.35)', background: 'rgba(255, 170, 60, 0.1)',
-  color: '#e6d3b0', fontSize: 12.5, lineHeight: 1.5,
+  padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ffbe5a-a350)', background: 'rgba(255, 170, 60, 0.1)',
+  color: 'var(--vg-f-e6d3b0)', fontSize: 12.5, lineHeight: 1.5,
 };
 const alertaFilaStyle = {
   display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 12, rowGap: 2, alignItems: 'baseline',
-  padding: '6px 0', borderTop: '1px solid rgba(255,255,255,0.08)',
+  padding: '6px 0', borderTop: '1px solid rgba(var(--vg-ink), 0.08)',
 };
 const subtotalRowStyle = (positive) => ({
   display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '10px 14px', borderRadius: 12,
-  background: 'rgba(255,255,255,0.04)',
-  border: positive ? '1px solid rgba(80, 200, 130, 0.22)' : '1px solid rgba(255, 145, 145, 0.25)',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  border: positive ? '1px solid var(--vg-f-50c882-a220)' : '1px solid var(--vg-f-ff9191-a250)',
 });
 const finalRowStyle = (positive) => ({
   display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginTop: 4, padding: '14px 16px', borderRadius: 14,
   background: positive ? 'rgba(70, 200, 120, 0.12)' : 'rgba(255, 98, 98, 0.12)',
-  border: positive ? '1px solid rgba(80, 200, 130, 0.3)' : '1px solid rgba(255, 145, 145, 0.3)',
+  border: positive ? '1px solid var(--vg-f-50c882-a300)' : '1px solid var(--vg-f-ff9191-a300)',
 });
 
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const verDetalleGastosButtonStyle = { marginLeft: 10, border: 'none', background: 'transparent', color: '#ff9d9d', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0, textDecoration: 'underline' };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
+const verDetalleGastosButtonStyle = { marginLeft: 10, border: 'none', background: 'transparent', color: 'var(--vg-f-ff9d9d)', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', padding: 0, textDecoration: 'underline' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default EstadoResultadosPage;

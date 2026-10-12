@@ -5,8 +5,8 @@ function SplashScreen() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'radial-gradient(circle at top, #4b1010 0%, #140606 45%, #050505 100%)',
-      color: '#fff',
+      background: 'radial-gradient(circle at top, var(--vg-s-4b1010) 0%, var(--vg-s-140606) 45%, var(--vg-s-050505) 100%)',
+      color: 'var(--vg-text-strong)',
       padding: 24,
       boxSizing: 'border-box',
     }}>
@@ -61,7 +61,7 @@ function SplashScreen() {
         <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '0.01em' }}>
           Varagrill
         </div>
-        <div style={{ marginTop: 10, color: '#d7b0b0', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+        <div style={{ marginTop: 10, color: 'var(--vg-f-d7b0b0)', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
           <span>Preparando tu experiencia</span>
           <span className="splash-dots" aria-hidden="true" />
         </div>

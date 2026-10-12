@@ -175,7 +175,7 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
               </div>
             </div>
             {!data.tasa_bcv ? (
-              <div style={{ fontSize: 12, color: '#ffcf85' }}>
+              <div style={{ fontSize: 12, color: 'var(--vg-f-ffcf85)' }}>
                 No hay tasa BCV registrada para esta fecha; los montos en bolívares no se pueden convertir.
               </div>
             ) : null}
@@ -184,9 +184,9 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Totales por metodo de pago — {fecha}</div>
             {data.tasa_bcv ? (
-              <div style={{ fontSize: 12, color: '#c8bbbb' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
+              <div style={{ fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
             ) : (
-              <div style={{ fontSize: 12, color: '#ffcf85' }}>No hay tasa BCV registrada para esta fecha; los metodos en bolivares no muestran conversion.</div>
+              <div style={{ fontSize: 12, color: 'var(--vg-f-ffcf85)' }}>No hay tasa BCV registrada para esta fecha; los metodos en bolivares no muestran conversion.</div>
             )}
             <div style={tableWrapStyle}>
               <div style={tableStyle}>
@@ -259,27 +259,27 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Cierre del dia</div>
             {Number(data.gastos_efectivo_dia) > 0 ? (
-              <div style={{ color: '#ff9d9d', fontSize: 13 }}>
+              <div style={{ color: 'var(--vg-f-ff9d9d)', fontSize: 13 }}>
                 Gastos pagados en efectivo hoy: −${formatMonto(data.gastos_efectivo_dia)}
               </div>
             ) : null}
-            <div style={{ color: '#c8bbbb', fontSize: 13 }}>
-              Efectivo esperado (ventas + propinas/extra − gastos, todo en efectivo): <strong style={{ color: '#fff' }}>${formatMonto(cierre ? cierre.efectivo_esperado : data.efectivo_esperado_preview)}</strong>
+            <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>
+              Efectivo esperado (ventas + propinas/extra − gastos, todo en efectivo): <strong style={{ color: 'var(--vg-text-strong)' }}>${formatMonto(cierre ? cierre.efectivo_esperado : data.efectivo_esperado_preview)}</strong>
             </div>
             {cierre ? (
-              <div style={{ display: 'grid', gap: 8, color: '#f2e6e6' }}>
-                <div style={{ color: '#8fffb0', fontWeight: 800 }}>La caja de este día ya está cerrada.</div>
+              <div style={{ display: 'grid', gap: 8, color: 'var(--vg-f-f2e6e6)' }}>
+                <div style={{ color: 'var(--vg-f-8fffb0)', fontWeight: 800 }}>La caja de este día ya está cerrada.</div>
                 {cierre.conteo_efectivo_realizado ? (
                   <>
                     <div>Efectivo contado al cerrar: <strong>${formatMonto(cierre.efectivo_contado_final)}</strong></div>
-                    <div style={{ color: Number(cierre.diferencia) === 0 ? '#8fffb0' : '#ff9d9d', fontWeight: 800 }}>
+                    <div style={{ color: Number(cierre.diferencia) === 0 ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)', fontWeight: 800 }}>
                       Diferencia: ${formatMonto(cierre.diferencia)}
                     </div>
                   </>
                 ) : null}
                 {pos ? <div>POS por acreditar al cerrar: <strong>${formatMonto(cierre.pos_por_acreditar_usd)}</strong></div> : null}
                 {cierre.notas ? <div>Notas: {cierre.notas}</div> : null}
-                <div style={{ fontSize: 13, color: '#c8bbbb' }}>
+                <div style={{ fontSize: 13, color: 'var(--vg-f-c8bbbb)' }}>
                   Cerrado por {cierre.cerrado_por || '—'} el {new Date(cierre.fecha_creacion).toLocaleString('es-VE')}
                 </div>
               </div>
@@ -303,28 +303,28 @@ function ReporteCuadreCajaPage({ isMobile, onBack, onNavigate, backLabel = '← 
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const headerRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 12 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3' };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)' };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginLeft: 6 };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) minmax(140px,1fr)', minWidth: 320, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
+const secondaryAmountStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12, marginLeft: 6 };
 const desgloseGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
 const ventasGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 });
-const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
-const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const desgloseValueStyle = { color: '#fff', fontSize: 20, fontWeight: 800 };
-const desgloseSecondaryStyle = { color: '#c8bbbb', fontSize: 12.5 };
-const verDetalleLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
-const posTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(150px,1fr) minmax(120px,0.8fr) minmax(130px,0.8fr)', minWidth: 520, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
+const desgloseLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const desgloseValueStyle = { color: 'var(--vg-text-strong)', fontSize: 20, fontWeight: 800 };
+const desgloseSecondaryStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
+const verDetalleLinkStyle = { border: 'none', background: 'none', color: 'var(--vg-f-ff9d9d)', fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
+const posTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(110px,0.8fr) minmax(150px,1fr) minmax(120px,0.8fr) minmax(130px,0.8fr)', minWidth: 520, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
 const posBadgeStyle = { fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em', width: 'fit-content' };
-const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '12px 16px', background: 'rgba(145,33,33,0.35)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '12px 16px', background: 'rgba(145,33,33,0.35)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer' };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default ReporteCuadreCajaPage;

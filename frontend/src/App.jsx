@@ -204,7 +204,7 @@ function App() {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '4px 0 18px',
-        color: '#f3b4b4',
+        color: 'var(--vg-f-f3b4b4)',
         fontSize: 13,
       }}>
         <div style={{ fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Varagrill</div>
@@ -225,8 +225,8 @@ function App() {
         }}>
           <img src="/assets/varagrill-logo.jpg" alt="Varagrill logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
-        <div style={{ fontSize: 34, fontWeight: 700, color: '#ff4d4d' }}>Varagrill</div>
-        <div style={{ color: '#c8c8c8', marginTop: 8, fontSize: 15 }}>Control de cocina y servicio</div>
+        <div style={{ fontSize: 34, fontWeight: 700, color: 'var(--vg-accent-primary)' }}>Varagrill</div>
+        <div style={{ color: 'var(--vg-text-secondary)', marginTop: 8, fontSize: 15 }}>Control de cocina y servicio</div>
       </div>
 
       <AuthForm

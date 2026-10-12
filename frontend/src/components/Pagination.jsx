@@ -29,11 +29,11 @@ const wrapStyle = (isMobile) => ({
   flexDirection: isMobile ? 'column' : 'row',
   gap: 10,
   paddingTop: 10,
-  borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.08)',
 });
 
 const labelStyle = {
-  color: '#c8bbbb',
+  color: 'var(--vg-f-c8bbbb)',
   fontSize: 13,
 };
 
@@ -44,7 +44,7 @@ const controlsStyle = {
 };
 
 const pageIndicatorStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 13,
   fontWeight: 700,
   minWidth: 92,
@@ -52,11 +52,11 @@ const pageIndicatorStyle = {
 };
 
 const navButtonStyle = (disabled) => ({
-  border: '1px solid rgba(255, 255, 255, 0.16)',
+  border: '1px solid rgba(var(--vg-ink), 0.16)',
   borderRadius: 999,
   padding: '8px 14px',
-  background: disabled ? 'rgba(255, 255, 255, 0.02)' : 'rgba(255, 255, 255, 0.06)',
-  color: disabled ? '#7a6f6f' : '#fff',
+  background: disabled ? 'rgba(var(--vg-ink), 0.02)' : 'rgba(var(--vg-ink), 0.06)',
+  color: disabled ? '#7a6f6f' : 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 13,
   cursor: disabled ? 'default' : 'pointer',

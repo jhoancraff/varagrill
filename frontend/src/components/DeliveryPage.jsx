@@ -257,17 +257,17 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
                   <div style={pedidoCardHeaderRowStyle}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                        <div style={{ color: '#fff', fontWeight: 700 }}>Pedido #{pedido.id}</div>
-                        <div style={{ color: '#fff', fontWeight: 700 }}>
+                        <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>Pedido #{pedido.id}</div>
+                        <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
                           ${Number(pedido.total || 0).toFixed(2)}
                           <BsAmount amountUsd={pedido.total} tasa={tasaCambio} />
                         </div>
                       </div>
-                      <div style={{ color: '#d2c3c3', fontSize: 12, marginTop: 4 }}>
+                      <div style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 12, marginTop: 4 }}>
                         {estadoLabel(pedido.estado)} · {pedido.mesero}
                       </div>
                       {Number(pedido.cargo_delivery) > 0 ? (
-                        <div style={{ color: '#ffcf7d', fontSize: 12, marginTop: 4 }}>
+                        <div style={{ color: 'var(--vg-f-ffcf7d)', fontSize: 12, marginTop: 4 }}>
                           Incluye delivery{pedido.zona_delivery_nombre ? ` (${pedido.zona_delivery_nombre})` : ''}: ${Number(pedido.cargo_delivery).toFixed(2)}
                         </div>
                       ) : null}
@@ -278,10 +278,10 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
                     {items.map((item) => (
                       <div key={item.id} style={itemRowStyle(impreso)}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                          <span style={{ color: '#fff', fontWeight: 600 }}>
+                          <span style={{ color: 'var(--vg-text-strong)', fontWeight: 600 }}>
                             {item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`} {item.producto_nombre}
                           </span>
-                          <span style={{ color: '#fff', fontWeight: 600 }}>
+                          <span style={{ color: 'var(--vg-text-strong)', fontWeight: 600 }}>
                             ${Number(item.subtotal || 0).toFixed(2)}
                           </span>
                         </div>
@@ -415,7 +415,7 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
       </div>
 
       {lastUpdate ? (
-        <div style={{ color: '#d3cfcf', fontSize: 12 }}>
+        <div style={{ color: 'var(--vg-f-d3cfcf)', fontSize: 12 }}>
           Última actualización: {lastUpdate.toLocaleTimeString('es-ES')}
         </div>
       ) : null}
@@ -436,16 +436,16 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
               style={grupoCardStyle}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                <div style={{ color: '#fff', fontWeight: 800, fontSize: 17 }}>{grupo.cliente_nombre || 'Sin nombre'}</div>
+                <div style={{ color: 'var(--vg-text-strong)', fontWeight: 800, fontSize: 17 }}>{grupo.cliente_nombre || 'Sin nombre'}</div>
                 <span style={tipoBadgeStyle}>{TIPO_LABEL[grupo.tipo_pedido] || grupo.tipo_pedido}</span>
               </div>
               {grupo.cliente_telefono ? (
-                <div style={{ color: '#c8bbbb', fontSize: 12.5, marginTop: 4 }}>{grupo.cliente_telefono}</div>
+                <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5, marginTop: 4 }}>{grupo.cliente_telefono}</div>
               ) : null}
-              <div style={{ color: '#d2c3c3', fontSize: 13, marginTop: 6 }}>
+              <div style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 13, marginTop: 6 }}>
                 {grupo.pedidos.length} {grupo.pedidos.length === 1 ? 'pedido' : 'pedidos'}
               </div>
-              <div style={{ color: '#fff', fontWeight: 700, fontSize: 16, marginTop: 8 }}>
+              <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 16, marginTop: 8 }}>
                 ${Number(grupo.total || 0).toFixed(2)}
                 <BsAmount amountUsd={grupo.total} tasa={tasaCambio} />
               </div>
@@ -458,11 +458,11 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
 }
 
 const containerStyle = (isMobile) => ({
-  background: 'linear-gradient(180deg, rgba(18, 8, 8, 0.96) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  border: '1px solid rgba(255, 95, 95, 0.18)',
+  background: 'linear-gradient(180deg, var(--vg-s-120808-a960) 0%, var(--vg-s-080808-a980) 100%)',
+  border: '1px solid var(--vg-f-ff5f5f-a180)',
   borderRadius: 24,
   padding: isMobile ? 14 : 20,
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 30px rgba(0,0,0,0.32)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 30px rgba(0, 0, 0, calc(0.32 * var(--vg-shadow-k)))',
   display: 'grid',
   gap: 14,
 });
@@ -476,7 +476,7 @@ const headerWrapStyle = {
 };
 
 const eyebrowStyle = {
-  color: '#f7a5a5',
+  color: 'var(--vg-f-f7a5a5)',
   fontSize: 12,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
@@ -484,14 +484,14 @@ const eyebrowStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: '8px 0 0',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 24 : 30,
   lineHeight: 1.15,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#c6c6c6',
+  color: 'var(--vg-f-c6c6c6)',
   fontSize: 14,
 };
 
@@ -504,11 +504,11 @@ const headerActionsStyle = (isMobile) => ({
 });
 
 const backButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(255, 115, 115, 0.34)',
+  border: '1px solid var(--vg-f-ff7373-a340)',
   borderRadius: 999,
   padding: isMobile ? '10px 14px' : '9px 14px',
-  background: 'rgba(255,255,255,0.03)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   cursor: 'pointer',
   minHeight: isMobile ? 42 : 38,
@@ -519,7 +519,7 @@ const newOrderButtonStyle = (isMobile) => ({
   border: 'none',
   borderRadius: 999,
   padding: isMobile ? '10px 14px' : '9px 14px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
@@ -528,11 +528,11 @@ const newOrderButtonStyle = (isMobile) => ({
 });
 
 const secondaryButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(255,255,255,0.2)',
+  border: '1px solid rgba(var(--vg-ink), 0.2)',
   borderRadius: 999,
   padding: isMobile ? '10px 14px' : '9px 14px',
-  background: 'rgba(255,255,255,0.06)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.06)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   cursor: 'pointer',
   minHeight: isMobile ? 42 : 38,
@@ -541,16 +541,16 @@ const secondaryButtonStyle = (isMobile) => ({
 
 const emptyStateStyle = {
   borderRadius: 16,
-  border: '1px dashed rgba(255,255,255,0.28)',
+  border: '1px dashed rgba(var(--vg-ink), 0.28)',
   padding: '18px 14px',
-  color: '#d8cfcf',
+  color: 'var(--vg-f-d8cfcf)',
 };
 
 const errorStyle = {
   borderRadius: 14,
-  border: '1px solid rgba(223, 102, 102, 0.5)',
-  background: 'rgba(102, 29, 29, 0.55)',
-  color: '#ffe2e2',
+  border: '1px solid var(--vg-f-df6666-a500)',
+  background: 'var(--vg-s-661d1d-a550)',
+  color: 'var(--vg-f-ffe2e2)',
   padding: '10px 12px',
   fontSize: 13,
 };
@@ -563,7 +563,7 @@ const mesasGridStyle = (isMobile) => ({
 
 const grupoCardStyle = {
   textAlign: 'left',
-  border: '1px solid rgba(52, 211, 153, 0.45)',
+  border: '1px solid var(--vg-f-34d399-a450)',
   background: 'rgba(52, 211, 153, 0.08)',
   borderRadius: 16,
   padding: 14,
@@ -579,9 +579,9 @@ const tipoBadgeStyle = {
   fontWeight: 800,
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
-  color: '#58a6ff',
+  color: 'var(--vg-f-58a6ff)',
   background: 'rgba(88, 166, 255, 0.14)',
-  border: '1px solid rgba(88, 166, 255, 0.4)',
+  border: '1px solid var(--vg-f-58a6ff-a400)',
   whiteSpace: 'nowrap',
 };
 
@@ -591,15 +591,15 @@ const telefonoBadgeStyle = {
   padding: '3px 10px',
   fontSize: 11,
   fontWeight: 700,
-  color: '#c8bbbb',
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.14)',
+  color: 'var(--vg-f-c8bbbb)',
+  background: 'rgba(var(--vg-ink), 0.06)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
 };
 
 const pedidoCardStyle = {
   borderRadius: 14,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.12)',
+  background: 'rgba(var(--vg-ink), 0.03)',
   padding: 11,
 };
 
@@ -614,20 +614,20 @@ const totalsBoxStyle = {
   justifyContent: 'space-between',
   alignItems: 'center',
   borderRadius: 14,
-  border: '1px solid rgba(255,255,255,0.16)',
-  background: 'rgba(255,255,255,0.04)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.16)',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   padding: '12px 14px',
   fontWeight: 800,
   fontSize: 16,
 };
 
 const addRoundButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(88, 166, 255, 0.5)',
+  border: '1px solid var(--vg-f-58a6ff-a500)',
   borderRadius: 999,
   padding: isMobile ? '12px 16px' : '10px 16px',
   background: 'rgba(88, 166, 255, 0.12)',
-  color: '#58a6ff',
+  color: 'var(--vg-f-58a6ff)',
   fontWeight: 700,
   cursor: 'pointer',
   minHeight: isMobile ? 44 : 40,
@@ -652,7 +652,7 @@ const fixedFooterStyle = (sidebarOffset) => ({
   display: 'grid',
   gap: 8,
   transition: 'left 260ms ease',
-  background: 'linear-gradient(180deg, rgba(8,8,8,0) 0%, rgba(8,8,8,0.94) 35%, rgba(6,6,6,0.98) 100%)',
+  background: 'linear-gradient(180deg, var(--vg-s-080808-a0) 0%, var(--vg-s-080808-a940) 35%, var(--vg-s-060606-a980) 100%)',
 });
 
 const footerActionsRowStyle = {
@@ -663,9 +663,9 @@ const footerActionsRowStyle = {
 
 const flashBannerStyle = {
   borderRadius: 14,
-  border: '1px solid rgba(52, 211, 153, 0.4)',
+  border: '1px solid var(--vg-f-34d399-a400)',
   background: 'rgba(52, 211, 153, 0.12)',
-  color: '#a7f3d3',
+  color: 'var(--vg-f-a7f3d3)',
   padding: '10px 12px',
   fontSize: 13,
   fontWeight: 600,
@@ -675,7 +675,7 @@ const iniciarPrepButtonStyle = (isMobile) => ({
   border: 'none',
   borderRadius: 999,
   padding: isMobile ? '12px 16px' : '10px 16px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
@@ -685,11 +685,11 @@ const iniciarPrepButtonStyle = (isMobile) => ({
 });
 
 const editOrderButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(255,255,255,0.2)',
+  border: '1px solid rgba(var(--vg-ink), 0.2)',
   borderRadius: 999,
   padding: isMobile ? '12px 16px' : '10px 16px',
-  background: 'rgba(255,255,255,0.06)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.06)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
   fontSize: 13,
@@ -699,11 +699,11 @@ const editOrderButtonStyle = (isMobile) => ({
 
 const reprintItemButtonStyle = {
   justifySelf: 'start',
-  border: '1px solid rgba(88, 166, 255, 0.45)',
+  border: '1px solid var(--vg-f-58a6ff-a450)',
   borderRadius: 999,
   padding: '4px 10px',
   background: 'rgba(88, 166, 255, 0.1)',
-  color: '#bcdcff',
+  color: 'var(--vg-f-bcdcff)',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
@@ -717,27 +717,27 @@ const impresoTagStyle = (impreso) => ({
   fontWeight: 800,
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
-  color: impreso ? '#34d399' : '#f59e0b',
+  color: impreso ? 'var(--vg-f-34d399)' : 'var(--vg-f-f59e0b)',
   background: impreso ? 'rgba(52, 211, 153, 0.14)' : 'rgba(245, 158, 11, 0.14)',
-  border: `1px solid ${impreso ? 'rgba(52, 211, 153, 0.4)' : 'rgba(245, 158, 11, 0.45)'}`,
+  border: `1px solid ${impreso ? 'var(--vg-f-34d399-a400)' : 'var(--vg-f-f59e0b-a450)'}`,
 });
 
 const itemRowStyle = (impreso) => ({
   borderRadius: 10,
   background: impreso ? 'rgba(52, 211, 153, 0.06)' : 'rgba(245, 158, 11, 0.08)',
-  border: `1px solid ${impreso ? 'rgba(52, 211, 153, 0.3)' : 'rgba(245, 158, 11, 0.35)'}`,
+  border: `1px solid ${impreso ? 'var(--vg-f-34d399-a300)' : 'var(--vg-f-f59e0b-a350)'}`,
   padding: '8px 9px',
   display: 'grid',
   gap: 4,
 });
 
 const itemNoteStyle = {
-  color: '#e8bcbc',
+  color: 'var(--vg-f-e8bcbc)',
   fontSize: 12,
 };
 
 const itemAddonStyle = {
-  color: '#ffcf85',
+  color: 'var(--vg-f-ffcf85)',
   fontSize: 12,
   fontWeight: 700,
 };
@@ -745,11 +745,11 @@ const itemAddonStyle = {
 const removeItemButtonStyle = {
   justifySelf: 'start',
   marginTop: 2,
-  border: '1px solid rgba(255, 102, 102, 0.45)',
+  border: '1px solid var(--vg-f-ff6666-a450)',
   borderRadius: 999,
   padding: '4px 10px',
   background: 'rgba(255, 73, 73, 0.1)',
-  color: '#ffb3b3',
+  color: 'var(--vg-f-ffb3b3)',
   fontSize: 11,
   fontWeight: 700,
   cursor: 'pointer',
@@ -760,7 +760,7 @@ const orderNoteStyle = {
   padding: '8px 10px',
   borderRadius: 10,
   background: 'rgba(191, 31, 31, 0.14)',
-  color: '#ffdede',
+  color: 'var(--vg-f-ffdede)',
   fontSize: 12,
 };
 

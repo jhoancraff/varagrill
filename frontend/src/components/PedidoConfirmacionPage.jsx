@@ -195,7 +195,7 @@ function PedidoConfirmacionPage({ isMobile, pedidoId, onBack, onIrACaja }) {
               {Number(pedido.propina) > 0 ? (
                 <div style={totalRowStyle}><span>Propina</span><span>${Number(pedido.propina).toFixed(2)}</span></div>
               ) : null}
-              <div style={{ ...totalRowStyle, fontWeight: 800, fontSize: 17, color: '#fff' }}>
+              <div style={{ ...totalRowStyle, fontWeight: 800, fontSize: 17, color: 'var(--vg-text-strong)' }}>
                 <span>Total</span>
                 <span>
                   ${Number(pedido.total).toFixed(2)}
@@ -243,38 +243,38 @@ function PedidoConfirmacionPage({ isMobile, pedidoId, onBack, onIrACaja }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6, maxWidth: 680 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.6, maxWidth: 680 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 
 const datosGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0,1fr))', gap: 14 });
-const labelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const valueStyle = { color: '#f2e6e6', fontSize: 14.5, marginTop: 2 };
+const labelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const valueStyle = { color: 'var(--vg-f-f2e6e6)', fontSize: 14.5, marginTop: 2 };
 
 const itemsListStyle = { display: 'grid', gap: 10 };
-const itemRowStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' };
+const itemRowStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.08)', background: 'rgba(var(--vg-ink), 0.03)' };
 const itemHeaderStyle = { display: 'flex', justifyContent: 'space-between', gap: 10 };
-const itemNombreStyle = { color: '#fff', fontWeight: 700, fontSize: 14.5 };
-const itemSubtotalStyle = { color: '#fff', fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap' };
-const itemExtraStyle = { color: '#c8bbbb', fontSize: 12.5, marginTop: 4 };
+const itemNombreStyle = { color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 14.5 };
+const itemSubtotalStyle = { color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 14.5, whiteSpace: 'nowrap' };
+const itemExtraStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5, marginTop: 4 };
 
 const totalesGridStyle = { display: 'grid', gap: 8 };
-const totalRowStyle = { display: 'flex', justifyContent: 'space-between', color: '#d2c3c3', fontSize: 14 };
+const totalRowStyle = { display: 'flex', justifyContent: 'space-between', color: 'var(--vg-f-d2c3c3)', fontSize: 14 };
 
 const estadoBadgeRowStyle = { display: 'flex' };
 const estadoBadgeStyle = (ok) => ({
   display: 'inline-flex', alignItems: 'center', padding: '6px 14px', borderRadius: 999,
   fontSize: 13, fontWeight: 700,
-  color: ok ? '#8fffb0' : '#ffcf7d',
+  color: ok ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ffcf7d)',
   background: ok ? 'rgba(70,200,120,0.14)' : 'rgba(255,190,120,0.14)',
-  border: ok ? '1px solid rgba(80,200,130,0.3)' : '1px solid rgba(255,190,120,0.3)',
+  border: ok ? '1px solid var(--vg-f-50c882-a300)' : '1px solid var(--vg-f-ffbe78-a300)',
 });
 const actionsRowStyle = (isMobile) => ({ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 10, flexWrap: 'wrap' });
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '12px 20px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 14 };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '12px 20px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 14 };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '12px 20px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 14 };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '12px 20px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 14 };
 const disabledButtonStyle = { ...primaryButtonStyle, background: 'rgba(255,255,255,0.06)', color: '#7a6f6f', cursor: 'not-allowed' };
 
 export default PedidoConfirmacionPage;

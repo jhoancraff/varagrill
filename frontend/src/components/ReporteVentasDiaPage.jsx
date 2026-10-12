@@ -227,7 +227,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
           <h2 style={titleStyle(isMobile)}>Ventas {rango ? 'del rango' : 'del día'} — detalle</h2>
         </div>
         {rango ? (
-          <div style={dateLabelStyle}>Rango<div style={{ color: '#fff', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
+          <div style={dateLabelStyle}>Rango<div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>{rango.desde} al {rango.hasta}</div></div>
         ) : (
           <DiaFecha value={fecha} onChange={setFecha} />
         )}
@@ -348,7 +348,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                       ) : null}
                       {!rango && pago && editandoPagoId === pago.id ? (
                         <div style={editRowWrapStyle} className="no-print">
-                          <span style={{ color: '#d2c3c3', fontSize: 13 }}>
+                          <span style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 13 }}>
                             Mover el pago de <strong>{pago.metodo_pago_nombre}</strong> a otra cuenta
                           </span>
                           <select
@@ -382,7 +382,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                               Cancelar
                             </button>
                           </div>
-                          {errorCambio ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{errorCambio}</div> : null}
+                          {errorCambio ? <div style={{ color: 'var(--vg-f-ffb0b0)', fontSize: 12.5 }}>{errorCambio}</div> : null}
                         </div>
                       ) : null}
                     </Fragment>
@@ -406,7 +406,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
                 >
                   ← Anteriores
                 </button>
-                <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+                <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
                 <button
                   type="button"
                   onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
@@ -419,7 +419,7 @@ function ReporteVentasDiaPage({ isMobile, onBack }) {
             </div>
           ) : null}
 
-          <div style={{ fontWeight: 700, color: '#fff' }}>
+          <div style={{ fontWeight: 700, color: 'var(--vg-text-strong)' }}>
             Total vendido: ${formatMonto(data.total_vendido)}
           </div>
         </section>
@@ -531,26 +531,26 @@ function NotaDetalleModal({ loading, error, detalle, onClose }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const headerRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 12 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3' };
-const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)' };
+const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700 };
 const filtrosRowStyle = (isMobile) => ({
   display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
 });
-const filtroInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', minWidth: 180 };
-const limpiarFiltrosButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
+const filtroInputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', minWidth: 180 };
+const limpiarFiltrosButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-f-ff9d9d)', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
 const paginacionRowStyle = (isMobile) => ({
   display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
 });
-const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionInfoStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
 const paginacionButtonStyle = (disabled) => ({
-  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
-  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
-  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
+  border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '8px 14px',
+  background: disabled ? 'rgba(var(--vg-ink), 0.02)' : 'rgba(var(--vg-ink), 0.05)',
+  color: disabled ? '#7a6f6f' : 'var(--vg-text-strong)', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
 });
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const tableWrapStyle = { overflowX: 'auto' };
 const ventasTableStyle = (rango) => ({
   display: 'grid',
@@ -558,33 +558,33 @@ const ventasTableStyle = (rango) => ({
     ? 'minmax(110px,0.8fr) minmax(110px,0.7fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr)'
     : 'minmax(110px,0.8fr) minmax(110px,0.7fr) minmax(120px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(140px,1fr) minmax(110px,0.7fr) minmax(100px,0.6fr)',
   minWidth: rango ? 1150 : 1250,
-  border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden',
+  border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden',
 });
-const cambiarCuentaButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '5px 12px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
-const editRowWrapStyle = { gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,157,157,0.06)' };
-const editSelectStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.16)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13 };
-const editInputStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.16)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13, minWidth: 220, flex: 1 };
+const cambiarCuentaButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '5px 12px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-f-ff9d9d)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const editRowWrapStyle = { gridColumn: '1 / -1', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: '12px 14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', background: 'rgba(255,157,157,0.06)' };
+const editSelectStyle = { borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.16)', background: 'var(--vg-s-161010)', padding: '8px 10px', color: 'var(--vg-text-strong)', fontSize: 13 };
+const editInputStyle = { borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.16)', background: 'var(--vg-s-161010)', padding: '8px 10px', color: 'var(--vg-text-strong)', fontSize: 13, minWidth: 220, flex: 1 };
 const guardarCambioButtonStyle = { border: 'none', borderRadius: 999, padding: '8px 16px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
-const cancelarCambioButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
-const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12, marginTop: 2 };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const cancelarCambioButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '8px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };
+const secondaryAmountStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12, marginTop: 2 };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const notaLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
+const notaLinkStyle = { border: 'none', background: 'none', color: 'var(--vg-f-ff9d9d)', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
 
 const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
-const modalCardStyle = { width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 14 };
+const modalCardStyle = { width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid var(--vg-f-ff9191-a300)', background: 'linear-gradient(180deg, var(--vg-s-1c0c0c-a980) 0%, var(--vg-s-0a0808-a990) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))', display: 'grid', gap: 14 };
 const modalHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
-const modalCloseButtonStyle = { border: 'none', background: 'rgba(255,255,255,0.08)', color: '#fff', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
-const reimprimirButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '6px 14px', background: 'rgba(255,255,255,0.06)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
-const modalMetaGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, color: '#f2e6e6', fontSize: 14 };
-const modalMetaLabelStyle = { color: '#ffb0b0', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const modalItemsTitleStyle = { color: '#fff', fontSize: 15, fontWeight: 700, borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 };
+const modalTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 800 };
+const modalCloseButtonStyle = { border: 'none', background: 'rgba(var(--vg-ink), 0.08)', color: 'var(--vg-text-strong)', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
+const reimprimirButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '6px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
+const modalMetaGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, color: 'var(--vg-f-f2e6e6)', fontSize: 14 };
+const modalMetaLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const modalItemsTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 15, fontWeight: 700, borderTop: '1px solid rgba(var(--vg-ink), 0.1)', paddingTop: 12 };
 const modalItemsListStyle = { display: 'grid', gap: 10 };
-const modalItemRowStyle = { padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' };
-const modalItemNombreStyle = { color: '#fff', fontWeight: 700, fontSize: 14 };
-const modalItemExtraStyle = { color: '#c8bbbb', fontSize: 12.5, marginTop: 4 };
+const modalItemRowStyle = { padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.08)', background: 'rgba(var(--vg-ink), 0.03)' };
+const modalItemNombreStyle = { color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 14 };
+const modalItemExtraStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5, marginTop: 4 };
 
 export default ReporteVentasDiaPage;

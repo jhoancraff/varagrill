@@ -3,9 +3,9 @@ import Toast from './Toast';
 import useToast from '../hooks/useToast';
 
 const ACCION_LABELS = {
-  nuevo: { label: 'Nuevo', color: '#8ff0b8', background: 'rgba(80, 200, 130, 0.18)' },
-  existente: { label: 'Ya existe', color: '#c8bbbb', background: 'rgba(255, 255, 255, 0.08)' },
-  duplicado: { label: 'Repetido en el archivo', color: '#ffcf8a', background: 'rgba(255, 176, 59, 0.18)' },
+  nuevo: { label: 'Nuevo', color: 'var(--vg-f-8ff0b8)', background: 'rgba(80, 200, 130, 0.18)' },
+  existente: { label: 'Ya existe', color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.08)' },
+  duplicado: { label: 'Repetido en el archivo', color: 'var(--vg-f-ffcf8a)', background: 'rgba(255, 176, 59, 0.18)' },
 };
 
 const SELECTABLE_ACCIONES = new Set(['nuevo']);
@@ -204,12 +204,12 @@ function AnalystIngredientsBulkCreatePage({ isMobile, onBack }) {
                     </div>
                     <div key={`name-${row.fila}`} style={cellPrimaryStyle}>
                       <div style={{ fontWeight: 700 }}>{row.nombre}</div>
-                      <div style={{ fontSize: 11, color: '#a89999' }}>Fila {row.fila}</div>
+                      <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>Fila {row.fila}</div>
                     </div>
                     <div key={`state-${row.fila}`} style={cellStyle}>
                       <span style={countBadgeStyle(badge)}>{badge?.label || row.accion}</span>
                     </div>
-                    <div key={`detail-${row.fila}`} style={{ ...cellStyle, fontSize: 12, color: '#c8bbbb' }}>
+                    <div key={`detail-${row.fila}`} style={{ ...cellStyle, fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>
                       {row.mensaje || ''}
                     </div>
                   </>
@@ -219,7 +219,7 @@ function AnalystIngredientsBulkCreatePage({ isMobile, onBack }) {
           </div>
 
           <div style={confirmRowStyle(isMobile)}>
-            <div style={{ color: '#c8bbbb', fontSize: 13 }}>{selectedCount} fila(s) seleccionada(s) para crear</div>
+            <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>{selectedCount} fila(s) seleccionada(s) para crear</div>
             <button type="button" onClick={handleConfirm} style={primaryButtonStyle} disabled={confirming || selectedCount === 0}>
               {confirming ? 'Creando...' : 'Confirmar carga'}
             </button>
@@ -242,34 +242,34 @@ function AnalystIngredientsBulkCreatePage({ isMobile, onBack }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6, maxWidth: 760 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.6, maxWidth: 760 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
 
 const uploadRowStyle = (isMobile) => ({ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
-const templateLinkStyle = { color: '#bfe0ff', fontWeight: 700, textDecoration: 'none', border: '1px solid rgba(125, 200, 255, 0.4)', borderRadius: 999, padding: '9px 14px', background: 'rgba(90, 170, 255, 0.08)' };
-const fileInputStyle = { color: '#fff', flex: 1, minWidth: 200 };
-const hintStyle = { margin: 0, color: '#a89999', fontSize: 12.5 };
+const templateLinkStyle = { color: 'var(--vg-f-bfe0ff)', fontWeight: 700, textDecoration: 'none', border: '1px solid var(--vg-f-7dc8ff-a400)', borderRadius: 999, padding: '9px 14px', background: 'rgba(90, 170, 255, 0.08)' };
+const fileInputStyle = { color: 'var(--vg-text-strong)', flex: 1, minWidth: 200 };
+const hintStyle = { margin: 0, color: 'var(--vg-f-a89999)', fontSize: 12.5 };
 
 const summaryRowStyle = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 };
 const countsRowStyle = { display: 'flex', flexWrap: 'wrap', gap: 8 };
 const countBadgeStyle = (badge) => ({
   display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 999,
   fontSize: 11.5, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase',
-  color: badge ? badge.color : '#fff', background: badge ? badge.background : 'rgba(255,255,255,0.08)',
+  color: badge ? badge.color : 'var(--vg-text-strong)', background: badge ? badge.background : 'rgba(var(--vg-ink), 0.08)',
 });
 
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(200px, 1.4fr) 140px minmax(200px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 680 };
-const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
-const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
+const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.1)' };
+const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
 const cellPrimaryStyle = { ...cellStyle };
-const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13 };
+const editInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 8, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '8px 10px', color: 'var(--vg-text-strong)', fontSize: 13 };
 
 const confirmRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, flexDirection: isMobile ? 'column' : 'row' });
 
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 
 export default AnalystIngredientsBulkCreatePage;

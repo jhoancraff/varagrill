@@ -7,8 +7,77 @@
  */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
+/* Variables derivadas de los colores que tenia cada pantalla (generadas al migrar al tema claro). */
+@import './theme-colors.css';
+
+/* ── Tema claro / oscuro ────────────────────────────────────────────────────
+ * El tema se elige con el atributo data-theme de <html> (ver context/ThemeContext.jsx). Los
+ * componentes usan estilos en linea, asi que NO llevan colores fijos: usan estas variables.
+ *
+ *   --vg-bg-app / -card / -sidebar / -input   fondos
+ *   --vg-text-main / -secondary / -strong     textos (strong: el blanco puro del tema oscuro)
+ *   --vg-border-card, --vg-shadow-card        bordes y sombras de tarjeta
+ *   --vg-accent-primary / --vg-accent-rgb     rojo de la marca (rgb para usarlo con transparencia)
+ *   --vg-ink                                  "tinta": rgb del color que se superpone a la superficie
+ *                                             (blanco sobre oscuro, casi negro sobre claro). Los
+ *                                             velos y bordes sutiles son rgba(var(--vg-ink), 0.08).
+ *   --vg-shadow-k                             intensidad de las sombras (0.35 en claro)
+ *
+ * Los textos de color y las superficies tintadas viven en theme-colors.css (--vg-f-* y --vg-s-*).
+ */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --vg-bg-base: #050505;
+  --vg-bg-app: radial-gradient(circle at top, #2f0b0b 0%, #120606 45%, #050505 100%);
+  --vg-bg-card: rgba(20, 10, 10, 0.95);
+  --vg-bg-sidebar: linear-gradient(180deg, rgba(22, 8, 8, 0.98) 0%, rgba(8, 8, 8, 0.98) 100%);
+  --vg-bg-input: rgba(255, 255, 255, 0.04);
+  --vg-bg-option: #17100f;
+
+  --vg-text-main: #f5f5f5;
+  --vg-text-secondary: #c8c8c8;
+  --vg-text-strong: #ffffff;
+
+  --vg-border-card: rgba(255, 255, 255, 0.1);
+  --vg-accent-primary: #ff4d4d;
+  --vg-accent-rgb: 255, 77, 77;
+  --vg-ink: 255, 255, 255;
+
+  --vg-shadow-card: 0 12px 30px rgba(0, 0, 0, 0.35);
+  --vg-shadow-k: 1;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --vg-bg-base: #f3f4f6;
+  --vg-bg-app: radial-gradient(circle at top, #fff1f1 0%, #f8f9fb 40%, #f3f4f6 100%);
+  --vg-bg-card: #ffffff;
+  --vg-bg-sidebar: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  --vg-bg-input: #ffffff;
+  --vg-bg-option: #ffffff;
+
+  --vg-text-main: #18181b;
+  --vg-text-secondary: #52525b;
+  --vg-text-strong: #18181b;
+
+  --vg-border-card: rgba(0, 0, 0, 0.08);
+  --vg-accent-primary: #d32f2f;
+  --vg-accent-rgb: 211, 47, 47;
+  --vg-ink: 24, 24, 27;
+
+  --vg-shadow-card: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --vg-shadow-k: 0.35;
+}
+
 *, *::before, *::after {
   box-sizing: border-box;
+}
+
+html {
+  background: var(--vg-bg-base);
 }
 
 body {
@@ -17,9 +86,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
+  background: var(--vg-bg-base);
+  color: var(--vg-text-main);
 }
 
-/* ── Scrollbar global (dark theme) ──────────────────────────────────────── */
+/* ── Scrollbar global ───────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -30,50 +101,31 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 77, 77, 0.25);
+  background: rgba(var(--vg-accent-rgb), 0.25);
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 77, 77, 0.45);
+  background: rgba(var(--vg-accent-rgb), 0.45);
 }
 
 /* ── Focus visible global (accesibilidad) ───────────────────────────────── */
 :focus-visible {
-  outline: 2px solid rgba(255, 77, 77, 0.7);
+  outline: 2px solid rgba(var(--vg-accent-rgb), 0.7);
   outline-offset: 2px;
 }
 
 /*
- * Arreglo global para el desplegable de cada <select> del sistema.
+ * Controles nativos (desplegable de cada <select>, selector de fecha, barras de scroll).
  *
- * El problema: cada página fija su propio estilo inline oscuro (fondo negro,
- * letra blanca) sobre el <select> cerrado, pero la LISTA desplegada al hacer
- * clic la dibuja el sistema operativo/navegador, no el CSS de la página. En
- * escritorio (Chrome/Edge/Firefox), sin ninguna pista, esa lista sale con
- * fondo blanco por defecto — y como el texto hereda el blanco que puso la
- * página, queda letra blanca sobre fondo blanco (invisible). En el celular,
- * el selector nativo del sistema no tiene ese problema porque usa su propio
- * tema, por eso ahí se veía bien.
- *
- * La solución real es `color-scheme: dark` en el propio <select>: le avisa
- * al navegador que dibuje SUS controles nativos (incluida esta lista) en
- * tema oscuro. Se refuerza con colores explícitos en <option> por si algún
- * navegador no lo respeta del todo. Al ser una regla global (no una clase
- * que hay que acordarse de poner en cada página), cubre todos los <select>
- * que ya existen y los que se agreguen después, sin tocar cada archivo.
+ * El navegador/sistema dibuja la LISTA desplegada de un <select> y el calendario de un campo de
+ * fecha, no el CSS de la pagina. Sin una pista, en escritorio salen con fondo blanco y, como la
+ * pagina fija texto claro, quedaba letra blanca sobre blanco. `color-scheme` (arriba, segun el
+ * tema) le dice al navegador que los dibuje en claro u oscuro; el color explicito de <option>
+ * refuerza el caso de navegadores que no lo respetan del todo. Es una regla global: cubre todos
+ * los <select> y campos de fecha, los que existen y los que se agreguen.
  */
-select {
-  color-scheme: dark;
-}
-
-/* Los campos de fecha de los formularios también se dibujan en tema oscuro: así el
- * icono del calendario se ve en vez de quedar negro sobre negro. */
-input[type="date"] {
-  color-scheme: dark;
-}
-
 select option {
-  background-color: #17100f;
-  color: #fff4f4;
+  background-color: var(--vg-bg-option);
+  color: var(--vg-text-strong);
 }

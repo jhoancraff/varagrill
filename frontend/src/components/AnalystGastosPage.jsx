@@ -292,28 +292,28 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante, onVerReporte })
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32 });
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32 });
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
 const formGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'end' });
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f0b4b4', fontSize: 12.5, fontWeight: 700 };
-const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '9px 10px', color: '#fff', fontSize: 13 };
+const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 12.5, fontWeight: 700 };
+const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '9px 10px', color: 'var(--vg-text-strong)', fontSize: 13 };
 const toggleRowStyle = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const toggleButtonStyle = (active) => ({
-  border: active ? '1px solid rgba(80, 200, 130, 0.5)' : '1px solid rgba(255,255,255,0.14)',
-  borderRadius: 999, padding: '9px 14px', background: active ? 'rgba(70, 200, 120, 0.16)' : 'rgba(255,255,255,0.04)',
-  color: active ? '#9fe3b0' : '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13,
+  border: active ? '1px solid var(--vg-f-50c882-a500)' : '1px solid rgba(var(--vg-ink), 0.14)',
+  borderRadius: 999, padding: '9px 14px', background: active ? 'rgba(70, 200, 120, 0.16)' : 'rgba(var(--vg-ink), 0.04)',
+  color: active ? 'var(--vg-f-9fe3b0)' : 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 13,
 });
 
-const collapseButtonStyle = { border: 'none', background: 'transparent', color: '#f0b4b4', fontWeight: 700, fontSize: 14, cursor: 'pointer', textAlign: 'left', padding: 0 };
+const collapseButtonStyle = { border: 'none', background: 'transparent', color: 'var(--vg-f-f0b4b4)', fontWeight: 700, fontSize: 14, cursor: 'pointer', textAlign: 'left', padding: 0 };
 const categoriaChipStyle = (activo) => ({
-  border: activo ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(255,145,145,0.3)',
-  borderRadius: 999, padding: '6px 12px', background: activo ? 'rgba(255,255,255,0.04)' : 'rgba(255,98,98,0.1)',
-  color: activo ? '#fff' : '#ffb0b0', fontSize: 12.5, cursor: 'pointer',
+  border: activo ? '1px solid rgba(var(--vg-ink), 0.14)' : '1px solid var(--vg-f-ff9191-a300)',
+  borderRadius: 999, padding: '6px 12px', background: activo ? 'rgba(var(--vg-ink), 0.04)' : 'rgba(255,98,98,0.1)',
+  color: activo ? 'var(--vg-text-strong)' : 'var(--vg-f-ffb0b0)', fontSize: 12.5, cursor: 'pointer',
 });
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 const headerRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' };
 
 export default AnalystGastosPage;

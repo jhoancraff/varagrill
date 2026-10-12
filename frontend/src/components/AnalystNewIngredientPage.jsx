@@ -169,8 +169,8 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
                     onClick={() => handleSelectExisting(item)}
                     style={suggestionRowStyle}
                   >
-                    <span style={{ color: '#fff', fontWeight: 600 }}>{item.nombre}</span>
-                    <span style={{ color: '#e8bcbc', fontSize: 12 }}>
+                    <span style={{ color: 'var(--vg-text-strong)', fontWeight: 600 }}>{item.nombre}</span>
+                    <span style={{ color: 'var(--vg-f-e8bcbc)', fontSize: 12 }}>
                       Stock: {item.stock_actual || '0'} {item.unidad_medida || ''}
                     </span>
                   </button>
@@ -216,7 +216,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
           </label>
           <label style={fieldStyle}>
             <span style={labelStyle}>Costo unitario (calculado)</span>
-            <input type="text" disabled value={costoUnitarioCalculado !== null ? costoUnitarioCalculado.toFixed(6) : '—'} style={{ ...inputStyle, color: '#c8bbbb', cursor: 'not-allowed' }} />
+            <input type="text" disabled value={costoUnitarioCalculado !== null ? costoUnitarioCalculado.toFixed(6) : '—'} style={{ ...inputStyle, color: 'var(--vg-f-c8bbbb)', cursor: 'not-allowed' }} />
           </label>
           <label style={fieldStyle}>
             <span style={labelStyle}>Ingrediente crudo equivalente</span>
@@ -256,17 +256,17 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: 0, color: '#d2c3c3', fontSize: 13 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: 0, color: 'var(--vg-f-d2c3c3)', fontSize: 13 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
 const gridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12 });
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f0b4b4', fontSize: 13, fontWeight: 700 };
-const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const helpTextStyle = { gridColumn: '1 / -1', margin: 0, color: '#c8bbbb', fontSize: 12, lineHeight: 1.5 };
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 13, fontWeight: 700 };
+const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
+const helpTextStyle = { gridColumn: '1 / -1', margin: 0, color: 'var(--vg-f-c8bbbb)', fontSize: 12, lineHeight: 1.5 };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 
 const suggestionsPanelStyle = {
   position: 'absolute',
@@ -276,9 +276,9 @@ const suggestionsPanelStyle = {
   marginTop: 6,
   zIndex: 5,
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'rgba(10, 8, 8, 0.98)',
-  boxShadow: '0 12px 30px rgba(0,0,0,0.4)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-0a0808-a980)',
+  boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.4 * var(--vg-shadow-k)))',
   padding: 8,
   display: 'grid',
   gap: 4,
@@ -287,7 +287,7 @@ const suggestionsPanelStyle = {
 };
 
 const suggestionsHintStyle = {
-  color: '#e8bcbc',
+  color: 'var(--vg-f-e8bcbc)',
   fontSize: 11,
   fontWeight: 700,
   textTransform: 'uppercase',
@@ -300,10 +300,10 @@ const suggestionRowStyle = {
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 8,
-  border: '1px solid rgba(255,255,255,0.08)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
   borderRadius: 10,
   padding: '9px 10px',
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(var(--vg-ink), 0.04)',
   cursor: 'pointer',
   textAlign: 'left',
 };
@@ -316,16 +316,16 @@ const duplicateWarningStyle = {
   marginTop: 4,
   padding: '9px 12px',
   borderRadius: 10,
-  border: '1px solid rgba(255,187,102,0.35)',
+  border: '1px solid var(--vg-f-ffbb66-a350)',
   background: 'rgba(255,153,51,0.12)',
-  color: '#ffdcae',
+  color: 'var(--vg-f-ffdcae)',
   fontSize: 12.5,
 };
 
 const duplicateLinkStyle = {
   border: 'none',
   background: 'transparent',
-  color: '#ffb74d',
+  color: 'var(--vg-f-ffb74d)',
   fontWeight: 700,
   textDecoration: 'underline',
   cursor: 'pointer',

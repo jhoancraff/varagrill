@@ -150,22 +150,22 @@ const backdropStyle = {
 
 const cardStyle = {
   width: '100%', maxWidth: 480, borderRadius: 20,
-  border: '1px solid rgba(150, 130, 255, 0.35)',
-  background: 'linear-gradient(180deg, rgba(18, 14, 28, 0.98) 0%, rgba(8, 8, 12, 0.99) 100%)',
+  border: '1px solid var(--vg-f-9682ff-a350)',
+  background: 'linear-gradient(180deg, var(--vg-s-120e1c-a980) 0%, var(--vg-s-08080c-a990) 100%)',
   padding: '22px 22px 18px',
-  boxShadow: '0 20px 50px rgba(0, 0, 0, 0.45)',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))',
   maxHeight: '90vh', overflowY: 'auto',
 };
 
-const titleStyle = { color: '#fff', fontSize: 19, fontWeight: 800, marginBottom: 4 };
-const subtitleStyle = { margin: '0 0 16px', color: '#c8bbd8', fontSize: 13, lineHeight: 1.5 };
+const titleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 800, marginBottom: 4 };
+const subtitleStyle = { margin: '0 0 16px', color: 'var(--vg-f-c8bbd8)', fontSize: 13, lineHeight: 1.5 };
 const formStyle = { display: 'grid', gap: 14 };
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#d3bff5', fontSize: 12.5, fontWeight: 700 };
-const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#141019', padding: '9px 10px', color: '#fff', fontSize: 13.5 };
-const errorStyle = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,145,145,0.28)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8', fontSize: 12.5 };
+const labelStyle = { color: 'var(--vg-f-d3bff5)', fontSize: 12.5, fontWeight: 700 };
+const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-141019)', padding: '9px 10px', color: 'var(--vg-text-strong)', fontSize: 13.5 };
+const errorStyle = { padding: '10px 12px', borderRadius: 10, border: '1px solid var(--vg-f-ff9191-a280)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)', fontSize: 12.5 };
 const footerStyle = { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6, flexWrap: 'wrap' };
-const cancelButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const cancelButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const confirmButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 18px', background: 'linear-gradient(90deg, #6d28d9 0%, #4f46e5 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(109, 40, 217, 0.35)' };
 
 export default IngresoParcialModal;

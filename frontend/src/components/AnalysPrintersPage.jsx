@@ -399,7 +399,7 @@ const badgeStyle = {
   padding: '7px 12px',
   borderRadius: 999,
   background: 'rgba(255, 163, 163, 0.12)',
-  color: '#ffb5b5',
+  color: 'var(--vg-f-ffb5b5)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -408,13 +408,13 @@ const badgeStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 28 : 34,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 720,
 };
@@ -432,8 +432,8 @@ const panelStyle = {
   gap: 16,
   padding: '20px 18px',
   borderRadius: 24,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
 };
 
 const emptyStateStyle = {
@@ -441,8 +441,8 @@ const emptyStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 18,
-  border: '1px dashed rgba(255, 255, 255, 0.12)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.12)',
+  color: 'var(--vg-f-c8bbbb)',
 };
 
 const tableWrapStyle = {
@@ -454,7 +454,7 @@ const tableStyle = {
   gridTemplateColumns:
     'minmax(150px, 0.8fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(160px, 1fr) minmax(90px, 0.5fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(260px, 1.2fr)',
   alignItems: 'stretch',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
   borderRadius: 18,
   overflow: 'hidden',
   minWidth: 1580,
@@ -462,19 +462,19 @@ const tableStyle = {
 
 const tableHeadStyle = {
   padding: '14px 16px',
-  background: 'rgba(255, 255, 255, 0.06)',
-  color: '#ffb0b0',
+  background: 'rgba(var(--vg-ink), 0.06)',
+  color: 'var(--vg-f-ffb0b0)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+  borderBottom: '1px solid rgba(var(--vg-ink), 0.08)',
 };
 
 const tableCellStyle = {
   padding: '12px 16px',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-  color: '#f2e6e6',
+  borderBottom: '1px solid rgba(var(--vg-ink), 0.08)',
+  color: 'var(--vg-f-f2e6e6)',
   display: 'grid',
   alignContent: 'center',
   gap: 4,
@@ -482,7 +482,7 @@ const tableCellStyle = {
 
 const tableCellPrimaryStyle = {
   ...tableCellStyle,
-  background: 'rgba(255, 255, 255, 0.02)',
+  background: 'rgba(var(--vg-ink), 0.02)',
 };
 
 const tableCellActionStyle = {
@@ -497,13 +497,13 @@ const autoPlatoCheckboxRowStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 8,
-  color: '#f2e6e6',
+  color: 'var(--vg-f-f2e6e6)',
   fontWeight: 600,
   fontSize: 13,
 };
 
 const categoriaNameStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 15,
 };
@@ -512,10 +512,10 @@ const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 10,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: 'rgba(255, 255, 255, 0.04)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'rgba(var(--vg-ink), 0.04)',
   padding: '9px 10px',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 13,
 };
 
@@ -523,8 +523,8 @@ const assignedPillStyle = {
   padding: '6px 10px',
   borderRadius: 999,
   background: 'rgba(94, 197, 135, 0.14)',
-  border: '1px solid rgba(94, 197, 135, 0.22)',
-  color: '#c8ffe0',
+  border: '1px solid var(--vg-f-5ec587-a220)',
+  color: 'var(--vg-f-c8ffe0)',
   fontSize: 11.5,
   fontWeight: 700,
 };
@@ -533,8 +533,8 @@ const unassignedPillStyle = {
   padding: '6px 10px',
   borderRadius: 999,
   background: 'rgba(180, 180, 180, 0.14)',
-  border: '1px solid rgba(180, 180, 180, 0.24)',
-  color: '#e0e0e0',
+  border: '1px solid var(--vg-f-b4b4b4-a240)',
+  color: 'var(--vg-f-e0e0e0)',
   fontSize: 11.5,
   fontWeight: 700,
 };
@@ -552,7 +552,7 @@ const cajaFieldStyle = {
 };
 
 const cajaLabelStyle = {
-  color: '#f0b4b4',
+  color: 'var(--vg-f-f0b4b4)',
   fontSize: 13,
   fontWeight: 700,
 };
@@ -561,7 +561,7 @@ const cajaToggleRowStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 10,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   gridColumn: '1 / -1',
 };
@@ -569,16 +569,16 @@ const cajaToggleRowStyle = {
 const noticeStyle = {
   padding: '12px 14px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 145, 145, 0.22)',
+  border: '1px solid var(--vg-f-ff9191-a220)',
   background: 'rgba(255, 98, 98, 0.12)',
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const primaryButtonStyle = {
   border: 'none',
   borderRadius: 999,
   padding: '9px 14px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
@@ -593,7 +593,7 @@ const backButtonStyle = {
   width: 'fit-content',
   border: 'none',
   background: 'transparent',
-  color: '#ffb5b5',
+  color: 'var(--vg-f-ffb5b5)',
   fontWeight: 700,
   cursor: 'pointer',
   padding: 0,

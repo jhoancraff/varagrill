@@ -176,8 +176,8 @@ function AnalystMovimientoProductosPage({ isMobile, onBack }) {
                     onClick={() => handleSelectProducto(seccion)}
                     style={suggestionRowStyle}
                   >
-                    <span style={{ color: '#fff', fontWeight: 600 }}>{seccion.nombre}</span>
-                    <span style={{ color: '#e8bcbc', fontSize: 12 }}>{seccion.categoria}</span>
+                    <span style={{ color: 'var(--vg-text-strong)', fontWeight: 600 }}>{seccion.nombre}</span>
+                    <span style={{ color: 'var(--vg-f-e8bcbc)', fontSize: 12 }}>{seccion.categoria}</span>
                   </button>
                 ))}
               </div>
@@ -207,13 +207,13 @@ function AnalystMovimientoProductosPage({ isMobile, onBack }) {
                       <div style={headStyle}>Nota de entrega</div>
                       {seccion.filas.map((fila) => (
                         <div key={fila.detalle_id} style={rowFragmentStyle}>
-                          <div style={{ ...cellStyle, fontWeight: 700, color: '#8fffb0' }}>{formatCantidadFila(fila)}</div>
+                          <div style={{ ...cellStyle, fontWeight: 700, color: 'var(--vg-f-8fffb0)' }}>{formatCantidadFila(fila)}</div>
                           <div style={cellStyle}>{formatHora(fila.fecha_hora)}</div>
                           <div style={cellStyle}>#{fila.pedido_id}</div>
                           <div style={cellStyle}>{fila.nota_entrega_codigo || '—'}</div>
                         </div>
                       ))}
-                      <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: '#8fffb0' }}>
+                      <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: 'var(--vg-f-8fffb0)' }}>
                         {Number(seccion.total_unidades) > 0 ? `${formatMonto(seccion.total_unidades)} u.` : ''}
                         {Number(seccion.total_unidades) > 0 && Number(seccion.total_kg) > 0 ? ' + ' : ''}
                         {Number(seccion.total_kg) > 0 ? `${formatMonto(seccion.total_kg)} kg` : ''}
@@ -240,28 +240,28 @@ function AnalystMovimientoProductosPage({ isMobile, onBack }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 640, lineHeight: 1.6 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 640, lineHeight: 1.6 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
 const seccionBlockStyle = { display: 'grid', gap: 8 };
-const seccionTituloStyle = { display: 'flex', alignItems: 'baseline', gap: 10, color: '#ff9d9d', fontSize: 15, fontWeight: 800 };
-const seccionCategoriaStyle = { color: '#c8bbbb', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const seccionTituloStyle = { display: 'flex', alignItems: 'baseline', gap: 10, color: 'var(--vg-f-ff9d9d)', fontSize: 15, fontWeight: 800 };
+const seccionCategoriaStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.7fr) minmax(150px,0.9fr) minmax(90px,0.6fr) minmax(150px,0.9fr)', minWidth: 640, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
-const totalCellStyle = { background: 'rgba(255,255,255,0.04)' };
+const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.7fr) minmax(150px,0.9fr) minmax(90px,0.6fr) minmax(150px,0.9fr)', minWidth: 640, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };
+const totalCellStyle = { background: 'rgba(var(--vg-ink), 0.04)' };
 const rowFragmentStyle = { display: 'contents' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const searchInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 14 };
+const searchInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', fontSize: 14 };
 const searchWrapStyle = { maxWidth: 420 };
-const summaryStyle = { color: '#c8bbbb', fontSize: 13 };
-const suggestionsPanelStyle = { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 5, borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(10, 8, 8, 0.98)', boxShadow: '0 12px 30px rgba(0,0,0,0.4)', padding: 8, display: 'grid', gap: 4, maxHeight: 260, overflowY: 'auto' };
-const suggestionRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', textAlign: 'left' };
-const quitarFiltroButtonStyle = { marginTop: 8, border: '1px solid rgba(255,157,157,0.35)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.2)', color: '#ff9d9d', fontWeight: 700, fontSize: 12, cursor: 'pointer' };
+const summaryStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 13 };
+const suggestionsPanelStyle = { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 5, borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-0a0808-a980)', boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.4 * var(--vg-shadow-k)))', padding: 8, display: 'grid', gap: 4, maxHeight: 260, overflowY: 'auto' };
+const suggestionRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 10, padding: '8px 10px', background: 'rgba(var(--vg-ink), 0.04)', cursor: 'pointer', textAlign: 'left' };
+const quitarFiltroButtonStyle = { marginTop: 8, border: '1px solid var(--vg-f-ff9d9d-a350)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.2)', color: 'var(--vg-f-ff9d9d)', fontWeight: 700, fontSize: 12, cursor: 'pointer' };
 
 export default AnalystMovimientoProductosPage;

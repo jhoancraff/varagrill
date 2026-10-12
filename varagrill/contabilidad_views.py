@@ -17,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import (
     _costo_con_margen_detalle,
+    _product_recipe_components,
     _costo_unitario_efectivo,
     _load_preparation_cost_map,
     _serialize_detalle_adicionales,
@@ -1756,6 +1757,10 @@ def reporte_estado_resultados_view(request):
     Las compras a proveedores (lotes, por Excel o manuales) NO suman: su costo ya entra por el
     costo de lo vendido, asi que sumarlas aqui contaria el mismo ingrediente dos veces. Ver el
     detalle de lo que se les pago en Cuentas por pagar.
+
+    `ventas_sin_costo` avisa de los productos vendidos cuyo costo salio en 0 (no tienen receta,
+    subreceta ni ingredientes anclados, o el costo de sus ingredientes es 0): sus ventas cuentan
+    completas como utilidad y por eso inflan la utilidad bruta.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1797,12 +1802,18 @@ def reporte_estado_resultados_view(request):
     costo_ventas = Decimal('0')
     costo_ventas_bs = Decimal('0')
     lineas_costo_estimado = 0
+    # producto_id -> {nombre, motivo, unidades, ventas}: lo vendido cuyo costo salio en 0.
+    productos_sin_costo = {}
+    motivo_por_producto = {}
     for nota in notas_cobradas:
         monto_cobrado = nota.total - nota.saldo_pendiente
         ventas_total += monto_cobrado
         tasa = nota.tasa_cambio_referencia or tasa_para_fecha(timezone.localdate(nota.fecha_emision))
         if tasa:
             ventas_total_bs += monto_cobrado * tasa
+
+        # Una nota abonada a medias cuenta solo la parte cobrada de la venta: el costo, la misma parte.
+        fraccion_cobrada = min(Decimal('1'), monto_cobrado / nota.total) if nota.total > 0 else Decimal('1')
 
         costo_nota = Decimal('0')
         for pedido in nota.pedidos.all():
@@ -1815,9 +1826,24 @@ def reporte_estado_resultados_view(request):
                 costo_nota += costo_unitario * Decimal(detalle.cantidad) * peso_factor
                 if estimado:
                     lineas_costo_estimado += 1
-        # Una nota abonada a medias cuenta solo la parte cobrada de la venta: el costo, la misma parte.
-        if nota.total > 0:
-            costo_nota *= min(Decimal('1'), monto_cobrado / nota.total)
+                venta_linea = detalle.precio_unitario * Decimal(detalle.cantidad) * peso_factor
+                if costo_unitario <= 0 and venta_linea > 0:
+                    producto = detalle.producto
+                    if producto.id not in motivo_por_producto:
+                        # Sin componentes: nada anclado que costear. Con componentes: costean 0.
+                        motivo_por_producto[producto.id] = (
+                            'costo_cero' if _product_recipe_components(producto) else 'sin_receta'
+                        )
+                    fila = productos_sin_costo.setdefault(producto.id, {
+                        'producto_id': producto.id,
+                        'nombre': producto.nombre,
+                        'motivo': motivo_por_producto[producto.id],
+                        'unidades': Decimal('0'),
+                        'ventas': Decimal('0'),
+                    })
+                    fila['unidades'] += Decimal(detalle.cantidad) * peso_factor
+                    fila['ventas'] += venta_linea * fraccion_cobrada
+        costo_nota *= fraccion_cobrada
         costo_ventas += costo_nota
         if tasa:
             # A la tasa de esa misma venta, igual que sus bolivares de venta (el costo no tiene tasa propia).
@@ -1854,6 +1880,22 @@ def reporte_estado_resultados_view(request):
         key=lambda item: Decimal(item['total']), reverse=True,
     )
 
+    ventas_sin_costo_lista = sorted(
+        (
+            {
+                'producto_id': fila['producto_id'],
+                'nombre': fila['nombre'],
+                'motivo': fila['motivo'],
+                'unidades': str(fila['unidades'].quantize(Decimal('0.01'))),
+                'ventas': str(fila['ventas'].quantize(Decimal('0.01'))),
+            }
+            for fila in productos_sin_costo.values()
+        ),
+        key=lambda fila: Decimal(fila['ventas']), reverse=True,
+    )
+    ventas_sin_costo_total = sum((fila['ventas'] for fila in productos_sin_costo.values()), Decimal('0'))
+    ventas_sin_costo_pct = (ventas_sin_costo_total / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
+
     utilidad_bruta = ventas_total - costo_ventas
     utilidad_bruta_bs = ventas_total_bs - costo_ventas_bs
     utilidad_bruta_pct = (utilidad_bruta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
@@ -1871,6 +1913,12 @@ def reporte_estado_resultados_view(request):
         'costo_ventas_bs': str(costo_ventas_bs.quantize(Decimal('0.01'))),
         # Lineas vendidas sin costo congelado al cobrar (ventas viejas): su costo es el actual, estimado.
         'costo_lineas_estimadas': lineas_costo_estimado,
+        # Productos vendidos cuyo costo salio en 0: sus ventas cuentan enteras como utilidad.
+        'ventas_sin_costo': {
+            'total': str(ventas_sin_costo_total.quantize(Decimal('0.01'))),
+            'pct_de_ventas': str(ventas_sin_costo_pct.quantize(Decimal('0.01'))),
+            'productos': ventas_sin_costo_lista,
+        },
         'utilidad_bruta': str(utilidad_bruta.quantize(Decimal('0.01'))),
         'utilidad_bruta_bs': str(utilidad_bruta_bs.quantize(Decimal('0.01'))),
         'utilidad_bruta_pct': str(utilidad_bruta_pct.quantize(Decimal('0.01'))),

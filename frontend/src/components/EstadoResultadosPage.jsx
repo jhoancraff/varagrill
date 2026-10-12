@@ -58,6 +58,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
 
   const utilidadNetaPositiva = data ? Number(data.utilidad_neta) >= 0 : true;
   const utilidadBrutaPositiva = data ? Number(data.utilidad_bruta) >= 0 : true;
+  const ventasSinCosto = data?.ventas_sin_costo?.productos || [];
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -123,6 +124,33 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
               <div style={avisoStyle}>
                 {data.costo_lineas_estimadas} línea(s) vendida(s) no tienen el costo guardado al cobrar (ventas antiguas):
                 para esas se usa el costo actual de la receta.
+              </div>
+            ) : null}
+            {ventasSinCosto.length > 0 ? (
+              <div style={alertaCostoStyle}>
+                <div style={{ fontWeight: 800, color: '#ffd9a0' }}>
+                  Ventas sin costo configurado: ${formatMonto(data.ventas_sin_costo.total)} ({formatMonto(data.ventas_sin_costo.pct_de_ventas)}% de las ventas)
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  Estos productos se vendieron pero su costo salió en $0, así que toda su venta cuenta como ganancia y la
+                  utilidad bruta sale más alta de lo real. Configura su receta, subreceta o ingredientes anclados para que
+                  el costo se calcule en las próximas ventas.
+                </div>
+                <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+                  {ventasSinCosto.map((fila) => (
+                    <div key={fila.producto_id} style={alertaFilaStyle}>
+                      <span style={{ color: '#fff', fontWeight: 700 }}>{fila.nombre}</span>
+                      <span style={{ color: '#d9c7a6' }}>
+                        {fila.motivo === 'sin_receta'
+                          ? 'Sin receta, subreceta ni ingredientes anclados'
+                          : 'Tiene receta, pero sus ingredientes cuestan $0'}
+                      </span>
+                      <span style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>
+                        {formatMonto(fila.unidades)} und · ${formatMonto(fila.ventas)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
 
@@ -197,6 +225,14 @@ const lineLabelStyle = { color: '#d2c3c3', fontSize: 14.5 };
 const lineValueStyle = { color: '#fff', fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap' };
 const categoriaChipStyle = { display: 'inline-flex', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };
 const avisoStyle = { color: '#a89999', fontSize: 12.5, lineHeight: 1.5 };
+const alertaCostoStyle = {
+  padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255, 190, 90, 0.35)', background: 'rgba(255, 170, 60, 0.1)',
+  color: '#e6d3b0', fontSize: 12.5, lineHeight: 1.5,
+};
+const alertaFilaStyle = {
+  display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 12, rowGap: 2, alignItems: 'baseline',
+  padding: '6px 0', borderTop: '1px solid rgba(255,255,255,0.08)',
+};
 const subtotalRowStyle = (positive) => ({
   display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '10px 14px', borderRadius: 12,
   background: 'rgba(255,255,255,0.04)',

@@ -43,14 +43,14 @@ const cardStyle = {
   width: '100%',
   maxWidth: 420,
   borderRadius: 20,
-  border: '1px solid rgba(255, 145, 145, 0.3)',
-  background: 'linear-gradient(180deg, rgba(28, 12, 12, 0.98) 0%, rgba(10, 8, 8, 0.99) 100%)',
+  border: '1px solid var(--vg-f-ff9191-a300)',
+  background: 'linear-gradient(180deg, var(--vg-s-1c0c0c-a980) 0%, var(--vg-s-0a0808-a990) 100%)',
   padding: '22px 22px 18px',
-  boxShadow: '0 20px 50px rgba(0, 0, 0, 0.45)',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))',
 };
 
 const titleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 19,
   fontWeight: 800,
   marginBottom: 8,
@@ -58,7 +58,7 @@ const titleStyle = {
 
 const textStyle = {
   margin: 0,
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   fontSize: 14,
 };
@@ -72,21 +72,21 @@ const footerStyle = {
 };
 
 const cancelButtonStyle = {
-  border: '1px solid rgba(255, 255, 255, 0.16)',
+  border: '1px solid rgba(var(--vg-ink), 0.16)',
   borderRadius: 999,
   padding: '10px 16px',
-  background: 'rgba(255, 255, 255, 0.05)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.05)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const confirmButtonStyle = {
-  border: '1px solid rgba(255, 126, 126, 0.4)',
+  border: '1px solid var(--vg-f-ff7e7e-a400)',
   borderRadius: 999,
   padding: '10px 16px',
   background: 'rgba(145, 33, 33, 0.35)',
-  color: '#ffd3d3',
+  color: 'var(--vg-f-ffd3d3)',
   fontWeight: 700,
   cursor: 'pointer',
 };

@@ -661,7 +661,7 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
             <div style={linkCardStyle}>
               <style>
                 {`.product-picker-option:hover { background: rgba(255, 90, 90, 0.16); }
-                  .product-picker-option:focus-visible { outline: 1px solid rgba(255, 132, 132, 0.8); }
+                  .product-picker-option:focus-visible { outline: 1px solid var(--vg-f-ff8484-a800); }
                 `}
               </style>
               <div style={labelStyle}>Ingredientes que lleva este producto (opcional)</div>
@@ -1073,9 +1073,9 @@ const pickerListStyle = {
   maxHeight: 230,
   overflowY: 'auto',
   borderRadius: 14,
-  border: '1px solid rgba(255, 132, 132, 0.4)',
-  background: '#140d0d',
-  boxShadow: '0 12px 24px rgba(0, 0, 0, 0.3)',
+  border: '1px solid var(--vg-f-ff8484-a400)',
+  background: 'var(--vg-s-140d0d)',
+  boxShadow: '0 12px 24px rgba(0, 0, 0, calc(0.3 * var(--vg-shadow-k)))',
 };
 
 const pickerItemStyle = {
@@ -1083,7 +1083,7 @@ const pickerItemStyle = {
   textAlign: 'left',
   border: 'none',
   background: 'transparent',
-  color: '#ffeaea',
+  color: 'var(--vg-f-ffeaea)',
   padding: '10px 12px',
   display: 'grid',
   gap: 3,
@@ -1096,12 +1096,12 @@ const pickerItemTitleStyle = {
 
 const pickerItemMetaStyle = {
   fontSize: 12,
-  color: '#d8bcbc',
+  color: 'var(--vg-f-d8bcbc)',
 };
 
 const pickerEmptyStyle = {
   padding: '10px 12px',
-  color: '#d8bcbc',
+  color: 'var(--vg-f-d8bcbc)',
   fontSize: 13,
 };
 
@@ -1110,7 +1110,7 @@ const grupoOpcionCardStyle = {
   gap: 10,
   padding: 12,
   borderRadius: 14,
-  border: '1px solid rgba(255, 190, 120, 0.25)',
+  border: '1px solid var(--vg-f-ffbe78-a250)',
   background: 'rgba(255, 190, 120, 0.04)',
 };
 
@@ -1121,26 +1121,26 @@ const componentCardStyle = {
   gap: 12,
   padding: '12px 14px',
   borderRadius: 14,
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  background: 'rgba(255, 255, 255, 0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
+  background: 'rgba(var(--vg-ink), 0.03)',
 };
 
 const componentTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
 };
 
 const componentMetaStyle = {
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   fontSize: 13,
 };
 
 const dangerButtonStyle = {
-  border: '1px solid rgba(255, 126, 126, 0.4)',
+  border: '1px solid var(--vg-f-ff7e7e-a400)',
   borderRadius: 999,
   padding: '8px 14px',
   background: 'rgba(145, 33, 33, 0.25)',
-  color: '#ffd3d3',
+  color: 'var(--vg-f-ffd3d3)',
   fontWeight: 700,
   cursor: 'pointer',
 };
@@ -1151,7 +1151,7 @@ const badgeStyle = {
   padding: '7px 12px',
   borderRadius: 999,
   background: 'rgba(255, 163, 163, 0.12)',
-  color: '#ffb5b5',
+  color: 'var(--vg-f-ffb5b5)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -1160,13 +1160,13 @@ const badgeStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 28 : 34,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 720,
 };
@@ -1184,8 +1184,8 @@ const panelStyle = {
   gap: 16,
   padding: '20px 18px',
   borderRadius: 24,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
 };
 
 const emptyStateStyle = {
@@ -1193,8 +1193,8 @@ const emptyStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 18,
-  border: '1px dashed rgba(255, 255, 255, 0.12)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.12)',
+  color: 'var(--vg-f-c8bbbb)',
 };
 
 const formGridStyle = (isMobile) => ({
@@ -1209,7 +1209,7 @@ const fieldStyle = {
 };
 
 const labelStyle = {
-  color: '#f0b4b4',
+  color: 'var(--vg-f-f0b4b4)',
   fontSize: 13,
   fontWeight: 700,
 };
@@ -1218,10 +1218,10 @@ const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 14,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: 'rgba(255, 255, 255, 0.04)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'rgba(var(--vg-ink), 0.04)',
   padding: '11px 12px',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 14,
 };
 
@@ -1229,13 +1229,13 @@ const toggleRowStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 10,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   minHeight: 42,
 };
 
 const ventaPorPesoHintStyle = {
-  color: '#c2adad',
+  color: 'var(--vg-f-c2adad)',
   fontSize: 11.5,
   lineHeight: 1.4,
 };
@@ -1245,13 +1245,13 @@ const linkCardStyle = {
   gap: 8,
   padding: 14,
   borderRadius: 14,
-  border: '1px solid rgba(255,255,255,0.08)',
-  background: 'rgba(255,255,255,0.02)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
+  background: 'rgba(var(--vg-ink), 0.02)',
 };
 
 const linkHintStyle = {
   margin: 0,
-  color: '#c2adad',
+  color: 'var(--vg-f-c2adad)',
   fontSize: 12.5,
 };
 
@@ -1263,12 +1263,12 @@ const costReferenceBoxStyle = {
   flexWrap: 'wrap',
   padding: '12px 14px',
   borderRadius: 14,
-  border: '1px solid rgba(120, 220, 160, 0.35)',
+  border: '1px solid var(--vg-f-78dca0-a350)',
   background: 'rgba(70, 200, 120, 0.08)',
 };
 
 const costReferenceLabelStyle = {
-  color: '#bdf0cf',
+  color: 'var(--vg-f-bdf0cf)',
   fontSize: 12,
   fontWeight: 700,
   textTransform: 'uppercase',
@@ -1276,7 +1276,7 @@ const costReferenceLabelStyle = {
 };
 
 const costReferenceValueStyle = {
-  color: '#7dffa0',
+  color: 'var(--vg-f-7dffa0)',
   fontSize: 22,
   fontWeight: 800,
   marginTop: 2,
@@ -1284,17 +1284,17 @@ const costReferenceValueStyle = {
 
 const costReferenceHintStyle = {
   margin: '4px 0 0',
-  color: '#c2adad',
+  color: 'var(--vg-f-c2adad)',
   fontSize: 12,
   maxWidth: 480,
 };
 
 const useCostButtonStyle = {
-  border: '1px solid rgba(125, 255, 160, 0.4)',
+  border: '1px solid var(--vg-f-7dffa0-a400)',
   borderRadius: 999,
   padding: '9px 14px',
   background: 'rgba(125, 255, 160, 0.12)',
-  color: '#bdf0cf',
+  color: 'var(--vg-f-bdf0cf)',
   fontWeight: 700,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
@@ -1309,11 +1309,11 @@ const previewRowStyle = {
 const removeImageButtonStyle = {
   marginTop: 8,
   display: 'block',
-  border: '1px solid rgba(255, 126, 126, 0.4)',
+  border: '1px solid var(--vg-f-ff7e7e-a400)',
   borderRadius: 999,
   padding: '7px 12px',
   background: 'rgba(145, 33, 33, 0.18)',
-  color: '#ffd3d3',
+  color: 'var(--vg-f-ffd3d3)',
   fontWeight: 700,
   fontSize: 12.5,
   cursor: 'pointer',
@@ -1324,19 +1324,19 @@ const confirmRemoveBoxStyle = {
   gap: 10,
   padding: '12px 14px',
   borderRadius: 14,
-  border: '1px solid rgba(255, 145, 145, 0.3)',
+  border: '1px solid var(--vg-f-ff9191-a300)',
   background: 'rgba(255, 98, 98, 0.1)',
   maxWidth: 320,
 };
 
 const confirmRemoveTextStyle = {
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
   fontSize: 13,
   lineHeight: 1.4,
 };
 
 const previewLabelStyle = {
-  color: '#f0b4b4',
+  color: 'var(--vg-f-f0b4b4)',
   fontSize: 12,
   fontWeight: 700,
   marginBottom: 6,
@@ -1347,44 +1347,44 @@ const previewImageStyle = {
   height: 140,
   objectFit: 'cover',
   borderRadius: 16,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
 };
 
 const noticeStyle = {
   padding: '12px 14px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 145, 145, 0.22)',
+  border: '1px solid var(--vg-f-ff9191-a220)',
   background: 'rgba(255, 98, 98, 0.12)',
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const primaryButtonStyle = {
   border: 'none',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const secondaryButtonStyle = {
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '10px 16px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };
 
 const backButtonStyle = {
   justifySelf: 'flex-start',
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };
@@ -1405,14 +1405,14 @@ const racionesModalCardStyle = {
   maxHeight: '85vh',
   overflowY: 'auto',
   borderRadius: 20,
-  border: '1px solid rgba(255, 145, 145, 0.3)',
-  background: 'linear-gradient(180deg, rgba(28, 12, 12, 0.98) 0%, rgba(10, 8, 8, 0.99) 100%)',
+  border: '1px solid var(--vg-f-ff9191-a300)',
+  background: 'linear-gradient(180deg, var(--vg-s-1c0c0c-a980) 0%, var(--vg-s-0a0808-a990) 100%)',
   padding: '22px 22px 18px',
-  boxShadow: '0 20px 50px rgba(0, 0, 0, 0.45)',
+  boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))',
 };
 
 const racionesModalTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 18,
   fontWeight: 800,
   marginBottom: 8,

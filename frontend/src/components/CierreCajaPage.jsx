@@ -153,7 +153,7 @@ function CierreCajaPage({ isMobile, onBack }) {
               {Number(data.gastos_efectivo_dia) > 0 ? (
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Gastos pagados en efectivo</div>
-                  <div style={{ ...tileValueStyle, color: '#ff9d9d' }}>−${formatMonto(data.gastos_efectivo_dia)}</div>
+                  <div style={{ ...tileValueStyle, color: 'var(--vg-f-ff9d9d)' }}>−${formatMonto(data.gastos_efectivo_dia)}</div>
                   {data.efectivo_por_moneda?.gastos_bs && Number(data.efectivo_por_moneda.gastos_bs) > 0 ? (
                     <div style={tileHintStyle}>Incluye Bs. {formatMonto(data.efectivo_por_moneda.gastos_bs)} pagados en bolívares</div>
                   ) : null}
@@ -172,12 +172,12 @@ function CierreCajaPage({ isMobile, onBack }) {
                 </div>
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Por acreditar (en lotes)</div>
-                  <div style={{ ...tileValueStyle, color: '#ffe3a3' }}>${formatMonto(pos.por_acreditar_usd)}</div>
+                  <div style={{ ...tileValueStyle, color: 'var(--vg-f-ffe3a3)' }}>${formatMonto(pos.por_acreditar_usd)}</div>
                   <div style={tileHintStyle}>Se suma a la cuenta al acreditar el lote</div>
                 </div>
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Disponibilidad real</div>
-                  <div style={{ ...tileValueStyle, color: '#8fffb0' }}>${formatMonto(pos.disponibilidad_real_usd)}</div>
+                  <div style={{ ...tileValueStyle, color: 'var(--vg-f-8fffb0)' }}>${formatMonto(pos.disponibilidad_real_usd)}</div>
                   <div style={tileHintStyle}>Excluye los lotes sin acreditar</div>
                 </div>
                 <div style={tileStyle}>
@@ -192,7 +192,7 @@ function CierreCajaPage({ isMobile, onBack }) {
                   {lotesAbiertos.map((lote) => (
                     <article key={lote.id} style={loteCardStyle}>
                       <div style={loteHeaderStyle}>
-                        <div style={{ fontWeight: 800, color: '#fff' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--vg-text-strong)' }}>
                           {lote.codigo} · {lote.metodo_pago_nombre}
                           {lote.cuenta_bancaria ? <span style={mutedStyle}> ({lote.cuenta_bancaria})</span> : null}
                         </div>
@@ -220,12 +220,12 @@ function CierreCajaPage({ isMobile, onBack }) {
                   {lotesCerradosDia.map((lote) => (
                     <article key={lote.id} style={loteCardStyle}>
                       <div style={loteHeaderStyle}>
-                        <div style={{ fontWeight: 700, color: '#fff' }}>{lote.codigo} · {lote.metodo_pago_nombre}</div>
+                        <div style={{ fontWeight: 700, color: 'var(--vg-text-strong)' }}>{lote.codigo} · {lote.metodo_pago_nombre}</div>
                         <span style={{ ...badgeStyle, ...(ESTADO_LOTE_ESTILO[lote.estado] || {}) }}>{lote.estado_label}</span>
                       </div>
                       <div style={loteDatosStyle}>
                         <span>${formatMonto(lote.monto_usd)} · Bs {formatMonto(lote.monto_bs)}</span>
-                        {lote.estado === 'acreditado' ? <span>Acreditado {formatFechaConDia(lote.fecha_abono)}</span> : <span style={{ color: '#ffe3a3' }}>Por acreditar</span>}
+                        {lote.estado === 'acreditado' ? <span>Acreditado {formatFechaConDia(lote.fecha_abono)}</span> : <span style={{ color: 'var(--vg-f-ffe3a3)' }}>Por acreditar</span>}
                       </div>
                     </article>
                   ))}
@@ -241,31 +241,31 @@ function CierreCajaPage({ isMobile, onBack }) {
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Cierre del día</div>
             {cierre ? (
-              <div style={{ display: 'grid', gap: 8, color: '#f2e6e6' }}>
-                <div style={{ color: '#8fffb0', fontWeight: 800 }}>La caja de este día ya está cerrada.</div>
+              <div style={{ display: 'grid', gap: 8, color: 'var(--vg-f-f2e6e6)' }}>
+                <div style={{ color: 'var(--vg-f-8fffb0)', fontWeight: 800 }}>La caja de este día ya está cerrada.</div>
                 <div>Efectivo esperado: <strong>${formatMonto(cierre.efectivo_esperado)}</strong></div>
                 {cierre.conteo_efectivo_realizado ? (
                   <>
                     <div>Efectivo contado al cerrar: <strong>${formatMonto(cierre.efectivo_contado_final)}</strong></div>
-                    <div style={{ color: Number(cierre.diferencia) === 0 ? '#8fffb0' : '#ff9d9d', fontWeight: 800 }}>
+                    <div style={{ color: Number(cierre.diferencia) === 0 ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)', fontWeight: 800 }}>
                       Diferencia: ${formatMonto(cierre.diferencia)}
                     </div>
                   </>
                 ) : null}
                 <div>POS por acreditar al cerrar: <strong>${formatMonto(cierre.pos_por_acreditar_usd)}</strong></div>
                 {cierre.notas ? <div>Notas: {cierre.notas}</div> : null}
-                <div style={{ fontSize: 13, color: '#c8bbbb' }}>
+                <div style={{ fontSize: 13, color: 'var(--vg-f-c8bbbb)' }}>
                   Cerrado por {cierre.cerrado_por || '—'} el {new Date(cierre.fecha_creacion).toLocaleString('es-VE')}
                 </div>
               </div>
             ) : (
               <form onSubmit={handleCerrarCaja} className="no-print" style={{ display: 'grid', gap: 12, maxWidth: 520 }}>
                 {lotesAbiertosConCobros.length > 0 ? (
-                  <div style={{ padding: 12, borderRadius: 12, border: '1px dashed rgba(255,207,133,0.4)', background: 'rgba(255,207,133,0.05)', color: '#ffe3a3', fontWeight: 700 }}>
+                  <div style={{ padding: 12, borderRadius: 12, border: '1px dashed var(--vg-f-ffcf85-a400)', background: 'rgba(255,207,133,0.05)', color: 'var(--vg-f-ffe3a3)', fontWeight: 700 }}>
                     Al cerrar la caja se cerrarán automáticamente {lotesAbiertosConCobros.length} lote(s) abiertos de punto de venta.
                   </div>
                 ) : null}
-                <label style={{ display: 'grid', gap: 6, color: '#f2e6e6' }}>
+                <label style={{ display: 'grid', gap: 6, color: 'var(--vg-f-f2e6e6)' }}>
                   Notas (opcional)
                   <input type="text" value={notas} onChange={(event) => setNotas(event.target.value)} style={inputStyle} />
                 </label>
@@ -282,25 +282,25 @@ function CierreCajaPage({ isMobile, onBack }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 34 });
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const subTitleStyle = { color: '#ffb0b0', fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 34 });
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const subTitleStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 const resumenGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 });
-const tileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
-const tileLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const tileValueStyle = { color: '#fff', fontSize: 22, fontWeight: 800 };
-const tileHintStyle = { color: '#c8bbbb', fontSize: 12 };
-const loteCardStyle = { display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
+const tileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
+const tileLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const tileValueStyle = { color: 'var(--vg-text-strong)', fontSize: 22, fontWeight: 800 };
+const tileHintStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12 };
+const loteCardStyle = { display: 'grid', gap: 8, padding: '12px 14px', borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
 const loteHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' };
-const loteDatosStyle = { display: 'flex', gap: 14, flexWrap: 'wrap', color: '#d2c3c3', fontSize: 13 };
+const loteDatosStyle = { display: 'flex', gap: 14, flexWrap: 'wrap', color: 'var(--vg-f-d2c3c3)', fontSize: 13 };
 const badgeStyle = { fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em' };
-const mutedStyle = { color: '#a89999', fontSize: 12.5 };
-const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.18)', borderRadius: 999, padding: '9px 16px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
-const dangerButtonStyle = { border: '1px solid rgba(255,126,126,0.4)', borderRadius: 999, padding: '12px 16px', background: 'rgba(145,33,33,0.35)', color: '#ffd3d3', fontWeight: 700, cursor: 'pointer' };
+const mutedStyle = { color: 'var(--vg-f-a89999)', fontSize: 12.5 };
+const inputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.18)', borderRadius: 999, padding: '9px 16px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
+const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '12px 16px', background: 'rgba(145,33,33,0.35)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default CierreCajaPage;

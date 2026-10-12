@@ -110,7 +110,7 @@ const baseCardStyle = {
   gap: 10,
   padding: '14px 16px 17px',
   borderRadius: 16,
-  boxShadow: '0 14px 30px rgba(0, 0, 0, 0.35)',
+  boxShadow: '0 14px 30px rgba(0, 0, 0, calc(0.35 * var(--vg-shadow-k)))',
   animation: 'toastSlideIn 0.2s ease-out',
   backdropFilter: 'blur(6px)',
   overflow: 'hidden',
@@ -118,16 +118,16 @@ const baseCardStyle = {
 
 const successCardStyle = {
   ...baseCardStyle,
-  border: '1px solid rgba(125, 255, 160, 0.4)',
-  background: 'rgba(20, 60, 32, 0.96)',
-  color: '#c2f0d2',
+  border: '1px solid var(--vg-f-7dffa0-a400)',
+  background: 'var(--vg-s-143c20-a960)',
+  color: 'var(--vg-f-c2f0d2)',
 };
 
 const errorCardStyle = {
   ...baseCardStyle,
-  border: '1px solid rgba(255, 145, 145, 0.45)',
-  background: 'rgba(70, 16, 16, 0.96)',
-  color: '#ffd8d8',
+  border: '1px solid var(--vg-f-ff9191-a450)',
+  background: 'var(--vg-s-461010-a960)',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const iconWrapStyle = (isError) => ({
@@ -138,7 +138,7 @@ const iconWrapStyle = (isError) => ({
   display: 'grid',
   placeItems: 'center',
   background: isError ? 'rgba(255, 100, 100, 0.2)' : 'rgba(74, 222, 128, 0.2)',
-  color: isError ? '#ff9d9d' : '#4ade80',
+  color: isError ? 'var(--vg-f-ff9d9d)' : 'var(--vg-f-4ade80)',
   marginTop: 1,
 });
 

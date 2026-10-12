@@ -208,11 +208,11 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                   <div key={`${movimiento.tipo_registro}-${movimiento.id}`} style={rowFragmentStyle}>
                     <div style={cellStyle}>{TIPOS_SIN_HORA.has(movimiento.tipo_registro) ? '—' : formatHora(movimiento.fecha_hora)}</div>
                     <div style={cellStyle}>{TIPO_REGISTRO_LABEL[movimiento.tipo_registro] || movimiento.tipo_registro}</div>
-                    {!esEntrada ? <div style={{ ...cellStyle, fontWeight: 700, color: '#ffd9a0' }}>{movimiento.documento_codigo || '—'}</div> : null}
+                    {!esEntrada ? <div style={{ ...cellStyle, fontWeight: 700, color: 'var(--vg-f-ffd9a0)' }}>{movimiento.documento_codigo || '—'}</div> : null}
                     <div style={cellStyle}>{movimiento.nombre}</div>
                     <div style={cellStyle}>{movimiento.metodo_pago_nombre}</div>
                     <div style={cellStyle}>{movimiento.referencia || '—'}</div>
-                    <div style={{ ...cellStyle, fontWeight: 700, color: esEntrada ? '#8fffb0' : '#ff9d9d' }}>
+                    <div style={{ ...cellStyle, fontWeight: 700, color: esEntrada ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)' }}>
                       {formatMontoMovimiento(movimiento)}
                     </div>
                   </div>
@@ -223,7 +223,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                 <div style={{ ...cellStyle, ...totalCellStyle }} />
                 <div style={{ ...cellStyle, ...totalCellStyle }} />
                 <div style={{ ...cellStyle, ...totalCellStyle }} />
-                <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: esEntrada ? '#8fffb0' : '#ff9d9d' }}>
+                <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: esEntrada ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)' }}>
                   {totalBs > 0 ? formatBsRaw(totalBs) : null}
                   {totalBs > 0 && totalUsd > 0 ? ' + ' : ''}
                   {totalUsd > 0 ? `$${formatMonto(totalUsd)}` : null}
@@ -281,7 +281,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                   <button
                     type="button"
                     onClick={() => Number(dia.entrada) > 0 && abrirDetalle(dia.fecha, 'entrada')}
-                    style={montoCellButtonStyle(Number(dia.entrada) > 0, '#8fffb0')}
+                    style={montoCellButtonStyle(Number(dia.entrada) > 0, 'var(--vg-f-8fffb0)')}
                     disabled={Number(dia.entrada) <= 0}
                   >
                     {formatMontoDia(dia.entrada, dia.entrada_bs)}
@@ -289,7 +289,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                   <button
                     type="button"
                     onClick={() => Number(dia.salida) > 0 && abrirDetalle(dia.fecha, 'salida')}
-                    style={montoCellButtonStyle(Number(dia.salida) > 0, '#ff9d9d')}
+                    style={montoCellButtonStyle(Number(dia.salida) > 0, 'var(--vg-f-ff9d9d)')}
                     disabled={Number(dia.salida) <= 0}
                   >
                     {formatMontoDia(dia.salida, dia.salida_bs)}
@@ -297,10 +297,10 @@ function FlujoBancarioPage({ isMobile, onBack }) {
                 </div>
               ))}
               <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800 }}>Total del mes</div>
-              <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: '#8fffb0' }}>
+              <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: 'var(--vg-f-8fffb0)' }}>
                 {totalesMes.hayBs ? formatBsRaw(totalesMes.entradaBs) : `$${formatMonto(totalesMes.entrada)}`}
               </div>
-              <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: '#ff9d9d' }}>
+              <div style={{ ...cellStyle, ...totalCellStyle, fontWeight: 800, color: 'var(--vg-f-ff9d9d)' }}>
                 {totalesMes.hayBs ? formatBsRaw(totalesMes.salidaBs) : `$${formatMonto(totalesMes.salida)}`}
               </div>
             </div>
@@ -308,7 +308,7 @@ function FlujoBancarioPage({ isMobile, onBack }) {
 
           <div style={summaryStyle}>
             Neto del mes:{' '}
-            <span style={{ color: (totalesMes.hayBs ? totalesMes.netoBs : totalesMes.neto) >= 0 ? '#8fffb0' : '#ff9d9d', fontWeight: 800 }}>
+            <span style={{ color: (totalesMes.hayBs ? totalesMes.netoBs : totalesMes.neto) >= 0 ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)', fontWeight: 800 }}>
               {totalesMes.hayBs ? formatBsRaw(totalesMes.netoBs) : `$${formatMonto(totalesMes.neto)}`}
             </span>
           </div>
@@ -323,29 +323,29 @@ function FlujoBancarioPage({ isMobile, onBack }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', lineHeight: 1.6 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.6 };
 const filtersRowStyle = (isMobile) => ({
   display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row',
 });
-const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: '#f2e6e6', fontSize: 13, fontWeight: 700, minWidth: 200 };
-const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff' };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const dateLabelStyle = { display: 'flex', flexDirection: 'column', gap: 6, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700, minWidth: 200 };
+const dateInputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)' };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const tableWrapStyle = { overflowX: 'auto' };
-const resumenTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.6fr) minmax(140px,1fr) minmax(140px,1fr)', minWidth: 460, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' };
+const resumenTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(120px,0.6fr) minmax(140px,1fr) minmax(140px,1fr)', minWidth: 460, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
 // En las salidas hay una columna extra "ID" (Lote #36 / Gasto #536) para ubicar rapido
 // la compra o el gasto en Cuentas por pagar.
-const detalleTableStyle = (esEntrada) => ({ display: 'grid', gridTemplateColumns: esEntrada ? 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)' : 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(110px,0.7fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)', minWidth: esEntrada ? 900 : 1010, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden' });
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
-const totalCellStyle = { background: 'rgba(255,255,255,0.04)' };
-const diaSemanaStyle = { color: '#c8bbbb', fontSize: 11, textTransform: 'uppercase', marginLeft: 6 };
+const detalleTableStyle = (esEntrada) => ({ display: 'grid', gridTemplateColumns: esEntrada ? 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)' : 'minmax(80px,0.5fr) minmax(100px,0.6fr) minmax(110px,0.7fr) minmax(200px,1.6fr) minmax(140px,0.9fr) minmax(120px,0.8fr) minmax(130px,0.9fr)', minWidth: esEntrada ? 900 : 1010, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' });
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };
+const totalCellStyle = { background: 'rgba(var(--vg-ink), 0.04)' };
+const diaSemanaStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 11, textTransform: 'uppercase', marginLeft: 6 };
 const rowFragmentStyle = { display: 'contents' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const summaryStyle = { color: '#c8bbbb', fontSize: 14 };
+const summaryStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 14 };
 
 const montoCellButtonStyle = (clickable, color) => ({
   ...cellStyle,

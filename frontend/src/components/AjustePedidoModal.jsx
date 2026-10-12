@@ -153,17 +153,17 @@ function AjustePedidoModal({
 }
 
 const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.65)', display: 'grid', placeItems: 'center', padding: 16 };
-const modalCardStyle = { width: '100%', maxWidth: 440, borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 12 };
-const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
-const modalDescStyle = { margin: 0, color: '#d2c3c3', lineHeight: 1.55, fontSize: 13.5 };
-const fieldLabelStyle = { display: 'grid', gap: 6, color: '#e8dede', fontSize: 13, fontWeight: 700 };
-const numberInputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 14, width: 100 };
-const selectStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 14 };
-const textareaStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff4f4', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' };
-const errorStyle = { padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8', fontSize: 13 };
-const infoNoteStyle = { margin: 0, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(245, 158, 11, 0.3)', background: 'rgba(245, 158, 11, 0.1)', color: '#f5c778', fontSize: 13, lineHeight: 1.5 };
+const modalCardStyle = { width: '100%', maxWidth: 440, borderRadius: 20, border: '1px solid var(--vg-f-ff9191-a300)', background: 'linear-gradient(180deg, var(--vg-s-1c0c0c-a980) 0%, var(--vg-s-0a0808-a990) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))', display: 'grid', gap: 12 };
+const modalTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 800 };
+const modalDescStyle = { margin: 0, color: 'var(--vg-f-d2c3c3)', lineHeight: 1.55, fontSize: 13.5 };
+const fieldLabelStyle = { display: 'grid', gap: 6, color: 'var(--vg-f-e8dede)', fontSize: 13, fontWeight: 700 };
+const numberInputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', fontSize: 14, width: 100 };
+const selectStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', fontSize: 14 };
+const textareaStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-f-fff4f4)', fontSize: 14, fontFamily: 'inherit', resize: 'vertical' };
+const errorStyle = { padding: '10px 12px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)', fontSize: 13 };
+const infoNoteStyle = { margin: 0, padding: '10px 12px', borderRadius: 12, border: '1px solid var(--vg-f-f59e0b-a300)', background: 'rgba(245, 158, 11, 0.1)', color: '#f5c778', fontSize: 13, lineHeight: 1.5 };
 const modalFooterStyle = { display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6, flexWrap: 'wrap' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 
 export default AjustePedidoModal;

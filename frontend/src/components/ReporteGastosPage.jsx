@@ -54,9 +54,9 @@ function firstDayOfMonthIso() {
 }
 
 const ESTADO_LABELS = {
-  pendiente: { label: 'Pendiente', color: '#ff9b9b', background: 'rgba(255, 145, 145, 0.16)' },
-  abonada_parcial: { label: 'Abonado', color: '#ffcf7d', background: 'rgba(255, 200, 120, 0.16)' },
-  pagado: { label: 'Pagado', color: '#9fe3b0', background: 'rgba(80, 200, 130, 0.18)' },
+  pendiente: { label: 'Pendiente', color: 'var(--vg-f-ff9b9b)', background: 'rgba(255, 145, 145, 0.16)' },
+  abonada_parcial: { label: 'Abonado', color: 'var(--vg-f-ffcf7d)', background: 'rgba(255, 200, 120, 0.16)' },
+  pagado: { label: 'Pagado', color: 'var(--vg-f-9fe3b0)', background: 'rgba(80, 200, 130, 0.18)' },
 };
 
 const FILAS_POR_PAGINA = 50;
@@ -408,7 +408,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
             ))}
           </div>
         ) : null}
-        <div style={{ color: '#ffcf7d', fontWeight: 800 }}>Total del período: {formatUsdBsPrecomputed(totalGeneral, bsTotalGeneral)}</div>
+        <div style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 800 }}>Total del período: {formatUsdBsPrecomputed(totalGeneral, bsTotalGeneral)}</div>
 
         {loadingGastos ? <div style={emptyStyle}>Cargando gastos...</div> : null}
         {!loadingGastos && gastos.length === 0 ? <div style={emptyStyle}>No hay gastos para ese filtro.</div> : null}
@@ -435,16 +435,16 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                     </div>
                     <div key={`fecha-${gasto.id}`} style={cellStyle}>
                       {gasto.fecha_gasto}
-                      <div style={{ fontSize: 11, color: '#a89999' }}>
+                      <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>
                         Creado: {new Date(gasto.fecha_creacion).toLocaleDateString('es-VE')}
                       </div>
                     </div>
                     <div key={`cat-${gasto.id}`} style={cellStyle}>{gasto.categoria_nombre}</div>
                     <div key={`desc-${gasto.id}`} style={cellPrimaryStyle}>
                       <div>{gasto.descripcion}</div>
-                      {gasto.proveedor_nombre ? <div style={{ fontSize: 11, color: '#a89999' }}>{gasto.proveedor_nombre}</div> : null}
+                      {gasto.proveedor_nombre ? <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>{gasto.proveedor_nombre}</div> : null}
                       {gasto.ultima_correccion ? (
-                        <div style={{ fontSize: 11, color: '#a89999' }} title={gasto.ultima_correccion.motivo}>
+                        <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }} title={gasto.ultima_correccion.motivo}>
                           Editado por {gasto.ultima_correccion.corregido_por || '—'}
                         </div>
                       ) : null}
@@ -452,7 +452,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                     <div key={`monto-${gasto.id}`} style={cellStyle}>
                       {formatUsdBs(gasto.monto, tasaDeRegistro(gasto, tasaCambio))}
                       {gasto.estado_pago !== 'pagado' ? (
-                        <div style={{ fontSize: 11, color: '#ffcf7d' }}>Saldo: {formatSaldoUsdBs(gasto)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--vg-f-ffcf7d)' }}>Saldo: {formatSaldoUsdBs(gasto)}</div>
                       ) : null}
                     </div>
                     <div key={`estado-${gasto.id}`} style={cellStyle}>
@@ -487,9 +487,9 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                     ) : null}
                     {verAbonosId === gasto.id ? (
                       <div key={`abonos-list-${gasto.id}`} style={{ gridColumn: '1 / -1', display: 'grid', gap: 6, padding: '6px 0' }}>
-                        {loadingAbonosDetalle ? <div style={{ fontSize: 12, color: '#c8bbbb' }}>Cargando abonos...</div> : null}
+                        {loadingAbonosDetalle ? <div style={{ fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>Cargando abonos...</div> : null}
                         {!loadingAbonosDetalle && abonosDetalle.map((abono) => (
-                          <div key={abono.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: '#e8dede' }}>
+                          <div key={abono.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--vg-f-e8dede)' }}>
                             <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               {formatUsdBs(abono.monto, tasaDeRegistro(abono, tasaCambio))}
@@ -522,7 +522,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
               >
                 ← Anteriores
               </button>
-              <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+              <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
               <button
                 type="button"
                 onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
@@ -586,7 +586,7 @@ function EditarGastoModal({
 
         {!loading && detalle && !pidiendoMotivo ? (
           <form onSubmit={onPedirMotivo} style={{ display: 'grid', gap: 12 }}>
-            <div style={{ fontSize: 13, color: '#c8bbbb' }}>
+            <div style={{ fontSize: 13, color: 'var(--vg-f-c8bbbb)' }}>
               {detalle.categoria_nombre} — {detalle.descripcion}
             </div>
             <label style={fieldStyle}>
@@ -606,12 +606,12 @@ function EditarGastoModal({
                       <option key={m.id} value={m.id}>{m.nombre} ({m.moneda === 'VES' ? 'Bs' : '$'})</option>
                     ))}
                   </select>
-                  <div style={{ fontSize: 11.5, color: '#a89999', marginTop: 4 }}>
+                  <div style={{ fontSize: 11.5, color: 'var(--vg-f-a89999)', marginTop: 4 }}>
                     Si cambias a una cuenta en otra moneda, el monto se muestra convertido con la tasa vigente — no se pierde ni se duplica.
                   </div>
                 </>
               ) : (
-                <div style={{ fontSize: 12, color: '#a89999' }}>
+                <div style={{ fontSize: 12, color: 'var(--vg-f-a89999)' }}>
                   {tieneVariosAbonos
                     ? 'Este gasto tiene varios abonos — el método de pago no se puede cambiar aquí.'
                     : 'Este gasto aún no tiene un abono registrado — el método de pago se define al pagarlo.'}
@@ -619,7 +619,7 @@ function EditarGastoModal({
               )}
             </div>
 
-            {error ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{error}</div> : null}
+            {error ? <div style={{ color: 'var(--vg-f-ffb0b0)', fontSize: 12.5 }}>{error}</div> : null}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" onClick={onClose} style={secondaryButtonStyle}>Cancelar</button>
@@ -630,7 +630,7 @@ function EditarGastoModal({
 
         {pidiendoMotivo ? (
           <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ fontSize: 13, color: '#c8bbbb' }}>
+            <div style={{ fontSize: 13, color: 'var(--vg-f-c8bbbb)' }}>
               Motivo del ajuste *
             </div>
             <textarea
@@ -640,7 +640,7 @@ function EditarGastoModal({
               placeholder="Ej: El monto real de la factura era distinto al registrado."
               autoFocus
             />
-            {motivoError ? <div style={{ color: '#ffb0b0', fontSize: 12.5 }}>{motivoError}</div> : null}
+            {motivoError ? <div style={{ color: 'var(--vg-f-ffb0b0)', fontSize: 12.5 }}>{motivoError}</div> : null}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" onClick={onCancelarMotivo} style={secondaryButtonStyle} disabled={saving}>Volver</button>
               <button type="button" onClick={onConfirmar} style={primaryButtonStyle} disabled={saving}>
@@ -656,44 +656,44 @@ function EditarGastoModal({
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 32 });
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32 });
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f0b4b4', fontSize: 12.5, fontWeight: 700 };
-const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '9px 10px', color: '#fff', fontSize: 13 };
+const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 12.5, fontWeight: 700 };
+const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '9px 10px', color: 'var(--vg-text-strong)', fontSize: 13 };
 const filtrosRowStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0,1fr))', gap: 10 });
-const categoriaTotalChipStyle = { display: 'inline-flex', padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };
+const categoriaTotalChipStyle = { display: 'inline-flex', padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.06)' };
 
-const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = { display: 'grid', gridTemplateColumns: '70px 100px 140px minmax(180px,1.4fr) minmax(140px,1fr) 110px 170px', gap: '10px 12px', alignItems: 'center', minWidth: 960 };
-const idLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
+const idLinkStyle = { border: 'none', background: 'none', color: 'var(--vg-f-ff9d9d)', fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 'inherit', fontFamily: 'inherit' };
 const paginacionRowStyle = (isMobile) => ({
   display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 10,
 });
-const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionInfoStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
 const paginacionButtonStyle = (disabled) => ({
-  border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '8px 14px',
-  background: disabled ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)',
-  color: disabled ? '#7a6f6f' : '#fff', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
+  border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '8px 14px',
+  background: disabled ? 'rgba(var(--vg-ink), 0.02)' : 'rgba(var(--vg-ink), 0.05)',
+  color: disabled ? '#7a6f6f' : 'var(--vg-text-strong)', fontWeight: 700, cursor: disabled ? 'default' : 'pointer', fontSize: 12.5,
 });
 const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
-const modalCardStyle = { width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 14 };
+const modalCardStyle = { width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid var(--vg-f-ff9191-a300)', background: 'linear-gradient(180deg, var(--vg-s-1c0c0c-a980) 0%, var(--vg-s-0a0808-a990) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))', display: 'grid', gap: 14 };
 const modalHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
-const modalCloseButtonStyle = { border: 'none', background: 'rgba(255,255,255,0.08)', color: '#fff', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
-const headStyle = { color: '#f0b4b4', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(255,255,255,0.1)' };
-const cellStyle = { color: '#fff', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(255,255,255,0.06)' };
+const modalTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 800 };
+const modalCloseButtonStyle = { border: 'none', background: 'rgba(var(--vg-ink), 0.08)', color: 'var(--vg-text-strong)', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
+const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.1)' };
+const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
 const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };
 const countBadgeStyle = (badge) => ({
   display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 999,
   fontSize: 11, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase',
-  color: badge ? badge.color : '#fff', background: badge ? badge.background : 'rgba(255,255,255,0.08)',
+  color: badge ? badge.color : 'var(--vg-text-strong)', background: badge ? badge.background : 'rgba(var(--vg-ink), 0.08)',
 });
 const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto', gap: 8, padding: '10px 0' });
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
-const miniPrintButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(255,255,255,0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
+const miniPrintButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(var(--vg-ink), 0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
 
 export default ReporteGastosPage;

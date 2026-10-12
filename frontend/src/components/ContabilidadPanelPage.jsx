@@ -292,12 +292,12 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
           transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
         }
         .vg-conta-tile:hover {
-          background: rgba(255, 77, 77, 0.08) !important;
-          border-color: rgba(255, 77, 77, 0.3) !important;
+          background: rgba(var(--vg-accent-rgb), 0.08) !important;
+          border-color: rgba(var(--vg-accent-rgb), 0.3) !important;
           transform: translateY(-1px);
         }
         .vg-conta-tile:focus-visible {
-          outline: 2px solid #ff7d7d;
+          outline: 2px solid var(--vg-f-ff7d7d);
           outline-offset: 2px;
         }
         @media (prefers-reduced-motion: reduce) {
@@ -342,7 +342,7 @@ const panelContainerStyle = (isMobile) => ({
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff4f4',
+  color: 'var(--vg-f-fff4f4)',
   fontSize: isMobile ? 20 : 22,
   fontWeight: 700,
   lineHeight: 1.2,
@@ -357,7 +357,7 @@ const groupHeadingStyle = {
   display: 'flex',
   alignItems: 'center',
   gap: 12,
-  color: 'rgba(255, 255, 255, 0.55)',
+  color: 'rgba(var(--vg-ink), 0.55)',
   fontSize: 12.5,
   fontWeight: 600,
   letterSpacing: '0.02em',
@@ -366,7 +366,7 @@ const groupHeadingStyle = {
 const groupRuleStyle = {
   flex: 1,
   height: 1,
-  background: 'rgba(255, 255, 255, 0.08)',
+  background: 'rgba(var(--vg-ink), 0.08)',
 };
 
 const gridStyle = (isMobile) => ({
@@ -383,9 +383,9 @@ const tileStyle = {
   minWidth: 0,
   padding: '10px 14px',
   borderRadius: 12,
-  background: 'rgba(255, 255, 255, 0.03)',
-  border: '1px solid rgba(255, 255, 255, 0.07)',
-  color: '#f5f5f5',
+  background: 'rgba(var(--vg-ink), 0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.07)',
+  color: 'var(--vg-text-main)',
   textAlign: 'left',
   cursor: 'pointer',
   boxSizing: 'border-box',
@@ -399,8 +399,8 @@ const tileIconStyle = {
   height: 34,
   flexShrink: 0,
   borderRadius: 10,
-  background: 'rgba(255, 77, 77, 0.1)',
-  color: '#ff7d7d',
+  background: 'rgba(var(--vg-accent-rgb), 0.1)',
+  color: 'var(--vg-f-ff7d7d)',
 };
 
 const tileTitleStyle = {
@@ -408,7 +408,7 @@ const tileTitleStyle = {
   minWidth: 0,
   fontSize: 14,
   fontWeight: 600,
-  color: '#f5f5f5',
+  color: 'var(--vg-text-main)',
 };
 
 const tileBadgeStyle = {
@@ -426,17 +426,17 @@ const tileBadgeStyle = {
 };
 
 const tileChevronStyle = {
-  color: 'rgba(255, 255, 255, 0.25)',
+  color: 'rgba(var(--vg-ink), 0.25)',
   fontSize: 20,
   lineHeight: 1,
 };
 
 const backButtonStyle = {
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };

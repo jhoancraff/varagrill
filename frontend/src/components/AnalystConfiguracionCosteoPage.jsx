@@ -111,14 +111,14 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10, maxWidth: 640 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 560, lineHeight: 1.6 };
-const panelStyle = { display: 'grid', gap: 18, padding: 22, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 560, lineHeight: 1.6 };
+const panelStyle = { display: 'grid', gap: 18, padding: 22, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f2e6e6', fontSize: 13.5, fontWeight: 700 };
-const inputStyle = { borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 15 };
-const hintStyle = { margin: 0, color: '#a99', fontSize: 12.5, lineHeight: 1.5 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
+const labelStyle = { color: 'var(--vg-f-f2e6e6)', fontSize: 13.5, fontWeight: 700 };
+const inputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '10px 12px', color: 'var(--vg-text-strong)', fontSize: 15 };
+const hintStyle = { margin: 0, color: 'var(--vg-f-aa9999)', fontSize: 12.5, lineHeight: 1.5 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const saveButtonStyle = { justifySelf: 'start', border: 'none', borderRadius: 999, padding: '11px 22px', background: 'linear-gradient(90deg, #d81d1d 0%, #ff5252 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 

@@ -124,7 +124,7 @@ const badgeStyle = {
   padding: '7px 12px',
   borderRadius: 999,
   background: 'rgba(255, 163, 163, 0.12)',
-  color: '#ffb5b5',
+  color: 'var(--vg-f-ffb5b5)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -133,13 +133,13 @@ const badgeStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 28 : 34,
 });
 
 const subtitleStyle = {
   margin: 0,
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 760,
 };
@@ -149,10 +149,10 @@ const searchInputStyle = {
   maxWidth: 420,
   boxSizing: 'border-box',
   borderRadius: 999,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: '#161010',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-161010)',
   padding: '12px 16px',
-  color: '#fff4f4',
+  color: 'var(--vg-f-fff4f4)',
   fontSize: 14,
 };
 
@@ -167,16 +167,16 @@ const cardStyle = {
   gap: 0,
   overflow: 'hidden',
   borderRadius: 20,
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.94) 0%, rgba(10, 10, 10, 0.96) 100%)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
-  boxShadow: '0 12px 28px rgba(0,0,0,0.24)',
+  background: 'linear-gradient(180deg, var(--vg-s-140a0a-a940) 0%, var(--vg-s-0a0a0a-a960) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
+  boxShadow: '0 12px 28px rgba(0, 0, 0, calc(0.24 * var(--vg-shadow-k)))',
 };
 
 const cardImageWrapStyle = {
   position: 'relative',
   width: '100%',
   aspectRatio: '4 / 3',
-  background: 'rgba(255,255,255,0.04)',
+  background: 'rgba(var(--vg-ink), 0.04)',
 };
 
 const cardImageStyle = {
@@ -194,7 +194,7 @@ const cardImagePlaceholderStyle = {
   fontSize: 30,
   fontWeight: 800,
   color: '#7a5f5f',
-  background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+  background: 'linear-gradient(135deg, rgba(var(--vg-ink), 0.05) 0%, rgba(var(--vg-ink), 0.02) 100%)',
 };
 
 const cardBodyStyle = {
@@ -204,7 +204,7 @@ const cardBodyStyle = {
 };
 
 const productNameStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   fontSize: 16,
   lineHeight: 1.3,
@@ -216,14 +216,14 @@ const discountBadgeStyle = {
   left: 8,
   padding: '4px 10px',
   borderRadius: 999,
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontSize: 12,
   fontWeight: 800,
 };
 
 const categoryStyle = {
-  color: '#b89999',
+  color: 'var(--vg-f-b89999)',
   fontSize: 12,
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
@@ -237,19 +237,19 @@ const priceRowStyle = {
 };
 
 const originalPriceStyle = {
-  color: '#8f7676',
+  color: 'var(--vg-f-8f7676)',
   fontSize: 14,
   textDecoration: 'line-through',
 };
 
 const finalPriceStyle = {
-  color: '#7dffa0',
+  color: 'var(--vg-f-7dffa0)',
   fontSize: 20,
   fontWeight: 800,
 };
 
 const descriptionStyle = {
-  color: '#c7c7c7',
+  color: 'var(--vg-f-c7c7c7)',
   fontSize: 13,
   lineHeight: 1.5,
 };
@@ -259,9 +259,9 @@ const emptyStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 24,
-  border: '1px dashed rgba(255, 255, 255, 0.14)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
+  color: 'var(--vg-f-c8bbbb)',
   textAlign: 'center',
   padding: 20,
 };
@@ -269,18 +269,18 @@ const emptyStateStyle = {
 const noticeStyle = {
   padding: '12px 14px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 145, 145, 0.22)',
+  border: '1px solid var(--vg-f-ff9191-a220)',
   background: 'rgba(255, 98, 98, 0.12)',
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const backButtonStyle = {
   justifySelf: 'flex-start',
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };

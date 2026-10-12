@@ -16,21 +16,21 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
         }
         .vg-btn-install:hover {
           background: rgba(191, 31, 31, 0.18) !important;
-          border-color: rgba(255, 100, 100, 0.65) !important;
+          border-color: var(--vg-f-ff6464-a650) !important;
         }
         .vg-btn-submit:hover:not(:disabled) {
           filter: brightness(1.12);
           box-shadow: 0 6px 20px rgba(191, 31, 31, 0.5) !important;
         }
         .vg-btn-eye:hover {
-          color: #ff7d7d !important;
+          color: var(--vg-f-ff7d7d) !important;
         }
         .vg-toggle-password {
           background: transparent;
           border: none;
           padding: 0 10px;
           cursor: pointer;
-          color: #9a9a9a;
+          color: var(--vg-f-9a9a9a);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -49,9 +49,9 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
             marginBottom: 16,
             padding: '11px 14px',
             borderRadius: 999,
-            border: '1px solid rgba(255, 103, 103, 0.45)',
-            background: 'rgba(43, 18, 18, 0.75)',
-            color: '#ffaaaa',
+            border: '1px solid var(--vg-f-ff6767-a450)',
+            background: 'var(--vg-s-2b1212-a750)',
+            color: 'var(--vg-f-ffaaaa)',
             fontWeight: 600,
             cursor: 'pointer',
             fontSize: 14,
@@ -74,7 +74,7 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
 
       <form onSubmit={onSubmit}>
         {/* ── Campo Usuario ── */}
-        <label style={{ display: 'block', marginBottom: 8, color: '#e6e6e6', fontSize: 14, fontWeight: 500 }}>
+        <label style={{ display: 'block', marginBottom: 8, color: 'var(--vg-f-e6e6e6)', fontSize: 14, fontWeight: 500 }}>
           Usuario
         </label>
         <input
@@ -90,7 +90,7 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
         />
 
         {/* ── Campo Contraseña ── */}
-        <label style={{ display: 'block', marginTop: 18, marginBottom: 8, color: '#e6e6e6', fontSize: 14, fontWeight: 500 }}>
+        <label style={{ display: 'block', marginTop: 18, marginBottom: 8, color: 'var(--vg-f-e6e6e6)', fontSize: 14, fontWeight: 500 }}>
           Contraseña
         </label>
         <div style={{
@@ -98,8 +98,8 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
           display: 'flex',
           alignItems: 'center',
           borderRadius: 14,
-          border: passwordFocused ? '1px solid rgba(255, 77, 77, 0.65)' : '1px solid rgba(255, 255, 255, 0.1)',
-          background: 'rgba(255, 255, 255, 0.04)',
+          border: passwordFocused ? '1px solid rgba(var(--vg-accent-rgb), 0.65)' : '1px solid rgba(var(--vg-ink), 0.1)',
+          background: 'rgba(var(--vg-ink), 0.04)',
           boxShadow: passwordFocused ? '0 0 0 3px rgba(255, 77, 77, 0.2)' : 'none',
           transition: 'border-color 180ms ease, box-shadow 180ms ease',
           overflow: 'hidden',
@@ -115,7 +115,7 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
               padding: '12px 14px',
               border: 'none',
               background: 'transparent',
-              color: '#fff',
+              color: 'var(--vg-text-strong)',
               outline: 'none',
               fontSize: 15,
               boxSizing: 'border-box',
@@ -159,8 +159,8 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
             borderRadius: 999,
             border: 'none',
             background: loading
-              ? 'rgba(90, 30, 30, 0.8)'
-              : 'linear-gradient(90deg, #b51d1d 0%, #ff4d4d 100%)',
+              ? 'var(--vg-s-5a1e1e-a800)'
+              : 'linear-gradient(90deg, #b51d1d 0%, var(--vg-accent-primary) 100%)',
             color: '#fff',
             fontWeight: 700,
             cursor: loading ? 'wait' : 'pointer',
@@ -180,9 +180,9 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
           marginTop: 18,
           padding: '12px 14px',
           borderRadius: 14,
-          background: isSuccess ? 'rgba(23, 61, 26, 0.9)' : 'rgba(75, 24, 24, 0.9)',
-          border: isSuccess ? '1px solid rgba(125, 255, 160, 0.3)' : '1px solid rgba(255, 100, 100, 0.3)',
-          color: '#fff',
+          background: isSuccess ? 'var(--vg-s-173d1a-a900)' : 'var(--vg-s-4b1818-a900)',
+          border: isSuccess ? '1px solid var(--vg-f-7dffa0-a300)' : '1px solid var(--vg-f-ff6464-a300)',
+          color: 'var(--vg-text-strong)',
           fontSize: 13.5,
           display: 'flex',
           alignItems: 'flex-start',
@@ -196,8 +196,8 @@ function AuthForm({ username, password, loading, onUsernameChange, onPasswordCha
             borderRadius: '50%',
             display: 'grid',
             placeItems: 'center',
-            background: isSuccess ? 'rgba(74, 222, 128, 0.2)' : 'rgba(255, 77, 77, 0.2)',
-            color: isSuccess ? '#4ade80' : '#ff7d7d',
+            background: isSuccess ? 'rgba(74, 222, 128, 0.2)' : 'rgba(var(--vg-accent-rgb), 0.2)',
+            color: isSuccess ? 'var(--vg-f-4ade80)' : 'var(--vg-f-ff7d7d)',
             fontSize: 12,
             fontWeight: 800,
           }}>
@@ -214,9 +214,9 @@ const inputStyle = (isFocused) => ({
   width: '100%',
   padding: '12px 14px',
   borderRadius: 14,
-  border: isFocused ? '1px solid rgba(255, 77, 77, 0.65)' : '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  border: isFocused ? '1px solid rgba(var(--vg-accent-rgb), 0.65)' : '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   boxSizing: 'border-box',
   outline: 'none',
   fontSize: 15,

@@ -107,14 +107,14 @@ function HistorialFacturasPage({ isMobile, onBack }) {
               <article key={factura.id} style={cardStyle}>
                 <button type="button" onClick={() => toggleExpand(factura)} style={cardHeaderButtonStyle}>
                   <div style={{ display: 'grid', gap: 2, textAlign: 'left' }}>
-                    <span style={{ color: '#fff', fontWeight: 700 }}>Factura {factura.codigo} · Control {factura.numero_control}</span>
-                    <span style={{ color: '#d2c4c4', fontSize: 12 }}>
+                    <span style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>Factura {factura.codigo} · Control {factura.numero_control}</span>
+                    <span style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 12 }}>
                       {factura.cliente ? factura.cliente.nombre : 'Consumidor Final'} · {new Date(factura.fecha_emision).toLocaleString('es-VE')}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={estadoBadgeStyle(factura.estado)}>{estadoLabel(factura.estado)}</span>
-                    <span style={{ color: '#ffcf7d', fontWeight: 700 }}>
+                    <span style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 700 }}>
                       {formatMontoDocumento(factura.total, factura.moneda, factura.tasa_cambio_referencia || tasaCambio)}
                     </span>
                   </div>
@@ -138,7 +138,7 @@ function HistorialFacturasPage({ isMobile, onBack }) {
                         <div style={detailTotalsStyle}>
                           <span>Subtotal: {formatMontoDocumento(detalle.subtotal, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
                           <span>IVA: {formatMontoDocumento(detalle.total_iva, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
-                          <span style={{ fontWeight: 800, color: '#fff' }}>Total: {formatMontoDocumento(detalle.total, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
+                          <span style={{ fontWeight: 800, color: 'var(--vg-text-strong)' }}>Total: {formatMontoDocumento(detalle.total, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
                           <span>Saldo pendiente: {formatMontoDocumento(detalle.saldo_pendiente, detalle.moneda, detalle.tasa_cambio_referencia || tasaCambio)}</span>
                         </div>
 
@@ -148,7 +148,7 @@ function HistorialFacturasPage({ isMobile, onBack }) {
 
                         {detalle.pagos.length > 0 ? (
                           <div style={{ display: 'grid', gap: 4 }}>
-                            <div style={{ color: '#9fe3b0', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>
+                            <div style={{ color: 'var(--vg-f-9fe3b0)', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>
                               Abonos registrados
                             </div>
                             {detalle.pagos.map((pago) => (
@@ -159,7 +159,7 @@ function HistorialFacturasPage({ isMobile, onBack }) {
                             ))}
                           </div>
                         ) : (
-                          <div style={{ color: '#d2c4c4', fontSize: 13 }}>Aún no se ha registrado ningún abono.</div>
+                          <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13 }}>Aún no se ha registrado ningún abono.</div>
                         )}
                       </>
                     )}
@@ -200,30 +200,30 @@ const eyebrowStyle = {
   fontSize: 12,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
-  color: '#f7a5a5',
+  color: 'var(--vg-f-f7a5a5)',
   marginBottom: 8,
 };
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 26 : 32,
   fontWeight: 700,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 640,
 };
 
 const backButtonStyle = (isMobile) => ({
-  border: '1px solid rgba(255, 115, 115, 0.34)',
+  border: '1px solid var(--vg-f-ff7373-a340)',
   borderRadius: 999,
   padding: isMobile ? '11px 16px' : '10px 16px',
-  background: 'rgba(255,255,255,0.03)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 600,
   cursor: 'pointer',
   width: isMobile ? '100%' : 'auto',
@@ -236,11 +236,11 @@ const filtrosRowStyle = {
 };
 
 const filtroButtonStyle = (active) => ({
-  border: active ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.14)',
+  border: active ? '1px solid var(--vg-f-ff8282-a600)' : '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '8px 14px',
-  background: active ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
-  color: '#fff',
+  background: active ? 'rgba(255, 90, 90, 0.16)' : 'rgba(var(--vg-ink), 0.03)',
+  color: 'var(--vg-text-strong)',
   fontSize: 13,
   fontWeight: 700,
   cursor: 'pointer',
@@ -251,9 +251,9 @@ const emptyStateStyle = {
   display: 'grid',
   placeItems: 'center',
   borderRadius: 20,
-  border: '1px dashed rgba(255, 255, 255, 0.14)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
+  color: 'var(--vg-f-c8bbbb)',
   textAlign: 'center',
   padding: 16,
 };
@@ -261,9 +261,9 @@ const emptyStateStyle = {
 const errorStyle = {
   padding: '12px 14px',
   borderRadius: 16,
-  border: '1px solid rgba(255, 145, 145, 0.22)',
+  border: '1px solid var(--vg-f-ff9191-a220)',
   background: 'rgba(255, 98, 98, 0.12)',
-  color: '#ffd8d8',
+  color: 'var(--vg-f-ffd8d8)',
 };
 
 const listStyle = {
@@ -273,8 +273,8 @@ const listStyle = {
 
 const cardStyle = {
   borderRadius: 18,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
   overflow: 'hidden',
 };
 
@@ -302,31 +302,31 @@ const estadoBadgeStyle = (estado) => ({
       : estado === 'anulada' ? 'rgba(160, 160, 160, 0.16)'
         : 'rgba(255, 200, 120, 0.16)',
   color:
-    estado === 'pagada' ? '#7be69b'
-      : estado === 'anulada' ? '#c9c9c9'
-        : '#ffcf7d',
+    estado === 'pagada' ? 'var(--vg-f-7be69b)'
+      : estado === 'anulada' ? 'var(--vg-f-c9c9c9)'
+        : 'var(--vg-f-ffcf7d)',
 });
 
 const detailWrapStyle = {
   display: 'grid',
   gap: 8,
   padding: '4px 16px 16px',
-  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.06)',
 };
 
 const lineaRowStyle = {
   display: 'flex',
   justifyContent: 'space-between',
   fontSize: 13,
-  color: '#e8dede',
+  color: 'var(--vg-f-e8dede)',
 };
 
 const detailNoteStyle = {
   padding: '8px 10px',
   borderRadius: 10,
   background: 'rgba(255, 145, 145, 0.1)',
-  border: '1px solid rgba(255, 145, 145, 0.2)',
-  color: '#ffd8d8',
+  border: '1px solid var(--vg-f-ff9191-a200)',
+  color: 'var(--vg-f-ffd8d8)',
   fontSize: 13,
 };
 
@@ -335,8 +335,8 @@ const detailTotalsStyle = {
   flexWrap: 'wrap',
   gap: 14,
   paddingTop: 8,
-  borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-  color: '#d2c4c4',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.06)',
+  color: 'var(--vg-f-d2c4c4)',
   fontSize: 13,
 };
 

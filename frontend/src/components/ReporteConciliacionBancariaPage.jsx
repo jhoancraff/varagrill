@@ -128,21 +128,21 @@ function ReporteConciliacionBancariaPage({ isMobile, onBack }) {
                 </div>
                 <div style={desgloseTileStyle}>
                   <div style={desgloseLabelStyle}>Pendientes por conciliar</div>
-                  <div style={{ ...desgloseValueStyle, color: resumen.pendientes > 0 ? '#ffcf7d' : '#8fffb0' }}>
+                  <div style={{ ...desgloseValueStyle, color: resumen.pendientes > 0 ? 'var(--vg-f-ffcf7d)' : 'var(--vg-f-8fffb0)' }}>
                     {resumen.pendientes}
                   </div>
                 </div>
                 <div style={desgloseTileStyle}>
                   <div style={desgloseLabelStyle}>Diferencia total (USD)</div>
-                  <div style={{ ...desgloseValueStyle, color: Number(resumen.suma_diferencias) === 0 ? '#8fffb0' : '#ff9d9d' }}>
+                  <div style={{ ...desgloseValueStyle, color: Number(resumen.suma_diferencias) === 0 ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)' }}>
                     ${formatMonto(resumen.suma_diferencias)}
                   </div>
                 </div>
               </div>
               {data.tasa_bcv ? (
-                <div style={{ fontSize: 12, color: '#c8bbbb' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
+                <div style={{ fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
               ) : (
-                <div style={{ fontSize: 12, color: '#ffcf85' }}>No hay tasa BCV registrada para esta fecha; las cuentas en bolívares no se pueden conciliar hasta que exista una.</div>
+                <div style={{ fontSize: 12, color: 'var(--vg-f-ffcf85)' }}>No hay tasa BCV registrada para esta fecha; las cuentas en bolívares no se pueden conciliar hasta que exista una.</div>
               )}
             </section>
           ) : null}
@@ -197,7 +197,7 @@ function ReporteConciliacionBancariaPage({ isMobile, onBack }) {
                               : `$${formatMonto(conciliado.saldo_banco)}`}
                           </span>
                         </div>
-                        <div style={{ color: diferenciaOk ? '#8fffb0' : '#ff9d9d', fontWeight: 800, fontSize: 14 }}>
+                        <div style={{ color: diferenciaOk ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)', fontWeight: 800, fontSize: 14 }}>
                           Diferencia: {banco.moneda === 'VES' && conciliado.diferencia_bs !== null
                             ? `Bs. ${formatMonto(conciliado.diferencia_bs)} `
                             : ''}
@@ -252,45 +252,45 @@ function ReporteConciliacionBancariaPage({ isMobile, onBack }) {
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const headerRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 12 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 680, lineHeight: 1.6 };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const sectionTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 700 };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const secondaryAmountStyle = { color: '#c8bbbb', fontSize: 12.5, marginLeft: 6 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 680, lineHeight: 1.6 };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 700 };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
+const secondaryAmountStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5, marginLeft: 6 };
 
 const resumenGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 10 });
-const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' };
-const desgloseLabelStyle = { color: '#ffb0b0', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
-const desgloseValueStyle = { color: '#fff', fontSize: 22, fontWeight: 800 };
+const desgloseTileStyle = { display: 'grid', gap: 4, padding: '14px 16px', borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
+const desgloseLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' };
+const desgloseValueStyle = { color: 'var(--vg-text-strong)', fontSize: 22, fontWeight: 800 };
 
 const bancosGridStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 });
 const bancoCardStyle = (ok) => ({
   display: 'grid', gap: 12, padding: '18px 20px', borderRadius: 18,
-  border: ok === null ? '1px solid rgba(255,255,255,0.1)' : ok ? '1px solid rgba(120,255,170,0.28)' : '1px solid rgba(255,145,145,0.3)',
-  background: ok === null ? 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' : ok ? 'rgba(90,220,140,0.06)' : 'rgba(255,98,98,0.07)',
+  border: ok === null ? '1px solid rgba(var(--vg-ink), 0.1)' : ok ? '1px solid var(--vg-f-78ffaa-a280)' : '1px solid var(--vg-f-ff9191-a300)',
+  background: ok === null ? 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' : ok ? 'rgba(90,220,140,0.06)' : 'rgba(255,98,98,0.07)',
 });
 const bancoHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 };
-const bancoNombreStyle = { color: '#fff', fontWeight: 700, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' };
+const bancoNombreStyle = { color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' };
 const badgeBase = { fontSize: 10.5, fontWeight: 800, padding: '2px 9px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' };
-const infoBadgeStyle = { ...badgeBase, color: '#c8bbbb', background: 'rgba(255,255,255,0.08)' };
-const warnBadgeStyle = { ...badgeBase, color: '#ffcf7d', background: 'rgba(255,183,77,0.16)' };
-const okBadgeStyle = { ...badgeBase, color: '#8fffb0', background: 'rgba(90,220,140,0.16)' };
-const pendingBadgeStyle = { ...badgeBase, color: '#ffcf7d', background: 'rgba(255,183,77,0.14)' };
+const infoBadgeStyle = { ...badgeBase, color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.08)' };
+const warnBadgeStyle = { ...badgeBase, color: 'var(--vg-f-ffcf7d)', background: 'rgba(255,183,77,0.16)' };
+const okBadgeStyle = { ...badgeBase, color: 'var(--vg-f-8fffb0)', background: 'rgba(90,220,140,0.16)' };
+const pendingBadgeStyle = { ...badgeBase, color: 'var(--vg-f-ffcf7d)', background: 'rgba(255,183,77,0.14)' };
 
 const saldoSistemaRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 };
-const saldoSistemaLabelStyle = { color: '#c8bbbb', fontSize: 12.5 };
-const saldoSistemaValueStyle = { color: '#fff', fontSize: 17, fontWeight: 700 };
-const conciliadoBoxStyle = { display: 'grid', gap: 6, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,0.14)' };
-const notasTextStyle = { color: '#d2c3c3', fontSize: 12.5, fontStyle: 'italic' };
-const metaTextStyle = { color: '#8f8080', fontSize: 11.5 };
+const saldoSistemaLabelStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
+const saldoSistemaValueStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
+const conciliadoBoxStyle = { display: 'grid', gap: 6, paddingTop: 10, borderTop: '1px dashed rgba(var(--vg-ink), 0.14)' };
+const notasTextStyle = { color: 'var(--vg-f-d2c3c3)', fontSize: 12.5, fontStyle: 'italic' };
+const metaTextStyle = { color: 'var(--vg-f-8f8080)', fontSize: 11.5 };
 
-const formStyle = { display: 'grid', gap: 10, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,0.14)' };
-const fieldLabelStyle = { display: 'grid', gap: 6, color: '#f2e6e6', fontSize: 12.5, fontWeight: 600 };
-const inputStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '9px 11px', color: '#fff', fontSize: 14 };
-const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const formStyle = { display: 'grid', gap: 10, paddingTop: 10, borderTop: '1px dashed rgba(var(--vg-ink), 0.14)' };
+const fieldLabelStyle = { display: 'grid', gap: 6, color: 'var(--vg-f-f2e6e6)', fontSize: 12.5, fontWeight: 600 };
+const inputStyle = { borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '9px 11px', color: 'var(--vg-text-strong)', fontSize: 14 };
+const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const printButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default ReporteConciliacionBancariaPage;

@@ -176,7 +176,7 @@ function ReporteDevolucionesPage({ isMobile, onBack, onArmarCanje }) {
                   >
                     ← Anteriores
                   </button>
-                  <span style={{ color: '#c8bbbb', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
+                  <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>Página {paginaActual + 1} de {totalPaginas}</span>
                   <button
                     type="button"
                     onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
@@ -189,7 +189,7 @@ function ReporteDevolucionesPage({ isMobile, onBack, onArmarCanje }) {
               </div>
             ) : null}
 
-            <div style={{ fontWeight: 700, color: '#fff' }}>
+            <div style={{ fontWeight: 700, color: 'var(--vg-text-strong)' }}>
               Total devuelto: {formatBsRaw(totalMontoBs)}
             </div>
           </section>
@@ -226,11 +226,11 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
         {!loading && detalle ? (
           <div style={{ display: 'grid', gap: 10 }}>
             <span style={tipoResolucionBadgeStyle(detalle.tipo_resolucion)}>{detalle.tipo_resolucion_display}</span>
-            <div style={{ color: '#d2c4c4', fontSize: 13 }}>{detalle.motivo_display}</div>
+            <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13 }}>{detalle.motivo_display}</div>
             {detalle.motivo_detalle ? (
-              <div style={{ color: '#d2c4c4', fontSize: 13, fontStyle: 'italic' }}>&ldquo;{detalle.motivo_detalle}&rdquo;</div>
+              <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13, fontStyle: 'italic' }}>&ldquo;{detalle.motivo_detalle}&rdquo;</div>
             ) : null}
-            <div style={{ color: '#d2c4c4', fontSize: 13 }}>
+            <div style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 13 }}>
               Autorizó: {detalle.autorizado_por} · Registró: {detalle.creado_por || '—'} · {new Date(detalle.fecha_emision).toLocaleString('es-VE')}
             </div>
 
@@ -246,7 +246,7 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
                     : `$${formatMonto(detalle.documento_original.total)}`}
                 </span>
               </div>
-            ) : <div style={{ color: '#a89999', fontSize: 12.5 }}>Documento no disponible.</div>}
+            ) : <div style={{ color: 'var(--vg-f-a89999)', fontSize: 12.5 }}>Documento no disponible.</div>}
 
             {detalle.item_cambiado ? (
               <>
@@ -270,7 +270,7 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
               </>
             ) : ['canje', 'canje_item'].includes(detalle.tipo_resolucion) && onArmarCanje ? (
               <div style={{ ...lineaRowStyle, alignItems: 'center' }}>
-                <span style={{ color: '#ffcf7d' }}>Todavía no se armó el plato de cambio.</span>
+                <span style={{ color: 'var(--vg-f-ffcf7d)' }}>Todavía no se armó el plato de cambio.</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -291,7 +291,7 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
                 <span>-${formatMonto(pago.monto)}</span>
               </div>
             )) : (
-              <div style={{ color: '#a89999', fontSize: 12.5 }}>
+              <div style={{ color: 'var(--vg-f-a89999)', fontSize: 12.5 }}>
                 {detalle.tipo_resolucion === 'reembolso'
                   ? 'El documento no tenía pagos registrados (se anuló antes de cobrarse).'
                   : 'Ninguno — el dinero nunca salió del negocio, así que no se tocó el cuadre de caja.'}
@@ -314,7 +314,7 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
                 {detalle.mermas.map((merma) => (
                   <div key={merma.id} style={lineaRowStyle}>
                     <span>{merma.cantidad}x {merma.producto}</span>
-                    <span style={{ color: '#a89999', fontSize: 11.5 }}>{merma.registrado_por}</span>
+                    <span style={{ color: 'var(--vg-f-a89999)', fontSize: 11.5 }}>{merma.registrado_por}</span>
                   </div>
                 ))}
               </>
@@ -327,33 +327,33 @@ function NotaCreditoDetalleModal({ loading, error, detalle, onArmarCanje, onClos
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', display: 'flex', alignItems: 'center', flexWrap: 'wrap' };
-const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)', background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)' };
-const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(255,255,255,0.12)', color: '#c8bbbb' };
-const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap' };
+const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff9191-a220)', background: 'rgba(255,98,98,0.12)', color: 'var(--vg-f-ffd8d8)' };
 const tableWrapStyle = { overflowX: 'auto' };
 const tableStyle = {
   display: 'grid',
   gridTemplateColumns: '70px minmax(110px,1fr) minmax(160px,1.4fr) minmax(140px,1fr) minmax(90px,0.8fr) minmax(140px,1fr) minmax(110px,0.8fr)',
   minWidth: 820,
-  border: '1px solid rgba(255,255,255,0.08)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
   borderRadius: 14,
   overflow: 'hidden',
 };
 const rowGroupStyle = { display: 'contents' };
-const headStyle = { padding: '12px 14px', background: 'rgba(255,255,255,0.06)', color: '#ffb0b0', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
-const cellStyle = { padding: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', color: '#f2e6e6', display: 'grid', alignContent: 'center' };
-const detalleLinkStyle = { border: 'none', background: 'none', color: '#ff9d9d', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left' };
+const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };
+const detalleLinkStyle = { border: 'none', background: 'none', color: 'var(--vg-f-ff9d9d)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 const paginacionRowStyle = (isMobile) => ({ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 8 });
-const paginacionInfoStyle = { color: '#c8bbbb', fontSize: 12.5 };
+const paginacionInfoStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
 const paginacionButtonStyle = (disabled) => ({
-  border: '1px solid rgba(255, 173, 173, 0.35)',
+  border: '1px solid var(--vg-f-ffadad-a350)',
   borderRadius: 12,
   padding: '7px 12px',
-  background: disabled ? 'rgba(255, 255, 255, 0.02)' : 'rgba(255, 255, 255, 0.05)',
-  color: disabled ? '#8a7a7a' : '#ffe0e0',
+  background: disabled ? 'rgba(var(--vg-ink), 0.02)' : 'rgba(var(--vg-ink), 0.05)',
+  color: disabled ? 'var(--vg-f-8a7a7a)' : 'var(--vg-f-ffe0e0)',
   fontWeight: 600,
   fontSize: 13,
   cursor: disabled ? 'not-allowed' : 'pointer',
@@ -361,19 +361,19 @@ const paginacionButtonStyle = (disabled) => ({
 });
 
 const modalBackdropStyle = { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center', padding: 16 };
-const modalCardStyle = { width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid rgba(255,145,145,0.3)', background: 'linear-gradient(180deg, rgba(28,12,12,0.98) 0%, rgba(10,8,8,0.99) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.45)', display: 'grid', gap: 14 };
+const modalCardStyle = { width: '100%', maxWidth: 560, maxHeight: '85vh', overflowY: 'auto', borderRadius: 20, border: '1px solid var(--vg-f-ff9191-a300)', background: 'linear-gradient(180deg, var(--vg-s-1c0c0c-a980) 0%, var(--vg-s-0a0808-a990) 100%)', padding: '22px 22px 18px', boxShadow: '0 20px 50px rgba(0, 0, 0, calc(0.45 * var(--vg-shadow-k)))', display: 'grid', gap: 14 };
 const modalHeaderStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const modalTitleStyle = { color: '#fff', fontSize: 19, fontWeight: 800 };
-const modalCloseButtonStyle = { border: 'none', background: 'rgba(255,255,255,0.08)', color: '#fff', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
+const modalTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 19, fontWeight: 800 };
+const modalCloseButtonStyle = { border: 'none', background: 'rgba(var(--vg-ink), 0.08)', color: 'var(--vg-text-strong)', width: 30, height: 30, borderRadius: 999, cursor: 'pointer', fontSize: 14 };
 
 const seccionTituloStyle = {
-  color: '#9fe3b0',
+  color: 'var(--vg-f-9fe3b0)',
   fontWeight: 700,
   fontSize: 11.5,
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
   marginTop: 6,
-  borderTop: '1px solid rgba(255,255,255,0.06)',
+  borderTop: '1px solid rgba(var(--vg-ink), 0.06)',
   paddingTop: 8,
 };
 
@@ -381,7 +381,7 @@ const lineaRowStyle = {
   display: 'flex',
   justifyContent: 'space-between',
   fontSize: 13,
-  color: '#e8dede',
+  color: 'var(--vg-f-e8dede)',
 };
 
 // 'reembolso' es el único tipo de resolución que de verdad saca plata del
@@ -393,15 +393,15 @@ const tipoResolucionBadgeStyle = (tipo) => ({
   fontWeight: 700,
   width: 'fit-content',
   background: tipo === 'reembolso' ? 'rgba(255, 98, 98, 0.14)' : 'rgba(159, 227, 176, 0.14)',
-  color: tipo === 'reembolso' ? '#ffb0b0' : '#9fe3b0',
+  color: tipo === 'reembolso' ? 'var(--vg-f-ffb0b0)' : 'var(--vg-f-9fe3b0)',
 });
 
 const armarCanjeButtonStyle = {
-  border: '1px solid rgba(255, 200, 120, 0.4)',
+  border: '1px solid var(--vg-f-ffc878-a400)',
   borderRadius: 999,
   padding: '7px 12px',
   background: 'rgba(255, 200, 120, 0.12)',
-  color: '#ffcf7d',
+  color: 'var(--vg-f-ffcf7d)',
   fontWeight: 700,
   fontSize: 12,
   cursor: 'pointer',

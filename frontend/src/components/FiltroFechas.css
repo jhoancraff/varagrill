@@ -10,8 +10,8 @@
   grid-column: 1 / -1;
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid rgba(255, 77, 77, 0.28);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  border: 1px solid rgba(var(--vg-accent-rgb), 0.28);
+  background: linear-gradient(180deg, rgba(var(--vg-ink), 0.045), rgba(var(--vg-ink), 0.015));
 }
 
 .vg-rango__fechas {
@@ -26,7 +26,7 @@
   width: 14px;
   height: 2px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(var(--vg-ink), 0.35);
 }
 
 .vg-rango__dias {
@@ -34,8 +34,8 @@
   margin-left: auto;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(255, 77, 77, 0.14);
-  color: #ffd8d8;
+  background: rgba(var(--vg-accent-rgb), 0.14);
+  color: var(--vg-f-ffd8d8);
   font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
@@ -58,20 +58,20 @@
   min-height: 62px;
   padding: 8px 16px 8px 8px;
   border-radius: 14px;
-  border: 1.5px solid rgba(255, 255, 255, 0.24);
-  background: #161010;
-  color: #fff;
+  border: 1.5px solid rgba(var(--vg-ink), 0.24);
+  background: var(--vg-s-161010);
+  color: var(--vg-text-strong);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .vg-fecha:hover {
-  border-color: #ff4d4d;
-  background: #1d1313;
+  border-color: var(--vg-accent-primary);
+  background: var(--vg-s-1d1313);
 }
 
 .vg-fecha:focus-within {
-  border-color: #ff4d4d;
+  border-color: var(--vg-accent-primary);
   box-shadow: 0 0 0 3px rgba(255, 77, 77, 0.28);
 }
 
@@ -94,13 +94,13 @@
 }
 
 .vg-fecha__etiqueta {
-  color: #c8bbbb;
+  color: var(--vg-f-c8bbbb);
   font-size: 12px;
   font-weight: 600;
 }
 
 .vg-fecha__valor {
-  color: #fff;
+  color: var(--vg-text-strong);
   font-size: 18px;
   font-weight: 800;
   line-height: 1.15;
@@ -136,9 +136,9 @@
   min-height: 38px;
   padding: 8px 16px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.06);
-  color: #f2e6e6;
+  border: 1px solid rgba(var(--vg-ink), 0.22);
+  background: rgba(var(--vg-ink), 0.06);
+  color: var(--vg-f-f2e6e6);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -147,12 +147,12 @@
 }
 
 .vg-atajo:hover {
-  border-color: #ff4d4d;
-  background: rgba(255, 77, 77, 0.12);
+  border-color: var(--vg-accent-primary);
+  background: rgba(var(--vg-accent-rgb), 0.12);
 }
 
 .vg-atajo--activo {
-  border-color: #ff4d4d;
+  border-color: var(--vg-accent-primary);
   background: #bf1f1f;
   color: #fff;
 }
@@ -184,16 +184,16 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  border: 1.5px solid rgba(255, 255, 255, 0.24);
-  background: #161010;
-  color: #fff;
+  border: 1.5px solid rgba(var(--vg-ink), 0.24);
+  background: var(--vg-s-161010);
+  color: var(--vg-text-strong);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .vg-dia__flecha:hover:not(:disabled) {
-  border-color: #ff4d4d;
-  background: #1d1313;
+  border-color: var(--vg-accent-primary);
+  background: var(--vg-s-1d1313);
 }
 
 .vg-dia__flecha:disabled {

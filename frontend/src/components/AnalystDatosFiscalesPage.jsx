@@ -170,23 +170,23 @@ function AnalystDatosFiscalesPage({ isMobile, onBack }) {
 }
 
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
-const titleStyle = (isMobile) => ({ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34 });
-const subtitleStyle = { margin: '8px 0 0', color: '#d2c3c3', maxWidth: 640, lineHeight: 1.6 };
+const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 28 : 34 });
+const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', maxWidth: 640, lineHeight: 1.6 };
 const panelStyle = {
   display: 'grid',
   gap: 14,
   padding: 18,
   borderRadius: 20,
-  border: '1px solid rgba(255,255,255,0.1)',
-  background: 'linear-gradient(180deg, rgba(20,10,10,0.95) 0%, rgba(8,8,8,0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
 };
 const emptyStyle = {
   minHeight: 80,
   display: 'grid',
   placeItems: 'center',
   borderRadius: 14,
-  border: '1px dashed rgba(255,255,255,0.12)',
-  color: '#c8bbbb',
+  border: '1px dashed rgba(var(--vg-ink), 0.12)',
+  color: 'var(--vg-f-c8bbbb)',
 };
 const formGridStyle = (isMobile) => ({
   display: 'grid',
@@ -194,21 +194,21 @@ const formGridStyle = (isMobile) => ({
   gap: 12,
 });
 const fieldStyle = { display: 'grid', gap: 6 };
-const labelStyle = { color: '#f0b4b4', fontSize: 13, fontWeight: 700 };
+const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 13, fontWeight: 700 };
 const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: '#161010',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-161010)',
   padding: '10px 12px',
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
 };
 const primaryButtonStyle = {
   border: 'none',
   borderRadius: 999,
   padding: '10px 16px',
-  background: 'linear-gradient(90deg, #bf1f1f 0%, #ff4d4d 100%)',
+  background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

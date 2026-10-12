@@ -147,8 +147,8 @@ function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas
         }
         .vg-admin-card:hover {
           transform: translateY(-3px);
-          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.38) !important;
-          border-color: rgba(255, 100, 100, 0.22) !important;
+          box-shadow: 0 20px 48px rgba(0, 0, 0, calc(0.38 * var(--vg-shadow-k))) !important;
+          border-color: var(--vg-f-ff6464-a220) !important;
         }
       `}</style>
       <section style={panelContainerStyle(isMobile)}>
@@ -169,7 +169,7 @@ function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas
                 onClick={() => onNavigate(section.id)}
                 style={{
                   ...cardButtonStyle,
-                  borderLeft: isRestricted ? '3px solid rgba(255, 200, 50, 0.5)' : '3px solid transparent',
+                  borderLeft: isRestricted ? '3px solid var(--vg-f-ffc832-a500)' : '3px solid transparent',
                 }}
               >
                 <div style={cardHeaderStyle}>
@@ -185,9 +185,9 @@ function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas
                         fontWeight: 700,
                         letterSpacing: '0.1em',
                         textTransform: 'uppercase',
-                        color: '#ffd700',
+                        color: 'var(--vg-f-ffd700)',
                         background: 'rgba(255, 215, 0, 0.1)',
-                        border: '1px solid rgba(255, 215, 0, 0.25)',
+                        border: '1px solid var(--vg-f-ffd700-a250)',
                         borderRadius: 999,
                         padding: '2px 8px',
                         marginTop: 4,
@@ -226,9 +226,9 @@ const heroStyle = {
   gap: 12,
   padding: '24px clamp(18px, 3vw, 32px)',
   borderRadius: 28,
-  background: 'linear-gradient(145deg, rgba(96, 17, 17, 0.96) 0%, rgba(24, 8, 8, 0.92) 100%)',
-  border: '1px solid rgba(255, 110, 110, 0.22)',
-  boxShadow: '0 18px 48px rgba(0, 0, 0, 0.28)',
+  background: 'linear-gradient(145deg, var(--vg-s-601111-a960) 0%, var(--vg-s-180808-a920) 100%)',
+  border: '1px solid var(--vg-f-ff6e6e-a220)',
+  boxShadow: '0 18px 48px rgba(0, 0, 0, calc(0.28 * var(--vg-shadow-k)))',
 };
 
 const heroBadgeStyle = {
@@ -236,8 +236,8 @@ const heroBadgeStyle = {
   width: 'fit-content',
   padding: '7px 12px',
   borderRadius: 999,
-  background: 'rgba(255, 255, 255, 0.08)',
-  color: '#ffb0b0',
+  background: 'rgba(var(--vg-ink), 0.08)',
+  color: 'var(--vg-f-ffb0b0)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -246,7 +246,7 @@ const heroBadgeStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff4f4',
+  color: 'var(--vg-f-fff4f4)',
   fontSize: isMobile ? 30 : 38,
   lineHeight: 1.05,
 });
@@ -254,7 +254,7 @@ const titleStyle = (isMobile) => ({
 const subtitleStyle = {
   margin: 0,
   maxWidth: 720,
-  color: '#f1cfcf',
+  color: 'var(--vg-f-f1cfcf)',
   lineHeight: 1.6,
   fontSize: 15,
 };
@@ -273,11 +273,11 @@ const cardButtonStyle = {
   textAlign: 'left',
   padding: '24px 22px',
   borderRadius: 24,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
+  color: 'var(--vg-text-strong)',
   cursor: 'pointer',
-  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.24)',
+  boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.24 * var(--vg-shadow-k)))',
 };
 
 const cardHeaderStyle = {
@@ -295,7 +295,7 @@ const cardIconWrapStyle = {
   flexShrink: 0,
   borderRadius: 14,
   background: 'rgba(255, 102, 102, 0.14)',
-  color: '#ff8f8f',
+  color: 'var(--vg-f-ff8f8f)',
 };
 
 const cardTitleStyle = {
@@ -304,23 +304,23 @@ const cardTitleStyle = {
 };
 
 const cardDescriptionStyle = {
-  color: '#d0c4c4',
+  color: 'var(--vg-f-d0c4c4)',
   lineHeight: 1.6,
   fontSize: 14,
 };
 
 const cardLinkStyle = {
-  color: '#ff8f8f',
+  color: 'var(--vg-f-ff8f8f)',
   fontWeight: 700,
   letterSpacing: '0.04em',
 };
 
 const backButtonStyle = {
-  border: '1px solid rgba(255, 255, 255, 0.14)',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
   borderRadius: 999,
   padding: '11px 18px',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
 };

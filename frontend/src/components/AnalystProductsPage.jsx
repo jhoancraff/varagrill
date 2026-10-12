@@ -381,7 +381,7 @@ const badgeStyle = {
   padding: '7px 12px',
   borderRadius: 999,
   background: 'rgba(255, 163, 163, 0.12)',
-  color: '#ffb5b5',
+  color: 'var(--vg-f-ffb5b5)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -390,13 +390,13 @@ const badgeStyle = {
 
 const titleStyle = (isMobile) => ({
   margin: 0,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: isMobile ? 28 : 34,
 });
 
 const subtitleStyle = {
   margin: '8px 0 0',
-  color: '#d2c3c3',
+  color: 'var(--vg-f-d2c3c3)',
   lineHeight: 1.6,
   maxWidth: 720,
 };
@@ -420,12 +420,12 @@ const summaryCardStyle = {
   gap: 10,
   padding: '18px 16px',
   borderRadius: 20,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(27, 10, 10, 0.96) 0%, rgba(10, 10, 10, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-s-1b0a0a-a960) 0%, var(--vg-s-0a0a0a-a980) 100%)',
 };
 
 const summaryLabelStyle = {
-  color: '#f0b1b1',
+  color: 'var(--vg-f-f0b1b1)',
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: '0.12em',
@@ -433,7 +433,7 @@ const summaryLabelStyle = {
 };
 
 const summaryValueStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 28,
   fontWeight: 800,
 };
@@ -443,12 +443,12 @@ const panelStyle = {
   gap: 16,
   padding: '20px 18px',
   borderRadius: 24,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
+  border: '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
 };
 
 const sectionTitleStyle = {
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
   fontSize: 20,
   fontWeight: 700,
 };
@@ -462,7 +462,7 @@ const reportHeaderStyle = (isMobile) => ({
 });
 
 const reportHintStyle = {
-  color: '#d2c4c4',
+  color: 'var(--vg-f-d2c4c4)',
   fontSize: 13,
 };
 
@@ -477,9 +477,9 @@ const searchInputStyle = {
   flex: '1 1 260px',
   padding: '10px 14px',
   borderRadius: 12,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: 'rgba(255, 255, 255, 0.04)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  color: 'var(--vg-text-strong)',
   fontSize: 14,
   outline: 'none',
 };
@@ -488,9 +488,9 @@ const filterSelectStyle = {
   flex: '0 1 220px',
   padding: '10px 14px',
   borderRadius: 12,
-  border: '1px solid rgba(255, 255, 255, 0.14)',
-  background: 'rgba(20, 10, 10, 0.9)',
-  color: '#fff',
+  border: '1px solid rgba(var(--vg-ink), 0.14)',
+  background: 'var(--vg-s-140a0a-a900)',
+  color: 'var(--vg-text-strong)',
   fontSize: 14,
   outline: 'none',
 };
@@ -498,14 +498,14 @@ const filterSelectStyle = {
 const tableWrapStyle = {
   overflowX: 'auto',
   borderRadius: 18,
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+  border: '1px solid rgba(var(--vg-ink), 0.08)',
 };
 
 const tableStyle = {
   minWidth: 1150,
   display: 'grid',
   gridTemplateColumns: 'minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(120px, .6fr) minmax(130px, .7fr) minmax(150px, .8fr) minmax(130px, .7fr) minmax(220px, 1fr)',
-  background: 'rgba(8, 8, 8, 0.55)',
+  background: 'var(--vg-s-080808-a550)',
 };
 
 const tableHeadStyle = {
@@ -514,14 +514,14 @@ const tableHeadStyle = {
   fontWeight: 800,
   letterSpacing: '0.08em',
   textTransform: 'uppercase',
-  color: '#f4b0b0',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+  color: 'var(--vg-f-f4b0b0)',
+  borderBottom: '1px solid rgba(var(--vg-ink), 0.1)',
 };
 
 const tableCellStyle = {
   padding: '14px',
-  color: '#eadede',
-  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+  color: 'var(--vg-f-eadede)',
+  borderBottom: '1px solid rgba(var(--vg-ink), 0.08)',
   display: 'grid',
   alignContent: 'center',
   gap: 4,
@@ -529,7 +529,7 @@ const tableCellStyle = {
 
 const tableCellPrimaryStyle = {
   ...tableCellStyle,
-  color: '#fff',
+  color: 'var(--vg-text-strong)',
 };
 
 const tableCellActionStyle = {
@@ -546,7 +546,7 @@ const nameStyle = {
 };
 
 const metaStyle = {
-  color: '#c7b8b8',
+  color: 'var(--vg-f-c7b8b8)',
   fontSize: 13,
 };
 
@@ -554,9 +554,9 @@ const linkBadgeStyle = {
   marginTop: 4,
   padding: '3px 8px',
   borderRadius: 999,
-  border: '1px solid rgba(255,196,110,0.35)',
+  border: '1px solid var(--vg-f-ffc46e-a350)',
   background: 'rgba(255,166,0,0.12)',
-  color: '#ffcf85',
+  color: 'var(--vg-f-ffcf85)',
   fontSize: 12,
   fontWeight: 700,
   width: 'fit-content',
@@ -569,7 +569,7 @@ const pillStyle = {
   borderRadius: 999,
   fontSize: 12,
   background: 'rgba(255, 143, 143, 0.16)',
-  color: '#ffc4c4',
+  color: 'var(--vg-f-ffc4c4)',
 };
 
 const sinCostoPillStyle = {
@@ -580,10 +580,10 @@ const sinCostoPillStyle = {
   fontSize: 11.5,
   fontWeight: 800,
   background: 'rgba(255, 200, 120, 0.16)',
-  color: '#ffcf7d',
+  color: 'var(--vg-f-ffcf7d)',
 };
 
-const costoUnidadStyle = { color: '#a89999', fontSize: 11.5, fontWeight: 600 };
+const costoUnidadStyle = { color: 'var(--vg-f-a89999)', fontSize: 11.5, fontWeight: 600 };
 
 const statusPillStyle = (isAvailable) => ({
   display: 'inline-flex',
@@ -593,23 +593,23 @@ const statusPillStyle = (isAvailable) => ({
   fontSize: 12,
   fontWeight: 700,
   background: isAvailable ? 'rgba(95, 224, 140, 0.16)' : 'rgba(255, 125, 125, 0.16)',
-  color: isAvailable ? '#9ef4bd' : '#ffb5b5',
+  color: isAvailable ? 'var(--vg-f-9ef4bd)' : 'var(--vg-f-ffb5b5)',
 });
 
 const noticeStyle = {
   padding: '12px 14px',
   borderRadius: 14,
   background: 'rgba(255, 140, 140, 0.14)',
-  border: '1px solid rgba(255, 175, 175, 0.24)',
-  color: '#ffd4d4',
+  border: '1px solid var(--vg-f-ffafaf-a240)',
+  color: 'var(--vg-f-ffd4d4)',
 };
 
 const emptyStateStyle = {
   padding: '14px',
   borderRadius: 14,
-  background: 'rgba(255, 255, 255, 0.04)',
-  border: '1px dashed rgba(255, 255, 255, 0.14)',
-  color: '#d8c8c8',
+  background: 'rgba(var(--vg-ink), 0.04)',
+  border: '1px dashed rgba(var(--vg-ink), 0.14)',
+  color: 'var(--vg-f-d8c8c8)',
 };
 
 const primaryButtonStyle = {
@@ -623,21 +623,21 @@ const primaryButtonStyle = {
 };
 
 const secondaryButtonStyle = {
-  border: '1px solid rgba(255, 173, 173, 0.35)',
+  border: '1px solid var(--vg-f-ffadad-a350)',
   borderRadius: 12,
   padding: '10px 14px',
-  background: 'rgba(255, 255, 255, 0.02)',
-  color: '#ffe0e0',
+  background: 'rgba(var(--vg-ink), 0.02)',
+  color: 'var(--vg-f-ffe0e0)',
   fontWeight: 600,
   cursor: 'pointer',
 };
 
 const dangerButtonStyle = {
-  border: '1px solid rgba(255, 102, 102, 0.45)',
+  border: '1px solid var(--vg-f-ff6666-a450)',
   borderRadius: 12,
   padding: '10px 14px',
   background: 'rgba(255, 73, 73, 0.1)',
-  color: '#ffb3b3',
+  color: 'var(--vg-f-ffb3b3)',
   fontWeight: 600,
   cursor: 'pointer',
 };

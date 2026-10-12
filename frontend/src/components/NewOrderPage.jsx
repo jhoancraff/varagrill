@@ -52,6 +52,12 @@ function NewOrderPage({
     notas: '',
   });
   const [cartItems, setCartItems] = useState([]);
+  // Cargo de delivery (ver delivery.py): las zonas activas, la elegida ('' = sin cargo, un id, o 'otro' para un
+  // monto libre) y el monto en $, que caja puede cambiar. No es un producto: no entra al carrito ni a cocina.
+  const [zonasDelivery, setZonasDelivery] = useState([]);
+  const [puedeCambiarMontoDelivery, setPuedeCambiarMontoDelivery] = useState(false);
+  const [zonaDeliveryId, setZonaDeliveryId] = useState('');
+  const [cargoDelivery, setCargoDelivery] = useState('');
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [catalogType, setCatalogType] = useState('Todos');
   const [searchTerm, setSearchTerm] = useState('');
@@ -185,10 +191,45 @@ function NewOrderPage({
     [cartItems],
   );
 
-  const subtotal = useMemo(
+  const subtotalProductos = useMemo(
     () => cartItems.reduce((total, item) => total + computeItemTotal(item, products, promotionsByProductId), 0),
     [cartItems, products, promotionsByProductId],
   );
+
+  // El delivery se cobra una sola vez, en el pedido original: una ronda agregada o un canje no lo repiten.
+  const cobraDelivery = orderHeader.tipoPedido === 'delivery' && !initialGrupoPedidoId && !initialNotaCreditoId;
+  const deliveryFee = cobraDelivery ? Math.max(0, Number(cargoDelivery) || 0) : 0;
+  const totalEstimado = subtotalProductos + deliveryFee;
+  const zonaDeliveryElegida = zonasDelivery.find((zona) => String(zona.id) === String(zonaDeliveryId));
+  const deliveryLabel = zonaDeliveryElegida ? `Delivery (${zonaDeliveryElegida.nombre})` : 'Delivery';
+
+  useEffect(() => {
+    if (!cobraDelivery) {
+      return undefined;
+    }
+    let cancelado = false;
+    fetch('/api/delivery/zonas/', { credentials: 'include', cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelado || !data || !data.ok) return;
+        setZonasDelivery(Array.isArray(data.zonas) ? data.zonas : []);
+        setPuedeCambiarMontoDelivery(Boolean(data.puede_cambiar_monto));
+      })
+      .catch(() => {
+        // Sin zonas el delivery se registra igual (sin cargo, o con monto libre si caja lo escribe).
+      });
+    return () => { cancelado = true; };
+  }, [cobraDelivery]);
+
+  const handleZonaDelivery = (valor) => {
+    setZonaDeliveryId(valor);
+    if (valor === '') {
+      setCargoDelivery('');
+    } else if (valor !== 'otro') {
+      const zona = zonasDelivery.find((item) => String(item.id) === String(valor));
+      setCargoDelivery(zona ? String(Number(zona.tarifa)) : '');
+    }
+  };
 
   // Los grupoArmado internos son ids únicos que solo crecen (nunca se reasignan, ver
   // addToCart) — así el merge de líneas repetidas y la comparación con grupoActual
@@ -544,6 +585,9 @@ function NewOrderPage({
     // porque ya está pagado con el dinero del documento que esa NC anuló.
     nota_credito_id: initialNotaCreditoId || null,
     notas: orderHeader.notas,
+    // Cargo de delivery: la zona (su tarifa se usa si no hay monto) y el monto final que caja dejó.
+    zona_delivery_id: cobraDelivery && zonaDeliveryId && zonaDeliveryId !== 'otro' ? Number(zonaDeliveryId) : null,
+    cargo_delivery: cobraDelivery && cargoDelivery !== '' ? cargoDelivery : null,
     items: cartItems.map((item) => ({
       product_id: Number(item.productId),
       cantidad: Number(item.quantity || 1),
@@ -906,6 +950,50 @@ function NewOrderPage({
               style={inputStyle(isCompact)}
             />
           </label>
+
+          {cobraDelivery ? (
+            <>
+              <label style={fieldWrapStyle}>
+                <span style={labelStyle}>Zona de delivery</span>
+                <select
+                  value={zonaDeliveryId}
+                  onChange={(event) => handleZonaDelivery(event.target.value)}
+                  style={inputStyle(isCompact)}
+                >
+                  <option value="">Sin cargo de delivery</option>
+                  {zonasDelivery.map((zona) => (
+                    <option key={zona.id} value={zona.id}>
+                      {zona.nombre} — ${Number(zona.tarifa).toFixed(2)}
+                    </option>
+                  ))}
+                  {puedeCambiarMontoDelivery ? <option value="otro">Otro monto</option> : null}
+                </select>
+                {zonasDelivery.length === 0 ? (
+                  <span style={{ color: '#c8bbbb', fontSize: 12 }}>
+                    No hay zonas activas: configúralas en Administración → Zonas de delivery.
+                  </span>
+                ) : null}
+              </label>
+              <label style={fieldWrapStyle}>
+                <span style={labelStyle}>Cargo de delivery ($)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={cargoDelivery}
+                  onChange={(event) => setCargoDelivery(event.target.value)}
+                  readOnly={!puedeCambiarMontoDelivery || zonaDeliveryId === ''}
+                  style={inputStyle(isCompact)}
+                />
+                {puedeCambiarMontoDelivery && zonaDeliveryElegida && Number(cargoDelivery) !== Number(zonaDeliveryElegida.tarifa) ? (
+                  <span style={{ color: '#ffcf7d', fontSize: 12 }}>
+                    Monto distinto a la tarifa de la zona (${Number(zonaDeliveryElegida.tarifa).toFixed(2)}).
+                  </span>
+                ) : null}
+              </label>
+            </>
+          ) : null}
         </div>
 
         <div style={workspaceStyle(isCompact)}>
@@ -1066,11 +1154,17 @@ function NewOrderPage({
               />
             </label>
 
+            {deliveryFee > 0 ? (
+              <div style={deliveryLineStyle}>
+                <span>{deliveryLabel}</span>
+                <span>${deliveryFee.toFixed(2)}</span>
+              </div>
+            ) : null}
             <div style={cartTotalRowStyle}>
               <span>Total estimado</span>
               <span style={cartTotalValueStyle}>
-                ${subtotal.toFixed(2)}
-                <BsAmount amountUsd={subtotal} tasa={tasaCambio} />
+                ${totalEstimado.toFixed(2)}
+                <BsAmount amountUsd={totalEstimado} tasa={tasaCambio} />
               </span>
             </div>
 
@@ -1093,8 +1187,8 @@ function NewOrderPage({
             <span style={mobileCartBadgeStyle}>{cartCount}</span>
           </button>
           <div style={{ color: '#fff', fontWeight: 700 }}>
-            ${subtotal.toFixed(2)}
-            <BsAmount amountUsd={subtotal} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
+            ${totalEstimado.toFixed(2)}
+            <BsAmount amountUsd={totalEstimado} tasa={tasaCambio} style={{ color: '#e0e0e0' }} />
           </div>
           <button type="button" onClick={handleSubmit} style={primaryButtonStyle(isCompact)} disabled={isSubmitting || cartItems.length === 0}>
             {isSubmitting ? 'Guardando...' : 'Registrar pedido'}
@@ -1105,7 +1199,9 @@ function NewOrderPage({
       {cartModalOpen ? (
         <CartSummaryModal
           cartCount={cartCount}
-          subtotal={subtotal}
+          subtotal={totalEstimado}
+          deliveryFee={deliveryFee}
+          deliveryLabel={deliveryLabel}
           tasaCambio={tasaCambio}
           groupedCartItems={groupedCartItems}
           renderCartLine={renderCartLine}
@@ -1178,6 +1274,8 @@ function NewOrderPage({
 function CartSummaryModal({
   cartCount,
   subtotal,
+  deliveryFee = 0,
+  deliveryLabel = 'Delivery',
   tasaCambio,
   groupedCartItems,
   renderCartLine,
@@ -1237,6 +1335,12 @@ function CartSummaryModal({
         </div>
 
         <div style={cartModalFooterStyle}>
+          {deliveryFee > 0 ? (
+            <div style={deliveryLineStyle}>
+              <span>{deliveryLabel}</span>
+              <span>${deliveryFee.toFixed(2)}</span>
+            </div>
+          ) : null}
           <div style={cartTotalRowStyle}>
             <span>Total estimado</span>
             <span style={cartTotalValueStyle}>
@@ -2376,6 +2480,7 @@ const addonPickerOptionPriceStyle = {
   whiteSpace: 'nowrap',
 };
 
+const deliveryLineStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: '#d2c3c3', fontSize: 13 };
 const cartTotalRowStyle = {
   display: 'flex',
   alignItems: 'center',

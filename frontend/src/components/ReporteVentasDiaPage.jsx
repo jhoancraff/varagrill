@@ -513,6 +513,15 @@ function NotaDetalleModal({ loading, error, detalle, onClose }) {
                 ))}
               </div>
             )}
+
+            {detalle.delivery && Number(detalle.delivery.monto) > 0 ? (
+              <div style={modalItemRowStyle}>
+                <div style={modalItemNombreStyle}>
+                  Delivery{detalle.delivery.zona ? ` (${detalle.delivery.zona})` : ''}: ${formatMonto(detalle.delivery.monto)}
+                </div>
+                <div style={modalItemExtraStyle}>Ya incluido en el total de la nota.</div>
+              </div>
+            ) : null}
           </>
         ) : null}
       </div>

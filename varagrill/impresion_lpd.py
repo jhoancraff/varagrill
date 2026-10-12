@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from .delivery import texto_cargo
 from .impresion_termica import (
     ALIGN_CENTER,
     ALIGN_LEFT,
@@ -232,6 +233,8 @@ def _build_recibo_bytes(
     impuesto_total = 0
     descuento_total = 0
     propina_total = 0
+    delivery_total = 0
+    delivery_etiquetas = []
 
     for pedido in pedidos:
         mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
@@ -254,9 +257,16 @@ def _build_recibo_bytes(
         impuesto_total += pedido.impuesto
         descuento_total += pedido.descuento
         propina_total += pedido.propina
+        if pedido.cargo_delivery and pedido.cargo_delivery > 0:
+            delivery_total += pedido.cargo_delivery
+            delivery_etiquetas.append(texto_cargo(pedido))
 
     out += _text('-' * LINE_WIDTH) + FEED
     out += _text(f'Subtotal: {_monto_texto(subtotal_total, moneda, tasa)}') + FEED
+    if delivery_total > 0:
+        # El envio va en su propia linea (no es un producto): sin ella el ticket no sumaria al TOTAL.
+        etiqueta = delivery_etiquetas[0] if len(delivery_etiquetas) == 1 else 'Delivery'
+        out += _text(f'{etiqueta}: {_monto_texto(delivery_total, moneda, tasa)}') + FEED
     if impuesto_total > 0:
         out += _text(f'Impuesto: {_monto_texto(impuesto_total, moneda, tasa)}') + FEED
     if descuento_total > 0:

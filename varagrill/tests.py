@@ -3737,3 +3737,238 @@ class ReporteCuentasPorCobrarPdfTests(TestCase):
         vacio = self.client.get(f'{self.URL}?cliente=nadie')
         self.assertEqual(vacio.status_code, 200)
         self.assertTrue(vacio.content.startswith(b'%PDF'))
+
+
+class DeliveryZonasInicialesTests(TestCase):
+    def test_la_migracion_deja_las_tres_zonas_inactivas_y_sin_precio(self):
+        from varagrill.models import VGZonaDelivery
+        zonas = {z.nombre: z for z in VGZonaDelivery.objects.all()}
+        self.assertEqual(set(zonas), {'Cerca', 'Media', 'Lejos'})
+        for zona in zonas.values():
+            self.assertFalse(zona.activo)
+            self.assertEqual(zona.tarifa, Decimal('0'))
+
+
+class DeliveryCargoTests(TestCase):
+    """
+    El delivery se cobra como un cargo propio del pedido (no como producto ni ingrediente), con tres
+    tarifas por zona que el administrador configura y que la cajera puede cambiar. Ver delivery.py.
+    """
+
+    def setUp(self):
+        from varagrill.models import VGZonaDelivery
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        mesero_role, _ = VGRol.objects.get_or_create(nombre_role='Mesero')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='dl_admin', password='claveAdmin123', cedula='97000001', email='dl_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='dl_cajera', password='claveCajera123', cedula='97000002', email='dl_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.mesero = VGUsuario.objects.create_user(
+            username='dl_mesero', password='claveMesero123', cedula='97000003', email='dl_mesero@varagrill.test', id_role=mesero_role,
+        )
+        categoria = VGCategoriaProducto.objects.create(nombre='Platos DL', no_requiere_cocina=True)
+        self.plato = VGProducto.objects.create(nombre='Plato DL', categoria=categoria, precio_venta='10.00', disponible=True)
+        self.efectivo = VGMetodoPago.objects.create(nombre='Efectivo DL', moneda='USD', es_efectivo=True)
+        _set_tasa_actual('100.0000')
+        # La migracion deja Cerca/Media/Lejos inactivas y en 0: el admin les pone precio y las activa.
+        VGZonaDelivery.objects.filter(nombre='Cerca').update(tarifa=Decimal('1.00'), activo=True)
+        VGZonaDelivery.objects.filter(nombre='Media').update(tarifa=Decimal('2.00'), activo=True)
+        self.cerca = VGZonaDelivery.objects.get(nombre='Cerca')
+        self.media = VGZonaDelivery.objects.get(nombre='Media')
+        self.lejos = VGZonaDelivery.objects.get(nombre='Lejos')  # sigue inactiva
+
+    def post(self, url, payload=None, usuario=None):
+        self.client.force_login(usuario or self.cajera)
+        return self.client.post(url, data=json.dumps(payload or {}), content_type='application/json')
+
+    def crear(self, usuario=None, tipo='delivery', **extra):
+        payload = {
+            'tipo_pedido': tipo, 'cliente_nombre': 'Cliente DL',
+            'items': [{'product_id': self.plato.id, 'cantidad': 2}],
+            **extra,
+        }
+        return self.post('/api/pedidos/', payload, usuario)
+
+    def pedido(self, respuesta):
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        return VGPedido.objects.get(pk=respuesta.json()['pedido']['id'])
+
+    # --- registrar el pedido -------------------------------------------------------------------
+    def test_con_zona_cobra_la_tarifa_y_la_suma_al_total(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        self.assertEqual(pedido.subtotal, Decimal('20.00'))
+        self.assertEqual(pedido.cargo_delivery, Decimal('2.00'))
+        self.assertEqual(pedido.total, Decimal('22.00'))
+        self.assertEqual((pedido.zona_delivery_id, pedido.zona_delivery_nombre, pedido.tarifa_delivery), (self.media.id, 'Media', Decimal('2.00')))
+
+    def test_la_cajera_puede_cambiar_el_monto_y_queda_la_tarifa_original(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id, cargo_delivery='1.50'))
+        self.assertEqual(pedido.cargo_delivery, Decimal('1.50'))
+        self.assertEqual(pedido.total, Decimal('21.50'))
+        self.assertEqual(pedido.tarifa_delivery, Decimal('2.00'))
+
+    def test_la_cajera_puede_poner_un_monto_sin_zona_incluso_cero(self):
+        pedido = self.pedido(self.crear(cargo_delivery='3.25'))
+        self.assertEqual((pedido.cargo_delivery, pedido.total, pedido.zona_delivery_id), (Decimal('3.25'), Decimal('23.25'), None))
+        gratis = self.pedido(self.crear(zona_delivery_id=self.media.id, cargo_delivery='0'))
+        self.assertEqual((gratis.cargo_delivery, gratis.total), (Decimal('0.00'), Decimal('20.00')))
+
+    def test_un_mesero_solo_puede_mandar_la_tarifa_de_la_zona(self):
+        r = self.crear(usuario=self.mesero, zona_delivery_id=self.media.id, cargo_delivery='0.50')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('caja o administracion', r.json()['message'])
+        ok = self.pedido(self.crear(usuario=self.mesero, zona_delivery_id=self.media.id, cargo_delivery='2.00'))
+        self.assertEqual(ok.cargo_delivery, Decimal('2.00'))
+
+    def test_un_pedido_que_no_es_delivery_nunca_cobra_envio(self):
+        pedido = self.pedido(self.crear(tipo='llevar', zona_delivery_id=self.media.id, cargo_delivery='5'))
+        self.assertEqual((pedido.cargo_delivery, pedido.total, pedido.zona_delivery_id), (Decimal('0.00'), Decimal('20.00'), None))
+
+    def test_una_ronda_agregada_al_delivery_no_repite_el_cargo(self):
+        original = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        ronda = self.pedido(self.crear(zona_delivery_id=self.media.id, grupo_pedido_id=original.id))
+        self.assertEqual((ronda.cargo_delivery, ronda.total), (Decimal('0.00'), Decimal('20.00')))
+        self.assertEqual(original.cargo_delivery, Decimal('2.00'))
+
+    def test_rechaza_zonas_inactivas_inexistentes_y_montos_invalidos(self):
+        for extra in ({'zona_delivery_id': self.lejos.id}, {'zona_delivery_id': 999999}, {'zona_delivery_id': 'abc'},
+                      {'cargo_delivery': '-1'}, {'cargo_delivery': 'mucho'}):
+            r = self.crear(**extra)
+            self.assertEqual(r.status_code, 400, extra)
+
+    def test_delivery_sin_zona_ni_monto_no_cobra_envio_como_antes(self):
+        pedido = self.pedido(self.crear())
+        self.assertEqual((pedido.cargo_delivery, pedido.total), (Decimal('0.00'), Decimal('20.00')))
+
+    # --- editar / quitar items ------------------------------------------------------------------
+    def test_editar_el_pedido_conserva_el_cargo_y_cambiar_a_llevar_lo_quita(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        # un pedido de categoria sin cocina nace 'entregado'; se fuerza 'pendiente' para poder editarlo
+        VGPedido.objects.filter(pk=pedido.pk).update(estado='pendiente')
+        base = {'tipo_pedido': 'delivery', 'cliente_nombre': 'Cliente DL', 'items': [{'product_id': self.plato.id, 'cantidad': 3}]}
+        r = self.post(f'/api/pedidos/{pedido.id}/actualizar/', base)
+        self.assertEqual(r.status_code, 200, r.content)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.subtotal, pedido.cargo_delivery, pedido.total), (Decimal('30.00'), Decimal('2.00'), Decimal('32.00')))
+        VGPedido.objects.filter(pk=pedido.pk).update(estado='pendiente')
+        r = self.post(f'/api/pedidos/{pedido.id}/actualizar/', {**base, 'tipo_pedido': 'llevar'})
+        self.assertEqual(r.status_code, 200, r.content)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.cargo_delivery, pedido.total, pedido.zona_delivery_id), (Decimal('0.00'), Decimal('30.00'), None))
+
+    def test_quitar_un_item_no_pierde_el_cargo(self):
+        r = self.post('/api/pedidos/', {
+            'tipo_pedido': 'delivery', 'cliente_nombre': 'Cliente DL', 'zona_delivery_id': self.media.id,
+            'items': [{'product_id': self.plato.id, 'cantidad': 1}, {'product_id': self.plato.id, 'cantidad': 1, 'notas': 'otro'}],
+        })
+        pedido = self.pedido(r)
+        self.assertEqual(pedido.total, Decimal('22.00'))
+        detalle = pedido.detalles.first()
+        r = self.post(f'/api/pedidos/{pedido.id}/items/{detalle.id}/eliminar/', {'motivo': 'se equivoco'})
+        self.assertIn(r.status_code, (200, 201), r.content)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.subtotal, pedido.total), (Decimal('10.00'), Decimal('12.00')))
+
+    # --- cambiar el cargo ya registrado ---------------------------------------------------------
+    def test_caja_puede_cambiar_el_cargo_de_un_pedido_ya_registrado(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        r = self.post(f'/api/pedidos/{pedido.id}/delivery/', {'cargo_delivery': '1'})
+        self.assertEqual(r.status_code, 200, r.content)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.cargo_delivery, pedido.total, pedido.zona_delivery_nombre, pedido.tarifa_delivery),
+                         (Decimal('1.00'), Decimal('21.00'), 'Media', Decimal('2.00')))
+        r = self.post(f'/api/pedidos/{pedido.id}/delivery/', {'zona_delivery_id': self.cerca.id})
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.cargo_delivery, pedido.total, pedido.zona_delivery_nombre), (Decimal('1.00'), Decimal('21.00'), 'Cerca'))
+
+    def test_cambiar_el_cargo_valida_permiso_tipo_estado_y_ronda(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        self.assertEqual(self.post(f'/api/pedidos/{pedido.id}/delivery/', {'cargo_delivery': '1'}, self.mesero).status_code, 401)
+        self.assertEqual(self.post(f'/api/pedidos/{pedido.id}/delivery/', {}).status_code, 400)
+        self.assertEqual(self.post(f'/api/pedidos/{pedido.id}/delivery/', {'cargo_delivery': '-3'}).status_code, 400)
+        ronda = self.pedido(self.crear(grupo_pedido_id=pedido.id))
+        self.assertEqual(self.post(f'/api/pedidos/{ronda.id}/delivery/', {'cargo_delivery': '1'}).status_code, 400)
+        llevar = self.pedido(self.crear(tipo='llevar'))
+        self.assertEqual(self.post(f'/api/pedidos/{llevar.id}/delivery/', {'cargo_delivery': '1'}).status_code, 400)
+        VGPedido.objects.filter(pk=pedido.pk).update(estado='pagado')
+        self.assertEqual(self.post(f'/api/pedidos/{pedido.id}/delivery/', {'cargo_delivery': '1'}).status_code, 409)
+
+    # --- cobro, nota, cuenta del cliente y ticket ----------------------------------------------
+    def test_la_nota_de_entrega_incluye_el_delivery_como_linea_aparte(self):
+        from varagrill.impresion_lpd import _build_recibo_bytes
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        r = self.post('/api/pedidos/cobro/', {
+            'pedido_ids': [pedido.id], 'metodo_pago_id': self.efectivo.id,
+            'cliente_numero_documento': '97000111', 'cliente_nombre': 'Cliente DL',
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        nota = r.json()['nota_entrega']
+        self.assertEqual(Decimal(nota['total']), Decimal('22.00'))
+
+        detalle = self.client.get(f'/api/notas-entrega/{nota["id"]}/').json()['nota_entrega']
+        self.assertEqual(Decimal(detalle['cargo_delivery']), Decimal('2.00'))
+        self.assertEqual(detalle['zona_delivery'], 'Media')
+        # no es un item: la lista de productos de la nota no lo trae
+        self.assertEqual({item['producto'] for item in detalle['items']}, {'Plato DL'})
+
+        # el ticket suma: Subtotal 20 + Delivery (Media) 2 = TOTAL 22
+        pedido.refresh_from_db()
+        ticket = _build_recibo_bytes([pedido], self.efectivo, 'REF', Decimal('22.00'), Decimal('100.0000'), titulo='NOTA DE ENTREGA', codigo='X')
+        texto = ticket.decode('cp1252', errors='replace')
+        self.assertIn('Delivery (Media): $2.00', texto)
+        self.assertIn('Subtotal: $20.00', texto)
+        self.assertIn('TOTAL: $22.00', texto)
+
+    def test_la_cuenta_del_cliente_trae_el_delivery_como_linea(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        r = self.post('/api/prefacturas/', {'pedido_ids': [pedido.id]})
+        self.assertEqual(r.status_code, 201, r.content)
+        prefactura = r.json()['prefactura']
+        lineas = {linea['descripcion']: linea for linea in prefactura['lineas']}
+        self.assertIn('Delivery (Media)', lineas)
+        self.assertEqual(Decimal(lineas['Delivery (Media)']['precio_unitario']), Decimal('2.00'))
+        # los precios incluyen IVA: la cuenta del cliente suma lo mismo que el total del pedido (20 + 2 de delivery)
+        self.assertEqual(Decimal(prefactura['total']), Decimal('22.00'))
+
+    def test_el_delivery_no_aparece_en_cocina(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        pedido.refresh_from_db()
+        self.assertEqual([d.producto.nombre for d in pedido.detalles.all()], ['Plato DL'])
+
+    # --- zonas ----------------------------------------------------------------------------------
+    def test_las_zonas_activas_las_ve_cualquier_usuario_con_sesion(self):
+        self.client.logout()
+        self.assertEqual(self.client.get('/api/delivery/zonas/').status_code, 401)
+        self.client.force_login(self.mesero)
+        r = self.client.get('/api/delivery/zonas/').json()
+        self.assertEqual([z['nombre'] for z in r['zonas']], ['Cerca', 'Media'])
+        self.assertFalse(r['puede_cambiar_monto'])
+        self.client.force_login(self.cajera)
+        self.assertTrue(self.client.get('/api/delivery/zonas/').json()['puede_cambiar_monto'])
+        # solo el admin ve las inactivas
+        self.assertEqual(len(self.client.get('/api/delivery/zonas/?todas=1').json()['zonas']), 2)
+        self.client.force_login(self.admin)
+        self.assertEqual(len(self.client.get('/api/delivery/zonas/?todas=1').json()['zonas']), 3)
+
+    def test_el_admin_crea_edita_y_activa_zonas(self):
+        r = self.post('/api/delivery/zonas/', {'action': 'update', 'id': self.lejos.id, 'nombre': 'Lejos', 'tarifa': '3.5'}, self.cajera)
+        self.assertEqual(r.status_code, 401)
+        r = self.post('/api/delivery/zonas/', {'action': 'update', 'id': self.lejos.id, 'nombre': 'Lejos', 'tarifa': '3.5'}, self.admin)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['zona']['tarifa'], '3.50')
+        r = self.post('/api/delivery/zonas/', {'action': 'toggle', 'id': self.lejos.id}, self.admin)
+        self.assertTrue(r.json()['zona']['activo'])
+        r = self.post('/api/delivery/zonas/', {'action': 'create', 'nombre': 'Centro', 'tarifa': '0.75'}, self.admin)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.post('/api/delivery/zonas/', {'action': 'create', 'nombre': 'centro', 'tarifa': '1'}, self.admin).status_code, 400)
+        self.assertEqual(self.post('/api/delivery/zonas/', {'action': 'create', 'nombre': 'Otra', 'tarifa': '-1'}, self.admin).status_code, 400)
+        self.assertEqual(self.post('/api/delivery/zonas/', {'action': 'create', 'nombre': ' ', 'tarifa': '1'}, self.admin).status_code, 400)
+
+    def test_cambiar_la_tarifa_no_toca_los_pedidos_ya_registrados(self):
+        pedido = self.pedido(self.crear(zona_delivery_id=self.media.id))
+        self.post('/api/delivery/zonas/', {'action': 'update', 'id': self.media.id, 'nombre': 'Intermedia', 'tarifa': '9'}, self.admin)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.cargo_delivery, pedido.zona_delivery_nombre, pedido.total), (Decimal('2.00'), 'Media', Decimal('22.00')))

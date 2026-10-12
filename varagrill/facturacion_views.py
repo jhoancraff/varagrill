@@ -26,6 +26,7 @@ from .api_views import (
     _snapshot_costo_venta_detalles,
 )
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user, _is_owner_or_contador_user
+from .delivery import texto_cargo
 from .impresion_lpd import (
     imprimir_cobro_nota_entrega_caja,
     imprimir_factura_caja,
@@ -221,6 +222,16 @@ def _lineas_data_desde_pedidos(pedidos, porcentaje_iva):
                     'precio_unitario': opcion.precio_unitario,
                     'porcentaje_iva': porcentaje_iva,
                 })
+        # El cargo de delivery no es un producto: va como su propia linea para que la cuenta del cliente
+        # y la factura sumen lo mismo que el total del pedido (ver delivery.py).
+        if pedido.cargo_delivery and pedido.cargo_delivery > 0:
+            lineas.append({
+                'descripcion': texto_cargo(pedido),
+                'producto_id': None,
+                'cantidad': Decimal('1'),
+                'precio_unitario': pedido.cargo_delivery,
+                'porcentaje_iva': porcentaje_iva,
+            })
     return lineas
 
 
@@ -1056,6 +1067,12 @@ def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
         'motivo_anulacion': nota.motivo_anulacion,
         'creado_por': (nota.creado_por.get_full_name() or nota.creado_por.username) if nota.creado_por else '',
         'pedidos': [pedido.id for pedido in nota.pedidos.all()],
+        # Lo que se cobro de delivery en esta nota (ya esta dentro de `total`), para mostrarlo como linea aparte.
+        'cargo_delivery': str(sum((pedido.cargo_delivery for pedido in nota.pedidos.all()), Decimal('0'))),
+        'zona_delivery': ', '.join(sorted({
+            pedido.zona_delivery_nombre for pedido in nota.pedidos.all()
+            if pedido.cargo_delivery > 0 and pedido.zona_delivery_nombre
+        })),
     }
     if nota.estado != 'pagada':
         # Tasa que se usaria AHORA MISMO si se le registrara un abono a esta

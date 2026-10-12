@@ -81,6 +81,15 @@ const PaymentMethodsIcon = () => (
   </svg>
 );
 
+const DeliveryZonesIcon = () => (
+  <svg {...iconProps}>
+    <rect x="1" y="6" width="14" height="10" rx="1" />
+    <path d="M15 9h4l3 3v4h-7" />
+    <circle cx="6" cy="18" r="2" />
+    <circle cx="18" cy="18" r="2" />
+  </svg>
+);
+
 const FiscalDataIcon = () => (
   <svg {...iconProps}>
     <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -116,6 +125,7 @@ const analystSections = [
   { id: 'admin-chef-recommendations', title: 'Recomendaciones del Chef', icon: ChefHatIcon },
   { id: 'admin-printers', title: 'Impresoras', icon: PrinterIcon },
   { id: 'admin-payment-methods', title: 'Métodos de pago', icon: PaymentMethodsIcon },
+  { id: 'admin-delivery-zonas', title: 'Zonas de delivery', icon: DeliveryZonesIcon },
   { id: 'admin-datos-fiscales', title: 'Datos fiscales', icon: FiscalDataIcon },
   { id: 'admin-compras', title: 'Compras', icon: PurchasesIcon },
 ];

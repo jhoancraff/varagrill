@@ -663,6 +663,12 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                 </div>
 
                 <div style={detailTotalsStyle}>
+                  {Number(notaDetalle.cargo_delivery) > 0 ? (
+                    <span>
+                      Incluye delivery{notaDetalle.zona_delivery ? ` (${notaDetalle.zona_delivery})` : ''}:{' '}
+                      {textoUsdBs(notaDetalle.cargo_delivery, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
+                    </span>
+                  ) : null}
                   <span style={{ fontWeight: 800, color: '#fff' }}>
                     Total: {textoUsdBs(notaDetalle.total, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
                   </span>

@@ -67,6 +67,7 @@ from varagrill.api_views import (
     tasa_cambio_view,
 )
 from varagrill.reportes_pdf_views import (
+    reporte_cuentas_por_cobrar_pdf_view,
     reporte_cuentas_por_pagar_pdf_view,
     reporte_facturado_pdf_view,
     reporte_gastos_pdf_view,
@@ -213,6 +214,7 @@ urlpatterns = [
     path('api/admin/reportes/gastos-pdf/', reporte_gastos_pdf_view, name='admin-reporte-gastos-pdf'),
     path('api/admin/reportes/facturado-pdf/', reporte_facturado_pdf_view, name='admin-reporte-facturado-pdf'),
     path('api/admin/reportes/cuentas-por-pagar-pdf/', reporte_cuentas_por_pagar_pdf_view, name='admin-reporte-cuentas-por-pagar-pdf'),
+    path('api/admin/reportes/cuentas-por-cobrar-pdf/', reporte_cuentas_por_cobrar_pdf_view, name='admin-reporte-cuentas-por-cobrar-pdf'),
     path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),
     path('api/admin/reportes/movimiento-productos/', reporte_movimiento_productos_view, name='admin-reporte-movimiento-productos'),
     path('api/admin/reportes/flujo-bancario/', reporte_flujo_bancario_view, name='admin-reporte-flujo-bancario'),

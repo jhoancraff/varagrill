@@ -8,6 +8,7 @@ entrega el resultado con responder_pdf().
 from datetime import date
 from functools import wraps
 
+from django.db.models import Q
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import HttpResponse
 from django.utils import timezone
@@ -15,10 +16,12 @@ from django.utils import timezone
 from .api_views import HIDDEN_INGREDIENT_IDS, _costo_unitario_efectivo, _serialize_compra
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .contabilidad_views import MAX_DIAS_RANGO_CUADRE_CAJA, _parse_rango_o_fecha_reporte
+from .facturacion_views import _serialize_nota_entrega
 from .gastos_views import _parse_fecha, _serialize_gasto
-from .models import VGCompra, VGGasto, VGIngrediente
+from .models import VGCompra, VGGasto, VGIngrediente, VGNotaEntrega
 from .pdf_reportes import (
-    generar_pdf_cuentas_por_pagar, generar_pdf_facturado, generar_pdf_gastos, generar_pdf_inventario,
+    generar_pdf_cuentas_por_cobrar, generar_pdf_cuentas_por_pagar, generar_pdf_facturado, generar_pdf_gastos,
+    generar_pdf_inventario,
 )
 from .reportes import detalle_ventas_rango
 from .tasa_cambio import obtener_tasa_actual
@@ -242,6 +245,85 @@ def reporte_cuentas_por_pagar_pdf_view(request):
     nombre = ['cuentas-por-pagar', {'pendientes': 'pendientes', 'pagadas': 'pagadas', 'todos': 'todas'}[estado]]
     if tipo != 'todos':
         nombre.append('lotes' if tipo == 'compra' else 'gastos')
+    if desde and hasta:
+        nombre.append(f'{desde:%Y-%m-%d}-al-{hasta:%Y-%m-%d}')
+    elif desde:
+        nombre.append(f'desde-{desde:%Y-%m-%d}')
+    elif hasta:
+        nombre.append(f'hasta-{hasta:%Y-%m-%d}')
+    else:
+        nombre.append(f'{ahora:%Y-%m-%d}')
+    return responder_pdf(pdf, '-'.join(nombre), con_fecha=False)
+
+
+@pdf_admin_o_cajera
+def reporte_cuentas_por_cobrar_pdf_view(request):
+    """
+    PDF de cuentas por cobrar: las notas de entrega que los clientes deben (o ya pagaron), por cliente.
+
+      estado   pendientes (por defecto: pendientes y abonadas) | pagadas | todas
+      desde / hasta   opcionales, cada uno por separado; por la fecha de emision de la nota
+      cliente  texto opcional: nombre y/o apellido del cliente
+
+    Las notas anuladas nunca se incluyen (no son una cuenta por cobrar). Los montos y la tasa son
+    los de la pantalla de Notas de entrega (_serialize_nota_entrega): el saldo en Bs usa la tasa con
+    la que se cobraria hoy, que para el fiado de dias anteriores es la del BCV de hoy.
+    """
+    estado = str(request.GET.get('estado') or 'pendientes').strip().lower()
+    if estado not in ('pendientes', 'pagadas', 'todas'):
+        return _auth_response({'ok': False, 'message': 'El estado debe ser pendientes, pagadas o todas.'}, status=400)
+    try:
+        desde = date.fromisoformat(request.GET['desde']) if request.GET.get('desde') else None
+        hasta = date.fromisoformat(request.GET['hasta']) if request.GET.get('hasta') else None
+    except ValueError:
+        return _auth_response({'ok': False, 'message': 'Las fechas no son validas.'}, status=400)
+    if desde and hasta and desde > hasta:
+        return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
+    texto_cliente = ' '.join(str(request.GET.get('cliente') or '').split())
+
+    notas = (
+        VGNotaEntrega.objects.exclude(estado='anulada')
+        .select_related('cliente', 'metodo_pago', 'creado_por')
+        .prefetch_related('pedidos', 'pagos')
+        .order_by('fecha_emision', 'id')
+    )
+    if estado == 'pendientes':
+        notas = notas.filter(estado__in=['pendiente_pago', 'abonada_parcial'])
+    elif estado == 'pagadas':
+        notas = notas.filter(estado='pagada')
+    notas = _en_rango(notas, 'fecha_emision__date', desde, hasta)
+    for palabra in texto_cliente.split():
+        notas = notas.filter(Q(cliente__nombre__icontains=palabra) | Q(cliente__apellido__icontains=palabra))
+
+    tasa_actual = obtener_tasa_actual()
+    hoy = timezone.localdate()
+    filas = []
+    for nota in notas:
+        datos = _serialize_nota_entrega(nota, incluir_detalle=False, tasa_pago_actual=tasa_actual)
+        fecha = timezone.localtime(nota.fecha_emision).date()
+        pagos = [pago for pago in nota.pagos.all() if pago.estado == 'completado']
+        filas.append({
+            'id': nota.id,
+            'codigo': nota.codigo,
+            'cliente_id': nota.cliente_id,
+            'cliente': f'{nota.cliente.nombre} {nota.cliente.apellido}'.strip() if nota.cliente_id else '',
+            'fecha': fecha,
+            'estado': nota.estado,
+            'total': datos['total'],
+            'saldo': datos['saldo_pendiente'],
+            'tasa': datos.get('tasa_cobro_vigente'),
+            'saldo_bs': datos.get('saldo_pendiente_bs_vigente'),
+            'fecha_pago': (
+                timezone.localtime(max(pago.fecha_pago for pago in pagos)).date()
+                if nota.estado == 'pagada' and pagos else None
+            ),
+            'dias': (hoy - fecha).days if nota.saldo_pendiente > 0 else None,
+        })
+
+    ahora = timezone.localtime()
+    pdf = generar_pdf_cuentas_por_cobrar(filas, estado, desde, hasta, cliente=texto_cliente, generado_en=ahora)
+
+    nombre = ['cuentas-por-cobrar', estado]
     if desde and hasta:
         nombre.append(f'{desde:%Y-%m-%d}-al-{hasta:%Y-%m-%d}')
     elif desde:

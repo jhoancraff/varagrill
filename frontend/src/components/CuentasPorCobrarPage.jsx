@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
+import BotonDescargarPdf from './BotonDescargarPdf';
+import { RangoFechas } from './FiltroFechas';
 import NotasEntregaHistorialPage from './NotasEntregaHistorialPage';
 import { formatMontoDocumento } from '../utils/currency';
 
@@ -10,6 +12,11 @@ function getCookie(name) {
     return parts.pop().split(';').shift();
   }
   return '';
+}
+
+function hoyIso() {
+  const ahora = new Date();
+  return new Date(ahora.getTime() - ahora.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
 function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken }) {
@@ -31,6 +38,14 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
   const [savingAbono, setSavingAbono] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
+  // Reporte PDF (tiene sus propios filtros): las notas de entrega por cobrar, agrupadas por cliente.
+  const [reporteAbierto, setReporteAbierto] = useState(false);
+  const [reporteEstado, setReporteEstado] = useState('pendientes');
+  const [reporteCliente, setReporteCliente] = useState('');
+  const [reporteConFechas, setReporteConFechas] = useState(false);
+  const [reporteDesde, setReporteDesde] = useState(() => `${hoyIso().slice(0, 7)}-01`);
+  const [reporteHasta, setReporteHasta] = useState(hoyIso);
+  const [reporteError, setReporteError] = useState('');
 
   const fetchOrdenes = useCallback(async () => {
     try {
@@ -169,6 +184,85 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
         </label>
       ) : null}
 
+      {!embedded ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => { setReporteError(''); setReporteAbierto((abierto) => !abierto); }}
+            style={reporteToggleStyle(reporteAbierto)}
+          >
+            Reporte PDF
+          </button>
+        </div>
+      ) : null}
+
+      {!embedded && reporteAbierto ? (
+        <section style={reportePanelStyle}>
+          <div style={{ color: '#fff', fontWeight: 700 }}>Reporte de cuentas por cobrar en PDF</div>
+          <div style={reporteFiltrosStyle(isMobile)}>
+            <label style={dateFieldStyle}>
+              <span style={dateLabelStyle}>Estado</span>
+              <select
+                value={reporteEstado}
+                onChange={(event) => setReporteEstado(event.target.value)}
+                style={selectStyle}
+                className="admin-dark-select"
+              >
+                <option value="pendientes">Pendientes (incluye abonadas)</option>
+                <option value="pagadas">Pagadas</option>
+                <option value="todas">Todas</option>
+              </select>
+            </label>
+            <label style={dateFieldStyle}>
+              <span style={dateLabelStyle}>Cliente (opcional)</span>
+              <input
+                type="text"
+                value={reporteCliente}
+                onChange={(event) => setReporteCliente(event.target.value)}
+                placeholder="Nombre o apellido"
+                style={inputStyle}
+              />
+            </label>
+          </div>
+
+          <label style={reporteCheckStyle}>
+            <input
+              type="checkbox"
+              checked={reporteConFechas}
+              onChange={(event) => setReporteConFechas(event.target.checked)}
+            />
+            Filtrar por rango de fechas
+          </label>
+          {reporteConFechas ? (
+            <RangoFechas
+              desde={reporteDesde}
+              hasta={reporteHasta}
+              onChange={(rango) => { setReporteDesde(rango.desde); setReporteHasta(rango.hasta); }}
+            />
+          ) : null}
+          <div style={{ color: '#c8bbbb', fontSize: 12.5 }}>
+            Son las notas de entrega, agrupadas por cliente. El rango filtra por la fecha en que se emitió la nota; las anuladas no se incluyen.
+            El saldo en Bs usa la tasa con la que se cobraría hoy.
+          </div>
+
+          {reporteError ? <div style={errorStyle}>{reporteError}</div> : null}
+          <div>
+            <BotonDescargarPdf
+              url="/api/admin/reportes/cuentas-por-cobrar-pdf/"
+              params={{
+                estado: reporteEstado,
+                cliente: reporteCliente.trim(),
+                desde: reporteConFechas ? reporteDesde : '',
+                hasta: reporteConFechas ? reporteHasta : '',
+              }}
+              onError={setReporteError}
+            >
+              Descargar PDF
+            </BotonDescargarPdf>
+          </div>
+        </section>
+      ) : null}
+
       {!embedded && tipoReporte === 'notas_entrega' ? (
         <NotasEntregaHistorialPage isMobile={isMobile} embedded />
       ) : (
@@ -289,6 +383,16 @@ function CuentasPorCobrarPage({ isMobile, onBack, embedded = false, refreshToken
     </section>
   );
 }
+
+const reporteToggleStyle = (activo) => ({
+  border: activo ? '1px solid rgba(255, 130, 130, 0.6)' : '1px solid rgba(255, 255, 255, 0.14)',
+  borderRadius: 999, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+  background: activo ? 'rgba(255, 90, 90, 0.16)' : 'rgba(255, 255, 255, 0.03)',
+  color: activo ? '#ffb0b0' : '#d2c4c4',
+});
+const reportePanelStyle = { display: 'grid', gap: 12, padding: '16px 18px', borderRadius: 20, border: '1px solid rgba(255, 255, 255, 0.1)', background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)' };
+const reporteFiltrosStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 260px))', gap: 12 });
+const reporteCheckStyle = { display: 'flex', alignItems: 'center', gap: 8, color: '#f2e6e6', fontSize: 13, fontWeight: 700, cursor: 'pointer' };
 
 function estadoLabel(estado) {
   if (estado === 'pendiente') return 'Pendiente';

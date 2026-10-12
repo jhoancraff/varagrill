@@ -1002,6 +1002,21 @@ def reporte_margen_ganancia_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
+    return _auth_response({
+        'ok': True,
+        'desde': desde.isoformat(),
+        'hasta': hasta.isoformat(),
+        **armar_margen_ganancia_detallado(desde, hasta),
+    })
+
+
+def armar_margen_ganancia_detallado(desde, hasta):
+    """
+    Los datos de reporte_margen_ganancia_view para el rango [desde, hasta] (fechas): una seccion por
+    producto con sus ventas linea por linea y los totales del periodo. Lo usan la pantalla (JSON) y el
+    PDF del reporte, para que los dos muestren exactamente los mismos numeros. Ver el docstring de la
+    vista para el criterio de costo (historico, congelado al cobrar).
+    """
     detalles = (
         VGDetallePedido.objects
         .filter(
@@ -1153,10 +1168,7 @@ def reporte_margen_ganancia_view(request):
         (total_ganancia_general / total_ingreso_general * Decimal('100')) if total_ingreso_general > 0 else Decimal('0')
     )
 
-    return _auth_response({
-        'ok': True,
-        'desde': desde.isoformat(),
-        'hasta': hasta.isoformat(),
+    return {
         'secciones': secciones,
         'total_lineas': total_lineas_general,
         'totales': {
@@ -1166,7 +1178,7 @@ def reporte_margen_ganancia_view(request):
             'ganancia_monto': str(total_ganancia_general.quantize(Decimal('0.01'))),
             'ganancia_pct': str(total_ganancia_general_pct.quantize(Decimal('0.01'))),
         },
-    })
+    }
 
 
 class MesaListView(generics.ListAPIView):

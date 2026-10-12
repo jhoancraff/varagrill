@@ -87,9 +87,6 @@ function AnalystMargenGananciaPage({ isMobile, onBack, onVerDetalle }) {
           <button type="button" onClick={loadReport} style={printButtonStyle} disabled={loading}>
             {loading ? 'Actualizando...' : 'Actualizar'}
           </button>
-          <button type="button" onClick={() => window.print()} style={printButtonStyle}>
-            Imprimir / Guardar PDF
-          </button>
         </div>
       </div>
 

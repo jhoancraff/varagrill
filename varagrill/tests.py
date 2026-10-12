@@ -4131,3 +4131,126 @@ class EstadoResultadosCostoDeVentasTests(TestCase):
         data = self.reporte()
         self.assertEqual(data['ventas_total'], '15.00')
         self.assertEqual(data['ventas_sin_costo']['productos'], [])
+
+
+class ReporteMargenPorPlatoPdfTests(TestCase):
+    """PDF del margen de ganancia por plato (el detallado): mismos numeros que la pantalla, agrupado por plato."""
+
+    URL = '/api/admin/reportes/margen-por-plato-pdf/'
+    URL_PANTALLA = '/api/admin/reportes/margen-ganancia/'
+
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='mpdf_admin', password='claveAdmin123', cedula='96000001', email='mpdf_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='mpdf_cajera', password='claveCajera123', cedula='96000002', email='mpdf_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.hoy = timezone.localdate().isoformat()
+        categoria = VGCategoriaProducto.objects.create(nombre='Platos MPDF')
+        self.arepa = VGProducto.objects.create(nombre='Arepa MPDF', categoria=categoria, precio_venta='10.00', disponible=True)
+        self.pizza = VGProducto.objects.create(nombre='Pizza MPDF', categoria=categoria, precio_venta='30.00', disponible=True)
+        self.venta(self.arepa, cantidad=2, precio='10.00', costo='4.00')   # vende 20, cuesta 8
+        self.venta(self.arepa, cantidad=1, precio='10.00', costo='4.00')   # vende 10, cuesta 4
+        self.venta(self.pizza, cantidad=1, precio='30.00', costo='12.50')  # vende 30, cuesta 12.50
+
+    def venta(self, producto, cantidad, precio, costo):
+        subtotal = Decimal(precio) * cantidad
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='llevar', estado='pagado', subtotal=subtotal, total=subtotal)
+        VGDetallePedido.objects.create(
+            pedido=pedido, producto=producto, cantidad=cantidad, precio_unitario=Decimal(precio), estado='entregado',
+            costo_unitario_venta=Decimal(costo), margen_produccion_pct_venta=Decimal('0'),
+        )
+
+    def pedir(self, usuario=None, **params):
+        from unittest import mock
+        self.client.force_login(usuario or self.admin)
+        params.setdefault('desde', self.hoy)
+        params.setdefault('hasta', self.hoy)
+        with mock.patch('varagrill.reportes_pdf_views.generar_pdf_margen_por_plato', return_value=b'%PDF-falso') as generar:
+            r = self.client.get(self.URL, params)
+        return r, generar
+
+    def test_solo_lo_descarga_un_administrador_y_solo_por_get(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        r, _ = self.pedir(usuario=self.cajera)
+        self.assertEqual(r.status_code, 401)
+        r, _ = self.pedir()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.post(self.URL).status_code, 405)
+
+    def test_rechaza_rango_invertido_rango_largo_y_plato_invalido(self):
+        for params in (
+            {'desde': '2026-09-11', 'hasta': '2026-09-10'},
+            {'desde': '2026-01-01', 'hasta': '2026-12-31'},
+            {'desde': 'no-es-fecha', 'hasta': '2026-09-10'},
+            {'producto_id': 'abc'},
+        ):
+            r, generar = self.pedir(**params)
+            self.assertEqual(r.status_code, 400, params)
+            generar.assert_not_called()
+
+    def test_un_plato_sin_ventas_en_el_rango_da_404(self):
+        otro = VGProducto.objects.create(nombre='Sin ventas MPDF', categoria=self.arepa.categoria, precio_venta='5.00', disponible=True)
+        r, generar = self.pedir(producto_id=otro.id)
+        self.assertEqual(r.status_code, 404)
+        generar.assert_not_called()
+
+    def test_el_pdf_lleva_los_mismos_totales_y_secciones_que_la_pantalla(self):
+        self.client.force_login(self.admin)
+        pantalla = self.client.get(self.URL_PANTALLA, {'desde': self.hoy, 'hasta': self.hoy}).json()
+        r, generar = self.pedir()
+        self.assertEqual(r.status_code, 200)
+        secciones, totales, total_lineas, desde, hasta = generar.call_args.args
+        self.assertEqual(secciones, pantalla['secciones'])
+        self.assertEqual(totales, pantalla['totales'])
+        self.assertEqual(total_lineas, pantalla['total_lineas'])
+        self.assertEqual(totales['ingreso_total'], '60.00')
+        self.assertEqual(totales['costo_con_margen_total'], '24.50')
+        self.assertEqual(totales['ganancia_monto'], '35.50')
+        self.assertEqual({s['nombre'] for s in secciones}, {'Arepa MPDF', 'Pizza MPDF'})
+
+    def test_con_producto_id_solo_va_ese_plato_con_sus_propios_totales(self):
+        r, generar = self.pedir(producto_id=self.arepa.id)
+        self.assertEqual(r.status_code, 200)
+        secciones, totales, total_lineas, _desde, _hasta = generar.call_args.args
+        self.assertEqual([s['nombre'] for s in secciones], ['Arepa MPDF'])
+        self.assertEqual(total_lineas, 2)
+        self.assertEqual(totales['ingreso_total'], '30.00')
+        self.assertEqual(totales['costo_con_margen_total'], '12.00')
+        self.assertEqual(totales['ganancia_monto'], '18.00')
+
+    def test_genera_un_pdf_de_verdad_con_nombre_de_archivo_del_rango(self):
+        self.client.force_login(self.admin)
+        r = self.client.get(self.URL, {'desde': self.hoy, 'hasta': self.hoy})
+        self.assertEqual(r.status_code, 200, r.content[:200])
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        self.assertTrue(r.content.startswith(b'%PDF'))
+        self.assertIn('margen-por-plato', r['Content-Disposition'])
+
+    def test_los_platos_con_muchas_ventas_se_parten_en_bloques_con_su_nombre(self):
+        from varagrill.pdf_reportes.margen_por_plato import FILAS_POR_BLOQUE, armar_secciones_margen_por_plato
+        cantidad = FILAS_POR_BLOQUE * 2 + 5
+        fila = {
+            'detalle_id': 1, 'pedido_id': 7, 'nota_entrega_codigo': None, 'fecha_hora': '2026-10-01T12:00:00-04:00',
+            'cantidad': '1', 'peso_gramos': None, 'unidad': 'unidad', 'ingreso': '10.00', 'costo': '4.00',
+            'costo_con_margen': '4.00', 'ganancia_monto': '6.00', 'ganancia_pct': '60.00',
+            'costo_estimado': False, 'margen_estimado': False,
+        }
+        seccion = {
+            'producto_id': 1, 'nombre': 'Plato largo', 'categoria': 'Platos', 'filas': [dict(fila) for _ in range(cantidad)],
+            'total_unidades': str(cantidad), 'total_kg': '0', 'total_ingreso': '10.00', 'total_costo': '4.00',
+            'total_costo_con_margen': '4.00', 'total_ganancia_monto': '6.00', 'total_ganancia_pct': '60.00',
+            'total_lineas': cantidad, 'tiene_costo_estimado': False, 'tiene_margen_estimado': False,
+        }
+        totales = {
+            'ingreso_total': '10.00', 'costo_total': '4.00', 'costo_con_margen_total': '4.00',
+            'ganancia_monto': '6.00', 'ganancia_pct': '60.00',
+        }
+        bloques = armar_secciones_margen_por_plato([seccion], totales)[1:]  # el primero es el resumen
+        self.assertEqual(len(bloques), 3)
+        self.assertEqual([b.titulo for b in bloques], ['Plato largo', 'Plato largo (continúa)', 'Plato largo (continúa)'])
+        self.assertEqual(sum(len(b.filas) for b in bloques), cantidad)
+        self.assertEqual([b.fila_total is not None for b in bloques], [False, False, True])

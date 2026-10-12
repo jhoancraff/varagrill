@@ -1,0 +1,299 @@
+/* Cobro: pestañas, vista de dos columnas y colores propios de la pantalla (ver CheckoutPage.jsx).
+
+   La pantalla fija su propia escala de grises para que el texto sea siempre legible:
+     --cb-title  titulos, numeros y totales
+     --cb-text   items, cliente y textos secundarios
+     --cb-muted  notas y ayudas
+   y re-define dentro de .vg-cobro las variables de texto neutro del tema para que tambien las
+   tablas/historiales embebidos (notas de entrega, cuentas por cobrar, facturas) las usen. */
+
+.vg-cobro {
+  --cb-title: #f8fafc;
+  --cb-text: #cbd5e1;
+  --cb-muted: #94a3b8;
+  --cb-card-bg: linear-gradient(180deg, var(--vg-s-2e1919-a950) 0%, var(--vg-s-180e0e-a970) 100%);
+  --cb-card-border: rgba(255, 255, 255, 0.12);
+  --cb-card-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  --cb-row-bg: rgba(255, 255, 255, 0.03);
+  --cb-row-border: rgba(255, 255, 255, 0.1);
+  --cb-input-bg: var(--vg-s-161010);
+  --cb-input-border: rgba(255, 255, 255, 0.16);
+  --cb-active-bg: rgba(var(--vg-accent-rgb), 0.12);
+  --cb-active-border: var(--vg-accent-primary);
+
+  --vg-text-strong: var(--cb-title);
+  --vg-text-main: var(--cb-title);
+  --vg-text-secondary: var(--cb-text);
+  --vg-f-e6dcdc: var(--cb-title);
+  --vg-f-e6e6e6: var(--cb-title);
+  --vg-f-e8dede: var(--cb-title);
+  --vg-f-e9fff0: var(--cb-title);
+  --vg-f-eadede: var(--cb-title);
+  --vg-f-f2e6e6: var(--cb-title);
+  --vg-f-ffeaea: var(--cb-title);
+  --vg-f-fff4f4: var(--cb-title);
+  --vg-f-999999: var(--cb-text);
+  --vg-f-9a9a9a: var(--cb-text);
+  --vg-f-a89999: var(--cb-text);
+  --vg-f-aa9999: var(--cb-text);
+  --vg-f-c2adad: var(--cb-text);
+  --vg-f-c6c6c6: var(--cb-text);
+  --vg-f-c7b8b8: var(--cb-text);
+  --vg-f-c7c7c7: var(--cb-text);
+  --vg-f-c8bbbb: var(--cb-text);
+  --vg-f-c9c9c9: var(--cb-text);
+  --vg-f-cccccc: var(--cb-text);
+  --vg-f-cfb8b8: var(--cb-text);
+  --vg-f-d0c4c4: var(--cb-text);
+  --vg-f-d2c3c3: var(--cb-text);
+  --vg-f-d2c4c4: var(--cb-text);
+  --vg-f-d3cfcf: var(--cb-text);
+  --vg-f-d8c8c8: var(--cb-text);
+  --vg-f-d8cfcf: var(--cb-text);
+  --vg-f-dddddd: var(--cb-text);
+  --vg-f-e0e0e0: var(--cb-text);
+  --vg-f-8a7a7a: var(--cb-muted);
+  --vg-f-8c7f7f: var(--cb-muted);
+  --vg-f-8f7676: var(--cb-muted);
+  --vg-f-8f8080: var(--cb-muted);
+  --vg-f-9a8686: var(--cb-muted);
+}
+
+[data-theme="light"] .vg-cobro {
+  --cb-title: #0f172a;
+  --cb-text: #334155;
+  --cb-muted: #475569;
+  --cb-card-bg: #ffffff;
+  --cb-card-border: #e2e8f0;
+  --cb-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 16px rgba(15, 23, 42, 0.06);
+  --cb-row-bg: #f8fafc;
+  --cb-row-border: #e2e8f0;
+  --cb-input-bg: #ffffff;
+  --cb-input-border: #cbd5e1;
+  --cb-active-bg: rgba(var(--vg-accent-rgb), 0.07);
+  /* Los importes en ambar (pensados para fondo oscuro) pasan a grafito */
+  --vg-f-ffcf7d: var(--cb-title);
+  --vg-f-e0c9a3: var(--cb-title);
+}
+
+/* ── Pestañas ───────────────────────────────────────────────────────────── */
+.vg-cobro-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--cb-row-bg);
+  border: 1px solid var(--cb-row-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.vg-cobro-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.vg-cobro-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cb-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.vg-cobro-tab:hover {
+  color: var(--cb-title);
+  background: rgba(var(--vg-ink), 0.05);
+}
+
+.vg-cobro-tab.is-active {
+  color: var(--cb-title);
+  background: var(--cb-card-bg);
+  border-color: var(--cb-card-border);
+  box-shadow: var(--cb-card-shadow);
+}
+
+.vg-cobro-tab__count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--vg-accent-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+/* ── Cobro de mesas: lista a la izquierda, ticket a la derecha ─────────── */
+.vg-cobro-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.38fr) minmax(0, 0.62fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.vg-cobro-lista {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--cb-card-bg);
+  border: 1px solid var(--cb-card-border);
+  box-shadow: var(--cb-card-shadow);
+}
+
+.vg-cobro-lista__items {
+  display: grid;
+  gap: 6px;
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}
+
+.vg-cobro-mesa {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--cb-row-border);
+  background: var(--cb-row-bg);
+  color: var(--cb-title);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.vg-cobro-mesa:hover {
+  border-color: rgba(var(--vg-accent-rgb), 0.5);
+}
+
+.vg-cobro-mesa.is-active {
+  border-color: var(--cb-active-border);
+  background: var(--cb-active-bg);
+  box-shadow: inset 3px 0 0 var(--cb-active-border);
+}
+
+.vg-cobro-mesa__nombre {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cb-title);
+}
+
+.vg-cobro-mesa__total {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--cb-title);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.vg-cobro-mesa__meta {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--cb-text);
+}
+
+.vg-cobro-ticket {
+  min-width: 0;
+}
+
+.vg-cobro-vacio {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  padding: 20px;
+  border-radius: 16px;
+  border: 1px dashed var(--cb-row-border);
+  color: var(--cb-text);
+  text-align: center;
+}
+
+.vg-cobro-volver {
+  display: none;
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--cb-row-border);
+  background: var(--cb-row-bg);
+  color: var(--cb-title);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Cliente: cedula, nombre y apellido en una sola fila */
+.vg-cobro-cliente {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Totalizador */
+.vg-cobro-total {
+  display: grid;
+  gap: 2px;
+}
+
+.vg-cobro-total__label {
+  color: var(--cb-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vg-cobro-total__monto {
+  color: var(--cb-title);
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+/* Pantallas de menos de 768px: una sola columna. Con una mesa abierta se oculta la lista y
+   aparece "← Mesas" para volver a ella. */
+@media (max-width: 767px) {
+  .vg-cobro-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vg-cobro-split--abierta .vg-cobro-lista {
+    display: none;
+  }
+
+  .vg-cobro-split:not(.vg-cobro-split--abierta) .vg-cobro-vacio {
+    display: none;
+  }
+
+  .vg-cobro-volver {
+    display: inline-flex;
+  }
+
+  .vg-cobro-lista__items {
+    max-height: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .vg-cobro-cliente {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vg-cobro-tab,
+  .vg-cobro-mesa {
+    transition: none;
+  }
+}

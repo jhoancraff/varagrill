@@ -8,6 +8,7 @@ import FacturasHistorialPage from './FacturasHistorialPage';
 import MoneyInput from './MoneyInput';
 import NotasEntregaHistorialPage from './NotasEntregaHistorialPage';
 import Toast from './Toast';
+import './CheckoutPage.css';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 import { formatBs, formatMontoDocumento } from '../utils/currency';
@@ -150,6 +151,8 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
   const [pendingConfirm, setPendingConfirm] = useState(null);
   const [mesaQuery, setMesaQuery] = useState('');
   const [selectedGroupKey, setSelectedGroupKey] = useState('');
+  // Pestaña activa de la pantalla: 'cobro' | 'notas' | 'propinas' | 'cuentas' | 'facturas'.
+  const [activeTab, setActiveTab] = useState('cobro');
 
   const toggleExpanded = (pedidoId) => {
     setExpandedOrderIds((current) => {
@@ -987,8 +990,17 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     setPendingConfirm(null);
   };
 
+  const tabs = [
+    { id: 'cobro', icon: '💳', label: 'Cobro de Mesas', count: groups.length },
+    { id: 'notas', icon: '📋', label: 'Notas de Entrega' },
+    { id: 'propinas', icon: '🪙', label: 'Propinas & Pagos Extra' },
+    { id: 'cuentas', icon: '📑', label: 'Cuentas por Cobrar' },
+    ...(FACTURACION_HABILITADA ? [{ id: 'facturas', icon: '📜', label: 'Facturas' }] : []),
+  ];
+  const panelStyle = (id) => ({ display: activeTab === id ? 'grid' : 'none', gap: 12 });
+
   return (
-    <section style={containerStyle(isMobile)}>
+    <section className="vg-cobro" style={containerStyle(isMobile)}>
       <div style={headerWrapStyle(isMobile)}>
         <div>
           <div style={eyebrowStyle}>Cobro</div>
@@ -1001,74 +1013,91 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
 
       <Toast toast={toast} onClose={hideToast} />
 
-      {loading ? <div style={emptyStateStyle}>Cargando pedidos...</div> : null}
-      {!loading && error ? <div style={errorStyle}>{error}</div> : null}
+      <div className="vg-cobro-tabs no-print" role="tablist" aria-label="Secciones de cobro">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            className={`vg-cobro-tab${activeTab === tab.id ? ' is-active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <span aria-hidden="true">{tab.icon}</span>
+            {tab.label}
+            {tab.count > 0 ? <span className="vg-cobro-tab__count">{tab.count}</span> : null}
+          </button>
+        ))}
+      </div>
 
-      {!loading && !error && groups.length === 0 ? (
-        <div style={emptyStateStyle}>No hay pedidos listos para cobrar en este momento.</div>
-      ) : null}
+      <div role="tabpanel" style={panelStyle('cobro')}>
+        {loading ? <div style={emptyStateStyle}>Cargando pedidos...</div> : null}
+        {!loading && error ? <div style={errorStyle}>{error}</div> : null}
 
-      {!loading && !error && groups.length > 0 ? (
-        <div style={cobroPickerWrapStyle}>
-          <div style={mesaSearchBoxStyle}>
-            <input
-              type="text"
-              value={mesaQuery}
-              onChange={(event) => setMesaQuery(event.target.value)}
-              placeholder="Buscar mesa por número o por cliente..."
-              style={mesaSearchInputStyle}
-            />
+        {!loading && !error && groups.length === 0 ? (
+          <div style={emptyStateStyle}>No hay pedidos listos para cobrar en este momento.</div>
+        ) : null}
 
-            {!selectedGroup || mesaQueryTerm ? (
-              <div style={mesaOptionsListStyle}>
+        {!loading && !error && groups.length > 0 ? (
+          <div className={`vg-cobro-split${selectedGroup ? ' vg-cobro-split--abierta' : ''}`}>
+            <aside className="vg-cobro-lista" aria-label="Mesas pendientes de cobro">
+              <input
+                type="text"
+                value={mesaQuery}
+                onChange={(event) => setMesaQuery(event.target.value)}
+                placeholder="Buscar mesa por número o por cliente..."
+                style={mesaSearchInputStyle}
+              />
+
+              <div className="vg-cobro-lista__items">
                 {filteredGroups.length === 0 ? (
                   <div style={mesaOptionEmptyStyle}>No se encontraron mesas con ese criterio.</div>
                 ) : (
                   filteredGroups.map((group) => {
                     const groupTotal = group.pedidos.reduce((sum, pedido) => sum + Number(pedido.total), 0);
-                    const isCurrent = selectedGroup && selectedGroup.key === group.key;
+                    const isCurrent = Boolean(selectedGroup && selectedGroup.key === group.key);
                     return (
                       <button
                         key={group.key}
                         type="button"
+                        className={`vg-cobro-mesa${isCurrent ? ' is-active' : ''}`}
+                        aria-pressed={isCurrent}
                         onClick={() => handleSelectGroup(group)}
-                        style={isCurrent ? mesaOptionRowActiveStyle : mesaOptionRowStyle}
                       >
-                        <span style={{ fontWeight: 700, color: 'var(--vg-text-strong)' }}>{group.label}</span>
-                        <span style={mesaOptionMetaStyle}>{group.pedidos.length} pedido(s) · ${groupTotal.toFixed(2)}</span>
+                        <span className="vg-cobro-mesa__nombre">{group.label}</span>
+                        <span className="vg-cobro-mesa__total">
+                          ${groupTotal.toFixed(2)}
+                          <BsAmount amountUsd={groupTotal} tasa={tasaCambio} />
+                        </span>
+                        <span className="vg-cobro-mesa__meta">{group.pedidos.length} pedido(s)</span>
                       </button>
                     );
                   })
                 )}
               </div>
-            ) : (
-              <button type="button" onClick={handleClearSelection} style={selectedMesaChipStyle}>
-                <span style={{ fontWeight: 700, color: 'var(--vg-text-strong)' }}>{selectedGroup.label}</span>
-                <span style={mesaOptionMetaStyle}>
-                  {selectedGroup.pedidos.length} pedido(s) · ${selectedGroupFullTotal.toFixed(2)}
-                </span>
-                <span style={selectedMesaChipClearStyle}>Cambiar ✕</span>
-              </button>
-            )}
-          </div>
+            </aside>
 
-          {selectedGroup ? (
-            <article style={groupCardStyle}>
-                <div style={groupHeaderStyle}>
-                  <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 17 }}>{selectedGroup.label}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={groupCountStyle}>{selectedGroup.pedidos.length} pedido(s)</span>
-                    {selectedGroup.pedidos.length > 1 && selectedSet.size < selectedGroup.pedidos.length ? (
-                      <button
-                        type="button"
-                        onClick={() => selectAllInGroup(selectedGroup)}
-                        style={selectAllButtonStyle}
-                      >
-                        Seleccionar todos los pedidos
-                      </button>
-                    ) : null}
+            <div className="vg-cobro-ticket">
+              {selectedGroup ? (
+                <article style={groupCardStyle}>
+                  <button type="button" className="vg-cobro-volver" onClick={handleClearSelection}>
+                    ← Mesas
+                  </button>
+                  <div style={groupHeaderStyle}>
+                    <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 18 }}>{selectedGroup.label}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <span style={groupCountStyle}>{selectedGroup.pedidos.length} pedido(s)</span>
+                      {selectedGroup.pedidos.length > 1 && selectedSet.size < selectedGroup.pedidos.length ? (
+                        <button
+                          type="button"
+                          onClick={() => selectAllInGroup(selectedGroup)}
+                          style={selectAllButtonStyle}
+                        >
+                          Seleccionar todos los pedidos
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
 
                 <div style={ordersScrollStyle}>
                   {selectedGroup.pedidos.map((pedido) => {
@@ -1184,7 +1213,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                 {!prefactura ? (
                   <div style={footerSectionStyle}>
                     <div style={clienteSeccionTituloStyle}>Cliente</div>
-                    <div style={clienteFormStyle}>
+                    <div className="vg-cobro-cliente">
                       <input
                         placeholder="Cédula *"
                         value={notaCliente.cedula}
@@ -1193,15 +1222,15 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                         style={inputStyle}
                       />
                       <input
-                        placeholder="Apellido"
-                        value={notaCliente.apellido}
-                        onChange={(event) => updateNotaCliente(selectedGroup.key, 'apellido', event.target.value)}
-                        style={inputStyle}
-                      />
-                      <input
                         placeholder="Nombre *"
                         value={notaCliente.nombre}
                         onChange={(event) => updateNotaCliente(selectedGroup.key, 'nombre', event.target.value)}
+                        style={inputStyle}
+                      />
+                      <input
+                        placeholder="Apellido"
+                        value={notaCliente.apellido}
+                        onChange={(event) => updateNotaCliente(selectedGroup.key, 'apellido', event.target.value)}
                         style={inputStyle}
                       />
                     </div>
@@ -1215,7 +1244,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     {FACTURACION_HABILITADA ? (
                       <>
                         <div style={clienteSeccionTituloStyle}>Cliente — factura</div>
-                        <div style={clienteFormStyle}>
+                        <div className="vg-cobro-cliente">
                           <input
                             placeholder="Cliente (opcional)"
                             value={cliente.nombre}
@@ -1266,9 +1295,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     ) : null}
 
                     <div style={groupFooterStyle(isMobile)}>
-                      <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
-                        Total seleccionado: ${selectedTotal.toFixed(2)}
-                        <BsAmount amountUsd={selectedTotal} tasa={tasaGrupo} />
+                      <div className="vg-cobro-total">
+                        <span className="vg-cobro-total__label">Total seleccionado</span>
+                        <span className="vg-cobro-total__monto">
+                          ${selectedTotal.toFixed(2)}
+                          <BsAmount amountUsd={selectedTotal} tasa={tasaGrupo} />
+                        </span>
                       </div>
                       {FACTURACION_HABILITADA ? (
                         <select
@@ -1392,16 +1424,20 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                     </div>
                   </div>
                 )}
-            </article>
-          ) : null}
-        </div>
-      ) : null}
+                </article>
+              ) : (
+                <div className="vg-cobro-vacio">Selecciona una mesa de la lista para ver su cuenta y cobrarla.</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
 
-      <div style={cuentasPorCobrarWrapStyle}>
+      <div style={panelStyle('notas')}>
         <NotasEntregaHistorialPage isMobile={isMobile} embedded refreshToken={notasRefreshToken} onArmarCanje={onArmarCanje} />
       </div>
 
-      <div style={cuentasPorCobrarWrapStyle}>
+      <div style={panelStyle('propinas')}>
         <div style={ingresoExtraButtonsRowStyle(isMobile)}>
           <button type="button" onClick={() => setIngresoModalTipo('propina')} style={propinaButtonStyle}>
             + Registrar propina
@@ -1439,13 +1475,15 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
         )}
       </div>
 
-      <div style={cuentasPorCobrarWrapStyle}>
+      <div style={panelStyle('cuentas')}>
         <CuentasPorCobrarPage isMobile={isMobile} embedded refreshToken={cuentasRefreshToken} />
       </div>
 
-      <div style={cuentasPorCobrarWrapStyle}>
-        <FacturasHistorialPage isMobile={isMobile} embedded />
-      </div>
+      {FACTURACION_HABILITADA ? (
+        <div style={panelStyle('facturas')}>
+          <FacturasHistorialPage isMobile={isMobile} embedded />
+        </div>
+      ) : null}
 
       <ConfirmModal
         open={Boolean(pendingConfirm)}
@@ -1794,7 +1832,7 @@ function tipoPedidoLabel(tipoPedido) {
 
 const containerStyle = (isMobile) => ({
   display: 'grid',
-  gap: 16,
+  gap: 12,
   padding: isMobile ? 4 : 8,
 });
 
@@ -1811,13 +1849,13 @@ const eyebrowStyle = {
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
   color: 'var(--vg-f-f7a5a5)',
-  marginBottom: 8,
+  marginBottom: 4,
 };
 
 const titleStyle = (isMobile) => ({
   margin: 0,
   color: 'var(--vg-text-strong)',
-  fontSize: isMobile ? 26 : 32,
+  fontSize: isMobile ? 22 : 26,
   fontWeight: 700,
 });
 
@@ -1859,61 +1897,15 @@ const errorStyle = {
   color: 'var(--vg-f-ffd8d8)',
 };
 
-const cobroPickerWrapStyle = {
-  display: 'grid',
-  gap: 14,
-  maxWidth: 640,
-};
-
-const mesaSearchBoxStyle = {
-  display: 'grid',
-  gap: 8,
-};
-
 const mesaSearchInputStyle = {
   width: '100%',
   boxSizing: 'border-box',
-  borderRadius: 14,
-  border: '1px solid rgba(var(--vg-ink), 0.16)',
-  background: 'var(--vg-s-161010)',
-  padding: '12px 14px',
-  color: 'var(--vg-f-fff4f4)',
-  fontSize: 15,
-};
-
-const mesaOptionsListStyle = {
-  display: 'grid',
-  gap: 6,
-  maxHeight: 360,
-  overflowY: 'auto',
-};
-
-const mesaOptionRowStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  gap: 10,
-  width: '100%',
-  textAlign: 'left',
-  border: '1px solid rgba(var(--vg-ink), 0.1)',
-  borderRadius: 14,
-  padding: '12px 14px',
-  background: 'rgba(var(--vg-ink), 0.03)',
-  color: 'var(--vg-text-strong)',
-  cursor: 'pointer',
-};
-
-const mesaOptionRowActiveStyle = {
-  ...mesaOptionRowStyle,
-  border: '1px solid var(--vg-f-34d399-a500)',
-  background: 'rgba(52, 211, 153, 0.08)',
-};
-
-const mesaOptionMetaStyle = {
-  color: 'var(--vg-f-ffcf7d)',
-  fontSize: 13,
-  fontWeight: 700,
-  flexShrink: 0,
+  borderRadius: 10,
+  border: '1px solid var(--cb-input-border)',
+  background: 'var(--cb-input-bg)',
+  padding: '9px 12px',
+  color: 'var(--cb-title)',
+  fontSize: 14,
 };
 
 const mesaOptionEmptyStyle = {
@@ -1925,36 +1917,15 @@ const mesaOptionEmptyStyle = {
   fontSize: 13,
 };
 
-const selectedMesaChipStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  gap: 10,
-  width: '100%',
-  textAlign: 'left',
-  border: '1px solid rgba(var(--vg-ink), 0.16)',
-  borderRadius: 14,
-  padding: '12px 14px',
-  background: 'rgba(var(--vg-ink), 0.05)',
-  cursor: 'pointer',
-};
-
-const selectedMesaChipClearStyle = {
-  color: 'var(--vg-f-ffb0b0)',
-  fontSize: 12,
-  fontWeight: 700,
-  flexShrink: 0,
-};
-
 const groupCardStyle = {
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  padding: '18px 18px',
-  borderRadius: 20,
-  background: 'linear-gradient(180deg, var(--vg-s-2e1919-a950) 0%, var(--vg-s-180e0e-a970) 100%)',
-  border: '1px solid rgba(var(--vg-ink), 0.14)',
-  boxShadow: '0 12px 28px rgba(0, 0, 0, calc(0.24 * var(--vg-shadow-k)))',
+  padding: '16px',
+  borderRadius: 16,
+  background: 'var(--cb-card-bg)',
+  border: '1px solid var(--cb-card-border)',
+  boxShadow: 'var(--cb-card-shadow)',
 };
 
 const groupHeaderStyle = {
@@ -1991,8 +1962,8 @@ const groupCountStyle = {
 
 const orderCardStyle = {
   borderRadius: 12,
-  border: '1px solid rgba(var(--vg-ink), 0.08)',
-  background: 'rgba(var(--vg-ink), 0.03)',
+  border: '1px solid var(--cb-row-border)',
+  background: 'var(--cb-row-bg)',
   overflow: 'hidden',
   flexShrink: 0,
 };
@@ -2185,10 +2156,10 @@ const groupFooterStyle = (isMobile) => ({
 
 const selectStyle = {
   borderRadius: 12,
-  border: '1px solid rgba(var(--vg-ink), 0.14)',
-  background: 'var(--vg-s-161010)',
+  border: '1px solid var(--cb-input-border)',
+  background: 'var(--cb-input-bg)',
   padding: '9px 10px',
-  color: 'var(--vg-f-fff4f4)',
+  color: 'var(--cb-title)',
   fontSize: 13,
 };
 
@@ -2200,12 +2171,6 @@ const checkoutButtonStyle = {
   color: '#04140a',
   fontWeight: 800,
   cursor: 'pointer',
-};
-
-const clienteFormStyle = {
-  display: 'grid',
-  gridTemplateColumns: '1fr',
-  gap: 8,
 };
 
 const tasaCuentaAvisoStyle = {
@@ -2256,10 +2221,10 @@ const inputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 12,
-  border: '1px solid rgba(var(--vg-ink), 0.14)',
-  background: 'var(--vg-s-161010)',
+  border: '1px solid var(--cb-input-border)',
+  background: 'var(--cb-input-bg)',
   padding: '9px 10px',
-  color: 'var(--vg-f-fff4f4)',
+  color: 'var(--cb-title)',
   fontSize: 13,
 };
 
@@ -2304,12 +2269,6 @@ const lineaRowStyle = {
   justifyContent: 'space-between',
   fontSize: 13,
   color: 'var(--vg-f-e8dede)',
-};
-
-const cuentasPorCobrarWrapStyle = {
-  marginTop: 8,
-  paddingTop: 20,
-  borderTop: '1px solid rgba(var(--vg-ink), 0.1)',
 };
 
 const ingresoExtraButtonsRowStyle = (isMobile) => ({
@@ -2458,10 +2417,10 @@ const ingresoInputStyle = {
   width: '100%',
   boxSizing: 'border-box',
   borderRadius: 12,
-  border: '1px solid rgba(var(--vg-ink), 0.14)',
-  background: 'var(--vg-s-161010)',
+  border: '1px solid var(--cb-input-border)',
+  background: 'var(--cb-input-bg)',
   padding: '10px 12px',
-  color: 'var(--vg-f-fff4f4)',
+  color: 'var(--cb-title)',
   fontSize: 14,
   fontWeight: 400,
 };

@@ -2,14 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import BsAmount from './BsAmount';
 import { RangoFechas } from './FiltroFechas';
 import useExchangeRate from '../hooks/useExchangeRate';
-import { setAbrirCuentasPorPagarEnPagadas } from '../utils/fechaContabilidad';
-
-// Nombre exacto de la categoría sintética que arma reporte_estado_resultados_view
-// para las compras a proveedores pagadas en el período (ver contabilidad_views.py) —
-// es el único chip que no corresponde a una categoría real de VGGasto, así que
-// necesita su propio link de detalle (a Cuentas por pagar) en vez del genérico
-// "Ver detalle" que solo lista gastos operativos.
-const CATEGORIA_COMPRAS_PAGADAS = 'Compras a proveedores (pagadas)';
 
 function toIso(date) {
   const offset = date.getTimezoneOffset();
@@ -65,6 +57,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
   }, [desde, hasta, loadReport]);
 
   const utilidadNetaPositiva = data ? Number(data.utilidad_neta) >= 0 : true;
+  const utilidadBrutaPositiva = data ? Number(data.utilidad_bruta) >= 0 : true;
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -109,6 +102,40 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
             </div>
             <div style={lineRowStyle}>
               <span style={lineLabelStyle}>
+                (−) Costo de ventas
+                {onNavigate ? (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('margen-ganancia')}
+                    style={verDetalleGastosButtonStyle}
+                    className="no-print"
+                  >
+                    Ver detalle →
+                  </button>
+                ) : null}
+              </span>
+              <span style={{ ...lineValueStyle, color: '#ff9d9d' }}>
+                −${formatMonto(data.costo_ventas)}
+                <BsAmount amountUsd={data.costo_ventas} bs={data.costo_ventas_bs} tasa={tasaCambio} />
+              </span>
+            </div>
+            {Number(data.costo_lineas_estimadas) > 0 ? (
+              <div style={avisoStyle}>
+                {data.costo_lineas_estimadas} línea(s) vendida(s) no tienen el costo guardado al cobrar (ventas antiguas):
+                para esas se usa el costo actual de la receta.
+              </div>
+            ) : null}
+
+            <div style={subtotalRowStyle(utilidadBrutaPositiva)}>
+              <span style={{ ...lineLabelStyle, fontWeight: 800 }}>= Utilidad bruta</span>
+              <span style={{ fontSize: 17, fontWeight: 800, color: utilidadBrutaPositiva ? '#8fffb0' : '#ff9d9d', whiteSpace: 'nowrap' }}>
+                ${formatMonto(data.utilidad_bruta)} ({formatMonto(data.utilidad_bruta_pct)}%)
+                <BsAmount amountUsd={data.utilidad_bruta} bs={data.utilidad_bruta_bs ?? undefined} tasa={tasaCambio} style={{ opacity: 0.85 }} />
+              </span>
+            </div>
+
+            <div style={lineRowStyle}>
+              <span style={lineLabelStyle}>
                 (−) Gastos operativos
                 {onNavigate ? (
                   <button
@@ -130,25 +157,9 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
             {data.gastos_por_categoria.length > 0 ? (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 12 }}>
                 {data.gastos_por_categoria.map((entry) => (
-                  entry.categoria_nombre === CATEGORIA_COMPRAS_PAGADAS && onNavigate ? (
-                    <button
-                      key={entry.categoria_nombre}
-                      type="button"
-                      onClick={() => {
-                        setAbrirCuentasPorPagarEnPagadas(desde, hasta);
-                        onNavigate('cuentas-pagar');
-                      }}
-                      style={categoriaChipButtonStyle}
-                      className="no-print"
-                      title="Ver qué facturas de compra componen este monto"
-                    >
-                      {entry.categoria_nombre}: ${formatMonto(entry.total)} →
-                    </button>
-                  ) : (
-                    <span key={entry.categoria_nombre} style={categoriaChipStyle}>
-                      {entry.categoria_nombre}: ${formatMonto(entry.total)}
-                    </span>
-                  )
+                  <span key={entry.categoria_nombre} style={categoriaChipStyle}>
+                    {entry.categoria_nombre}: ${formatMonto(entry.total)}
+                  </span>
                 ))}
               </div>
             ) : null}
@@ -159,6 +170,11 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
                 ${formatMonto(data.utilidad_neta)} ({formatMonto(data.utilidad_neta_pct)}%)
                 <BsAmount amountUsd={data.utilidad_neta} bs={data.utilidad_neta_bs ?? undefined} tasa={tasaCambio} style={{ opacity: 0.85 }} />
               </span>
+            </div>
+
+            <div style={avisoStyle}>
+              Las compras a proveedores (lotes) no se suman aquí: su costo ya está dentro del costo de ventas, que sale del costo
+              de cada producto vendido. Lo que se les pagó se ve en Cuentas por pagar.
             </div>
           </div>
         </section>
@@ -180,7 +196,12 @@ const lineRowStyle = { display: 'flex', justifyContent: 'space-between', alignIt
 const lineLabelStyle = { color: '#d2c3c3', fontSize: 14.5 };
 const lineValueStyle = { color: '#fff', fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap' };
 const categoriaChipStyle = { display: 'inline-flex', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: '#c8bbbb', background: 'rgba(255,255,255,0.06)' };
-const categoriaChipButtonStyle = { ...categoriaChipStyle, border: '1px solid rgba(255,157,157,0.35)', color: '#ff9d9d', cursor: 'pointer' };
+const avisoStyle = { color: '#a89999', fontSize: 12.5, lineHeight: 1.5 };
+const subtotalRowStyle = (positive) => ({
+  display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '10px 14px', borderRadius: 12,
+  background: 'rgba(255,255,255,0.04)',
+  border: positive ? '1px solid rgba(80, 200, 130, 0.22)' : '1px solid rgba(255, 145, 145, 0.25)',
+});
 const finalRowStyle = (positive) => ({
   display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginTop: 4, padding: '14px 16px', borderRadius: 14,
   background: positive ? 'rgba(70, 200, 120, 0.12)' : 'rgba(255, 98, 98, 0.12)',

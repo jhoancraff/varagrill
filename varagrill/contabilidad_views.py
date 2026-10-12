@@ -8,13 +8,20 @@ dos archivos seguiera creciendo junto por cosas sin relacion.
 import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from .api_views import _serialize_detalle_adicionales, _serialize_detalle_opciones
+from .api_views import (
+    _costo_con_margen_detalle,
+    _costo_unitario_efectivo,
+    _load_preparation_cost_map,
+    _serialize_detalle_adicionales,
+    _serialize_detalle_opciones,
+)
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .models import (
     VGAbonoCompra,
@@ -23,7 +30,9 @@ from .models import (
     VGConsignacionCaja,
     VGCorreccionMetodoPago,
     VGDetallePedido,
+    VGConfiguracionCosteo,
     VGGasto,
+    VGIngrediente,
     VGIngresoExtra,
     VGLotePOS,
     VGMetodoPago,
@@ -1732,20 +1741,21 @@ def reporte_conciliacion_bancaria_view(request):
 # ---------------------------------------------------------------------------
 def reporte_estado_resultados_view(request):
     """
-    Ventas − gastos operativos = utilidad neta, para un rango de fechas. Las
-    ventas son el total cobrado de las notas de entrega pagadas o abonadas
-    parcialmente, por fecha de emision; las pendientes y anuladas no se
-    incluyen. Suma VGGasto por fecha_gasto (no por fecha de pago: un gasto cuenta para el
-    periodo en que se incurrio, se haya pagado ya o no) para los gastos
-    operativos.
+    Ventas − costo de ventas = utilidad bruta; utilidad bruta − gastos operativos = utilidad neta,
+    para un rango de fechas.
 
-    Las facturas de compra a proveedores (VGCompra, inventario subido por Excel)
-    tambien se suman aca como si fueran un gasto mas, por fecha_pago de cada
-    VGAbonoCompra (cuando de verdad se abono/pago, no cuando se cargo la
-    factura).
+    - Ventas: el total cobrado de las notas de entrega pagadas o abonadas parcialmente, por fecha de
+      emision; las pendientes y anuladas no se incluyen.
+    - Costo de ventas: el costo de cada producto que se vendio en esas notas, con el mismo criterio
+      del reporte de margen por plato (costo de receta congelado al cobrar, con el margen de
+      produccion; ver _costo_con_margen_detalle). En una nota abonada a medias cuenta la misma
+      fraccion del costo que de la venta cobrada.
+    - Gastos operativos: VGGasto por fecha_gasto (no por fecha de pago: un gasto cuenta para el
+      periodo en que se incurrio, se haya pagado ya o no).
 
-    IMPORTANTE: el reporte no resta el costo teorico de ingredientes por receta;
-    ese costeo sigue disponible en el reporte de margen por plato.
+    Las compras a proveedores (lotes, por Excel o manuales) NO suman: su costo ya entra por el
+    costo de lo vendido, asi que sumarlas aqui contaria el mismo ingrediente dos veces. Ver el
+    detalle de lo que se les pago en Cuentas por pagar.
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1763,19 +1773,55 @@ def reporte_estado_resultados_view(request):
     if desde > hasta:
         return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
-    notas_cobradas = VGNotaEntrega.objects.filter(
-        fecha_emision__date__gte=desde,
-        fecha_emision__date__lte=hasta,
-        estado__in=['pagada', 'abonada_parcial'],
+    notas_cobradas = (
+        VGNotaEntrega.objects.filter(
+            fecha_emision__date__gte=desde,
+            fecha_emision__date__lte=hasta,
+            estado__in=['pagada', 'abonada_parcial'],
+        )
+        .prefetch_related('pedidos__detalles__producto')
     )
+    # Costos actuales de ingredientes/preparaciones: solo como ultimo recurso para lineas viejas sin costo
+    # congelado (ver _costo_con_margen_detalle). Se cargan una sola vez.
+    ingredient_costs = {
+        row['id']: _costo_unitario_efectivo(row['costo_unitario'], row['precio_compra'], row['peso_real'])
+        for row in VGIngrediente.objects.values('id', 'costo_unitario', 'precio_compra', 'peso_real')
+    }
+    preparation_cost_map = _load_preparation_cost_map()
+    costo_puro_cache = {}
+    config_sin_rendimiento = SimpleNamespace(rendimiento_receta_pct=Decimal('0'))
+    margen_produccion_actual = VGConfiguracionCosteo.obtener_config().rendimiento_receta_pct or Decimal('0')
+
     ventas_total = Decimal('0')
     ventas_total_bs = Decimal('0')
+    costo_ventas = Decimal('0')
+    costo_ventas_bs = Decimal('0')
+    lineas_costo_estimado = 0
     for nota in notas_cobradas:
         monto_cobrado = nota.total - nota.saldo_pendiente
         ventas_total += monto_cobrado
         tasa = nota.tasa_cambio_referencia or tasa_para_fecha(timezone.localdate(nota.fecha_emision))
         if tasa:
             ventas_total_bs += monto_cobrado * tasa
+
+        costo_nota = Decimal('0')
+        for pedido in nota.pedidos.all():
+            for detalle in pedido.detalles.all():
+                peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
+                costo_unitario, estimado = _costo_con_margen_detalle(
+                    detalle, costo_puro_cache, ingredient_costs, preparation_cost_map,
+                    config_sin_rendimiento, margen_produccion_actual,
+                )
+                costo_nota += costo_unitario * Decimal(detalle.cantidad) * peso_factor
+                if estimado:
+                    lineas_costo_estimado += 1
+        # Una nota abonada a medias cuenta solo la parte cobrada de la venta: el costo, la misma parte.
+        if nota.total > 0:
+            costo_nota *= min(Decimal('1'), monto_cobrado / nota.total)
+        costo_ventas += costo_nota
+        if tasa:
+            # A la tasa de esa misma venta, igual que sus bolivares de venta (el costo no tiene tasa propia).
+            costo_ventas_bs += costo_nota * tasa
 
     gastos = VGGasto.objects.filter(fecha_gasto__gte=desde, fecha_gasto__lte=hasta).select_related('categoria')
 
@@ -1796,27 +1842,6 @@ def reporte_estado_resultados_view(request):
             monto_bs = gasto.monto * gasto.tasa_cambio_referencia
             gastos_total_bs += monto_bs
             entry['total_bs'] += monto_bs
-    # Abonos a compras de proveedores pagados DENTRO del rango (por fecha_pago,
-    # no por cuándo se cargó la factura) — se agrupan bajo una categoría
-    # sintética para que aparezcan en el mismo desglose que los gastos.
-    abonos_compra = VGAbonoCompra.objects.filter(
-        fecha_pago__date__gte=desde, fecha_pago__date__lte=hasta,
-    ).select_related('compra')
-    compras_pagadas_total = Decimal('0')
-    compras_pagadas_total_bs = Decimal('0')
-    for abono in abonos_compra:
-        compras_pagadas_total += abono.monto
-        if abono.tasa_cambio_referencia:
-            compras_pagadas_total_bs += abono.monto * abono.tasa_cambio_referencia
-    if compras_pagadas_total > 0:
-        gastos_total += compras_pagadas_total
-        gastos_total_bs += compras_pagadas_total_bs
-        totales_por_categoria['__compras_proveedores'] = {
-            'categoria_nombre': 'Compras a proveedores (pagadas)',
-            'total': compras_pagadas_total,
-            'total_bs': compras_pagadas_total_bs,
-        }
-
     gastos_por_categoria = sorted(
         [
             {
@@ -1829,8 +1854,11 @@ def reporte_estado_resultados_view(request):
         key=lambda item: Decimal(item['total']), reverse=True,
     )
 
-    utilidad_neta_bs = ventas_total_bs - gastos_total_bs
-    utilidad_neta = ventas_total - gastos_total
+    utilidad_bruta = ventas_total - costo_ventas
+    utilidad_bruta_bs = ventas_total_bs - costo_ventas_bs
+    utilidad_bruta_pct = (utilidad_bruta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
+    utilidad_neta_bs = utilidad_bruta_bs - gastos_total_bs
+    utilidad_neta = utilidad_bruta - gastos_total
     utilidad_neta_pct = (utilidad_neta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
 
     return _auth_response({
@@ -1839,6 +1867,13 @@ def reporte_estado_resultados_view(request):
         'hasta': hasta.isoformat(),
         'ventas_total': str(ventas_total.quantize(Decimal('0.01'))),
         'ventas_total_bs': str(ventas_total_bs.quantize(Decimal('0.01'))),
+        'costo_ventas': str(costo_ventas.quantize(Decimal('0.01'))),
+        'costo_ventas_bs': str(costo_ventas_bs.quantize(Decimal('0.01'))),
+        # Lineas vendidas sin costo congelado al cobrar (ventas viejas): su costo es el actual, estimado.
+        'costo_lineas_estimadas': lineas_costo_estimado,
+        'utilidad_bruta': str(utilidad_bruta.quantize(Decimal('0.01'))),
+        'utilidad_bruta_bs': str(utilidad_bruta_bs.quantize(Decimal('0.01'))),
+        'utilidad_bruta_pct': str(utilidad_bruta_pct.quantize(Decimal('0.01'))),
         'gastos_total': str(gastos_total.quantize(Decimal('0.01'))),
         'gastos_total_bs': str(gastos_total_bs.quantize(Decimal('0.01'))),
         'gastos_por_categoria': gastos_por_categoria,

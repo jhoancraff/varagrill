@@ -1,7 +1,7 @@
 const iconProps = {
   viewBox: '0 0 24 24',
-  width: 26,
-  height: 26,
+  width: 18,
+  height: 18,
   fill: 'none',
   stroke: 'currentColor',
   strokeWidth: 2,
@@ -134,74 +134,93 @@ const analystSections = [
 // de rol común no las ve, ver WelcomeScreen.jsx (canSeeCartasRestringidas).
 const CARTAS_RESTRINGIDAS = ['admin-printers', 'admin-datos-fiscales', 'admin-compras'];
 
+// Cómo se agrupan las secciones en pantalla. Solo lista ids de analystSections: una sección
+// que el usuario no puede ver (cartas restringidas) simplemente no se dibuja, y un grupo sin
+// secciones visibles tampoco.
+const analystGroups = [
+  {
+    id: 'menu-produccion',
+    title: 'Menú & Producción',
+    ids: ['admin-products', 'admin-recipes', 'admin-preparations', 'admin-configuracion-costeo', 'admin-promotions', 'admin-chef-recommendations'],
+  },
+  {
+    id: 'operacion-local',
+    title: 'Operación del local',
+    ids: ['admin-mesas', 'admin-users', 'admin-printers', 'admin-delivery-zonas'],
+  },
+  {
+    id: 'pagos-administracion',
+    title: 'Pagos & Administración',
+    ids: ['admin-payment-methods', 'admin-compras', 'admin-datos-fiscales'],
+  },
+];
+
 function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas }) {
   const visibleSections = canSeeCartasRestringidas
     ? analystSections
     : analystSections.filter((section) => !CARTAS_RESTRINGIDAS.includes(section.id));
+  const sectionsById = new Map(visibleSections.map((section) => [section.id, section]));
+  const groups = analystGroups
+    .map((group) => ({ ...group, sections: group.ids.filter((id) => sectionsById.has(id)).map((id) => sectionsById.get(id)) }))
+    .filter((group) => group.sections.length > 0);
+
+  const renderTile = (section) => {
+    const SectionIcon = section.icon;
+    const isRestricted = CARTAS_RESTRINGIDAS.includes(section.id);
+    return (
+      <button
+        key={section.id}
+        type="button"
+        className="vg-admin-tile"
+        onClick={() => onNavigate(section.id)}
+        style={{
+          ...tileStyle,
+          borderLeft: isRestricted ? '3px solid var(--vg-f-ffc832-a500)' : tileStyle.border,
+        }}
+        aria-label={isRestricted ? `${section.title} (restringido)` : section.title}
+      >
+        <span style={tileIconStyle} aria-hidden="true">
+          <SectionIcon />
+        </span>
+        <span style={tileTitleStyle}>{section.title}</span>
+        {isRestricted ? <span style={restrictedPillStyle}>Restringido</span> : null}
+        <span style={tileChevronStyle} aria-hidden="true">›</span>
+      </button>
+    );
+  };
 
   return (
     <>
       <style>{`
-        .vg-admin-card {
-          transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+        .vg-admin-tile {
+          transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
         }
-        .vg-admin-card:hover {
-          transform: translateY(-3px);
-          box-shadow: 0 20px 48px rgba(0, 0, 0, calc(0.38 * var(--vg-shadow-k))) !important;
-          border-color: var(--vg-f-ff6464-a220) !important;
+        .vg-admin-tile:hover {
+          background: rgba(var(--vg-accent-rgb), 0.08) !important;
+          border-color: rgba(var(--vg-accent-rgb), 0.3) !important;
+          transform: translateY(-1px);
+        }
+        .vg-admin-tile:focus-visible {
+          outline: 2px solid var(--vg-f-ff7d7d);
+          outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .vg-admin-tile { transition: none; }
+          .vg-admin-tile:hover { transform: none; }
         }
       `}</style>
       <section style={panelContainerStyle(isMobile)}>
-        <div style={heroStyle}>
-          <div style={heroBadgeStyle}>Panel del analista</div>
-          <h2 style={titleStyle(isMobile)}>Elige un área de trabajo</h2>
-        </div>
+        <h2 style={titleStyle(isMobile)}>Panel del analista</h2>
 
-        <div style={gridStyle(isMobile)}>
-          {visibleSections.map((section) => {
-            const SectionIcon = section.icon;
-            const isRestricted = CARTAS_RESTRINGIDAS.includes(section.id);
-            return (
-              <button
-                key={section.id}
-                type="button"
-                className="vg-admin-card"
-                onClick={() => onNavigate(section.id)}
-                style={{
-                  ...cardButtonStyle,
-                  borderLeft: isRestricted ? '3px solid var(--vg-f-ffc832-a500)' : '3px solid transparent',
-                }}
-              >
-                <div style={cardHeaderStyle}>
-                  <span style={cardIconWrapStyle} aria-hidden="true">
-                    <SectionIcon />
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div style={cardTitleStyle}>{section.title}</div>
-                    {isRestricted && (
-                      <span style={{
-                        display: 'inline-block',
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '0.1em',
-                        textTransform: 'uppercase',
-                        color: 'var(--vg-f-ffd700)',
-                        background: 'rgba(255, 215, 0, 0.1)',
-                        border: '1px solid var(--vg-f-ffd700-a250)',
-                        borderRadius: 999,
-                        padding: '2px 8px',
-                        marginTop: 4,
-                      }}>
-                        Restringido
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span style={cardLinkStyle}>Abrir sección →</span>
-              </button>
-            );
-          })}
-        </div>
+        {groups.map((group) => (
+          <section key={group.id} style={groupStyle} aria-label={group.title}>
+            <div style={groupHeadingStyle}>
+              <span>{group.title}</span>
+              <span style={groupRuleStyle} aria-hidden="true" />
+            </div>
+            <div style={gridStyle(isMobile)}>{group.sections.map(renderTile)}</div>
+          </section>
+        ))}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button type="button" onClick={onBack} style={backButtonStyle}>
@@ -215,104 +234,100 @@ function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas
 
 const panelContainerStyle = (isMobile) => ({
   display: 'grid',
-  gap: 22,
+  gap: 18,
   width: '100%',
   padding: isMobile ? 4 : 8,
   boxSizing: 'border-box',
 });
 
-const heroStyle = {
-  display: 'grid',
-  gap: 12,
-  padding: '24px clamp(18px, 3vw, 32px)',
-  borderRadius: 28,
-  background: 'linear-gradient(145deg, var(--vg-s-601111-a960) 0%, var(--vg-s-180808-a920) 100%)',
-  border: '1px solid var(--vg-f-ff6e6e-a220)',
-  boxShadow: '0 18px 48px rgba(0, 0, 0, calc(0.28 * var(--vg-shadow-k)))',
-};
-
-const heroBadgeStyle = {
-  display: 'inline-flex',
-  width: 'fit-content',
-  padding: '7px 12px',
-  borderRadius: 999,
-  background: 'rgba(var(--vg-ink), 0.08)',
-  color: 'var(--vg-f-ffb0b0)',
-  fontSize: 12,
-  fontWeight: 800,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-};
-
 const titleStyle = (isMobile) => ({
   margin: 0,
   color: 'var(--vg-f-fff4f4)',
-  fontSize: isMobile ? 30 : 38,
-  lineHeight: 1.05,
+  fontSize: isMobile ? 20 : 22,
+  fontWeight: 700,
+  lineHeight: 1.2,
 });
 
-const subtitleStyle = {
-  margin: 0,
-  maxWidth: 720,
-  color: 'var(--vg-f-f1cfcf)',
-  lineHeight: 1.6,
-  fontSize: 15,
+const groupStyle = {
+  display: 'grid',
+  gap: 10,
+};
+
+const groupHeadingStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  color: 'rgba(var(--vg-ink), 0.55)',
+  fontSize: 12.5,
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+};
+
+const groupRuleStyle = {
+  flex: 1,
+  height: 1,
+  background: 'rgba(var(--vg-ink), 0.08)',
 };
 
 const gridStyle = (isMobile) => ({
   display: 'grid',
-  gridTemplateColumns: isMobile
-    ? '1fr'
-    : 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
-  gap: 16,
+  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
+  gap: 10,
 });
 
-const cardButtonStyle = {
-  display: 'grid',
-  gap: 12,
-  textAlign: 'left',
-  padding: '24px 22px',
-  borderRadius: 24,
-  border: '1px solid rgba(var(--vg-ink), 0.1)',
-  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
-  color: 'var(--vg-text-strong)',
-  cursor: 'pointer',
-  boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.24 * var(--vg-shadow-k)))',
-};
-
-const cardHeaderStyle = {
+const tileStyle = {
   display: 'flex',
   alignItems: 'center',
-  gap: 14,
+  gap: 12,
+  width: '100%',
+  minWidth: 0,
+  padding: '10px 14px',
+  borderRadius: 12,
+  background: 'rgba(var(--vg-ink), 0.03)',
+  border: '1px solid rgba(var(--vg-ink), 0.07)',
+  color: 'var(--vg-text-main)',
+  textAlign: 'left',
+  cursor: 'pointer',
+  boxSizing: 'border-box',
 };
 
-const cardIconWrapStyle = {
+const tileIconStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 44,
-  height: 44,
+  width: 34,
+  height: 34,
   flexShrink: 0,
-  borderRadius: 14,
-  background: 'rgba(255, 102, 102, 0.14)',
-  color: 'var(--vg-f-ff8f8f)',
+  borderRadius: 10,
+  background: 'rgba(var(--vg-accent-rgb), 0.1)',
+  color: 'var(--vg-f-ff7d7d)',
 };
 
-const cardTitleStyle = {
-  fontSize: 22,
-  fontWeight: 700,
-};
-
-const cardDescriptionStyle = {
-  color: 'var(--vg-f-d0c4c4)',
-  lineHeight: 1.6,
+const tileTitleStyle = {
+  flex: 1,
+  minWidth: 0,
   fontSize: 14,
+  fontWeight: 600,
+  color: 'var(--vg-text-main)',
 };
 
-const cardLinkStyle = {
-  color: 'var(--vg-f-ff8f8f)',
+const restrictedPillStyle = {
+  flexShrink: 0,
+  fontSize: 10,
   fontWeight: 700,
-  letterSpacing: '0.04em',
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: 'var(--vg-f-ffd700)',
+  background: 'rgba(255, 215, 0, 0.1)',
+  border: '1px solid var(--vg-f-ffd700-a250)',
+  borderRadius: 999,
+  padding: '2px 8px',
+};
+
+const tileChevronStyle = {
+  color: 'rgba(var(--vg-ink), 0.25)',
+  fontSize: 20,
+  lineHeight: 1,
 };
 
 const backButtonStyle = {

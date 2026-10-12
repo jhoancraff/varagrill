@@ -3,8 +3,8 @@ import { limpiarFechaSeleccionada, limpiarRangoSeleccionado } from '../utils/fec
 
 const iconProps = {
   viewBox: '0 0 24 24',
-  width: 26,
-  height: 26,
+  width: 18,
+  height: 18,
   fill: 'none',
   stroke: 'currentColor',
   strokeWidth: 2,
@@ -161,6 +161,33 @@ const reportSections = [
   { id: 'admin-ingredients', title: 'Inventario', icon: IngredientsIcon },
 ];
 
+// Cómo se agrupan los reportes en pantalla. Cada grupo solo lista ids de reportSections: una opción
+// que no exista (p. ej. la conciliación mientras está oculta) simplemente no se dibuja.
+const reportGroups = [
+  {
+    id: 'caja-bancos',
+    title: 'Caja & Bancos (Operación diaria)',
+    ids: [
+      'contabilidad-cuadre-caja',
+      'contabilidad-cuadre-caja-rango',
+      'contabilidad-disponibilidad-cuentas',
+      'flujo-bancario',
+      'contabilidad-lotes-pos',
+      'contabilidad-conciliacion-bancaria',
+    ],
+  },
+  {
+    id: 'cuentas-tesoreria',
+    title: 'Cuentas & Tesorería',
+    ids: ['cuentas-cobrar', 'cuentas-pagar', 'gastos-operativos', 'estado-resultados'],
+  },
+  {
+    id: 'auditoria-inventario',
+    title: 'Auditoría & Inventario',
+    ids: ['facturas-historial', 'margen-ganancia', 'movimiento-productos', 'admin-ingredients'],
+  },
+];
+
 function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
   const [cuentasPorPagarCount, setCuentasPorPagarCount] = useState(0);
   const [cuentasPorCobrarCount, setCuentasPorCobrarCount] = useState(0);
@@ -202,77 +229,104 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
 
   const badgeCounts = { cuentasPorPagar: cuentasPorPagarCount, cuentasPorCobrar: cuentasPorCobrarCount };
   const visibleSections = onlyCardIds ? reportSections.filter((section) => onlyCardIds.includes(section.id)) : reportSections;
+  const visibleIds = new Set(visibleSections.map((section) => section.id));
+  const sectionsById = new Map(visibleSections.map((section) => [section.id, section]));
+  // Sin onlyCardIds se muestran los tres grupos con su subtítulo; con él (cajera) solo las tarjetas
+  // permitidas, sin títulos de grupo que quedarían vacíos o con una sola opción.
+  const groups = onlyCardIds
+    ? []
+    : reportGroups
+      .map((group) => ({ ...group, sections: group.ids.filter((id) => visibleIds.has(id)).map((id) => sectionsById.get(id)) }))
+      .filter((group) => group.sections.length > 0);
+
+  const handleOpen = (section) => {
+    if (section.id === 'contabilidad-cuadre-caja') {
+      // Entrar desde esta tarjeta es un arranque nuevo del cuadre
+      // diario — debe mostrar hoy, no la fecha que haya quedado
+      // guardada de una visita anterior a algún reporte de
+      // detalle. Esa fecha guardada solo debe sobrevivir cuando
+      // se vuelve AL cuadre DESDE un detalle (botón Volver), lo
+      // cual no pasa por acá. Tambien se limpia el rango
+      // guardado, para que esos mismos 4 reportes de detalle no
+      // se queden en "modo rango" de una visita anterior al
+      // cuadre por rango.
+      limpiarFechaSeleccionada();
+      limpiarRangoSeleccionado();
+    } else if (section.id === 'contabilidad-cuadre-caja-rango') {
+      // Mismo razonamiento que arriba pero al reves: arrancar de
+      // nuevo el cuadre por rango no debe arrastrar un rango
+      // viejo, y los 4 reportes de detalle no deben quedarse en
+      // "modo dia" de una visita anterior al cuadre diario.
+      limpiarRangoSeleccionado();
+      limpiarFechaSeleccionada();
+    }
+    onNavigate(section.id);
+  };
+
+  const renderTile = (section) => {
+    const SectionIcon = section.icon;
+    const badgeCount = section.badgeKey ? badgeCounts[section.badgeKey] : 0;
+    return (
+      <button
+        key={section.id}
+        type="button"
+        className="vg-conta-tile"
+        onClick={() => handleOpen(section)}
+        style={tileStyle}
+        aria-label={badgeCount > 0 ? `${section.title}, ${badgeCount} pendientes` : section.title}
+      >
+        <span style={tileIconStyle} aria-hidden="true">
+          <SectionIcon />
+        </span>
+        <span style={tileTitleStyle}>{section.title}</span>
+        {badgeCount > 0 ? <span style={tileBadgeStyle}>{badgeCount}</span> : null}
+        <span style={tileChevronStyle} aria-hidden="true">›</span>
+      </button>
+    );
+  };
 
   return (
     <>
       <style>{`
-        .vg-admin-card {
-          transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+        .vg-conta-tile {
+          transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
         }
-        .vg-admin-card:hover {
-          transform: translateY(-3px);
-          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.38) !important;
-          border-color: rgba(255, 100, 100, 0.22) !important;
+        .vg-conta-tile:hover {
+          background: rgba(255, 77, 77, 0.08) !important;
+          border-color: rgba(255, 77, 77, 0.3) !important;
+          transform: translateY(-1px);
+        }
+        .vg-conta-tile:focus-visible {
+          outline: 2px solid #ff7d7d;
+          outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .vg-conta-tile { transition: none; }
+          .vg-conta-tile:hover { transform: none; }
         }
       `}</style>
       <section style={panelContainerStyle(isMobile)}>
-      <div style={heroStyle}>
-        <div style={heroBadgeStyle}>Contabilidad</div>
         <h2 style={titleStyle(isMobile)}>Reportes contables</h2>
-      </div>
 
-      <div style={gridStyle(isMobile)}>
-        {visibleSections.map((section) => {
-          const SectionIcon = section.icon;
-          const badgeCount = section.badgeKey ? badgeCounts[section.badgeKey] : 0;
-          return (
-            <button
-              key={section.id}
-              type="button"
-              className="vg-admin-card"
-              onClick={() => {
-                if (section.id === 'contabilidad-cuadre-caja') {
-                  // Entrar desde esta tarjeta es un arranque nuevo del cuadre
-                  // diario — debe mostrar hoy, no la fecha que haya quedado
-                  // guardada de una visita anterior a algún reporte de
-                  // detalle. Esa fecha guardada solo debe sobrevivir cuando
-                  // se vuelve AL cuadre DESDE un detalle (botón Volver), lo
-                  // cual no pasa por acá. Tambien se limpia el rango
-                  // guardado, para que esos mismos 4 reportes de detalle no
-                  // se queden en "modo rango" de una visita anterior al
-                  // cuadre por rango.
-                  limpiarFechaSeleccionada();
-                  limpiarRangoSeleccionado();
-                } else if (section.id === 'contabilidad-cuadre-caja-rango') {
-                  // Mismo razonamiento que arriba pero al reves: arrancar de
-                  // nuevo el cuadre por rango no debe arrastrar un rango
-                  // viejo, y los 4 reportes de detalle no deben quedarse en
-                  // "modo dia" de una visita anterior al cuadre diario.
-                  limpiarRangoSeleccionado();
-                  limpiarFechaSeleccionada();
-                }
-                onNavigate(section.id);
-              }}
-              style={cardButtonStyle}
-            >
-              {badgeCount > 0 ? <span style={cardBadgeStyle}>{badgeCount}</span> : null}
-              <div style={cardHeaderStyle}>
-                <span style={cardIconWrapStyle} aria-hidden="true">
-                  <SectionIcon />
-                </span>
-                <div style={cardTitleStyle}>{section.title}</div>
+        {onlyCardIds ? (
+          <div style={gridStyle(isMobile)}>{visibleSections.map(renderTile)}</div>
+        ) : (
+          groups.map((group) => (
+            <section key={group.id} style={groupStyle} aria-label={group.title}>
+              <div style={groupHeadingStyle}>
+                <span>{group.title}</span>
+                <span style={groupRuleStyle} aria-hidden="true" />
               </div>
-              <span style={cardLinkStyle}>Abrir reporte</span>
-            </button>
-          );
-        })}
-      </div>
+              <div style={gridStyle(isMobile)}>{group.sections.map(renderTile)}</div>
+            </section>
+          ))
+        )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button type="button" onClick={onBack} style={backButtonStyle}>
-          Volver al inicio
-        </button>
-      </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onBack} style={backButtonStyle}>
+            Volver al inicio
+          </button>
+        </div>
       </section>
     </>
   );
@@ -280,123 +334,101 @@ function ContabilidadPanelPage({ isMobile, onBack, onNavigate, onlyCardIds }) {
 
 const panelContainerStyle = (isMobile) => ({
   display: 'grid',
-  gap: 22,
+  gap: 18,
   width: '100%',
   padding: isMobile ? 4 : 8,
   boxSizing: 'border-box',
 });
 
-const heroStyle = {
-  display: 'grid',
-  gap: 12,
-  padding: '24px clamp(18px, 3vw, 32px)',
-  borderRadius: 28,
-  background: 'linear-gradient(145deg, rgba(96, 17, 17, 0.96) 0%, rgba(24, 8, 8, 0.92) 100%)',
-  border: '1px solid rgba(255, 110, 110, 0.22)',
-  boxShadow: '0 18px 48px rgba(0, 0, 0, 0.28)',
-};
-
-const heroBadgeStyle = {
-  display: 'inline-flex',
-  width: 'fit-content',
-  padding: '7px 12px',
-  borderRadius: 999,
-  background: 'rgba(255, 255, 255, 0.08)',
-  color: '#ffb0b0',
-  fontSize: 12,
-  fontWeight: 800,
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-};
-
 const titleStyle = (isMobile) => ({
   margin: 0,
   color: '#fff4f4',
-  fontSize: isMobile ? 30 : 38,
-  lineHeight: 1.05,
+  fontSize: isMobile ? 20 : 22,
+  fontWeight: 700,
+  lineHeight: 1.2,
 });
 
-const subtitleStyle = {
-  margin: 0,
-  maxWidth: 720,
-  color: '#f1cfcf',
-  lineHeight: 1.6,
-  fontSize: 15,
+const groupStyle = {
+  display: 'grid',
+  gap: 10,
+};
+
+const groupHeadingStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  color: 'rgba(255, 255, 255, 0.55)',
+  fontSize: 12.5,
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+};
+
+const groupRuleStyle = {
+  flex: 1,
+  height: 1,
+  background: 'rgba(255, 255, 255, 0.08)',
 };
 
 const gridStyle = (isMobile) => ({
   display: 'grid',
-  gridTemplateColumns: isMobile
-    ? '1fr'
-    : 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))',
-  gap: 16,
+  gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
+  gap: 10,
 });
 
-const cardButtonStyle = {
-  position: 'relative',
-  display: 'grid',
+const tileStyle = {
+  display: 'flex',
+  alignItems: 'center',
   gap: 12,
+  width: '100%',
+  minWidth: 0,
+  padding: '10px 14px',
+  borderRadius: 12,
+  background: 'rgba(255, 255, 255, 0.03)',
+  border: '1px solid rgba(255, 255, 255, 0.07)',
+  color: '#f5f5f5',
   textAlign: 'left',
-  padding: '24px 22px',
-  borderRadius: 24,
-  border: '1px solid rgba(255, 255, 255, 0.1)',
-  background: 'linear-gradient(180deg, rgba(20, 10, 10, 0.95) 0%, rgba(8, 8, 8, 0.98) 100%)',
-  color: '#fff',
   cursor: 'pointer',
-  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.24)',
+  boxSizing: 'border-box',
 };
 
-const cardBadgeStyle = {
-  position: 'absolute',
-  top: -10,
-  right: -10,
-  minWidth: 28,
-  height: 28,
-  padding: '0 6px',
+const tileIconStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 34,
+  height: 34,
+  flexShrink: 0,
+  borderRadius: 10,
+  background: 'rgba(255, 77, 77, 0.1)',
+  color: '#ff7d7d',
+};
+
+const tileTitleStyle = {
+  flex: 1,
+  minWidth: 0,
+  fontSize: 14,
+  fontWeight: 600,
+  color: '#f5f5f5',
+};
+
+const tileBadgeStyle = {
+  minWidth: 22,
+  height: 22,
+  padding: '0 7px',
   display: 'grid',
   placeItems: 'center',
   borderRadius: 999,
   background: '#ff5c5c',
   color: '#2a0505',
   fontWeight: 800,
-  fontSize: 13,
-  boxShadow: '0 4px 12px rgba(255, 92, 92, 0.5)',
-  animation: 'pendingPulse 1.1s ease-in-out infinite',
+  fontSize: 12,
+  boxSizing: 'border-box',
 };
 
-const cardHeaderStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 14,
-};
-
-const cardIconWrapStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 44,
-  height: 44,
-  flexShrink: 0,
-  borderRadius: 14,
-  background: 'rgba(255, 102, 102, 0.14)',
-  color: '#ff8f8f',
-};
-
-const cardTitleStyle = {
-  fontSize: 22,
-  fontWeight: 700,
-};
-
-const cardDescriptionStyle = {
-  color: '#d0c4c4',
-  lineHeight: 1.6,
-  fontSize: 14,
-};
-
-const cardLinkStyle = {
-  color: '#ff8f8f',
-  fontWeight: 700,
-  letterSpacing: '0.04em',
+const tileChevronStyle = {
+  color: 'rgba(255, 255, 255, 0.25)',
+  fontSize: 20,
+  lineHeight: 1,
 };
 
 const backButtonStyle = {

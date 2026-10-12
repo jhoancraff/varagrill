@@ -902,6 +902,44 @@ def _calcular_margen_periodo(desde, hasta):
     return filas, total_ingreso, total_costo, total_ingreso_bs
 
 
+def _costo_con_margen_detalle(
+    detalle, costo_puro_cache, ingredient_costs, preparation_cost_map, config_sin_rendimiento, margen_produccion_actual,
+):
+    """
+    Costo (con margen de produccion) de UNA unidad vendible de la linea `detalle` — el mismo
+    criterio historico de reporte_margen_ganancia_view, para que el estado de resultados y el
+    reporte de margen por plato den el mismo costo (ver su docstring):
+      - con costo congelado al cobrar (costo_unitario_venta): se usa ese; si tambien se congelo el
+        margen de produccion de ese dia, el costo ya lo trae sumado para las recetas (no para un
+        producto ligado a una subreceta), asi que se separa y se vuelve a sumar una sola vez;
+      - sin costo congelado (ventas de antes de que existiera): el costo actual de la receta
+        (estimado), con el margen de hoy.
+    Devuelve (costo_con_margen_unitario, costo_estimado).
+    """
+    producto = detalle.producto
+    cien = Decimal('100')
+    if detalle.costo_unitario_venta is not None:
+        if detalle.margen_produccion_pct_venta is not None:
+            margen_pct = detalle.margen_produccion_pct_venta
+            costo_unitario = (
+                detalle.costo_unitario_venta if producto.subreceta_vinculada_id
+                else detalle.costo_unitario_venta / (Decimal('1') + margen_pct / cien)
+            )
+        else:
+            margen_pct = margen_produccion_actual
+            costo_unitario = detalle.costo_unitario_venta
+        costo_estimado = False
+    else:
+        if producto.id not in costo_puro_cache:
+            costo_puro_cache[producto.id] = _compute_product_unit_cost(
+                producto, ingredient_costs, preparation_cost_map, config_sin_rendimiento,
+            )
+        costo_unitario = costo_puro_cache[producto.id]
+        margen_pct = margen_produccion_actual
+        costo_estimado = True
+    return costo_unitario * (Decimal('1') + margen_pct / cien), costo_estimado
+
+
 def reporte_margen_ganancia_view(request):
     """
     Margen de ganancia DETALLADO, fila por fila (una por cada VGDetallePedido,

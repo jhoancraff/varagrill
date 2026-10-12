@@ -3972,3 +3972,117 @@ class DeliveryCargoTests(TestCase):
         self.post('/api/delivery/zonas/', {'action': 'update', 'id': self.media.id, 'nombre': 'Intermedia', 'tarifa': '9'}, self.admin)
         pedido.refresh_from_db()
         self.assertEqual((pedido.cargo_delivery, pedido.zona_delivery_nombre, pedido.total), (Decimal('2.00'), 'Media', Decimal('22.00')))
+
+
+class EstadoResultadosCostoDeVentasTests(TestCase):
+    """
+    Estado de resultados: ventas − costo de lo vendido = utilidad bruta; utilidad bruta − gastos = utilidad
+    neta. Las compras a proveedores (lotes) no suman. Ver reporte_estado_resultados_view.
+    """
+
+    URL = '/api/admin/reportes/estado-resultados/'
+
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='er_admin', password='claveAdmin123', cedula='98000001', email='er_admin@varagrill.test', id_role=admin_role,
+        )
+        self.client.force_login(self.admin)
+        self.hoy = timezone.localdate()
+        self.categoria = VGCategoriaProducto.objects.create(nombre='Platos ER')
+        self.plato = VGProducto.objects.create(nombre='Plato ER', categoria=self.categoria, precio_venta='10.00', disponible=True)
+        self.metodo = VGMetodoPago.objects.create(nombre='Efectivo ER', moneda='USD', es_efectivo=True)
+        _set_tasa_actual('100.0000')
+
+    def venta(self, cantidad=2, precio='10.00', costo='4.00', margen=None, estado='pagada', saldo='0', total=None, tasa='100.0000'):
+        """Una nota de entrega con un pedido de `cantidad` platos; `costo` es el costo congelado al cobrar."""
+        subtotal = Decimal(precio) * cantidad
+        pedido = VGPedido.objects.create(
+            usuario=self.admin, tipo_pedido='llevar', estado='pagado', subtotal=subtotal, total=subtotal,
+        )
+        VGDetallePedido.objects.create(
+            pedido=pedido, producto=self.plato, cantidad=cantidad, precio_unitario=Decimal(precio), estado='entregado',
+            costo_unitario_venta=Decimal(costo) if costo is not None else None,
+            margen_produccion_pct_venta=Decimal(margen) if margen is not None else None,
+        )
+        nota = VGNotaEntrega.objects.create(
+            metodo_pago=self.metodo, total=Decimal(total) if total is not None else subtotal, saldo_pendiente=Decimal(saldo),
+            estado=estado, tasa_cambio_referencia=Decimal(tasa),
+        )
+        nota.pedidos.set([pedido])
+        return nota
+
+    def reporte(self):
+        r = self.client.get(f'{self.URL}?desde={self.hoy.isoformat()}&hasta={self.hoy.isoformat()}')
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def test_ventas_menos_costo_da_la_utilidad_bruta_y_menos_gastos_la_neta(self):
+        self.venta(cantidad=2, precio='10.00', costo='4.00')   # vende 20, cuesta 8
+        self.venta(cantidad=1, precio='30.00', costo='12.50')  # vende 30, cuesta 12.50
+        categoria = VGCategoriaGasto.objects.create(nombre='Servicios ER')
+        VGGasto.objects.create(
+            categoria=categoria, descripcion='Luz', monto=Decimal('15.00'), saldo_pendiente=0, estado_pago='pagado',
+            fecha_gasto=self.hoy, tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        data = self.reporte()
+        self.assertEqual(data['ventas_total'], '50.00')
+        self.assertEqual(data['costo_ventas'], '20.50')
+        self.assertEqual(data['utilidad_bruta'], '29.50')
+        self.assertEqual(data['utilidad_bruta_pct'], '59.00')
+        self.assertEqual(data['gastos_total'], '15.00')
+        self.assertEqual(data['utilidad_neta'], '14.50')
+        self.assertEqual(data['utilidad_neta_pct'], '29.00')
+        self.assertEqual(data['costo_lineas_estimadas'], 0)
+        # en bolivares: venta y costo a la tasa de esa misma venta
+        self.assertEqual(data['costo_ventas_bs'], '2050.00')
+        self.assertEqual(data['utilidad_bruta_bs'], '2950.00')
+        self.assertEqual(data['utilidad_neta_bs'], '1450.00')
+
+    def test_las_compras_a_proveedores_no_suman_ni_aparecen_en_el_desglose(self):
+        from varagrill.models import VGAbonoCompra, VGCompra
+        compra = VGCompra.objects.create(
+            proveedor_nombre='Proveedor ER', estado='recibido', total=Decimal('500'), saldo_pendiente=Decimal('0'),
+            estado_pago='pagada', tasa_cambio_referencia=Decimal('100.0000'), moneda_origen='USD',
+        )
+        VGAbonoCompra.objects.create(
+            compra=compra, monto=Decimal('500'), metodo_pago=self.metodo, tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        self.venta(cantidad=1, precio='10.00', costo='4.00')
+        data = self.reporte()
+        self.assertEqual(data['gastos_total'], '0.00')
+        self.assertEqual(data['gastos_por_categoria'], [])
+        self.assertEqual(data['utilidad_neta'], '6.00')
+
+    def test_una_nota_abonada_a_medias_cuenta_la_misma_fraccion_de_la_venta_y_del_costo(self):
+        # vende 40, cobro 10 (25%): vende 10 y su costo es el 25% de 16
+        self.venta(cantidad=2, precio='20.00', costo='8.00', estado='abonada_parcial', saldo='30.00')
+        data = self.reporte()
+        self.assertEqual(data['ventas_total'], '10.00')
+        self.assertEqual(data['costo_ventas'], '4.00')
+        self.assertEqual(data['utilidad_bruta'], '6.00')
+
+    def test_las_notas_pendientes_y_anuladas_no_suman_ni_venta_ni_costo(self):
+        self.venta(estado='pendiente_pago', saldo='20.00')
+        self.venta(estado='anulada', saldo='0')
+        data = self.reporte()
+        self.assertEqual((data['ventas_total'], data['costo_ventas'], data['utilidad_bruta']), ('0.00', '0.00', '0.00'))
+
+    def test_el_costo_congelado_con_margen_de_produccion_no_se_suma_dos_veces(self):
+        # receta: el costo congelado (11) ya trae el 10% de margen; costo puro 10, con margen 11
+        self.venta(cantidad=1, precio='20.00', costo='11.00', margen='10.00')
+        self.assertEqual(self.reporte()['costo_ventas'], '11.00')
+
+    def test_una_venta_sin_costo_congelado_usa_el_costo_actual_y_queda_marcada_como_estimada(self):
+        self.venta(cantidad=1, precio='20.00', costo=None)
+        data = self.reporte()
+        self.assertEqual(data['costo_lineas_estimadas'], 1)
+        self.assertEqual(data['ventas_total'], '20.00')
+
+    def test_el_costo_coincide_con_el_reporte_de_margen_por_plato(self):
+        self.venta(cantidad=3, precio='10.00', costo='4.00', margen='10.00')
+        self.venta(cantidad=1, precio='25.00', costo='9.90')
+        estado = self.reporte()
+        r = self.client.get(f'/api/admin/reportes/margen-ganancia/?desde={self.hoy.isoformat()}&hasta={self.hoy.isoformat()}')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(estado['costo_ventas'], r.json()['totales']['costo_con_margen_total'])

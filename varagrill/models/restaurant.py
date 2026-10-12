@@ -851,6 +851,31 @@ class VGDetalleAjusteInventario(models.Model):
 # ---------------------------------------------------------------------------
 # Pedidos y pagos
 # ---------------------------------------------------------------------------
+class VGZonaDelivery(VGAuditoria):
+    """
+    Tarifa de delivery por zona (Cerca / Media / Lejos, o los sectores que el negocio
+    quiera). Al registrar un pedido delivery se elige una zona y su tarifa se copia al
+    pedido como `cargo_delivery` (ver VGPedido): cambiar la tarifa aqui no toca los
+    pedidos ya registrados.
+    """
+    nombre = models.CharField(max_length=80, unique=True)
+    tarifa = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)],
+        help_text="Tarifa en dolares que se cobra por defecto en esta zona.",
+    )
+    activo = models.BooleanField(
+        default=True, help_text="Una zona inactiva no se ofrece al registrar pedidos nuevos.",
+    )
+    orden = models.PositiveSmallIntegerField(default=0, help_text="Orden en que se muestran las zonas.")
+
+    class Meta:
+        db_table = "vg_zonas_delivery"
+        ordering = ["orden", "nombre"]
+
+    def __str__(self):
+        return f"{self.nombre} (${self.tarifa})"
+
+
 class VGPedido(VGAuditoria):
     TIPOS = [
         ("local", "Local"),
@@ -892,6 +917,21 @@ class VGPedido(VGAuditoria):
     impuesto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     descuento = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     propina = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cargo_delivery = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Lo que se cobra por el envio (ingreso del restaurante). Ya esta sumado en `total`; NO es un producto ni un ingrediente, asi que no sale en cocina ni en los reportes de productos y margen. Solo se cobra una vez por delivery: las rondas no lo repiten.",
+    )
+    zona_delivery = models.ForeignKey(
+        VGZonaDelivery, on_delete=models.SET_NULL, null=True, blank=True, related_name="pedidos",
+    )
+    zona_delivery_nombre = models.CharField(
+        max_length=80, blank=True,
+        help_text="Nombre de la zona al momento de registrar el pedido (queda aunque despues se renombre o se borre la zona).",
+    )
+    tarifa_delivery = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Tarifa de la zona cuando se registro el pedido. Si cargo_delivery es distinto, la cajera lo cambio a mano.",
+    )
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     notas = models.TextField(blank=True)
 

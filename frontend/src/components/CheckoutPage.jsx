@@ -543,6 +543,38 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     });
   };
 
+  // Cambiar el cargo de delivery de un pedido antes de cobrarlo (ver delivery_views.pedido_cargo_delivery_view):
+  // lo usa caja cuando el cliente reclama el precio. Si ya se le había dado la cuenta del cliente, esa cuenta
+  // queda con el monto viejo: se descarta para que se genere de nuevo con el total correcto.
+  const handleCambiarDelivery = async (pedido, cuerpo, groupKey) => {
+    try {
+      const response = await fetch(`/api/pedidos/${pedido.id}/delivery/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify(cuerpo),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        showError(data.message || 'No se pudo cambiar el delivery.');
+        return false;
+      }
+      showSuccess(`Delivery del pedido #${pedido.id} actualizado: $${Number(data.pedido.cargo_delivery).toFixed(2)}.`);
+      if (groupKey) {
+        setPrefacturaByGroup((current) => {
+          const copy = { ...current };
+          delete copy[groupKey];
+          return copy;
+        });
+      }
+      await fetchPedidos();
+      return true;
+    } catch (requestError) {
+      showError('Error de red al cambiar el delivery.');
+      return false;
+    }
+  };
+
   // Cancelar un pedido individual desde caja (antes de cobrarlo) — solo visible para
   // quien puede hacerlo (ver canCancelarPedidos, resuelto en WelcomeScreen a partir
   // del rol). El backend vuelve a validar el permiso igual, esto es solo la UI.
@@ -1124,11 +1156,24 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                               {Number(pedido.impuesto) > 0 ? <span>Impuesto: ${pedido.impuesto}<BsAmount amountUsd={pedido.impuesto} tasa={tasaGrupo} /></span> : null}
                               {Number(pedido.descuento) > 0 ? <span>Descuento: -${pedido.descuento}<BsAmount amountUsd={pedido.descuento} tasa={tasaGrupo} /></span> : null}
                               {Number(pedido.propina) > 0 ? <span>Propina: ${pedido.propina}<BsAmount amountUsd={pedido.propina} tasa={tasaGrupo} /></span> : null}
+                              {Number(pedido.cargo_delivery) > 0 ? (
+                                <span>
+                                  Delivery{pedido.zona_delivery_nombre ? ` (${pedido.zona_delivery_nombre})` : ''}: ${pedido.cargo_delivery}
+                                  <BsAmount amountUsd={pedido.cargo_delivery} tasa={tasaGrupo} />
+                                </span>
+                              ) : null}
                               <span style={{ fontWeight: 800, color: '#fff' }}>
                                 Total: ${pedido.total}
                                 <BsAmount amountUsd={pedido.total} tasa={tasaGrupo} style={{ color: '#e0c9a3' }} />
                               </span>
                             </div>
+
+                            {pedido.tipo_pedido === 'delivery' && (pedido.grupo_id === pedido.id) ? (
+                              <DeliveryCargoEditor
+                                pedido={pedido}
+                                onGuardar={(cuerpo) => handleCambiarDelivery(pedido, cuerpo, selectedGroup.key)}
+                              />
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -1605,6 +1650,110 @@ function groupItemsByPlato(items) {
     .map(([grupoId, groupedItems]) => ({ grupoId, items: groupedItems }));
   return { platos, sueltos };
 }
+
+// Cambio del cargo de delivery de un pedido: elegir otra zona o escribir el monto que se va a cobrar. Caja
+// puede dejar el monto que quiera (por ejemplo cuando el cliente reclama que le cobraron mucho); la zona y su
+// tarifa original quedan registradas en el pedido, para saber que se cambio.
+function DeliveryCargoEditor({ pedido, onGuardar }) {
+  const [abierto, setAbierto] = useState(false);
+  const [zonas, setZonas] = useState([]);
+  const [zonaId, setZonaId] = useState('');
+  const [monto, setMonto] = useState('');
+  const [guardando, setGuardando] = useState(false);
+
+  const abrir = async () => {
+    setZonaId(pedido.zona_delivery_id ? String(pedido.zona_delivery_id) : '');
+    setMonto(String(Number(pedido.cargo_delivery || 0)));
+    setAbierto(true);
+    try {
+      const response = await fetch('/api/delivery/zonas/', { credentials: 'include', cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) {
+        setZonas(Array.isArray(data.zonas) ? data.zonas : []);
+      }
+    } catch (requestError) {
+      // Sin la lista de zonas se puede igual escribir el monto.
+    }
+  };
+
+  const elegirZona = (valor) => {
+    setZonaId(valor);
+    const zona = zonas.find((item) => String(item.id) === String(valor));
+    if (zona) {
+      setMonto(String(Number(zona.tarifa)));
+    }
+  };
+
+  const guardar = async () => {
+    if (monto === '' || Number.isNaN(Number(monto)) || Number(monto) < 0) {
+      return;
+    }
+    setGuardando(true);
+    const cuerpo = { cargo_delivery: monto };
+    if (zonaId) {
+      cuerpo.zona_delivery_id = Number(zonaId);
+    }
+    const ok = await onGuardar(cuerpo);
+    setGuardando(false);
+    if (ok) {
+      setAbierto(false);
+    }
+  };
+
+  if (!abierto) {
+    return (
+      <div>
+        <button type="button" onClick={abrir} style={deliveryEditorButtonStyle}>
+          {Number(pedido.cargo_delivery) > 0 ? 'Cambiar delivery' : 'Agregar cargo de delivery'}
+        </button>
+      </div>
+    );
+  }
+
+  const zonaActual = zonas.find((item) => String(item.id) === String(zonaId));
+  const montoDistinto = zonaActual && Number(monto) !== Number(zonaActual.tarifa);
+
+  return (
+    <div style={deliveryEditorStyle}>
+      <div style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>Delivery del pedido #{pedido.id}</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={zonaId} onChange={(event) => elegirZona(event.target.value)} style={deliveryEditorInputStyle} className="admin-dark-select">
+          <option value="">Sin zona (monto libre)</option>
+          {zonas.map((zona) => (
+            <option key={zona.id} value={zona.id}>{zona.nombre} — ${Number(zona.tarifa).toFixed(2)}</option>
+          ))}
+        </select>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={monto}
+          onChange={(event) => setMonto(event.target.value)}
+          placeholder="Monto $"
+          style={{ ...deliveryEditorInputStyle, width: 120 }}
+        />
+      </div>
+      {montoDistinto ? (
+        <div style={{ color: '#ffcf7d', fontSize: 12 }}>
+          Es distinto a la tarifa de la zona (${Number(zonaActual.tarifa).toFixed(2)}); queda registrado en el pedido.
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" onClick={guardar} disabled={guardando} style={deliveryEditorSaveStyle}>
+          {guardando ? 'Guardando...' : 'Guardar'}
+        </button>
+        <button type="button" onClick={() => setAbierto(false)} disabled={guardando} style={deliveryEditorButtonStyle}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const deliveryEditorStyle = { display: 'grid', gap: 8, padding: '10px 12px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)' };
+const deliveryEditorInputStyle = { borderRadius: 10, border: '1px solid rgba(255,255,255,0.16)', background: '#161010', padding: '8px 10px', color: '#fff', fontSize: 13 };
+const deliveryEditorButtonStyle = { border: '1px solid rgba(255,255,255,0.16)', borderRadius: 999, padding: '7px 14px', background: 'rgba(255,255,255,0.05)', color: '#ff9d9d', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
+const deliveryEditorSaveStyle = { border: 'none', borderRadius: 999, padding: '8px 16px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 12.5 };
 
 function renderDetailItemRow(item, tasaCambio, { canGestionarItems = false, onAjustarItem, soloItem = false } = {}) {
   const cantidadLabel = item.peso_gramos ? `${item.peso_gramos} g` : `${item.cantidad}x`;

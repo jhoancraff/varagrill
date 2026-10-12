@@ -63,6 +63,7 @@ from .auth_helpers import (
     _is_owner_or_contador_user,
     _is_owner_user,
 )
+from .delivery import CargoDeliveryInvalido, aplicar_cargo, resolver_cargo_delivery
 from .impresion_lpd import imprimir_nota_entrega_caja
 from .impresion_termica import imprimir_comandas_pedido
 from .ingredientes_excel import (
@@ -1681,6 +1682,10 @@ def _serialize_order_detail(pedido):
         'impuesto': str(pedido.impuesto),
         'descuento': str(pedido.descuento),
         'propina': str(pedido.propina),
+        'cargo_delivery': str(pedido.cargo_delivery),
+        'zona_delivery_id': pedido.zona_delivery_id,
+        'zona_delivery_nombre': pedido.zona_delivery_nombre,
+        'tarifa_delivery': str(pedido.tarifa_delivery) if pedido.tarifa_delivery is not None else None,
         'subtotal': str(pedido.subtotal),
         'total': str(pedido.total),
         'items': _serialize_order_items(pedido),
@@ -1799,6 +1804,15 @@ def pedido_create_view(request):
 
     notas = str(data.get('notas', '') or '').strip()
 
+    # Cargo de delivery (ver delivery.py): solo el pedido delivery original lo cobra; una ronda agregada
+    # a un delivery o un pedido de canje no lo repiten.
+    try:
+        cargo = resolver_cargo_delivery(
+            data, parsed['tipo_pedido'], request.user, es_ronda=grupo_pedido is not None or nota_credito is not None,
+        )
+    except CargoDeliveryInvalido as error:
+        return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
     with transaction.atomic():
         built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         # Si TODOS los productos del pedido son de categorías "no_requiere_cocina" (ej.
@@ -1822,6 +1836,10 @@ def pedido_create_view(request):
             impuesto=parsed['impuesto'],
             descuento=parsed['descuento'],
             propina=parsed['propina'],
+            cargo_delivery=cargo['cargo_delivery'],
+            zona_delivery=cargo['zona_delivery'],
+            zona_delivery_nombre=cargo['zona_delivery_nombre'],
+            tarifa_delivery=cargo['tarifa_delivery'],
             creado_por=request.user,
             actualizado_por=request.user,
         )
@@ -1854,7 +1872,7 @@ def pedido_create_view(request):
                     precio_unitario=opcion['precio_unitario'],
                 )
 
-        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
+        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento'] + cargo['cargo_delivery']
         pedido.subtotal = subtotal.quantize(Decimal('0.01'))
         pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
@@ -1875,6 +1893,7 @@ def pedido_create_view(request):
                 'estado': pedido.estado,
                 'tipo_pedido': pedido.tipo_pedido,
                 'subtotal': str(pedido.subtotal),
+                'cargo_delivery': str(pedido.cargo_delivery),
                 'total': str(pedido.total),
                 'items': len(parsed['parsed_lines']),
             },
@@ -1953,6 +1972,14 @@ def pedido_update_view(request, pedido_id):
                     'message': f'La Mesa {parsed["mesa"].numero} ya la está atendiendo {mesero_nombre}.',
                 }, status=409)
 
+        try:
+            cargo = resolver_cargo_delivery(
+                data, parsed['tipo_pedido'], request.user, es_ronda=pedido.grupo_pedido_id is not None,
+                pedido_actual=pedido,
+            )
+        except CargoDeliveryInvalido as error:
+            return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
         built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         # Mismo criterio que pedido_create_view: si el pedido editado queda compuesto
         # solo por categorías "no_requiere_cocina", pasa a 'entregado' de una vez.
@@ -1966,6 +1993,7 @@ def pedido_update_view(request, pedido_id):
         pedido.impuesto = parsed['impuesto']
         pedido.descuento = parsed['descuento']
         pedido.propina = parsed['propina']
+        aplicar_cargo(pedido, cargo)
         pedido.estado = estado_inicial
 
         pedido.detalles.all().delete()
@@ -1998,7 +2026,7 @@ def pedido_update_view(request, pedido_id):
                     precio_unitario=opcion['precio_unitario'],
                 )
 
-        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento']
+        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento'] + cargo['cargo_delivery']
         pedido.subtotal = subtotal.quantize(Decimal('0.01'))
         pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
@@ -2030,7 +2058,7 @@ def _recalcular_totales_pedido(pedido, usuario):
         )
         for d in pedido.detalles.all()
     )
-    total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento
+    total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento + pedido.cargo_delivery
     pedido.subtotal = subtotal.quantize(Decimal('0.01'))
     pedido.total = total.quantize(Decimal('0.01'))
     pedido.actualizado_por = usuario
@@ -6196,6 +6224,8 @@ def pedidos_delivery_view(request):
                     'tipo_pedido': p.tipo_pedido,
                     'estado': p.estado,
                     'total': str(p.total),
+                    'cargo_delivery': str(p.cargo_delivery),
+                    'zona_delivery_nombre': p.zona_delivery_nombre,
                     'notas': p.notas,
                     'creado_en': p.fecha_creacion.isoformat(),
                     'mesero': p.usuario.get_full_name() or p.usuario.username,
@@ -6490,6 +6520,9 @@ def pedidos_cobro_view(request):
                     'impuesto': str(pedido.impuesto),
                     'descuento': str(pedido.descuento),
                     'propina': str(pedido.propina),
+                    'cargo_delivery': str(pedido.cargo_delivery),
+                    'zona_delivery_id': pedido.zona_delivery_id,
+                    'zona_delivery_nombre': pedido.zona_delivery_nombre,
                     'total': str(pedido.total),
                     'creado_en': pedido.fecha_creacion.isoformat(),
                     'items': [

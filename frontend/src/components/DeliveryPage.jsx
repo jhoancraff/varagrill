@@ -266,6 +266,11 @@ function DeliveryPage({ isMobile, onBack, onAddRoundToDelivery, onNuevoPedido, o
                       <div style={{ color: '#d2c3c3', fontSize: 12, marginTop: 4 }}>
                         {estadoLabel(pedido.estado)} · {pedido.mesero}
                       </div>
+                      {Number(pedido.cargo_delivery) > 0 ? (
+                        <div style={{ color: '#ffcf7d', fontSize: 12, marginTop: 4 }}>
+                          Incluye delivery{pedido.zona_delivery_nombre ? ` (${pedido.zona_delivery_nombre})` : ''}: ${Number(pedido.cargo_delivery).toFixed(2)}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 

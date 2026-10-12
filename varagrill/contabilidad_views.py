@@ -1037,6 +1037,14 @@ def reporte_venta_nota_detalle_view(request, nota_id):
         },
         'mesas': mesas,
         'meseros': meseros,
+        # El delivery cobrado va aparte de los productos (no es un item de cocina).
+        'delivery': {
+            'monto': str(sum((pedido.cargo_delivery for pedido in pedidos), Decimal('0'))),
+            'zona': ', '.join(sorted({
+                pedido.zona_delivery_nombre for pedido in pedidos
+                if pedido.cargo_delivery > 0 and pedido.zona_delivery_nombre
+            })),
+        },
         'items': [
             {
                 'producto': item['producto'],

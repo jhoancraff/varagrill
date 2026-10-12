@@ -13,10 +13,12 @@ from .cuentas_por_pagar import armar_bloques_cuentas, generar_pdf_cuentas_por_pa
 from .facturado import armar_dias_facturado, generar_pdf_facturado
 from .gastos import armar_bloques_gastos, generar_pdf_gastos
 from .inventario import armar_filas_inventario, generar_pdf_inventario
+from .margen_por_plato import armar_secciones_margen_por_plato, generar_pdf_margen_por_plato
 
 __all__ = [
     'Columna', 'Seccion', 'escapar', 'formatear_numero', 'generar_pdf_reporte', 'generar_pdf_tabla',
     'armar_filas_inventario', 'generar_pdf_inventario', 'armar_bloques_gastos', 'generar_pdf_gastos',
     'armar_dias_facturado', 'generar_pdf_facturado', 'armar_bloques_cuentas', 'generar_pdf_cuentas_por_pagar',
     'armar_bloques_clientes', 'generar_pdf_cuentas_por_cobrar',
+    'armar_secciones_margen_por_plato', 'generar_pdf_margen_por_plato',
 ]

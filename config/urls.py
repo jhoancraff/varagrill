@@ -71,6 +71,7 @@ from varagrill.reportes_pdf_views import (
     reporte_cuentas_por_cobrar_pdf_view,
     reporte_cuentas_por_pagar_pdf_view,
     reporte_facturado_pdf_view,
+    reporte_margen_por_plato_pdf_view,
     reporte_gastos_pdf_view,
     reporte_inventario_pdf_view,
 )
@@ -214,6 +215,10 @@ urlpatterns = [
     path('api/admin/reportes/inventario-pdf/', reporte_inventario_pdf_view, name='admin-reporte-inventario-pdf'),
     path('api/admin/reportes/gastos-pdf/', reporte_gastos_pdf_view, name='admin-reporte-gastos-pdf'),
     path('api/admin/reportes/facturado-pdf/', reporte_facturado_pdf_view, name='admin-reporte-facturado-pdf'),
+    path(
+        'api/admin/reportes/margen-por-plato-pdf/', reporte_margen_por_plato_pdf_view,
+        name='admin-reporte-margen-por-plato-pdf',
+    ),
     path('api/admin/reportes/cuentas-por-pagar-pdf/', reporte_cuentas_por_pagar_pdf_view, name='admin-reporte-cuentas-por-pagar-pdf'),
     path('api/admin/reportes/cuentas-por-cobrar-pdf/', reporte_cuentas_por_cobrar_pdf_view, name='admin-reporte-cuentas-por-cobrar-pdf'),
     path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),

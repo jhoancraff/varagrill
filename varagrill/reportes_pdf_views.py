@@ -13,7 +13,9 @@ from django.db.models.functions import Coalesce, TruncDate
 from django.http import HttpResponse
 from django.utils import timezone
 
-from .api_views import HIDDEN_INGREDIENT_IDS, _costo_unitario_efectivo, _serialize_compra
+from .api_views import (
+    HIDDEN_INGREDIENT_IDS, _costo_unitario_efectivo, _serialize_compra, armar_margen_ganancia_detallado,
+)
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
 from .contabilidad_views import MAX_DIAS_RANGO_CUADRE_CAJA, _parse_rango_o_fecha_reporte
 from .facturacion_views import _serialize_nota_entrega
@@ -21,7 +23,7 @@ from .gastos_views import _parse_fecha, _serialize_gasto
 from .models import VGCompra, VGGasto, VGIngrediente, VGNotaEntrega
 from .pdf_reportes import (
     generar_pdf_cuentas_por_cobrar, generar_pdf_cuentas_por_pagar, generar_pdf_facturado, generar_pdf_gastos,
-    generar_pdf_inventario,
+    generar_pdf_inventario, generar_pdf_margen_por_plato,
 )
 from .reportes import detalle_ventas_rango
 from .tasa_cambio import obtener_tasa_actual
@@ -134,6 +136,53 @@ def reporte_facturado_pdf_view(request):
     if desde == hasta:
         return responder_pdf(pdf, 'facturado', desde)
     return responder_pdf(pdf, f'facturado-{desde:%Y-%m-%d}-al-{hasta:%Y-%m-%d}', con_fecha=False)
+
+
+@pdf_solo_admin
+def reporte_margen_por_plato_pdf_view(request):
+    """
+    PDF del margen de ganancia por plato, en detalle, de un dia (`fecha`, hoy por defecto) o de un rango
+    (`desde`/`hasta`, hasta 92 dias): el mismo reporte de "Detalles de margen de ganancia por plato" y con
+    los mismos numeros (armar_margen_ganancia_detallado), agrupado por plato, con el total de ventas y el
+    total del costo del rango. Con `producto_id` solo trae ese plato.
+    """
+    desde, hasta = _parse_rango_o_fecha_reporte(request)
+    if desde is None:
+        return _auth_response({
+            'ok': False,
+            'message': (
+                'Fechas invalidas: "Desde" no puede ser posterior a "Hasta" '
+                f'y el rango no puede superar {MAX_DIAS_RANGO_CUADRE_CAJA} dias.'
+            ),
+        }, status=400)
+
+    producto_id = request.GET.get('producto_id')
+    if producto_id and not producto_id.isdigit():
+        return _auth_response({'ok': False, 'message': 'El plato indicado no es valido.'}, status=400)
+
+    datos = armar_margen_ganancia_detallado(desde, hasta)
+    secciones, totales, total_lineas = datos['secciones'], datos['totales'], datos['total_lineas']
+    if producto_id:
+        secciones = [s for s in secciones if s['producto_id'] == int(producto_id)]
+        if not secciones:
+            return _auth_response({'ok': False, 'message': 'Ese plato no tiene ventas en el rango.'}, status=404)
+        # Los totales del plato: los de su propia seccion (es una sola).
+        seccion = secciones[0]
+        total_lineas = seccion['total_lineas']
+        totales = {
+            'ingreso_total': seccion['total_ingreso'],
+            'costo_total': seccion['total_costo'],
+            'costo_con_margen_total': seccion['total_costo_con_margen'],
+            'ganancia_monto': seccion['total_ganancia_monto'],
+            'ganancia_pct': seccion['total_ganancia_pct'],
+        }
+
+    pdf = generar_pdf_margen_por_plato(
+        secciones, totales, total_lineas, desde, hasta, generado_en=timezone.localtime(),
+    )
+    if desde == hasta:
+        return responder_pdf(pdf, 'margen-por-plato', desde)
+    return responder_pdf(pdf, f'margen-por-plato-{desde:%Y-%m-%d}-al-{hasta:%Y-%m-%d}', con_fecha=False)
 
 
 def _en_rango(consulta, campo, desde, hasta):

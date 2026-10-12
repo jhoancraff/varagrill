@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import BotonDescargarPdf from './BotonDescargarPdf';
 import BsAmount from './BsAmount';
 import { RangoFechas } from './FiltroFechas';
 import useExchangeRate from '../hooks/useExchangeRate';
@@ -46,6 +47,7 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
   const [busqueda, setBusqueda] = useState('');
   const [isBusquedaFocused, setIsBusquedaFocused] = useState(false);
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
+  const [pdfError, setPdfError] = useState('');
 
   const loadReport = useCallback(async (desdeConsultado, hastaConsultado) => {
     setLoading(true);
@@ -75,6 +77,7 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
   useEffect(() => {
     setBusqueda('');
     setProductoSeleccionado(null);
+    setPdfError('');
   }, [desde, hasta]);
 
   const secciones = data?.secciones || [];
@@ -134,9 +137,14 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
         <button type="button" onClick={onBack} style={backButtonStyle}>
           ← Volver
         </button>
-        <button type="button" onClick={() => window.print()} style={printButtonStyle}>
-          Imprimir / Guardar PDF
-        </button>
+        {/* PDF del rango elegido, agrupado por plato; con un plato elegido en el buscador, solo ese plato. */}
+        <BotonDescargarPdf
+          url="/api/admin/reportes/margen-por-plato-pdf/"
+          params={{ desde, hasta, producto_id: productoSeleccionado?.producto_id }}
+          onError={setPdfError}
+        >
+          {productoSeleccionado ? `Descargar PDF de ${productoSeleccionado.nombre}` : 'Descargar PDF'}
+        </BotonDescargarPdf>
       </div>
 
       <div>
@@ -151,6 +159,8 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
           setHasta(rango.hasta);
         }}
       />
+
+      {pdfError ? <div style={noticeStyle}>{pdfError}</div> : null}
 
       {loading ? <div style={emptyStyle}>Cargando reporte...</div> : null}
       {!loading && error ? <div style={noticeStyle}>{error}</div> : null}
@@ -341,7 +351,6 @@ const estimadoBadgeStyle = {
 const estimadoBadgeInlineStyle = { ...estimadoBadgeStyle, marginLeft: 6, display: 'inline-block' };
 const rowFragmentStyle = { display: 'contents' };
 const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(255,145,145,0.22)', background: 'rgba(255,98,98,0.12)', color: '#ffd8d8' };
-const printButtonStyle = { border: '1px solid rgba(255,255,255,0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(255,255,255,0.04)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 const searchInputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: '#161010', padding: '10px 12px', color: '#fff', fontSize: 14 };
 const searchWrapStyle = { maxWidth: 420 };

@@ -61,6 +61,7 @@ import AnalystDatosFiscalesPage from './AnalystDatosFiscalesPage';
 import AnalystComprasPage from './AnalystComprasPage';
 import AnalystMargenGananciaPage from './AnalystMargenGananciaPage';
 import AnalystMargenGananciaDetalladoPage from './AnalystMargenGananciaDetalladoPage';
+import AnalystMovimientoInventarioPage from './AnalystMovimientoInventarioPage';
 import AnalystMovimientoProductosPage from './AnalystMovimientoProductosPage';
 import FlujoBancarioPage from './FlujoBancarioPage';
 import AnalystConfiguracionCosteoPage from './AnalystConfiguracionCosteoPage';
@@ -1370,6 +1371,12 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onCreate={() => goToView('admin-ingredients-create')}
             onViewInventory={() => goToView('admin-ingredients-inventory')}
             onAdjustInventory={() => goToView('admin-ingredients-ajuste')}
+            onViewMovements={() => goToView('admin-ingredients-movimientos')}
+          />
+        ) : activeView === 'admin-ingredients-movimientos' ? (
+          <AnalystMovimientoInventarioPage
+            isMobile={isMobile}
+            onBack={goBackView}
           />
         ) : activeView === 'admin-ingredients-ajuste' ? (
           <AnalystAjusteInventarioPage

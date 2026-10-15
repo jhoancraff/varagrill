@@ -4254,3 +4254,140 @@ class ReporteMargenPorPlatoPdfTests(TestCase):
         self.assertEqual([b.titulo for b in bloques], ['Plato largo', 'Plato largo (continúa)', 'Plato largo (continúa)'])
         self.assertEqual(sum(len(b.filas) for b in bloques), cantidad)
         self.assertEqual([b.fila_total is not None for b in bloques], [False, False, True])
+
+
+class MovimientoInventarioReporteTests(TestCase):
+    """Reporte de movimiento de inventario: ingredientes con movimiento, su origen y el detalle de pedido/nota."""
+
+    URL = '/api/admin/reportes/movimiento-inventario/'
+
+    def setUp(self):
+        from datetime import timedelta
+        from varagrill.models import VGCompra, VGMetodoPago, VGMovimientoInventario, VGNotaEntrega
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='mi_admin', password='claveAdmin123', cedula='97000001', email='mi_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='mi_cajera', password='claveCajera123', cedula='97000002', email='mi_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.hoy = timezone.localdate()
+        self.ayer = self.hoy - timedelta(days=1)
+        self.carne = VGIngrediente.objects.create(nombre='Carne MI', unidad_medida='g', stock_actual=Decimal('1000'), costo_unitario=Decimal('0.02'))
+        self.queso = VGIngrediente.objects.create(nombre='Queso MI', unidad_medida='g', stock_actual=Decimal('500'), costo_unitario=Decimal('0.03'))
+        self.sin_mov = VGIngrediente.objects.create(nombre='Sal MI', unidad_medida='g', stock_actual=Decimal('100'), costo_unitario=Decimal('0.01'))
+
+        categoria = VGCategoriaProducto.objects.create(nombre='Platos MI')
+        self.hamburguesa = VGProducto.objects.create(nombre='Hamburguesa MI', categoria=categoria, precio_venta='10.00', disponible=True)
+        self.papas = VGProducto.objects.create(nombre='Papas MI', categoria=categoria, precio_venta='4.00', disponible=True)
+        self.pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='llevar', estado='pagado', subtotal=Decimal('24'), total=Decimal('24'))
+        VGDetallePedido.objects.create(pedido=self.pedido, producto=self.hamburguesa, cantidad=2, precio_unitario=Decimal('10.00'), estado='entregado')
+        VGDetallePedido.objects.create(pedido=self.pedido, producto=self.papas, cantidad=1, precio_unitario=Decimal('4.00'), estado='entregado')
+        metodo = VGMetodoPago.objects.create(nombre='Efectivo MI', moneda='USD', es_efectivo=True)
+        self.nota = VGNotaEntrega.objects.create(
+            metodo_pago=metodo, total=Decimal('24'), saldo_pendiente=Decimal('0'), estado='pagada', tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        self.nota.pedidos.set([self.pedido])
+        compra = VGCompra.objects.create(
+            proveedor_nombre='Proveedor MI', estado='recibido', total=Decimal('50'), saldo_pendiente=Decimal('0'),
+            estado_pago='pagada', tasa_cambio_referencia=Decimal('100.0000'), moneda_origen='USD',
+        )
+
+        def mov(ingrediente, tipo, cantidad, motivo, referencia=None, compra_obj=None, dia=None):
+            m = VGMovimientoInventario.objects.create(
+                ingrediente=ingrediente, tipo_movimiento=tipo, cantidad=Decimal(cantidad), motivo=motivo,
+                id_referencia=referencia, compra=compra_obj, creado_por=self.admin,
+            )
+            if dia is not None:
+                from datetime import datetime
+                VGMovimientoInventario.objects.filter(pk=m.pk).update(
+                    fecha_movimiento=timezone.make_aware(datetime(dia.year, dia.month, dia.day, 12, 0)),
+                )
+            return m
+
+        self.venta = mov(self.carne, 'salida', '300', f'Venta — Pedido #{self.pedido.id}', referencia=self.pedido.id)
+        mov(self.queso, 'salida', '40', f'Venta — Pedido #{self.pedido.id}', referencia=self.pedido.id)
+        mov(self.carne, 'entrada', '500', f'Compra registrada #{compra.id}', referencia=compra.id, compra_obj=compra)
+        mov(self.carne, 'ajuste', '-20', 'Ajuste de inventario #7', referencia=7)
+        mov(self.carne, 'entrada', '300', f'Reversion por anulacion de Nota de entrega {self.nota.codigo}', referencia=self.nota.id)
+        # rollback: no cuenta en el reporte
+        mov(self.carne, 'ajuste', '999', 'ROLLBACK inventario por correccion del rango 2026-09-02 a 2026-09-21. Original #1', referencia=1)
+        # de ayer: fuera del rango "hoy"
+        mov(self.carne, 'salida', '77', 'Venta — Pedido #1', referencia=1, dia=self.ayer)
+
+    def pedir(self, ruta='', usuario=None, **params):
+        self.client.force_login(usuario or self.admin)
+        params.setdefault('desde', self.hoy.isoformat())
+        params.setdefault('hasta', self.hoy.isoformat())
+        return self.client.get(self.URL + ruta, params)
+
+    def test_solo_un_administrador_y_solo_por_get(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.assertEqual(self.pedir(usuario=self.cajera).status_code, 401)
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.post(self.URL).status_code, 405)
+
+    def test_resumen_por_ingrediente_sin_rollback_y_solo_los_que_tuvieron_movimiento(self):
+        data = self.pedir().json()
+        self.assertTrue(data['ok'])
+        por_nombre = {i['nombre']: i for i in data['ingredientes']}
+        self.assertEqual(set(por_nombre), {'Carne MI', 'Queso MI'})  # Sal MI no tuvo movimiento
+        carne = por_nombre['Carne MI']
+        self.assertEqual(Decimal(carne['entradas']), Decimal('800'))   # compra 500 + reversion 300
+        self.assertEqual(Decimal(carne['salidas']), Decimal('300'))
+        self.assertEqual(Decimal(carne['ajustes']), Decimal('-20'))    # el ROLLBACK (999) no cuenta
+        self.assertEqual(Decimal(carne['neto']), Decimal('480'))
+        self.assertEqual(carne['movimientos'], 4)
+        self.assertEqual(data['total_movimientos'], 5)  # 4 de la carne + 1 del queso (sin el ROLLBACK)
+
+    def test_el_rango_deja_fuera_otros_dias(self):
+        ayer = self.pedir(desde=self.ayer.isoformat(), hasta=self.ayer.isoformat()).json()
+        self.assertEqual([i['nombre'] for i in ayer['ingredientes']], ['Carne MI'])
+        self.assertEqual(Decimal(ayer['ingredientes'][0]['salidas']), Decimal('77'))
+        self.assertEqual(self.pedir(desde='2026-01-02', hasta='2026-01-01').status_code, 400)
+
+    def test_filtra_por_nombre_y_por_tipo(self):
+        solo_queso = self.pedir(q='quesito').json()['ingredientes']
+        self.assertEqual(solo_queso, [])
+        solo_queso = self.pedir(q='queso').json()['ingredientes']
+        self.assertEqual([i['nombre'] for i in solo_queso], ['Queso MI'])
+        salidas = self.pedir(tipo='salida').json()['ingredientes']
+        self.assertEqual({i['nombre']: Decimal(i['salidas']) for i in salidas}, {'Carne MI': Decimal('300'), 'Queso MI': Decimal('40')})
+        self.assertTrue(all(Decimal(i['entradas']) == 0 and Decimal(i['ajustes']) == 0 for i in salidas))
+
+    def test_detalle_del_ingrediente_con_su_origen(self):
+        data = self.pedir(f'ingrediente/{self.carne.id}/').json()
+        self.assertEqual(data['total'], 4)
+        self.assertFalse(data['truncado'])
+        self.assertFalse(any('ROLLBACK' in m['motivo'] for m in data['movimientos']))
+        origenes = {m['motivo'].split(' ')[0]: m['origen'] for m in data['movimientos']}
+        self.assertEqual(origenes['Venta'], {'tipo': 'pedido', 'id': self.pedido.id, 'etiqueta': f'Pedido #{self.pedido.id}'})
+        self.assertEqual(origenes['Reversion']['tipo'], 'nota_entrega')
+        self.assertEqual(origenes['Reversion']['id'], self.nota.id)
+        self.assertEqual(origenes['Compra']['tipo'], 'compra')
+        self.assertEqual(origenes['Ajuste']['tipo'], 'ajuste')
+        self.assertEqual(data['movimientos'][0]['usuario'], self.admin.username)
+
+    def test_el_pedido_trae_sus_productos_y_la_nota_de_entrega(self):
+        r = self.pedir(f'pedido/{self.pedido.id}/')
+        self.assertEqual(r.status_code, 200, r.content)
+        pedido = r.json()['pedido']
+        self.assertEqual(pedido['id'], self.pedido.id)
+        self.assertEqual(
+            sorted((p['producto'], p['cantidad']) for p in pedido['productos']),
+            [('Hamburguesa MI', 2), ('Papas MI', 1)],
+        )
+        self.assertEqual([n['codigo'] for n in pedido['notas_entrega']], [self.nota.codigo])
+        self.assertEqual(pedido['notas_entrega'][0]['estado'], 'pagada')
+        self.assertEqual(pedido['notas_entrega'][0]['pedidos'], [self.pedido.id])
+        self.assertEqual(self.pedir('pedido/99999999/').status_code, 404)
+
+    def test_la_nota_trae_sus_pedidos_con_productos(self):
+        r = self.pedir(f'nota-entrega/{self.nota.id}/')
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()
+        self.assertEqual(data['nota']['codigo'], self.nota.codigo)
+        self.assertEqual([p['id'] for p in data['pedidos']], [self.pedido.id])
+        self.assertEqual(len(data['pedidos'][0]['productos']), 2)
+        self.assertEqual(self.pedir('nota-entrega/99999999/').status_code, 404)

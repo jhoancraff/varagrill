@@ -117,6 +117,12 @@ from varagrill.contabilidad_views import (
     reporte_venta_nota_detalle_view,
     reporte_ventas_dia_view,
 )
+from varagrill.movimientos_inventario_views import (
+    movimiento_inventario_nota_view,
+    movimiento_inventario_pedido_view,
+    reporte_movimiento_inventario_detalle_view,
+    reporte_movimiento_inventario_view,
+)
 from varagrill.gastos_views import (
     admin_categorias_gasto_view,
     admin_gastos_view,
@@ -223,6 +229,22 @@ urlpatterns = [
     path('api/admin/reportes/cuentas-por-cobrar-pdf/', reporte_cuentas_por_cobrar_pdf_view, name='admin-reporte-cuentas-por-cobrar-pdf'),
     path('api/admin/reportes/estado-resultados/', reporte_estado_resultados_view, name='admin-reporte-estado-resultados'),
     path('api/admin/reportes/movimiento-productos/', reporte_movimiento_productos_view, name='admin-reporte-movimiento-productos'),
+    path(
+        'api/admin/reportes/movimiento-inventario/', reporte_movimiento_inventario_view,
+        name='admin-reporte-movimiento-inventario',
+    ),
+    path(
+        'api/admin/reportes/movimiento-inventario/ingrediente/<int:ingrediente_id>/',
+        reporte_movimiento_inventario_detalle_view, name='admin-reporte-movimiento-inventario-detalle',
+    ),
+    path(
+        'api/admin/reportes/movimiento-inventario/pedido/<int:pedido_id>/', movimiento_inventario_pedido_view,
+        name='admin-movimiento-inventario-pedido',
+    ),
+    path(
+        'api/admin/reportes/movimiento-inventario/nota-entrega/<int:nota_id>/', movimiento_inventario_nota_view,
+        name='admin-movimiento-inventario-nota',
+    ),
     path('api/admin/reportes/flujo-bancario/', reporte_flujo_bancario_view, name='admin-reporte-flujo-bancario'),
     path('api/admin/reportes/flujo-bancario/detalle/', reporte_flujo_bancario_detalle_view, name='admin-reporte-flujo-bancario-detalle'),
     path('api/admin/metodos-pago/', admin_metodos_pago_view, name='admin-metodos-pago'),

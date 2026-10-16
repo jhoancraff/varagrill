@@ -192,6 +192,10 @@ class VGProducto(VGAuditoria):
         "VGPreparacion", on_delete=models.SET_NULL, null=True, blank=True, related_name="productos_vinculados",
         help_text="Subreceta que compone este producto vendible.",
     )
+    apta_comida_empleados = models.BooleanField(
+        default=False,
+        help_text="Solo para recetas (categoría 'Recetas'): si está activo, la receta se puede elegir en 'Comida de empleados'.",
+    )
 
     class Meta:
         db_table = "vg_productos"
@@ -769,6 +773,59 @@ class VGMovimientoInventario(models.Model):
 
     def __str__(self):
         return f"{self.tipo_movimiento} — {self.ingrediente} ({self.cantidad})"
+
+
+class VGComidaEmpleados(VGAuditoria):
+    """
+    Comida que se prepara para los empleados: no se vende ni se factura, solo descuenta del inventario los
+    ingredientes de una receta, una subreceta o un ingrediente suelto (ver comida_empleados_views). Cada
+    ingrediente descontado queda en VGDetalleComidaEmpleados con su cantidad y su costo de ese momento, para
+    poder anularla reponiendo exactamente lo descontado aunque la receta cambie despues.
+    """
+    TIPOS_ORIGEN = [("receta", "Receta"), ("subreceta", "Subreceta"), ("ingrediente", "Ingrediente")]
+    TURNOS = [("desayuno", "Desayuno"), ("almuerzo", "Almuerzo"), ("cena", "Cena"), ("otro", "Otro")]
+    ESTADOS = [("registrada", "Registrada"), ("anulada", "Anulada")]
+
+    fecha = models.DateField()
+    turno = models.CharField(max_length=10, choices=TURNOS, blank=True)
+    tipo_origen = models.CharField(max_length=12, choices=TIPOS_ORIGEN)
+    receta = models.ForeignKey(VGProducto, on_delete=models.SET_NULL, null=True, blank=True, related_name="comidas_empleados")
+    subreceta = models.ForeignKey("VGPreparacion", on_delete=models.SET_NULL, null=True, blank=True, related_name="comidas_empleados")
+    ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.SET_NULL, null=True, blank=True, related_name="comidas_empleados")
+    nombre_origen = models.CharField(max_length=150, help_text="Nombre de lo que se uso, tal como se llamaba al registrarla.")
+    cantidad = models.DecimalField(max_digits=10, decimal_places=2, help_text="Porciones (receta) o cantidad en la unidad de la subreceta/ingrediente.")
+    unidad = models.CharField(max_length=15, help_text="'porciones' para una receta; g/ml/unidad para una subreceta o un ingrediente.")
+    nota = models.CharField(max_length=255, blank=True)
+    estado = models.CharField(max_length=12, choices=ESTADOS, default="registrada")
+    costo_total = models.DecimalField(max_digits=14, decimal_places=4, default=0, help_text="USD, congelado al registrarla.")
+    tasa_cambio_referencia = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    anulada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="comidas_empleados_anuladas",
+    )
+    fecha_anulacion = models.DateTimeField(null=True, blank=True)
+    motivo_anulacion = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_comidas_empleados"
+        ordering = ["-fecha", "-id"]
+        verbose_name = "Comida de empleados"
+        verbose_name_plural = "Comidas de empleados"
+
+    def __str__(self):
+        return f"Comida de empleados #{self.pk} — {self.nombre_origen} ({self.fecha})"
+
+
+class VGDetalleComidaEmpleados(models.Model):
+    comida = models.ForeignKey(VGComidaEmpleados, on_delete=models.CASCADE, related_name="detalles")
+    ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.PROTECT, related_name="detalles_comida_empleados")
+    cantidad = models.DecimalField(max_digits=12, decimal_places=2)
+    costo_unitario = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+
+    class Meta:
+        db_table = "vg_detalle_comida_empleados"
+
+    def __str__(self):
+        return f"{self.ingrediente} x {self.cantidad}"
 
 
 class VGCierreInventario(VGAuditoria):

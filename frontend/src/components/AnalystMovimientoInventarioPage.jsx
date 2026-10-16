@@ -282,9 +282,14 @@ function Cifra({ etiqueta, valor, color, fuerte = false }) {
 // detalle; compras y ajustes se muestran como texto.
 function OrigenCelda({ origen, onAbrir }) {
   if (!origen) return <span style={mutedStyle}>—</span>;
-  if (origen.tipo === 'pedido' || origen.tipo === 'nota_entrega') {
+  if (origen.tipo === 'pedido' || origen.tipo === 'nota_entrega' || origen.tipo === 'comida_empleados') {
     return (
-      <button type="button" onClick={onAbrir} style={linkButtonStyle} title="Ver los productos y la nota de entrega">
+      <button
+        type="button"
+        onClick={onAbrir}
+        style={linkButtonStyle}
+        title={origen.tipo === 'comida_empleados' ? 'Ver la comida de empleados y sus ingredientes' : 'Ver los productos y la nota de entrega'}
+      >
         {origen.etiqueta}
       </button>
     );
@@ -293,10 +298,22 @@ function OrigenCelda({ origen, onAbrir }) {
 }
 
 function OrigenModal({ origen, ingrediente, movimiento, onClose }) {
-  const [estado, setEstado] = useState({ loading: true, error: '', pedidos: [], nota: null });
+  const [estado, setEstado] = useState({ loading: true, error: '', pedidos: [], nota: null, comida: null });
 
   useEffect(() => {
     let cancelado = false;
+    if (origen.tipo === 'comida_empleados') {
+      pedirJson(`/api/admin/comida-empleados/${origen.id}/`)
+        .then((json) => {
+          if (!cancelado) setEstado({ loading: false, error: '', pedidos: [], nota: null, comida: json.comida });
+        })
+        .catch((requestError) => {
+          if (!cancelado) setEstado({ loading: false, error: requestError.message, pedidos: [], nota: null, comida: null });
+        });
+      return () => {
+        cancelado = true;
+      };
+    }
     const url = origen.tipo === 'pedido'
       ? `/api/admin/reportes/movimiento-inventario/pedido/${origen.id}/`
       : `/api/admin/reportes/movimiento-inventario/nota-entrega/${origen.id}/`;
@@ -323,7 +340,11 @@ function OrigenModal({ origen, ingrediente, movimiento, onClose }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  const titulo = origen.tipo === 'pedido' ? `Pedido #${origen.id}` : `Nota de entrega ${String(origen.id).padStart(8, '0')}`;
+  const titulo = origen.tipo === 'pedido'
+    ? `Pedido #${origen.id}`
+    : origen.tipo === 'comida_empleados'
+      ? `Comida de empleados #${origen.id}`
+      : `Nota de entrega ${String(origen.id).padStart(8, '0')}`;
 
   return (
     <div style={backdropStyle} onClick={onClose} role="presentation">
@@ -343,6 +364,34 @@ function OrigenModal({ origen, ingrediente, movimiento, onClose }) {
 
         {estado.loading ? <div style={mutedStyle}>Cargando...</div> : null}
         {estado.error ? <div style={noticeStyle}>{estado.error}</div> : null}
+
+        {estado.comida ? (
+          <div style={bloqueStyle}>
+            <div style={bloqueTituloStyle}>
+              {estado.comida.nombre}
+              {estado.comida.estado === 'anulada' ? <span style={estadoBadgeStyle('anulada')}> Anulada</span> : null}
+            </div>
+            <div style={mutedStyle}>
+              {estado.comida.tipo_origen_label} · {formatCantidad(estado.comida.cantidad)} {estado.comida.unidad}
+              {' · '}{estado.comida.fecha.split('-').reverse().join('/')}
+              {estado.comida.turno_label ? ` · ${estado.comida.turno_label}` : ''}
+            </div>
+            <div style={mutedStyle}>Registrada por {estado.comida.registrada_por || '—'} · costo ${formatMonto(estado.comida.costo_total)}</div>
+            {estado.comida.nota ? <div style={mutedStyle}>Nota: {estado.comida.nota}</div> : null}
+            {estado.comida.estado === 'anulada' ? (
+              <div style={mutedStyle}>Anulada por {estado.comida.anulada_por || '—'}: {estado.comida.motivo_anulacion}</div>
+            ) : null}
+            <div style={subtituloStyle}>Ingredientes que descontó</div>
+            <ul style={listaStyle}>
+              {(estado.comida.lineas || []).map((linea) => (
+                <li key={linea.ingrediente_id} style={productoFilaStyle}>
+                  <span>{linea.nombre}</span>
+                  <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatCantidad(linea.cantidad)} {linea.unidad}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {estado.nota ? (
           <div style={bloqueStyle}>

@@ -31,7 +31,7 @@ Qué se borra (y su ID vuelve a arrancar en 1):
   VGDetallePedidoAdicional, VGDetallePedido, VGPedido, VGNotaEntrega,
   VGFacturaLinea, VGOrdenCobro, VGFactura, VGPreFacturaLinea, VGPreFactura,
   VGGasto, VGDetalleCompra, VGCompra, VGDetalleCompraBorrador,
-  VGCompraBorrador, VGMovimientoInventario, VGConsignacionCaja,
+  VGCompraBorrador, VGComidaEmpleados, VGMovimientoInventario, VGConsignacionCaja,
   VGCierreCaja, VGPromocion, VGRecomendacionChef, VGTasaCambio.
 
 Además reinicia a 0 los tres correlativos fiscales (VGCorrelativoFiscal:
@@ -62,6 +62,7 @@ from varagrill.models import (
     VGAbonoCompra,
     VGAbonoGasto,
     VGCierreCaja,
+    VGComidaEmpleados,
     VGCompra,
     VGCompraBorrador,
     VGConsignacionCaja,
@@ -95,6 +96,7 @@ MODELOS_A_BORRAR_EN_ORDEN = [
     VGGasto,
     VGCompra,
     VGCompraBorrador,
+    VGComidaEmpleados,
     VGMovimientoInventario,
     VGConsignacionCaja,
     VGCierreCaja,

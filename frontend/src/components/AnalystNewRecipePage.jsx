@@ -7,6 +7,7 @@ import useToast from '../hooks/useToast';
 const emptyForm = {
   nombre: '',
   descripcion: '',
+  apta_comida_empleados: false,
 };
 
 const emptyDraft = {
@@ -227,6 +228,7 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
           action: 'create',
           nombre: form.nombre,
           descripcion: form.descripcion,
+          apta_comida_empleados: Boolean(form.apta_comida_empleados),
           componentes: components.map((item) => ({
             tipo: item.tipo,
             referencia_id: item.referencia_id,
@@ -310,6 +312,21 @@ function AnalystNewRecipePage({ isMobile, isAdmin, onBack }) {
                   rows={3}
                   placeholder="Describe preparación, porciones y notas operativas"
                 />
+              </label>
+
+              <label style={{ ...checkRowStyle, gridColumn: isMobile ? 'auto' : '1 / -1' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.apta_comida_empleados)}
+                  onChange={(event) => handleFormChange('apta_comida_empleados', event.target.checked)}
+                  style={{ width: 18, height: 18, flexShrink: 0 }}
+                />
+                <span>
+                  <span style={labelStyle}>Receta para comida de empleados</span>
+                  <span style={checkHintStyle}>
+                    Si la marcas, se puede elegir en "Comida de empleados" para descontar sus ingredientes del inventario (por porción).
+                  </span>
+                </span>
               </label>
             </div>
 
@@ -779,6 +796,21 @@ const backButtonStyle = {
   color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
+};
+
+const checkRowStyle = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 10,
+  cursor: 'pointer',
+};
+
+const checkHintStyle = {
+  display: 'block',
+  marginTop: 2,
+  color: 'var(--vg-f-c8bbbb)',
+  fontSize: 12.5,
+  lineHeight: 1.4,
 };
 
 export default AnalystNewRecipePage;

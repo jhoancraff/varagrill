@@ -81,6 +81,8 @@ def _origen(movimiento):
         return {'tipo': 'pedido', 'id': referencia, 'etiqueta': f'Pedido #{referencia}'}
     if referencia and motivo.startswith('reversion por anulacion de nota'):
         return {'tipo': 'nota_entrega', 'id': referencia, 'etiqueta': f'Nota de entrega {referencia:08d}'}
+    if referencia and motivo.startswith(('comida de empleados', 'reversion de comida de empleados')):
+        return {'tipo': 'comida_empleados', 'id': referencia, 'etiqueta': f'Comida de empleados #{referencia}'}
     if movimiento.compra_id:
         return {'tipo': 'compra', 'id': movimiento.compra_id, 'etiqueta': f'Compra #{movimiento.compra_id}'}
     if referencia and movimiento.tipo_movimiento == 'ajuste':

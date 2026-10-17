@@ -202,7 +202,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
                   {onNavigate ? (
                     <button
                       type="button"
-                      onClick={() => onNavigate('comida-empleados')}
+                      onClick={() => onNavigate('admin-comida-empleados')}
                       style={verDetalleGastosButtonStyle}
                       className="no-print"
                     >

@@ -114,6 +114,14 @@ const CosteoConfigIcon = () => (
   </svg>
 );
 
+const MealsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M4 3v7a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V3" />
+    <path d="M6 3v18" />
+    <path d="M16 21V3c-2.5 1.5-4 4-4 7 0 2 1 3 4 3" />
+  </svg>
+);
+
 const analystSections = [
   { id: 'admin-users', title: 'Usuarios', icon: UsersIcon },
   { id: 'admin-mesas', title: 'Mesas', icon: TablesIcon },
@@ -128,6 +136,7 @@ const analystSections = [
   { id: 'admin-delivery-zonas', title: 'Zonas de delivery', icon: DeliveryZonesIcon },
   { id: 'admin-datos-fiscales', title: 'Datos fiscales', icon: FiscalDataIcon },
   { id: 'admin-compras', title: 'Compras', icon: PurchasesIcon },
+  { id: 'admin-comida-empleados', title: 'Comida de empleados', icon: MealsIcon },
 ];
 
 // Reservadas al dueño real del negocio (superusuario) o al Contador — un Administrador
@@ -141,17 +150,17 @@ const analystGroups = [
   {
     id: 'menu-produccion',
     title: 'Menú & Producción',
-    ids: ['admin-products', 'admin-recipes', 'admin-preparations', 'admin-configuracion-costeo', 'admin-promotions', 'admin-chef-recommendations'],
+    ids: ['admin-products', 'admin-recipes', 'admin-preparations', 'admin-promotions', 'admin-chef-recommendations'],
   },
   {
     id: 'operacion-local',
     title: 'Operación del local',
-    ids: ['admin-mesas', 'admin-users', 'admin-printers', 'admin-delivery-zonas'],
+    ids: ['admin-mesas', 'admin-users', 'admin-comida-empleados', 'admin-compras'],
   },
   {
-    id: 'pagos-administracion',
-    title: 'Pagos & Administración',
-    ids: ['admin-payment-methods', 'admin-compras', 'admin-datos-fiscales'],
+    id: 'configuracion',
+    title: 'Configuración',
+    ids: ['admin-configuracion-costeo', 'admin-payment-methods', 'admin-delivery-zonas', 'admin-printers', 'admin-datos-fiscales'],
   },
 ];
 

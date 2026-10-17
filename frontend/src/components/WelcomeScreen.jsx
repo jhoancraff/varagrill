@@ -377,7 +377,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
       return;
     }
 
-    if (!isAdmin && (activeView.startsWith('admin') || activeView.startsWith('contabilidad') || activeView.startsWith('comida-empleados'))) {
+    if (!isAdmin && (activeView.startsWith('admin') || activeView.startsWith('contabilidad'))) {
       replaceView('home');
       return;
     }
@@ -856,29 +856,6 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           </button>
         ) : null}
 
-        {isAdmin ? (
-          <button
-            type="button"
-            onClick={() => {
-              goToView('comida-empleados');
-              if (isSidebarOverlayMode) {
-                setIsSidebarOpen(false);
-              }
-            }}
-            className="vg-sidebar-btn"
-            style={sidebarButtonStyle(activeView.startsWith('comida-empleados'))}
-          >
-            <span aria-hidden="true" style={sidebarIconWrapStyle(activeView.startsWith('comida-empleados'))}>
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 3v7a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V3" />
-                <path d="M6 3v18" />
-                <path d="M16 21V3c-2.5 1.5-4 4-4 7 0 2 1 3 4 3" />
-              </svg>
-            </span>
-            <span>Comida de empleados</span>
-          </button>
-        ) : null}
-
         </div>
 
         <div style={{
@@ -1242,7 +1219,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onNavigate={handleAnalystNavigation}
             canSeeCartasRestringidas={canSeeCartasRestringidas}
           />
-        ) : activeView === 'comida-empleados' ? (
+        ) : activeView === 'admin-comida-empleados' ? (
           <ComidaEmpleadosPage
             isMobile={isMobile}
             onBack={goBackView}

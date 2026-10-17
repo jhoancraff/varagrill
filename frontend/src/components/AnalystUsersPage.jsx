@@ -73,7 +73,7 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver al panel del analista
+          ← Volver al panel de configuración
         </button>
       </section>
     );
@@ -86,7 +86,7 @@ function AnalystUsersPage({ isMobile, isAdmin, onBack, onCreateNewUser, onEditUs
   return (
     <section style={containerStyle(isMobile)}>
       <button type="button" onClick={onBack} style={backButtonStyle}>
-        ← Volver al panel del analista
+        ← Volver al panel de configuración
       </button>
 
       <div style={badgeStyle}>Usuarios</div>

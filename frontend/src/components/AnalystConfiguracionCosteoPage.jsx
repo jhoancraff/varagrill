@@ -61,7 +61,7 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
     <section style={containerStyle(isMobile)}>
       <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver al panel analista
+          ← Volver al panel de configuración
         </button>
       </div>
 

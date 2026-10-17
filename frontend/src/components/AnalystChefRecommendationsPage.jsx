@@ -89,7 +89,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver al panel del analista
+          ← Volver al panel de configuración
         </button>
       </section>
     );
@@ -98,7 +98,7 @@ function AnalystChefRecommendationsPage({ isMobile, isAdmin, onBack, onCreateNew
   return (
     <section style={containerStyle(isMobile)}>
       <button type="button" onClick={onBack} style={backButtonStyle}>
-        ← Volver al panel del analista
+        ← Volver al panel de configuración
       </button>
 
       <div style={badgeStyle}>Recomendaciones del chef</div>

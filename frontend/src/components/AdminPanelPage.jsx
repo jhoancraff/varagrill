@@ -150,17 +150,17 @@ const analystGroups = [
   {
     id: 'menu-produccion',
     title: 'Menú & Producción',
-    ids: ['admin-products', 'admin-recipes', 'admin-preparations', 'admin-promotions', 'admin-chef-recommendations'],
+    ids: ['admin-products', 'admin-recipes', 'admin-preparations', 'admin-configuracion-costeo', 'admin-promotions', 'admin-chef-recommendations'],
   },
   {
     id: 'operacion-local',
     title: 'Operación del local',
-    ids: ['admin-mesas', 'admin-users', 'admin-comida-empleados', 'admin-compras'],
+    ids: ['admin-mesas', 'admin-users', 'admin-comida-empleados', 'admin-printers', 'admin-delivery-zonas'],
   },
   {
-    id: 'configuracion',
-    title: 'Configuración',
-    ids: ['admin-configuracion-costeo', 'admin-payment-methods', 'admin-delivery-zonas', 'admin-printers', 'admin-datos-fiscales'],
+    id: 'pagos-administracion',
+    title: 'Pagos & Administración',
+    ids: ['admin-payment-methods', 'admin-compras', 'admin-datos-fiscales'],
   },
 ];
 
@@ -219,7 +219,7 @@ function AdminPanelPage({ isMobile, onBack, onNavigate, canSeeCartasRestringidas
         }
       `}</style>
       <section style={panelContainerStyle(isMobile)}>
-        <h2 style={titleStyle(isMobile)}>Panel del analista</h2>
+        <h2 style={titleStyle(isMobile)}>Panel de configuración</h2>
 
         {groups.map((group) => (
           <section key={group.id} style={groupStyle} aria-label={group.title}>

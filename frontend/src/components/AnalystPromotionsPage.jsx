@@ -128,7 +128,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
         <h2 style={titleStyle(isMobile)}>Acceso restringido</h2>
         <div style={noticeStyle}>Solo el rol Administrador puede entrar a esta sección.</div>
         <button type="button" onClick={onBack} style={backButtonStyle}>
-          ← Volver al panel del analista
+          ← Volver al panel de configuración
         </button>
       </section>
     );
@@ -137,7 +137,7 @@ function AnalystPromotionsPage({ isMobile, isAdmin, onBack, onSelectProduct, onS
   return (
     <section style={containerStyle(isMobile)}>
       <button type="button" onClick={onBack} style={backButtonStyle}>
-        ← Volver al panel del analista
+        ← Volver al panel de configuración
       </button>
 
       <div style={badgeStyle}>Promociones</div>

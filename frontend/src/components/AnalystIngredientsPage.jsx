@@ -309,7 +309,7 @@ function AnalystIngredientsPage({ isMobile, onBack }) {
       </form>
 
       <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
-        Volver al panel del analista
+        Volver al panel de configuración
       </button>
 
       <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />

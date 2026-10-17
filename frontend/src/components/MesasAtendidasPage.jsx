@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BsAmount from './BsAmount';
 import AjustePedidoModal from './AjustePedidoModal';
+import ImpresionFallidaModal from './ImpresionFallidaModal';
 import useExchangeRate from '../hooks/useExchangeRate';
 
 const ESTADO_LABELS = {
@@ -33,6 +34,8 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
   const [prepBusyMap, setPrepBusyMap] = useState({});
   const [reprintBusyMap, setReprintBusyMap] = useState({});
   const [actionError, setActionError] = useState('');
+  // Comanda que no salió en alguna impresora (el pedido igual quedó registrado y en Caja).
+  const [avisoImpresion, setAvisoImpresion] = useState(null);
   const [ajusteModal, setAjusteModal] = useState(null); // { modo, pedidoId, item }
   const [ajusteBusy, setAjusteBusy] = useState(false);
   const [ajusteError, setAjusteError] = useState('');
@@ -204,6 +207,9 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
       if (!response.ok || !data.ok) {
         setActionError(data.message || 'No se pudo iniciar la preparación.');
         return;
+      }
+      if (data.impresion && !data.impresion.ok) {
+        setAvisoImpresion({ pedidoId, fallidas: data.impresion.fallidas || [] });
       }
       await fetchMesas();
     } catch (requestError) {
@@ -604,6 +610,7 @@ function MesasAtendidasPage({ isMobile, onBack, onAddRoundToTable, onNuevoPedido
             onConfirmarMover={handleConfirmarMover}
           />
         ) : null}
+        <ImpresionFallidaModal aviso={avisoImpresion} onCerrar={() => setAvisoImpresion(null)} />
       </section>
     );
   }

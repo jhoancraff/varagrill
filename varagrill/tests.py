@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 from django.utils import timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from varagrill.models import (
     VGCategoriaGasto,
@@ -4616,3 +4616,119 @@ class ComidaEmpleadosTests(TestCase):
         cuerpo['apta_comida_empleados'] = False
         r = self.client.post('/api/admin/recetas/', data=json.dumps(cuerpo), content_type='application/json')
         self.assertFalse(r.json()['recipe']['apta_comida_empleados'])
+
+
+class ComandaNoImpresaTests(TestCase):
+    """Si una impresora no responde, el pedido igual queda registrado pero la respuesta avisa que la comanda NO salió."""
+
+    COCINA = '192.168.1.246'
+    PARRILLA = '192.168.1.200'
+
+    def setUp(self):
+        mesero_role, _ = VGRol.objects.get_or_create(nombre_role='Mesero')
+        self.user = VGUsuario.objects.create_user(
+            username='mesero_imp', password='claveMesero123', cedula='96000001', email='mesero_imp@test.test', id_role=mesero_role,
+        )
+        self.client.force_login(self.user)
+        self.cat_cocina = VGCategoriaProducto.objects.create(nombre='Cocina IMP', ip_impresora=self.COCINA, puerto_impresora=9100)
+        self.cat_parrilla = VGCategoriaProducto.objects.create(nombre='Parrilla IMP', ip_impresora=self.PARRILLA, puerto_impresora=9100)
+        self.plato = VGProducto.objects.create(nombre='Plato IMP', categoria=self.cat_cocina, precio_venta='10.00', disponible=True)
+        self.carne = VGProducto.objects.create(nombre='Carne IMP', categoria=self.cat_parrilla, precio_venta='12.00', disponible=True)
+        self.conexiones = []
+        self.caidas = set()
+
+        def conectar(direccion, timeout=None):
+            host = direccion[0]
+            self.conexiones.append(host)
+            if host in self.caidas:
+                raise ConnectionRefusedError('rechazada')
+            return MagicMock()
+
+        patcher = patch('varagrill.impresion_termica.socket.create_connection', side_effect=conectar)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        sleep_patcher = patch('varagrill.impresion_termica.time.sleep')
+        sleep_patcher.start()
+        self.addCleanup(sleep_patcher.stop)
+
+    def _pedido(self, estado='pendiente'):
+        pedido = VGPedido.objects.create(
+            usuario=self.user, tipo_pedido='llevar', estado=estado, subtotal='22.00', total='22.00',
+        )
+        self.detalle_plato = VGDetallePedido.objects.create(pedido=pedido, producto=self.plato, cantidad=1, precio_unitario='10.00', estado='pendiente')
+        self.detalle_carne = VGDetallePedido.objects.create(pedido=pedido, producto=self.carne, cantidad=1, precio_unitario='12.00', estado='pendiente')
+        return pedido
+
+    def _estado(self, pedido, estado='en_preparacion'):
+        return self.client.post(
+            f'/api/pedidos/{pedido.id}/estado/', data=json.dumps({'estado': estado}), content_type='application/json',
+        )
+
+    def test_si_todo_imprime_la_respuesta_lo_dice(self):
+        pedido = self._pedido()
+        r = self._estado(pedido)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['impresion'], {'ok': True, 'fallidas': []})
+        self.assertEqual(sorted(self.conexiones), [self.PARRILLA, self.COCINA])
+
+    def test_si_una_impresora_falla_el_pedido_queda_registrado_y_la_respuesta_avisa(self):
+        self.caidas = {self.COCINA}
+        pedido = self._pedido()
+        r = self._estado(pedido)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['ok'])
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, 'en_preparacion')
+        impresion = r.json()['impresion']
+        self.assertFalse(impresion['ok'])
+        self.assertEqual(len(impresion['fallidas']), 1)
+        falla = impresion['fallidas'][0]
+        self.assertEqual(falla['nombre'], 'Cocina IMP')
+        self.assertEqual(falla['destino'], f'{self.COCINA}:9100')
+        self.assertIn('rechazó', falla['motivo'])
+
+    def test_una_categoria_sin_ip_no_cuenta_como_fallo(self):
+        VGCategoriaProducto.objects.all().update(ip_impresora='')
+        pedido = self._pedido()
+        r = self._estado(pedido)
+        self.assertEqual(r.json()['impresion'], {'ok': True, 'fallidas': []})
+        self.assertEqual(self.conexiones, [])
+
+    def test_un_cambio_de_estado_que_no_imprime_no_trae_aviso(self):
+        pedido = self._pedido(estado='pendiente')
+        r = self._estado(pedido, 'cancelado')
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()['impresion'])
+        self.assertEqual(self.conexiones, [])
+
+    def test_reimprimir_la_comanda_devuelve_502_con_la_impresora_que_fallo(self):
+        pedido = self._pedido(estado='en_preparacion')
+        self.caidas = {self.PARRILLA}
+        r = self.client.post(f'/api/pedidos/{pedido.id}/reimprimir-comanda/')
+        self.assertEqual(r.status_code, 502)
+        self.assertFalse(r.json()['ok'])
+        self.assertIn('Parrilla IMP', r.json()['message'])
+        self.assertEqual([f['nombre'] for f in r.json()['impresion']['fallidas']], ['Parrilla IMP'])
+
+    def test_reintentar_con_destinos_solo_reenvia_a_las_que_fallaron(self):
+        pedido = self._pedido(estado='en_preparacion')
+        self.caidas = {self.PARRILLA}
+        self.client.post(f'/api/pedidos/{pedido.id}/reimprimir-comanda/')
+        self.caidas = set()
+        self.conexiones.clear()
+        r = self.client.post(
+            f'/api/pedidos/{pedido.id}/reimprimir-comanda/',
+            data=json.dumps({'destinos': [f'{self.PARRILLA}:9100']}), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()['ok'])
+        self.assertEqual(self.conexiones, [self.PARRILLA])  # la cocina no recibe un duplicado
+
+    def test_reimprimir_un_renglon_devuelve_502_si_la_impresora_no_responde(self):
+        pedido = self._pedido(estado='en_preparacion')
+        pedido.fecha_inicio_preparacion = timezone.now()
+        pedido.save(update_fields=['fecha_inicio_preparacion'])
+        self.caidas = {self.PARRILLA}
+        r = self.client.post(f'/api/pedidos/{pedido.id}/items/{self.detalle_carne.id}/reimprimir/')
+        self.assertEqual(r.status_code, 502)
+        self.assertIn('Parrilla IMP', r.json()['message'])

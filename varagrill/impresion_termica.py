@@ -453,12 +453,27 @@ def _build_ticket_secundario_bytes(pedido, categoria, detalles):
     return bytes(out)
 
 
+def _motivo_fallo_impresion(exc):
+    """Por qué no salió el ticket, en una frase corta en español (se le muestra al mesero)."""
+    if isinstance(exc, ConnectionRefusedError):
+        return 'rechazó la conexión (revisa la IP y el puerto configurados)'
+    if isinstance(exc, socket.timeout):
+        return 'no respondió (¿apagada o desconectada?)'
+    if isinstance(exc, socket.gaierror):
+        return 'la dirección configurada no es válida'
+    if isinstance(exc, OSError):
+        return 'no se pudo conectar (¿apagada o fuera de la red?)'
+    return 'falló el envío'
+
+
 def _enviar_ticket_comanda(ip_impresora, puerto_impresora, ticket, pedido_id, etiqueta):
     """
     Abre un socket a (ip_impresora, puerto_impresora) y manda `ticket` (bytes ESC/POS ya
-    armados), silencioso ante cualquier fallo (impresora apagada/inalcanzable) — usado
-    tanto para el destino primario como para el secundario de una categoría, para que un
-    fallo en un ticket no afecte a los demás ni al registro del pedido.
+    armados). Nunca lanza: ante cualquier fallo (impresora apagada/inalcanzable) lo deja en
+    el log y devuelve {'ok': False, 'destino', 'motivo'} — usado tanto para el destino
+    primario como para el secundario de una categoría, para que un fallo en un ticket no
+    afecte a los demás ni al registro del pedido. Quien llama decide si avisarle al usuario
+    (ver resumir_resultados_impresion).
     """
     destino = f'{ip_impresora}:{puerto_impresora}'
     try:
@@ -475,11 +490,34 @@ def _enviar_ticket_comanda(ip_impresora, puerto_impresora, ticket, pedido_id, et
             conexion.shutdown(socket.SHUT_WR)
             time.sleep(0.3)
         logger.info('Comanda pedido %s [%s] enviada a %s', pedido_id, etiqueta, destino)
-    except Exception:
+        return {'ok': True, 'destino': destino, 'motivo': ''}
+    except Exception as exc:
         logger.exception('No se pudo imprimir pedido %s [%s] hacia %s', pedido_id, etiqueta, destino)
+        return {'ok': False, 'destino': destino, 'motivo': _motivo_fallo_impresion(exc)}
 
 
-def imprimir_comandas_pedido(pedido, detalles=None):
+def resumir_resultados_impresion(resultados):
+    """
+    Resume lo que devolvió imprimir_comandas_pedido en {'ok': bool, 'fallidas': [{'nombre',
+    'destino', 'motivo'}]} — la forma en que las vistas se lo cuentan al frontend para que
+    el mesero sepa que la comanda física NO salió aunque el pedido ya esté registrado.
+    """
+    fallidas = [
+        {'nombre': r.get('nombre', ''), 'destino': r.get('destino', ''), 'motivo': r.get('motivo', '')}
+        for r in (resultados or []) if not r.get('ok')
+    ]
+    return {'ok': not fallidas, 'fallidas': fallidas}
+
+
+def mensaje_fallos_impresion(resumen):
+    """'Cocina (192.168.1.246:9100): no respondió...; Parrilla (...)' para el mensaje de error."""
+    return '; '.join(
+        f"{f['nombre']} ({f['destino']}): {f['motivo']}" if f['destino'] else f"{f['nombre']}: {f['motivo']}"
+        for f in resumen['fallidas']
+    )
+
+
+def imprimir_comandas_pedido(pedido, detalles=None, solo_destinos=None):
     """
     Imprime una comanda por cada impresora física con ítems asignados (ip:puerto),
     combinando en un solo ticket todo lo que comparte esa impresora — así un plato
@@ -502,7 +540,16 @@ def imprimir_comandas_pedido(pedido, detalles=None):
     (ver pedido_detalle_reimprimir_view) en vez de reimprimir el pedido completo — útil
     para reimprimir un solo producto sin repetir los demás renglones ya entregados a
     cocina.
+
+    `solo_destinos`, si se pasa (conjunto de 'ip:puerto'), limita el envío a esas impresoras:
+    es el "reintentar" tras un fallo parcial, para no duplicar el ticket en las que sí
+    imprimieron.
+
+    Devuelve una lista con el resultado de cada impresora intentada: {'ok', 'nombre',
+    'destino', 'motivo'} (ver resumir_resultados_impresion). Una categoría sin IP no cuenta:
+    no imprimir ahí es una decisión de configuración, no un fallo.
     """
+    resultados = []
     if detalles is None:
         detalles = list(
             pedido.detalles
@@ -513,7 +560,7 @@ def imprimir_comandas_pedido(pedido, detalles=None):
             .all()
         )
     if not detalles:
-        return
+        return resultados
 
     items = _collect_print_items(detalles)
 
@@ -527,12 +574,16 @@ def imprimir_comandas_pedido(pedido, detalles=None):
         entry['items'].append(item)
 
     for (ip_impresora, puerto_impresora), datos in por_destino.items():
+        if solo_destinos is not None and f'{ip_impresora}:{puerto_impresora}' not in solo_destinos:
+            continue
         categorias = list(datos['categorias'].values())
         nombres_categorias = ', '.join(c.nombre for c in categorias)
         ticket = _build_ticket_bytes(pedido, categorias, datos['items'])
-        _enviar_ticket_comanda(
+        resultado = _enviar_ticket_comanda(
             ip_impresora, puerto_impresora, ticket, pedido.id, f'categorias [{nombres_categorias}]',
         )
+        resultado['nombre'] = nombres_categorias or 'Impresora'
+        resultados.append(resultado)
 
     por_destino_secundario = {}
     for detalle in detalles:
@@ -545,8 +596,13 @@ def imprimir_comandas_pedido(pedido, detalles=None):
         entry['detalles'].append(detalle)
 
     for (ip_impresora, puerto_impresora), datos in por_destino_secundario.items():
+        if solo_destinos is not None and f'{ip_impresora}:{puerto_impresora}' not in solo_destinos:
+            continue
         categoria = datos['categoria']
         ticket = _build_ticket_secundario_bytes(pedido, categoria, datos['detalles'])
-        _enviar_ticket_comanda(
+        resultado = _enviar_ticket_comanda(
             ip_impresora, puerto_impresora, ticket, pedido.id, f'{categoria.nombre} (secundaria)',
         )
+        resultado['nombre'] = f'{categoria.nombre} (secundaria)'
+        resultados.append(resultado)
+    return resultados

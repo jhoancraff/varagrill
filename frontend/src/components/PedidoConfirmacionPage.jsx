@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import BsAmount from './BsAmount';
 import Toast from './Toast';
+import ImpresionFallidaModal from './ImpresionFallidaModal';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 
@@ -38,6 +39,8 @@ function PedidoConfirmacionPage({ isMobile, pedidoId, onBack, onIrACaja }) {
   const [error, setError] = useState('');
   const [confirmando, setConfirmando] = useState(false);
   const [reimprimiendo, setReimprimiendo] = useState(false);
+  // Comanda que no salió en alguna impresora (el pedido igual quedó registrado y en Caja).
+  const [avisoImpresion, setAvisoImpresion] = useState(null);
 
   const loadPedido = useCallback(async () => {
     setLoading(true);
@@ -84,7 +87,12 @@ function PedidoConfirmacionPage({ isMobile, pedidoId, onBack, onIrACaja }) {
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo confirmar el pedido.');
       }
-      showSuccess('Comanda enviada a imprimir. El pedido ya está disponible en Caja para cobrarlo.');
+      if (data.impresion && !data.impresion.ok) {
+        setAvisoImpresion({ pedidoId, fallidas: data.impresion.fallidas || [] });
+        showError('Pedido registrado y disponible en Caja, pero la comanda NO se imprimió.');
+      } else {
+        showSuccess('Comanda enviada a imprimir. El pedido ya está disponible en Caja para cobrarlo.');
+      }
       await loadPedido();
     } catch (requestError) {
       showError(requestError.message || 'No se pudo confirmar el pedido.');
@@ -123,6 +131,7 @@ function PedidoConfirmacionPage({ isMobile, pedidoId, onBack, onIrACaja }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      <ImpresionFallidaModal aviso={avisoImpresion} onCerrar={() => setAvisoImpresion(null)} />
 
       {loading ? <div style={emptyStyle}>Cargando pedido...</div> : null}
       {!loading && error ? <div style={noticeStyle}>{error}</div> : null}

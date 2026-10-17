@@ -117,6 +117,13 @@ from varagrill.contabilidad_views import (
     reporte_venta_nota_detalle_view,
     reporte_ventas_dia_view,
 )
+from varagrill.comida_empleados_views import (
+    comida_empleados_anular_view,
+    comida_empleados_detalle_view,
+    comida_empleados_opciones_view,
+    comida_empleados_previsualizar_view,
+    comida_empleados_view,
+)
 from varagrill.movimientos_inventario_views import (
     movimiento_inventario_nota_view,
     movimiento_inventario_pedido_view,
@@ -205,6 +212,17 @@ urlpatterns = [
     path('api/admin/categorias/', admin_categorias_view, name='admin-categorias'),
     path('api/admin/impresora-caja/', admin_impresora_caja_view, name='admin-impresora-caja'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),
+    path('api/admin/comida-empleados/', comida_empleados_view, name='admin-comida-empleados'),
+    path('api/admin/comida-empleados/opciones/', comida_empleados_opciones_view, name='admin-comida-empleados-opciones'),
+    path(
+        'api/admin/comida-empleados/previsualizar/', comida_empleados_previsualizar_view,
+        name='admin-comida-empleados-previsualizar',
+    ),
+    path('api/admin/comida-empleados/<int:comida_id>/', comida_empleados_detalle_view, name='admin-comida-empleados-detalle'),
+    path(
+        'api/admin/comida-empleados/<int:comida_id>/anular/', comida_empleados_anular_view,
+        name='admin-comida-empleados-anular',
+    ),
     path('api/admin/configuracion-costeo/', admin_configuracion_costeo_view, name='admin-configuracion-costeo'),
     path('api/admin/promociones/', admin_promotions_view, name='admin-promotions'),
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),

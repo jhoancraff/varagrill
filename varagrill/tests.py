@@ -4391,3 +4391,228 @@ class MovimientoInventarioReporteTests(TestCase):
         self.assertEqual([p['id'] for p in data['pedidos']], [self.pedido.id])
         self.assertEqual(len(data['pedidos'][0]['productos']), 2)
         self.assertEqual(self.pedir('nota-entrega/99999999/').status_code, 404)
+
+
+class ComidaEmpleadosTests(TestCase):
+    """Comida de empleados: descuenta del inventario sin vender ni facturar, y se puede anular."""
+
+    URL = '/api/admin/comida-empleados/'
+
+    def setUp(self):
+        from datetime import timedelta
+        from varagrill.models import VGPreparacion, VGRecetaPreparacion
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        contador_role, _ = VGRol.objects.get_or_create(nombre_role='Contador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='ce_admin', password='claveAdmin123', cedula='98100001', email='ce_admin@varagrill.test', id_role=admin_role,
+        )
+        self.contador = VGUsuario.objects.create_user(
+            username='ce_contador', password='claveConta123', cedula='98100002', email='ce_contador@varagrill.test', id_role=contador_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='ce_cajera', password='claveCajera123', cedula='98100003', email='ce_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.hoy = timezone.localdate()
+        self.ayer = self.hoy - timedelta(days=1)
+        _set_tasa_actual('100.0000')  # sin salir a internet a buscar la tasa del BCV
+
+        self.arroz = VGIngrediente.objects.create(nombre='Arroz CE', unidad_medida='g', stock_actual=Decimal('1000'), costo_unitario=Decimal('0.01'))
+        self.pollo = VGIngrediente.objects.create(nombre='Pollo CE', unidad_medida='g', stock_actual=Decimal('500'), costo_unitario=Decimal('0.02'))
+        self.sal = VGIngrediente.objects.create(nombre='Sal CE', unidad_medida='g', stock_actual=Decimal('100'), costo_unitario=Decimal('0.01'))
+
+        categoria = VGCategoriaProducto.objects.create(nombre='Recetas')
+        self.receta = VGProducto.objects.create(
+            nombre='Arroz con pollo CE', categoria=categoria, precio_venta='0', disponible=False, apta_comida_empleados=True,
+        )
+        VGRecetaProducto.objects.create(producto=self.receta, ingrediente=self.arroz, cantidad_requerida=Decimal('100'))
+        VGRecetaProducto.objects.create(producto=self.receta, ingrediente=self.pollo, cantidad_requerida=Decimal('150'))
+        self.receta_no_apta = VGProducto.objects.create(
+            nombre='Receta de la carta CE', categoria=categoria, precio_venta='0', disponible=False, apta_comida_empleados=False,
+        )
+        VGRecetaProducto.objects.create(producto=self.receta_no_apta, ingrediente=self.arroz, cantidad_requerida=Decimal('10'))
+
+        # subreceta: un lote de 1000 g lleva 600 g de arroz y 40 g de sal
+        self.subreceta = VGPreparacion.objects.create(nombre='Arroz base CE', rendimiento_cantidad=Decimal('1000'), rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=self.subreceta, ingrediente=self.arroz, cantidad_requerida=Decimal('600'))
+        VGRecetaPreparacion.objects.create(preparacion=self.subreceta, ingrediente=self.sal, cantidad_requerida=Decimal('40'))
+        # receta que lleva 200 g de esa subreceta por porcion
+        self.receta_anidada = VGProducto.objects.create(
+            nombre='Plato con arroz base CE', categoria=categoria, precio_venta='0', disponible=False, apta_comida_empleados=True,
+        )
+        VGRecetaProducto.objects.create(producto=self.receta_anidada, preparacion=self.subreceta, cantidad_requerida=Decimal('200'))
+
+    def post(self, ruta='', usuario=None, **cuerpo):
+        self.client.force_login(usuario or self.admin)
+        return self.client.post(self.URL + ruta, data=json.dumps(cuerpo), content_type='application/json')
+
+    def get(self, ruta='', usuario=None, **params):
+        self.client.force_login(usuario or self.admin)
+        return self.client.get(self.URL + ruta, params)
+
+    def stock(self, ingrediente):
+        ingrediente.refresh_from_db()
+        return ingrediente.stock_actual
+
+    def test_solo_administradores_y_contadores(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.assertEqual(self.get(usuario=self.cajera).status_code, 401)
+        self.assertEqual(self.get(usuario=self.contador).status_code, 200)
+        self.assertEqual(self.get(usuario=self.admin).status_code, 200)
+
+    def test_opciones_solo_recetas_marcadas_y_todas_las_subrecetas_e_ingredientes(self):
+        data = self.get('opciones/').json()
+        self.assertEqual({r['nombre'] for r in data['recetas']}, {'Arroz con pollo CE', 'Plato con arroz base CE'})
+        self.assertEqual([s['nombre'] for s in data['subrecetas']], ['Arroz base CE'])
+        self.assertTrue({'Arroz CE', 'Pollo CE', 'Sal CE'} <= {i['nombre'] for i in data['ingredientes']})
+        self.assertTrue(data['puede_fecha_pasada'])
+        self.assertFalse(self.get('opciones/', usuario=self.contador).json()['puede_fecha_pasada'])
+
+    def test_previsualizar_no_toca_el_stock_y_avisa_si_no_alcanza(self):
+        r = self.post('previsualizar/', tipo='receta', origen_id=self.receta.id, cantidad='4')
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()
+        por_nombre = {l['nombre']: l for l in data['lineas']}
+        self.assertEqual(Decimal(por_nombre['Arroz CE']['cantidad']), Decimal('400'))
+        self.assertEqual(Decimal(por_nombre['Pollo CE']['cantidad']), Decimal('600'))
+        self.assertEqual(Decimal(por_nombre['Pollo CE']['stock_despues']), Decimal('-100'))
+        self.assertEqual(data['sin_stock'], ['Pollo CE'])
+        self.assertEqual(Decimal(data['costo_total']), Decimal('16.00'))  # 400 x 0.01 + 600 x 0.02
+        self.assertEqual(self.stock(self.pollo), Decimal('500'))
+        from varagrill.models import VGComidaEmpleados
+        self.assertEqual(VGComidaEmpleados.objects.count(), 0)
+
+    def test_registrar_una_receta_descuenta_el_inventario_y_deja_los_movimientos(self):
+        from varagrill.models import VGComidaEmpleados, VGMovimientoInventario
+        r = self.post(tipo='receta', origen_id=self.receta.id, cantidad='3', turno='almuerzo', nota='Almuerzo del personal')
+        self.assertEqual(r.status_code, 201, r.content)
+        comida = r.json()['comida']
+        self.assertEqual(comida['estado'], 'registrada')
+        self.assertEqual(comida['turno_label'], 'Almuerzo')
+        self.assertEqual(Decimal(comida['costo_total']), Decimal('12.00'))  # 300 x 0.01 + 450 x 0.02
+        self.assertEqual(self.stock(self.arroz), Decimal('700'))
+        self.assertEqual(self.stock(self.pollo), Decimal('50'))
+        movimientos = VGMovimientoInventario.objects.filter(id_referencia=comida['id'], tipo_movimiento='salida')
+        self.assertEqual(movimientos.count(), 2)
+        self.assertTrue(all(m.motivo.startswith('Comida de empleados') for m in movimientos))
+        self.assertEqual(VGComidaEmpleados.objects.get(pk=comida['id']).detalles.count(), 2)
+
+    def test_si_no_alcanza_pide_confirmacion_y_con_ella_deja_el_stock_en_negativo(self):
+        r = self.post(tipo='receta', origen_id=self.receta.id, cantidad='4')
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertEqual(r.json()['code'], 'stock_insuficiente')
+        self.assertEqual(r.json()['sin_stock'], ['Pollo CE'])
+        self.assertEqual(self.stock(self.pollo), Decimal('500'))
+        r = self.post(tipo='receta', origen_id=self.receta.id, cantidad='4', confirmar_stock_insuficiente=True)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self.stock(self.pollo), Decimal('-100'))
+
+    def test_una_subreceta_se_descuenta_segun_su_rendimiento(self):
+        r = self.post(tipo='subreceta', origen_id=self.subreceta.id, cantidad='500')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['comida']['unidad'], 'g')
+        self.assertEqual(self.stock(self.arroz), Decimal('700'))  # 500 g es medio lote: 300 g de arroz
+        self.assertEqual(self.stock(self.sal), Decimal('80'))     # y 20 g de sal
+
+    def test_una_receta_con_subreceta_anidada_descuenta_hasta_el_ingrediente_crudo(self):
+        r = self.post(tipo='receta', origen_id=self.receta_anidada.id, cantidad='5')
+        self.assertEqual(r.status_code, 201, r.content)
+        # 5 porciones x 200 g de subreceta = 1000 g = un lote: 600 g de arroz y 40 g de sal
+        self.assertEqual(self.stock(self.arroz), Decimal('400'))
+        self.assertEqual(self.stock(self.sal), Decimal('60'))
+
+    def test_un_ingrediente_suelto(self):
+        r = self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='250')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['comida']['unidad'], 'g')
+        self.assertEqual(self.stock(self.arroz), Decimal('750'))
+
+    def test_validaciones_de_lo_que_se_elige(self):
+        self.assertEqual(self.post(tipo='receta', origen_id=self.receta_no_apta.id, cantidad='2').status_code, 400)
+        self.assertEqual(self.post(tipo='receta', origen_id=99999999, cantidad='2').status_code, 400)
+        self.assertEqual(self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='0').status_code, 400)
+        self.assertEqual(self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='abc').status_code, 400)
+        self.assertEqual(self.post(tipo='otra-cosa', origen_id=1, cantidad='1').status_code, 400)
+        self.assertEqual(self.stock(self.arroz), Decimal('1000'))
+
+    def test_la_fecha_pasada_solo_la_registra_un_administrador(self):
+        from datetime import timedelta
+        from varagrill.models import VGMovimientoInventario
+        r = self.post(usuario=self.contador, tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', fecha=self.ayer.isoformat())
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', fecha=(self.hoy + timedelta(days=30)).isoformat()).status_code, 400)
+        r = self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', fecha=self.ayer.isoformat())
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()['comida']['fecha'], self.ayer.isoformat())
+        mov = VGMovimientoInventario.objects.get(id_referencia=r.json()['comida']['id'])
+        self.assertEqual(timezone.localtime(mov.fecha_movimiento).date(), self.ayer)
+        # el contador si registra la de hoy
+        self.assertEqual(self.post(usuario=self.contador, tipo='ingrediente', origen_id=self.arroz.id, cantidad='10').status_code, 201)
+
+    def test_avisa_si_ya_hay_una_comida_ese_dia_y_turno_pero_deja_registrar_varias(self):
+        self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', turno='almuerzo')
+        previa = self.post('previsualizar/', tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', turno='almuerzo').json()
+        self.assertEqual(len(previa['ya_registradas']), 1)
+        otro_turno = self.post('previsualizar/', tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', turno='cena').json()
+        self.assertEqual(otro_turno['ya_registradas'], [])
+        self.assertEqual(self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='10', turno='almuerzo').status_code, 201)
+
+    def test_anular_repone_exactamente_lo_descontado(self):
+        from varagrill.models import VGMovimientoInventario
+        comida = self.post(tipo='receta', origen_id=self.receta.id, cantidad='3').json()['comida']
+        self.assertEqual(self.post(f'{comida["id"]}/anular/', usuario=self.contador, motivo='Error').status_code, 403)
+        self.assertEqual(self.post(f'{comida["id"]}/anular/', motivo='').status_code, 400)
+        r = self.post(f'{comida["id"]}/anular/', motivo='Se registró por error')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['comida']['estado'], 'anulada')
+        self.assertEqual(self.stock(self.arroz), Decimal('1000'))
+        self.assertEqual(self.stock(self.pollo), Decimal('500'))
+        self.assertEqual(VGMovimientoInventario.objects.filter(id_referencia=comida['id'], tipo_movimiento='entrada').count(), 2)
+        self.assertEqual(self.post(f'{comida["id"]}/anular/', motivo='otra vez').status_code, 400)
+
+    def test_el_historial_suma_solo_las_registradas(self):
+        a = self.post(tipo='ingrediente', origen_id=self.arroz.id, cantidad='100').json()['comida']  # 1.00
+        b = self.post(tipo='ingrediente', origen_id=self.pollo.id, cantidad='100').json()['comida']  # 2.00
+        self.post(f'{b["id"]}/anular/', motivo='prueba')
+        data = self.get(desde=self.hoy.isoformat(), hasta=self.hoy.isoformat()).json()
+        self.assertEqual({c['id']: c['estado'] for c in data['comidas']}, {a['id']: 'registrada', b['id']: 'anulada'})
+        self.assertEqual(data['total_registradas'], 1)
+        self.assertEqual(Decimal(data['costo_total']), Decimal('1.00'))
+        detalle = self.get(f'{a["id"]}/').json()['comida']
+        self.assertEqual([l['nombre'] for l in detalle['lineas']], ['Arroz CE'])
+
+    def test_el_estado_de_resultados_resta_la_alimentacion_del_personal(self):
+        self.post(tipo='receta', origen_id=self.receta.id, cantidad='3')  # costo 12.00
+        self.client.force_login(self.admin)
+        r = self.client.get('/api/admin/reportes/estado-resultados/', {'desde': self.hoy.isoformat(), 'hasta': self.hoy.isoformat()})
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()
+        self.assertEqual(data['comida_empleados']['total'], '12.00')
+        self.assertEqual(data['comida_empleados']['cantidad'], 1)
+        self.assertEqual(data['utilidad_neta'], '-12.00')
+
+    def test_el_movimiento_de_inventario_enlaza_con_la_comida(self):
+        comida = self.post(tipo='receta', origen_id=self.receta.id, cantidad='3').json()['comida']
+        self.client.force_login(self.admin)
+        r = self.client.get(f'/api/admin/reportes/movimiento-inventario/ingrediente/{self.arroz.id}/', {'desde': self.hoy.isoformat(), 'hasta': self.hoy.isoformat()})
+        origen = r.json()['movimientos'][0]['origen']
+        self.assertEqual(origen, {'tipo': 'comida_empleados', 'id': comida['id'], 'etiqueta': f'Comida de empleados #{comida["id"]}'})
+
+    def test_el_check_de_la_receta_se_guarda_y_se_conserva_al_editar(self):
+        self.client.force_login(self.admin)
+        cuerpo = {
+            'action': 'create', 'nombre': 'Sopa CE', 'descripcion': '',
+            'componentes': [{'tipo': 'ingrediente', 'referencia_id': self.sal.id, 'cantidad': '5'}],
+            'apta_comida_empleados': True,
+        }
+        r = self.client.post('/api/admin/recetas/', data=json.dumps(cuerpo), content_type='application/json')
+        self.assertEqual(r.status_code, 201, r.content)
+        receta = r.json()['recipe']
+        self.assertTrue(receta['apta_comida_empleados'])
+        cuerpo.update({'action': 'update', 'id': receta['id']})
+        cuerpo.pop('apta_comida_empleados')  # si no lo manda, conserva el valor
+        r = self.client.post('/api/admin/recetas/', data=json.dumps(cuerpo), content_type='application/json')
+        self.assertTrue(r.json()['recipe']['apta_comida_empleados'])
+        cuerpo['apta_comida_empleados'] = False
+        r = self.client.post('/api/admin/recetas/', data=json.dumps(cuerpo), content_type='application/json')
+        self.assertFalse(r.json()['recipe']['apta_comida_empleados'])

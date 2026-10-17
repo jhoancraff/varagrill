@@ -192,6 +192,31 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
               </div>
             ) : null}
 
+            {Number(data.comida_empleados?.total) > 0 ? (
+              <div style={lineRowStyle}>
+                <span style={lineLabelStyle}>
+                  (−) Alimentación del personal
+                  <span style={{ color: 'var(--vg-f-a89999)', fontSize: 12.5 }}>
+                    {' '}({data.comida_empleados.cantidad} {data.comida_empleados.cantidad === 1 ? 'comida' : 'comidas'})
+                  </span>
+                  {onNavigate ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('comida-empleados')}
+                      style={verDetalleGastosButtonStyle}
+                      className="no-print"
+                    >
+                      Ver detalle →
+                    </button>
+                  ) : null}
+                </span>
+                <span style={{ ...lineValueStyle, color: 'var(--vg-f-ff9d9d)' }}>
+                  −${formatMonto(data.comida_empleados.total)}
+                  <BsAmount amountUsd={data.comida_empleados.total} bs={data.comida_empleados.total_bs} tasa={tasaCambio} />
+                </span>
+              </div>
+            ) : null}
+
             <div style={finalRowStyle(utilidadNetaPositiva)}>
               <span style={{ ...lineLabelStyle, fontSize: 16, fontWeight: 800 }}>= Utilidad neta</span>
               <span style={{ fontSize: 22, fontWeight: 800, color: utilidadNetaPositiva ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-ff9d9d)' }}>
@@ -203,6 +228,7 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
             <div style={avisoStyle}>
               Las compras a proveedores (lotes) no se suman aquí: su costo ya está dentro del costo de ventas, que sale del costo
               de cada producto vendido. Lo que se les pagó se ve en Cuentas por pagar.
+              {' '}La comida de empleados se resta aparte, con el costo de los ingredientes que se descontaron.
             </div>
           </div>
         </section>

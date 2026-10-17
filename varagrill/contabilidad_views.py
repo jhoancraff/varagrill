@@ -31,6 +31,7 @@ from .models import (
     VGConsignacionCaja,
     VGCorreccionMetodoPago,
     VGDetallePedido,
+    VGComidaEmpleados,
     VGConfiguracionCosteo,
     VGGasto,
     VGIngrediente,
@@ -1753,6 +1754,9 @@ def reporte_estado_resultados_view(request):
       fraccion del costo que de la venta cobrada.
     - Gastos operativos: VGGasto por fecha_gasto (no por fecha de pago: un gasto cuenta para el
       periodo en que se incurrio, se haya pagado ya o no).
+    - Alimentacion del personal: el costo de las comidas de empleados registradas (VGComidaEmpleados, no
+      anuladas) por su fecha; no es venta ni gasto pagado, pero si inventario consumido, y sin esta linea la
+      utilidad saldria inflada. Se resta de la utilidad neta junto con los gastos.
 
     Las compras a proveedores (lotes, por Excel o manuales) NO suman: su costo ya entra por el
     costo de lo vendido, asi que sumarlas aqui contaria el mismo ingrediente dos veces. Ver el
@@ -1899,8 +1903,18 @@ def reporte_estado_resultados_view(request):
     utilidad_bruta = ventas_total - costo_ventas
     utilidad_bruta_bs = ventas_total_bs - costo_ventas_bs
     utilidad_bruta_pct = (utilidad_bruta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
-    utilidad_neta_bs = utilidad_bruta_bs - gastos_total_bs
-    utilidad_neta = utilidad_bruta - gastos_total
+    comidas = VGComidaEmpleados.objects.filter(fecha__gte=desde, fecha__lte=hasta, estado='registrada')
+    comida_total = Decimal('0')
+    comida_total_bs = Decimal('0')
+    comida_cantidad = 0
+    for comida in comidas:
+        comida_cantidad += 1
+        comida_total += comida.costo_total
+        if comida.tasa_cambio_referencia:
+            comida_total_bs += comida.costo_total * comida.tasa_cambio_referencia
+
+    utilidad_neta_bs = utilidad_bruta_bs - gastos_total_bs - comida_total_bs
+    utilidad_neta = utilidad_bruta - gastos_total - comida_total
     utilidad_neta_pct = (utilidad_neta / ventas_total * Decimal('100')) if ventas_total > 0 else Decimal('0')
 
     return _auth_response({
@@ -1925,6 +1939,12 @@ def reporte_estado_resultados_view(request):
         'gastos_total': str(gastos_total.quantize(Decimal('0.01'))),
         'gastos_total_bs': str(gastos_total_bs.quantize(Decimal('0.01'))),
         'gastos_por_categoria': gastos_por_categoria,
+        # Comida de empleados (inventario consumido, no vendido): se resta de la utilidad neta.
+        'comida_empleados': {
+            'total': str(comida_total.quantize(Decimal('0.01'))),
+            'total_bs': str(comida_total_bs.quantize(Decimal('0.01'))),
+            'cantidad': comida_cantidad,
+        },
         'utilidad_neta': str(utilidad_neta.quantize(Decimal('0.01'))),
         'utilidad_neta_bs': str(utilidad_neta_bs.quantize(Decimal('0.01'))),
         'utilidad_neta_pct': str(utilidad_neta_pct.quantize(Decimal('0.01'))),

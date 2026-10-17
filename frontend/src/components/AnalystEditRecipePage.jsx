@@ -27,7 +27,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
   const [ingredients, setIngredients] = useState([]);
   const [preparations, setPreparations] = useState([]);
   const [configCosteo, setConfigCosteo] = useState({ rendimiento_receta_pct: '0', margen_ganancia_defecto_pct: '50' });
-  const [form, setForm] = useState({ id: null, nombre: '', descripcion: '' });
+  const [form, setForm] = useState({ id: null, nombre: '', descripcion: '', apta_comida_empleados: false });
   const [draft, setDraft] = useState(emptyDraft);
   const [components, setComponents] = useState([]);
   const [showIngredientResults, setShowIngredientResults] = useState(false);
@@ -88,6 +88,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
           id: selectedRecipe.id,
           nombre: selectedRecipe.nombre || '',
           descripcion: selectedRecipe.descripcion || '',
+          apta_comida_empleados: Boolean(selectedRecipe.apta_comida_empleados),
         };
         const loadedComponents = (selectedRecipe.componentes || []).map((item) => ({
           uid: `${item.tipo}-${item.referencia_id}`,
@@ -255,6 +256,7 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
           id: form.id,
           nombre: form.nombre,
           descripcion: form.descripcion,
+          apta_comida_empleados: Boolean(form.apta_comida_empleados),
           componentes: components.map((item) => ({
             tipo: item.tipo,
             referencia_id: item.referencia_id,
@@ -331,6 +333,21 @@ function AnalystEditRecipePage({ isMobile, isAdmin, recipeId, onBack }) {
                   className="recipe-dark-textarea"
                   rows={3}
                 />
+              </label>
+
+              <label style={{ ...checkRowStyle, gridColumn: isMobile ? 'auto' : '1 / -1' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.apta_comida_empleados)}
+                  onChange={(event) => handleFormChange('apta_comida_empleados', event.target.checked)}
+                  style={{ width: 18, height: 18, flexShrink: 0 }}
+                />
+                <span>
+                  <span style={labelStyle}>Receta para comida de empleados</span>
+                  <span style={checkHintStyle}>
+                    Si la marcas, se puede elegir en "Comida de empleados" para descontar sus ingredientes del inventario (por porción).
+                  </span>
+                </span>
               </label>
             </div>
 
@@ -800,6 +817,21 @@ const backButtonStyle = {
   color: 'var(--vg-text-strong)',
   fontWeight: 700,
   cursor: 'pointer',
+};
+
+const checkRowStyle = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 10,
+  cursor: 'pointer',
+};
+
+const checkHintStyle = {
+  display: 'block',
+  marginTop: 2,
+  color: 'var(--vg-f-c8bbbb)',
+  fontSize: 12.5,
+  lineHeight: 1.4,
 };
 
 export default AnalystEditRecipePage;

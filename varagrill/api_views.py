@@ -143,6 +143,7 @@ def _serialize_recipe_product(product):
         'descripcion': product.descripcion,
         'categoria': product.categoria.nombre if product.categoria else '',
         'disponible': product.disponible,
+        'apta_comida_empleados': product.apta_comida_empleados,
         'componentes': components,
         'componentes_total': len(components),
     }
@@ -5269,6 +5270,12 @@ def admin_recipes_view(request):
         except (ValueError, TypeError, VGProducto.DoesNotExist):
             return _auth_response({'ok': False, 'message': 'La receta a editar no existe.'}, status=400)
 
+    # Check "para comida de empleados": si el cliente no lo manda al editar, se conserva el valor que tenia.
+    apta_comida_empleados = (
+        bool(data['apta_comida_empleados']) if 'apta_comida_empleados' in data
+        else (recipe.apta_comida_empleados if recipe is not None else False)
+    )
+
     existing_name_query = VGProducto.objects.filter(categoria__nombre__iexact='Recetas', nombre__iexact=nombre)
     if recipe is not None:
         existing_name_query = existing_name_query.exclude(pk=recipe.pk)
@@ -5289,6 +5296,7 @@ def admin_recipes_view(request):
                 precio_venta=Decimal('0'),
                 costo_estimado=Decimal('0'),
                 disponible=False,
+                apta_comida_empleados=apta_comida_empleados,
                 tiempo_preparacion_min=0,
                 creado_por=request.user,
                 actualizado_por=request.user,
@@ -5300,8 +5308,11 @@ def admin_recipes_view(request):
             recipe.descripcion = descripcion
             recipe.categoria = category
             recipe.disponible = False
+            recipe.apta_comida_empleados = apta_comida_empleados
             recipe.actualizado_por = request.user
-            recipe.save(update_fields=['nombre', 'descripcion', 'categoria', 'disponible', 'actualizado_por', 'fecha_actualizacion'])
+            recipe.save(update_fields=[
+                'nombre', 'descripcion', 'categoria', 'disponible', 'apta_comida_empleados', 'actualizado_por', 'fecha_actualizacion',
+            ])
             message = 'Receta actualizada correctamente.'
             status_code = 200
 

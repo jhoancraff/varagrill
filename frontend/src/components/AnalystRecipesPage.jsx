@@ -140,7 +140,10 @@ function AnalystRecipesPage({ isMobile, isAdmin, onBack, onCreateNewRecipe, onEd
               {pagedRecipes.map((recipe) => (
                 <>
                   <div key={`name-${recipe.id}`} style={tableCellPrimaryStyle}>
-                    <div style={recipeNameStyle}>{recipe.nombre}</div>
+                    <div style={recipeNameStyle}>
+                      {recipe.nombre}
+                      {recipe.apta_comida_empleados ? <span style={empleadosBadgeStyle} title="Se puede usar en Comida de empleados">Empleados</span> : null}
+                    </div>
                     <div style={recipeMetaStyle}>ID #{recipe.id}</div>
                   </div>
                   <div key={`description-${recipe.id}`} style={tableCellStyle}>
@@ -387,6 +390,17 @@ const backButtonStyle = {
   fontWeight: 700,
   cursor: 'pointer',
   boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
+};
+
+const empleadosBadgeStyle = {
+  marginLeft: 8,
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--vg-f-8fffb0)',
+  background: 'rgba(70, 200, 120, 0.14)',
+  verticalAlign: 'middle',
 };
 
 export default AnalystRecipesPage;

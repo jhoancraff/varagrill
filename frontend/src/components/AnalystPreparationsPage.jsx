@@ -290,7 +290,7 @@ function AnalystPreparationsPage({ isMobile, onBack }) {
       </form>
 
       <button type="button" onClick={onBack} style={backButtonStyle}>
-        Volver al panel del analista
+        Volver al panel de configuración
       </button>
     </section>
   );

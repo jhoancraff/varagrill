@@ -82,7 +82,7 @@ from .tasa_cuenta import prefacturas_con_tasa_vigente, resolver_tasa_cuenta
 
 logger = logging.getLogger(__name__)
 
-HIDDEN_INGREDIENT_IDS = {285, 288, 312, 337, 381, 487, 488, 366, 371, 372}
+HIDDEN_INGREDIENT_IDS = {22, 227, 285, 288, 312, 332, 337, 381, 487, 488, 366, 371, 372}
 
 
 def _serialize_role(role):

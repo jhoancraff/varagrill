@@ -254,6 +254,21 @@ class AdminCatalogApiTests(TestCase):
         self.assertTrue(any(item['nombre'] == 'Salsa roja' for item in payload['recipes']))
         self.assertTrue(any(item['nombre'] == 'Jugo de naranja' for item in payload['beverages']))
 
+    def test_admin_catalog_hides_requested_ingredient_ids(self):
+        hidden_ids = (332, 227, 22)
+        for ingredient_id in hidden_ids:
+            VGIngrediente.objects.create(
+                id=ingredient_id,
+                nombre=f'Ingrediente oculto {ingredient_id}',
+                unidad_medida='g',
+            )
+
+        response = self.client.get('/api/admin/catalogo/')
+
+        self.assertEqual(response.status_code, 200)
+        inventory_ids = {item['id'] for item in response.json()['inventory']}
+        self.assertTrue(set(hidden_ids).isdisjoint(inventory_ids))
+
     def test_subrecipe_cost_uses_price_fields_when_ingredient_cost_is_stale_zero(self):
         ingredient = VGIngrediente.objects.create(
             nombre='Queso con costo desincronizado', unidad_medida='g', costo_unitario='0',

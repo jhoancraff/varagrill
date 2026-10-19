@@ -349,6 +349,7 @@ class VGExtractoBancario(VGAuditoria):
     movimientos_leidos = models.PositiveIntegerField(default=0)
     movimientos_nuevos = models.PositiveIntegerField(default=0)
     duplicados_omitidos = models.PositiveIntegerField(default=0)
+    omitidos_dia_cerrado = models.PositiveIntegerField(default=0)
     saltos_saldo = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -476,6 +477,62 @@ class VGConciliacionMovimiento(VGAuditoria):
 
     def __str__(self):
         return f"Movimiento #{self.movimiento_id} ↔ {self.origen_tipo} #{self.origen_id} ({self.estado})"
+
+
+class VGCierreConciliacion(VGAuditoria):
+    """
+    Cierre de la conciliacion de UN dia de UNA cuenta bancaria: la constancia de que alguien reviso
+    ese dia contra el extracto del banco y todo quedo resuelto. Guarda una foto de los numeros del
+    dia (movimientos, conciliados, creditos, debitos, saldo del banco...) para que al cerrar el mes se
+    compare contra algo que ya no cambia.
+
+    Un dia solo se cierra si no le quedan movimientos por revisar ni sin coincidencia. Una vez
+    cerrado, sus movimientos no se pueden tocar ni se importan lineas nuevas de ese dia: para cambiar
+    algo hay que reabrir el cierre (con motivo), y la reapertura queda registrada. Reabrir no borra
+    nada: la fila queda con estado "reabierto" y el nuevo cierre es una fila nueva — asi el historial
+    muestra quien cerro, quien reabrio y por que.
+
+    saldo_final_banco es el saldo de la ultima linea del dia en el extracto; saldo_inicial_banco se
+    deriva (final menos lo que se movio ese dia). Entre dos dias cerrados, el saldo inicial de uno debe
+    ser el final del anterior: si no, falta algun movimiento entre ambos.
+    """
+    ESTADOS = [("vigente", "Vigente"), ("reabierto", "Reabierto")]
+    cuenta_bancaria = models.CharField(max_length=80)
+    fecha = models.DateField()
+    estado = models.CharField(max_length=10, choices=ESTADOS, default="vigente")
+    movimientos_total = models.PositiveIntegerField(default=0)
+    conciliados = models.PositiveIntegerField(default=0)
+    ignorados = models.PositiveIntegerField(default=0)
+    pendientes_pos = models.PositiveIntegerField(default=0)
+    creditos = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    debitos = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    saldo_inicial_banco = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    saldo_final_banco = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    saltos_saldo = models.PositiveIntegerField(default=0)
+    registros_sin_banco = models.PositiveIntegerField(default=0)
+    pos_banco = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    pos_sistema = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    nota = models.CharField(max_length=255, blank=True)
+    reabierto_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="cierres_conciliacion_reabiertos",
+    )
+    fecha_reapertura = models.DateTimeField(null=True, blank=True)
+    motivo_reapertura = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_cierres_conciliacion"
+        verbose_name = "Cierre de conciliación"
+        verbose_name_plural = "Cierres de conciliación"
+        ordering = ["-fecha", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cuenta_bancaria", "fecha"], condition=models.Q(estado="vigente"),
+                name="uniq_cierre_conciliacion_vigente",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Cierre {self.cuenta_bancaria} — {self.fecha} ({self.get_estado_display()})"
 
 
 # ---------------------------------------------------------------------------

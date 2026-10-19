@@ -107,6 +107,7 @@ const PESTANAS = [
   { id: 'sin_coincidencia', texto: 'Sin coincidencia' },
   { id: 'sistema', texto: 'En el sistema, no en el banco' },
   { id: 'pos', texto: 'POS por día' },
+  { id: 'cierres', texto: 'Cierres por día' },
 ];
 
 function EstadoBadge({ estado }) {
@@ -131,6 +132,9 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
   const [candidatosDe, setCandidatosDe] = useState(null);
   const [ignorando, setIgnorando] = useState(null);
   const [pdfConConciliados, setPdfConConciliados] = useState(false);
+  const [cierres, setCierres] = useState(null);
+  const [cerrandoDia, setCerrandoDia] = useState(null);
+  const [reabriendo, setReabriendo] = useState(null);
 
   useEffect(() => {
     let cancelado = false;
@@ -163,11 +167,22 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
     }
   }, [cuenta, rango.desde, rango.hasta]);
 
+  const cargarCierres = useCallback(async () => {
+    if (!cuenta) return;
+    try {
+      const qs = new URLSearchParams({ cuenta, desde: rango.desde, hasta: rango.hasta });
+      setCierres(await llamar(`${API}cierres/?${qs}`));
+    } catch (e) {
+      setCierres(null);
+    }
+  }, [cuenta, rango.desde, rango.hasta]);
+
   useEffect(() => {
     setVisibles(PAGINA);
     setSistema(null);
     cargar();
-  }, [cargar]);
+    cargarCierres();
+  }, [cargar, cargarCierres]);
 
   useEffect(() => {
     if (pestana !== 'sistema' || !cuenta || sistema) return;
@@ -198,7 +213,7 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
       const data = await accion();
       if (mensaje) showSuccess(typeof mensaje === 'function' ? mensaje(data) : mensaje);
       setSistema(null);
-      await cargar(true);
+      await Promise.all([cargar(true), cargarCierres()]);
     } catch (e) {
       showError(e.message);
     } finally {
@@ -213,12 +228,32 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
       const data = await llamar(`${API}movimientos/${mov.id}/accion/`, { method: 'POST', body });
       setDatos((actual) => (actual ? reemplazarMovimiento(actual, data.movimiento) : actual));
       setSistema(null);
+      cargarCierres();
       if (mensaje) showSuccess(mensaje);
     } catch (e) {
       showError(e.message);
     } finally {
       setOcupado(false);
     }
+  };
+
+  const cerrarDia = async (dia, nota) => {
+    await llamar(`${API}cierres/cerrar/`, { method: 'POST', body: { cuenta, fecha: dia.fecha, nota, confirmo: true } });
+    setCerrandoDia(null);
+    showSuccess(`Día ${formatFecha(dia.fecha)} cerrado.`);
+    await Promise.all([cargar(true), cargarCierres()]);
+  };
+
+  const reabrirDia = async (dia, motivo) => {
+    await llamar(`${API}cierres/${dia.cierre.id}/reabrir/`, { method: 'POST', body: { motivo } });
+    setReabriendo(null);
+    showSuccess(`Día ${formatFecha(dia.fecha)} reabierto.`);
+    await Promise.all([cargar(true), cargarCierres()]);
+  };
+
+  const verDia = (dia) => {
+    setRango({ desde: dia.fecha, hasta: dia.fecha });
+    setPestana('todos');
   };
 
   const volverACruzar = () => ejecutar(
@@ -322,6 +357,13 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
             />
             <Tarjeta titulo="Por revisar" valor={estados.por_revisar?.cantidad || 0} detalle="Falta confirmar" onClick={() => setPestana('por_revisar')} alerta={(estados.por_revisar?.cantidad || 0) > 0} />
             <Tarjeta
+              titulo="Días cerrados"
+              valor={cierres ? `${cierres.resumen.cerrados} de ${cierres.resumen.dias}` : '—'}
+              detalle={cierres ? (cierres.resumen.completo ? 'Período completo y cuadrado' : `${cierres.resumen.pendientes} con pendientes · ${cierres.resumen.listos} listos`) : ''}
+              onClick={() => setPestana('cierres')}
+              alerta={Boolean(cierres && cierres.resumen.discontinuidades > 0)}
+            />
+            <Tarjeta
               titulo="Sin coincidencia"
               valor={estados.sin_coincidencia?.cantidad || 0}
               detalle={`Bs ${formatMonto(Number(estados.sin_coincidencia?.creditos || 0) + Number(estados.sin_coincidencia?.debitos || 0))}`}
@@ -341,15 +383,23 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
                 style={pestana === p.id ? pestanaActivaStyle : pestanaStyle}
               >
                 {p.texto}
-                {p.id !== 'todos' && p.id !== 'sistema' && p.id !== 'pos' ? ` (${estados[p.id]?.cantidad || 0})` : ''}
+                {p.id !== 'todos' && p.id !== 'sistema' && p.id !== 'pos' && p.id !== 'cierres' ? ` (${estados[p.id]?.cantidad || 0})` : ''}
               </button>
             ))}
           </div>
 
           {pestana === 'pos' ? <TablaPos filas={datos.pos} /> : null}
           {pestana === 'sistema' ? <TablaSistema filas={sistema} /> : null}
+          {pestana === 'cierres' ? (
+            <TablaCierres
+              datos={cierres}
+              onCerrar={setCerrandoDia}
+              onReabrir={setReabriendo}
+              onVer={verDia}
+            />
+          ) : null}
 
-          {pestana !== 'pos' && pestana !== 'sistema' ? (
+          {pestana !== 'pos' && pestana !== 'sistema' && pestana !== 'cierres' ? (
             <>
               <input
                 type="search"
@@ -382,6 +432,7 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
                         <FilaMovimiento
                           key={m.id}
                           mov={m}
+                          bloqueado={m.dia_cerrado}
                           ocupado={ocupado}
                           onConfirmar={(v) => postAccion(m, { accion: 'confirmar', vinculo_id: v.id }, 'Movimiento conciliado.')}
                           onRechazar={(v) => postAccion(m, { accion: 'rechazar', vinculo_id: v.id }, 'Sugerencia rechazada.')}
@@ -450,6 +501,14 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
         </div>
       ) : null}
 
+      {cerrandoDia ? (
+        <CerrarDiaModal dia={cerrandoDia} onCerrar={() => setCerrandoDia(null)} onConfirmar={cerrarDia} onError={showError} />
+      ) : null}
+
+      {reabriendo ? (
+        <ReabrirModal dia={reabriendo} onCerrar={() => setReabriendo(null)} onConfirmar={reabrirDia} onError={showError} />
+      ) : null}
+
       {ignorando ? (
         <div style={backdropStyle} onClick={() => setIgnorando(null)}>
           <div style={modalStyle(false)} onClick={(e) => e.stopPropagation()}>
@@ -504,7 +563,7 @@ function Tarjeta({ titulo, valor, detalle, onClick, alerta }) {
   );
 }
 
-function FilaMovimiento({ mov, ocupado, onConfirmar, onRechazar, onBuscar, onIgnorar, onReabrir }) {
+function FilaMovimiento({ mov, bloqueado, ocupado, onConfirmar, onRechazar, onBuscar, onIgnorar, onReabrir }) {
   const sugerido = mov.vinculos.find((v) => v.estado === 'sugerido');
   const confirmado = mov.vinculos.find((v) => v.estado === 'confirmado');
   const vinculo = confirmado || sugerido;
@@ -543,20 +602,21 @@ function FilaMovimiento({ mov, ocupado, onConfirmar, onRechazar, onBuscar, onIgn
       </td>
       <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {mov.estado === 'por_revisar' && sugerido ? (
+          {bloqueado ? <span style={mutedStyle}>Día cerrado</span> : null}
+          {!bloqueado && mov.estado === 'por_revisar' && sugerido ? (
             <>
               <button type="button" style={primaryChipStyle} disabled={ocupado} onClick={() => onConfirmar(sugerido)}>Confirmar</button>
               <button type="button" style={chipStyle} disabled={ocupado} onClick={() => onRechazar(sugerido)}>Rechazar</button>
               {mov.clase !== 'comision' ? <button type="button" style={chipStyle} disabled={ocupado} onClick={onBuscar}>Elegir otro</button> : null}
             </>
           ) : null}
-          {mov.estado === 'sin_coincidencia' ? (
+          {!bloqueado && mov.estado === 'sin_coincidencia' ? (
             <>
               {mov.clase !== 'comision' ? <button type="button" style={chipStyle} disabled={ocupado} onClick={onBuscar}>Buscar</button> : null}
               <button type="button" style={chipStyle} disabled={ocupado} onClick={onIgnorar}>Ignorar</button>
             </>
           ) : null}
-          {mov.estado === 'conciliado' || mov.estado === 'ignorado' ? (
+          {!bloqueado && (mov.estado === 'conciliado' || mov.estado === 'ignorado') ? (
             <button type="button" style={chipStyle} disabled={ocupado} onClick={onReabrir}>
               {mov.estado === 'ignorado' ? 'Reabrir' : 'Deshacer'}
             </button>
@@ -646,6 +706,208 @@ function TablaSistema({ filas }) {
   );
 }
 
+const ESTADOS_DIA = {
+  cerrado: { texto: 'Cerrado', fondo: 'rgba(46, 204, 113, 0.14)', borde: 'rgba(46, 204, 113, 0.55)' },
+  listo: { texto: 'Listo para cerrar', fondo: 'rgba(90, 170, 255, 0.14)', borde: 'rgba(90, 170, 255, 0.55)' },
+  pendiente: { texto: 'Con pendientes', fondo: 'rgba(255, 193, 7, 0.16)', borde: 'rgba(255, 193, 7, 0.6)' },
+  sin_movimientos: { texto: 'Sin movimientos', fondo: 'rgba(var(--vg-ink), 0.06)', borde: 'rgba(var(--vg-ink), 0.25)' },
+};
+
+function TablaCierres({ datos, onCerrar, onReabrir, onVer }) {
+  if (!datos) return <div style={emptyStyle}>Cargando cierres...</div>;
+  const { resumen, dias } = datos;
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={infoStyle}>
+        Cada día se cierra cuando todo quedó resuelto: así queda registrado que se revisó contra el banco y el día se bloquea. Al final del mes,
+        si todos los días están cerrados y el saldo encadena de un día al siguiente, el período cuadra.
+      </div>
+      <div style={resumen.completo ? infoStyle : (resumen.discontinuidades > 0 ? avisoStyle : infoStyle)}>
+        <strong>{resumen.cerrados} de {resumen.dias} días cerrados.</strong>
+        {resumen.pendientes ? ` ${resumen.pendientes} con pendientes.` : ''}
+        {resumen.listos ? ` ${resumen.listos} listos para cerrar.` : ''}
+        {resumen.sin_movimientos ? ` ${resumen.sin_movimientos} sin movimientos cargados.` : ''}
+        {resumen.discontinuidades ? ` ${resumen.discontinuidades} día(s) cuyo saldo no encadena con el anterior.` : ''}
+        {resumen.completo ? ' El período está completo y cuadrado.' : ''}
+      </div>
+      <div style={tablaScrollStyle}>
+        <table style={tablaStyle}>
+          <thead>
+            <tr>
+              <th style={thStyle}>Día</th>
+              <th style={thStyle}>Estado</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Mov.</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Faltan</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Créditos (Bs)</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Débitos (Bs)</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Saldo final (Bs)</th>
+              <th style={thStyle}>Saldo vs. anterior</th>
+              <th style={thStyle}>Cierre</th>
+              <th style={thStyle}>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {dias.map((d) => {
+              const e = ESTADOS_DIA[d.estado];
+              return (
+                <tr key={d.fecha}>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{formatFecha(d.fecha)}</td>
+                  <td style={tdStyle}>
+                    <span style={{ ...badgeStyle, background: e.fondo, border: `1px solid ${e.borde}` }}>{e.texto}</span>
+                    {d.reaperturas ? <div style={mutedStyle}>reabierto {d.reaperturas} vez(ces)</div> : null}
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.total}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.bloqueos || '—'}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMonto(d.creditos)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMonto(d.debitos)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.saldo_final === null ? '—' : formatMonto(d.saldo_final)}</td>
+                  <td style={tdStyle}>
+                    {d.continuidad === true ? 'Cuadra' : d.continuidad === false ? <span style={avisoTextoStyle}>No cuadra</span> : '—'}
+                  </td>
+                  <td style={{ ...tdStyle, minWidth: 150 }}>
+                    {d.cierre ? (
+                      <div style={{ display: 'grid', gap: 2 }}>
+                        <span>{d.cierre.cerrado_por}</span>
+                        <span style={mutedStyle}>{formatFechaHora(d.cierre.fecha_cierre)}</span>
+                        {d.cierre.nota ? <span style={mutedStyle}>{d.cierre.nota}</span> : null}
+                      </div>
+                    ) : '—'}
+                  </td>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {d.estado === 'listo' || d.estado === 'sin_movimientos' ? (
+                        <button type="button" style={primaryChipStyle} onClick={() => onCerrar(d)}>Cerrar día</button>
+                      ) : null}
+                      {d.estado === 'cerrado' ? <button type="button" style={chipStyle} onClick={() => onReabrir(d)}>Reabrir</button> : null}
+                      {d.total > 0 ? <button type="button" style={chipStyle} onClick={() => onVer(d)}>Ver movimientos</button> : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CerrarDiaModal({ dia, onCerrar, onConfirmar, onError }) {
+  const [nota, setNota] = useState('');
+  const [confirmo, setConfirmo] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const saltos = dia.saltos_saldo > 0;
+  const noCuadra = dia.continuidad === false;
+  const sinMovimientos = dia.total === 0;
+  const pideNota = saltos || noCuadra || sinMovimientos;
+  const diferenciaPos = Number(dia.pos_banco) - Number(dia.pos_sistema);
+
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await onConfirmar(dia, nota.trim());
+    } catch (e) {
+      onError(e.message);
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div style={backdropStyle} onClick={guardando ? undefined : onCerrar}>
+      <div style={modalStyle(true)} onClick={(e) => e.stopPropagation()}>
+        <div style={modalTituloStyle}>Cerrar el día {formatFecha(dia.fecha)}</div>
+        <div style={mutedStyle}>Queda guardado que este día se concilió con el banco, y sus movimientos se bloquean.</div>
+        <div style={previewStyle}>
+          <div style={datosGridStyle}>
+            <Dato etiqueta="Movimientos" valor={dia.total} />
+            <Dato etiqueta="Conciliados" valor={dia.conciliados} />
+            <Dato etiqueta="Ignorados" valor={dia.ignorados} />
+            <Dato etiqueta="POS sin vincular" valor={dia.pendientes_pos} />
+            <Dato etiqueta="Créditos (Bs)" valor={formatMonto(dia.creditos)} />
+            <Dato etiqueta="Débitos (Bs)" valor={formatMonto(dia.debitos)} />
+            <Dato etiqueta="Saldo final del banco (Bs)" valor={dia.saldo_final === null ? '—' : formatMonto(dia.saldo_final)} />
+            <Dato etiqueta="Saldo vs. día anterior" valor={dia.continuidad === true ? 'Cuadra' : dia.continuidad === false ? 'No cuadra' : '—'} />
+          </div>
+        </div>
+        {noCuadra ? (
+          <div style={avisoStyle}>El saldo con que abre este día no coincide con el saldo con que cerró el último día cerrado: puede faltar alguna línea en el archivo.</div>
+        ) : null}
+        {saltos ? <div style={avisoStyle}>La columna Saldo tiene {dia.saltos_saldo} salto(s) dentro de este día: puede faltar alguna línea.</div> : null}
+        {dia.registros_sin_banco > 0 ? (
+          <div style={avisoStyle}>Hay {dia.registros_sin_banco} registro(s) del sistema ese día que no aparecen en el banco (pestaña "En el sistema, no en el banco").</div>
+        ) : null}
+        {dia.pos_banco !== '0.00' || dia.pos_sistema !== '0.00' ? (
+          <div style={Math.abs(diferenciaPos) > 0.5 ? avisoStyle : infoStyle}>
+            POS: el banco acreditó Bs {formatMonto(dia.pos_banco)} y el sistema acreditó Bs {formatMonto(dia.pos_sistema)} (diferencia Bs {formatMonto(diferenciaPos)}).
+          </div>
+        ) : null}
+        <label style={campoStyle}>
+          <span style={etiquetaStyle}>Nota{pideNota ? ' (obligatoria)' : ' (opcional)'}</span>
+          <textarea
+            rows={3}
+            value={nota}
+            onChange={(e) => setNota(e.target.value)}
+            placeholder={pideNota ? 'Explica por qué se cierra así (ej. feriado sin movimientos, o falta una línea en el archivo)' : 'Ej: revisado con el estado de cuenta'}
+            style={{ ...inputStyle, resize: 'vertical' }}
+          />
+        </label>
+        <label style={checkStyle}>
+          <input type="checkbox" checked={confirmo} onChange={(e) => setConfirmo(e.target.checked)} />
+          Confirmo que revisé la conciliación de este día contra el extracto del banco
+        </label>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" style={secondaryButtonStyle} onClick={onCerrar} disabled={guardando}>Cancelar</button>
+          <button type="button" style={primaryButtonStyle} onClick={guardar} disabled={!confirmo || guardando || (pideNota && !nota.trim())}>
+            {guardando ? 'Cerrando...' : 'Cerrar día'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReabrirModal({ dia, onCerrar, onConfirmar, onError }) {
+  const [motivo, setMotivo] = useState('');
+  const [guardando, setGuardando] = useState(false);
+
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await onConfirmar(dia, motivo.trim());
+    } catch (e) {
+      onError(e.message);
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <div style={backdropStyle} onClick={guardando ? undefined : onCerrar}>
+      <div style={modalStyle(false)} onClick={(e) => e.stopPropagation()}>
+        <div style={modalTituloStyle}>Reabrir el día {formatFecha(dia.fecha)}</div>
+        <div style={mutedStyle}>
+          El día vuelve a admitir cambios y quedará registrado quién lo reabrió y por qué. Después hay que cerrarlo de nuevo.
+        </div>
+        <label style={campoStyle}>
+          <span style={etiquetaStyle}>Motivo</span>
+          <textarea
+            rows={3}
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Ej: faltaba una línea del banco"
+            style={{ ...inputStyle, resize: 'vertical' }}
+          />
+        </label>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button type="button" style={secondaryButtonStyle} onClick={onCerrar} disabled={guardando}>Cancelar</button>
+          <button type="button" style={primaryButtonStyle} onClick={guardar} disabled={!motivo.trim() || guardando}>
+            {guardando ? 'Reabriendo...' : 'Reabrir día'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ImportarModal({ cuenta, onCerrar, onImportado, onError }) {
   const [archivo, setArchivo] = useState(null);
   const [vista, setVista] = useState(null);
@@ -726,6 +988,12 @@ function ImportarModal({ cuenta, onCerrar, onImportado, onError }) {
             {vista.hojas_omitidas.length > 0 ? (
               <div style={infoStyle}>Hojas sin movimientos (se ignoran): {vista.hojas_omitidas.join(', ')}</div>
             ) : null}
+            {vista.en_dias_cerrados?.cantidad > 0 ? (
+              <div style={avisoStyle}>
+                {vista.en_dias_cerrados.cantidad} línea(s) nueva(s) caen en días ya cerrados ({vista.en_dias_cerrados.dias.map(formatFecha).join(', ')})
+                y NO se importarán. Si necesitas agregarlas, reabre el cierre de ese día en "Cierres por día".
+              </div>
+            ) : null}
             {vista.nuevos === 0 ? <div style={infoStyle}>Todos los movimientos de este archivo ya estaban cargados.</div> : null}
           </div>
         ) : null}
@@ -769,7 +1037,7 @@ const infoStyle = { padding: '8px 12px', borderRadius: 10, border: '1px solid rg
 const previewStyle = { display: 'grid', gap: 10, padding: 12, borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
 const previewTituloStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' };
 const datosGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 };
-const tarjetasStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 10 });
+const tarjetasStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 10 });
 const tarjetaStyle = { display: 'grid', gap: 4, textAlign: 'left', padding: 14, borderRadius: 16, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)', color: 'var(--vg-text-strong)' };
 const tarjetaValorStyle = { fontSize: 28, fontWeight: 800, color: 'var(--vg-text-strong)' };
 const pestanasStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };

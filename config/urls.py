@@ -100,6 +100,8 @@ from varagrill.compras_views import (
 )
 from varagrill.conciliacion_bancaria_views import (
     conciliacion_candidatos_view,
+    conciliacion_cerrar_dia_view,
+    conciliacion_cierres_view,
     conciliacion_conciliar_view,
     conciliacion_confirmar_probables_view,
     conciliacion_cuentas_view,
@@ -107,6 +109,7 @@ from varagrill.conciliacion_bancaria_views import (
     conciliacion_importar_view,
     conciliacion_movimiento_accion_view,
     conciliacion_movimientos_view,
+    conciliacion_reabrir_cierre_view,
     conciliacion_reverso_view,
 )
 from varagrill.contabilidad_views import (
@@ -258,6 +261,9 @@ urlpatterns = [
     path('api/admin/conciliacion-bancaria/conciliar/', conciliacion_conciliar_view, name='conciliacion-conciliar'),
     path('api/admin/conciliacion-bancaria/confirmar-probables/', conciliacion_confirmar_probables_view, name='conciliacion-confirmar-probables'),
     path('api/admin/conciliacion-bancaria/reverso/', conciliacion_reverso_view, name='conciliacion-reverso'),
+    path('api/admin/conciliacion-bancaria/cierres/', conciliacion_cierres_view, name='conciliacion-cierres'),
+    path('api/admin/conciliacion-bancaria/cierres/cerrar/', conciliacion_cerrar_dia_view, name='conciliacion-cerrar-dia'),
+    path('api/admin/conciliacion-bancaria/cierres/<int:cierre_id>/reabrir/', conciliacion_reabrir_cierre_view, name='conciliacion-reabrir-cierre'),
     path('api/admin/conciliacion-bancaria/pdf/', reporte_conciliacion_bancaria_pdf_view, name='conciliacion-pdf'),
     path('api/admin/reportes/gastos-pdf/', reporte_gastos_pdf_view, name='admin-reporte-gastos-pdf'),
     path('api/admin/reportes/facturado-pdf/', reporte_facturado_pdf_view, name='admin-reporte-facturado-pdf'),

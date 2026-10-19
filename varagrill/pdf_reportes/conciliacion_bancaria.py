@@ -48,6 +48,13 @@ COLUMNAS_POS = [
 ]
 
 
+COLUMNAS_CIERRE = [
+    Columna('Día', 0.09), Columna('Estado', 0.11), Columna('Movimientos', 0.09, 'derecha'), Columna('Conciliados', 0.09, 'derecha'),
+    Columna('Créditos (Bs)', 0.13, 'derecha'), Columna('Débitos (Bs)', 0.13, 'derecha'), Columna('Saldo final banco (Bs)', 0.14, 'derecha'),
+    Columna('Saldo vs. día anterior', 0.1), Columna('Cerrado por', 0.12),
+]
+
+
 def _fecha_hora(dt):
     return dt.strftime('%d/%m/%Y %H:%M')
 
@@ -62,7 +69,7 @@ def _num(valor):
 
 def generar_pdf_conciliacion_bancaria(
     cuenta, desde, hasta, resumen, sin_coincidencia, por_revisar, conciliados, no_banco, comisiones, pos,
-    generado_en=None, incluir_conciliados=True,
+    generado_en=None, incluir_conciliados=True, cierres=None,
 ):
     """
     resumen          salida de conciliacion_bancaria.resumen_movimientos
@@ -72,6 +79,7 @@ def generar_pdf_conciliacion_bancaria(
     no_banco         [{fecha(date), sentido, etiqueta, referencia, monto}]
     comisiones       [{dia(date), banco, sistema, diferencia, estado}]
     pos              [{fecha(date), banco, sistema, diferencia, porcentaje}]
+    cierres          [{fecha(date), estado, total, conciliados, creditos, debitos, saldo_final, continuidad, cerrado_por}]
     """
     total = resumen['total']
     estados = resumen['estados']
@@ -87,6 +95,14 @@ def generar_pdf_conciliacion_bancaria(
         fila_total=['Total', str(total), _num(resumen['creditos']), _num(resumen['debitos'])],
         mensaje_vacio='No hay movimientos del banco cargados en este rango.',
     )]
+    if cierres:
+        secciones.append(Seccion(
+            titulo='Cierre de la conciliación por día', columnas=COLUMNAS_CIERRE,
+            filas=[[
+                c['fecha'].strftime('%d/%m/%Y'), c['estado'], str(c['total']), str(c['conciliados']),
+                _num(c['creditos']), _num(c['debitos']), _num(c['saldo_final']), c['continuidad'], c['cerrado_por'],
+            ] for c in cierres],
+        ))
     if sin_coincidencia:
         secciones.append(Seccion(
             titulo='Sin coincidencia en el sistema', detalle=f'{len(sin_coincidencia)} movimientos',

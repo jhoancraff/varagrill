@@ -5246,3 +5246,223 @@ class ConciliacionBancariaViewsTests(TestCase):
         self.assertIn(self.client.get(url).status_code, (401, 403))
         self.client.force_login(self.admin)
         self.assertEqual(self.client.get(self.BASE + 'pdf/?cuenta=Banco Vista&desde=2026-10-31&hasta=2026-10-01').status_code, 400)
+
+
+class ConciliacionCierreDiarioTests(TestCase):
+    """Cierre diario de la conciliacion: la constancia de que el dia se reviso, con su foto de numeros y su bloqueo."""
+
+    CUENTA = 'Banco Cierre'
+
+    def setUp(self):
+        from varagrill import conciliacion_bancaria as motor
+        from varagrill.models import VGCierreConciliacion, VGExtractoBancario
+        self.motor = motor
+        self.Cierre = VGCierreConciliacion
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='cierre_admin', password='claveCierre123', cedula='92000001', email='cierre@test.test', id_role=rol,
+        )
+        VGMetodoPago.objects.create(nombre='PM Cierre', moneda='VES', cuenta_bancaria='Banco Cierre')
+        self.extracto = VGExtractoBancario.objects.create(cuenta_bancaria=self.CUENTA)
+        self.n = 0
+
+    def mov(self, dia, tipo='credito', monto='100.00', saldo=None, estado='conciliado', desc='TDY RECIB DE VZLA 4245940617', hora=12, clase=None):
+        from varagrill.banco_excel import clasificar
+        self.n += 1
+        return VGMovimientoBancario.objects.create(
+            extracto=self.extracto, cuenta_bancaria=self.CUENTA,
+            fecha=timezone.make_aware(datetime(2026, 10, dia, hora, self.n % 60)), referencia=str(self.n), descripcion=desc,
+            tipo=tipo, monto=Decimal(monto), saldo=Decimal(saldo) if saldo is not None else None,
+            clase=clase or clasificar(desc, tipo), huella=f'c{self.n}', estado=estado,
+        )
+
+    def cerrar(self, dia, nota='', usuario=None):
+        return self.motor.cerrar_dia(self.CUENTA, date(2026, 10, dia), nota, usuario or self.admin)
+
+    # ---- reglas para cerrar
+    def test_un_dia_con_movimientos_sin_resolver_no_se_puede_cerrar(self):
+        self.mov(5, estado='conciliado')
+        self.mov(5, estado='sin_coincidencia')
+        self.mov(5, estado='por_revisar')
+        with self.assertRaises(self.motor.AccionInvalida) as ctx:
+            self.cerrar(5)
+        self.assertIn('1 por revisar', str(ctx.exception))
+        self.assertIn('1 sin coincidencia', str(ctx.exception))
+        self.assertFalse(self.Cierre.objects.exists())
+
+    def test_cierre_guarda_la_foto_del_dia_con_el_saldo_de_la_cadena(self):
+        # las filas del archivo no vienen en orden: el saldo final sale de la cadena, no de la ultima fila
+        self.mov(5, 'debito', '50.00', saldo='1050.00', desc='COMPRA MAESTRO')
+        self.mov(5, 'credito', '25.00', saldo='1075.00')
+        self.mov(5, 'credito', '100.00', saldo='1100.00', estado='conciliado')
+        ignorado = self.mov(5, 'debito', '5.00', saldo='1070.00', estado='ignorado', desc='OTRO CARGO')
+        VGMovimientoBancario.objects.filter(pk=ignorado.pk).update(saldo=Decimal('1070.00'))
+        # cadena: 1000 -> +100 -> 1100 -> -50 -> 1050 -> +25 -> 1075 -> -5 -> 1070
+        c = self.cerrar(5, usuario=self.admin)
+        self.assertEqual((c.estado, c.movimientos_total, c.conciliados, c.ignorados), ('vigente', 4, 3, 1))
+        self.assertEqual((c.creditos, c.debitos), (Decimal('125.00'), Decimal('55.00')))
+        self.assertEqual((c.saldo_final_banco, c.saldo_inicial_banco), (Decimal('1070.00'), Decimal('1000.00')))
+        self.assertEqual((c.saltos_saldo, c.creado_por), (0, self.admin))
+
+    def test_el_pos_pendiente_no_impide_cerrar_el_dia(self):
+        self.mov(5, estado='pendiente', desc='POS MAE 88013794 001 0056 3009', monto='990.00')
+        c = self.cerrar(5)
+        self.assertEqual((c.pendientes_pos, c.pos_banco), (1, Decimal('990.00')))
+
+    def test_un_dia_sin_movimientos_solo_se_cierra_con_nota_y_no_se_cierra_el_futuro_ni_dos_veces(self):
+        with self.assertRaises(self.motor.AccionInvalida):
+            self.cerrar(5)
+        c = self.cerrar(5, nota='Feriado, el banco no tuvo movimientos')
+        self.assertEqual((c.movimientos_total, c.nota), (0, 'Feriado, el banco no tuvo movimientos'))
+        with self.assertRaises(self.motor.AccionInvalida):
+            self.cerrar(5, nota='otra vez')
+        futuro = timezone.localdate() + timedelta(days=3)
+        with self.assertRaises(self.motor.AccionInvalida):
+            self.motor.cerrar_dia(self.CUENTA, futuro, 'x', self.admin)
+
+    # ---- un dia cerrado queda bloqueado
+    def test_un_dia_cerrado_no_admite_cambios_ni_cruces_ni_lineas_nuevas(self):
+        from varagrill.banco_excel import parsear_extracto
+        m = self.mov(5, estado='sin_coincidencia')
+        self.motor.ignorar_movimiento(m, 'Cargo del banco', self.admin)
+        self.cerrar(5)
+        for accion in (
+            lambda: self.motor.ignorar_movimiento(m, 'otro motivo', self.admin),
+            lambda: self.motor.reabrir_movimiento(m, self.admin),
+        ):
+            with self.assertRaises(self.motor.AccionInvalida):
+                accion()
+        self.assertEqual(self.motor.conciliar(self.CUENTA, date(2026, 10, 1), date(2026, 10, 31), self.admin), {})
+
+        # una linea nueva de ese dia en un archivo posterior NO se importa; las de otros dias si
+        archivo = parsear_extracto(_xlsx_bytes([('d', [
+            ENCABEZADO_BANCO,
+            ['05/10/2026 18:00:00', '777', 'COMPRA MAESTRO', 'Débito', '-10,00', '90,00', ''],
+            ['06/10/2026 18:00:00', '778', 'COMPRA MAESTRO', 'Débito', '-20,00', '70,00', ''],
+        ])]), 'x.xlsx')
+        self.assertEqual(self.motor.movimientos_en_dias_cerrados(self.CUENTA, archivo)['cantidad'], 1)
+        extracto = self.motor.importar_extracto(self.CUENTA, archivo, 'x.xlsx', self.admin)
+        self.assertEqual((extracto.movimientos_nuevos, extracto.omitidos_dia_cerrado), (1, 1))
+        self.assertFalse(VGMovimientoBancario.objects.filter(referencia='777').exists())
+
+    def test_reabrir_deja_historial_y_permite_volver_a_cerrar(self):
+        c1 = self.cerrar(5, nota='Sin movimientos')
+        with self.assertRaises(self.motor.AccionInvalida):
+            self.motor.reabrir_cierre(c1, '  ', self.admin)
+        self.motor.reabrir_cierre(c1, 'Faltaba una línea del banco', self.admin)
+        c1.refresh_from_db()
+        self.assertEqual((c1.estado, c1.reabierto_por, c1.motivo_reapertura), ('reabierto', self.admin, 'Faltaba una línea del banco'))
+        self.assertIsNotNone(c1.fecha_reapertura)
+        c2 = self.cerrar(5, nota='Ahora sí')
+        self.assertEqual(self.Cierre.objects.filter(fecha=date(2026, 10, 5)).count(), 2)
+        self.assertEqual(self.Cierre.objects.filter(fecha=date(2026, 10, 5), estado='vigente').get(), c2)
+        with self.assertRaises(self.motor.AccionInvalida):
+            self.motor.reabrir_cierre(c1, 'ya estaba reabierto', self.admin)
+
+    # ---- continuidad del saldo entre dias
+    def test_si_el_saldo_no_encadena_con_el_dia_anterior_hace_falta_una_nota(self):
+        self.mov(5, 'credito', '100.00', saldo='1100.00')      # dia 5: abre en 1000, cierra en 1100
+        self.cerrar(5)
+        self.mov(6, 'debito', '50.00', saldo='1000.00', desc='COMPRA MAESTRO')   # abre en 1050: no cuadra con 1100
+        with self.assertRaises(self.motor.AccionInvalida) as ctx:
+            self.cerrar(6)
+        self.assertIn('no encadena', str(ctx.exception))
+        c = self.cerrar(6, nota='Falta una línea de Bs 50 en el archivo del banco')
+        dias, resumen = self.motor.listar_cierres(self.CUENTA, date(2026, 10, 5), date(2026, 10, 6))
+        self.assertEqual([d['continuidad'] for d in dias], [None, False])
+        self.assertEqual((resumen['cerrados'], resumen['discontinuidades'], resumen['completo']), (2, 1, False))
+        self.assertEqual(c.saldo_inicial_banco, Decimal('1050.00'))
+
+    def test_dias_que_encadenan_dan_continuidad_y_el_periodo_queda_completo(self):
+        self.mov(5, 'credito', '100.00', saldo='1100.00')
+        self.mov(6, 'debito', '50.00', saldo='1050.00', desc='COMPRA MAESTRO')
+        self.cerrar(5)
+        self.cerrar(6)
+        dias, resumen = self.motor.listar_cierres(self.CUENTA, date(2026, 10, 5), date(2026, 10, 6))
+        self.assertEqual([d['continuidad'] for d in dias], [None, True])
+        self.assertTrue(resumen['completo'])
+        self.assertEqual((resumen['creditos_cerrados'], resumen['debitos_cerrados']), (Decimal('100.00'), Decimal('50.00')))
+
+    def test_listar_cierres_distingue_cerrado_pendiente_listo_y_sin_movimientos(self):
+        self.mov(5)                                  # listo para cerrar
+        self.mov(6, estado='sin_coincidencia')       # pendiente
+        self.mov(7)                                  # se cierra
+        self.cerrar(7)
+        dias, resumen = self.motor.listar_cierres(self.CUENTA, date(2026, 10, 5), date(2026, 10, 8))
+        self.assertEqual([d['estado'] for d in dias], ['listo', 'pendiente', 'cerrado', 'sin_movimientos'])
+        self.assertEqual((resumen['cerrados'], resumen['pendientes'], resumen['listos'], resumen['sin_movimientos']), (1, 1, 1, 1))
+        self.assertFalse(resumen['completo'])
+
+
+class ConciliacionCierreDiarioViewsTests(TestCase):
+    """API de cierres: solo administrador y contador, exige confirmar la revision y bloquea los dias cerrados."""
+
+    BASE = '/api/admin/conciliacion-bancaria/'
+
+    def setUp(self):
+        for nombre in ('Administrador', 'Contador', 'Mesero'):
+            VGRol.objects.get_or_create(nombre_role=nombre)
+        crear = lambda user, rol, ced: VGUsuario.objects.create_user(
+            username=user, password='claveCierre123', cedula=ced, email=f'{user}@test.test', id_role=VGRol.objects.get(nombre_role=rol),
+        )
+        self.contador = crear('cv_contador', 'Contador', '91000001')
+        self.mesero = crear('cv_mesero', 'Mesero', '91000002')
+        VGMetodoPago.objects.create(nombre='PM Cierre V', moneda='VES', cuenta_bancaria='Banco Cierre V')
+        from varagrill.models import VGExtractoBancario
+        extracto = VGExtractoBancario.objects.create(cuenta_bancaria='Banco Cierre V')
+        self.mov = VGMovimientoBancario.objects.create(
+            extracto=extracto, cuenta_bancaria='Banco Cierre V', fecha=timezone.make_aware(datetime(2026, 10, 5, 12, 0)),
+            referencia='1', descripcion='COMPRA MAESTRO', tipo='debito', monto=Decimal('40.00'), saldo=Decimal('960.00'),
+            clase='compra_tarjeta', huella='v1', estado='sin_coincidencia',
+        )
+
+    def post(self, ruta, cuerpo):
+        return self.client.post(self.BASE + ruta, data=json.dumps(cuerpo), content_type='application/json')
+
+    def test_solo_administrador_y_contador(self):
+        url = self.BASE + 'cierres/?cuenta=Banco Cierre V&desde=2026-10-05&hasta=2026-10-05'
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.client.force_login(self.mesero)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.post('cierres/cerrar/', {}).status_code, 403)
+        self.client.force_login(self.contador)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_cerrar_exige_confirmar_resolver_los_pendientes_y_luego_bloquea_el_dia(self):
+        self.client.force_login(self.contador)
+        base = {'cuenta': 'Banco Cierre V', 'fecha': '2026-10-05', 'nota': ''}
+        self.assertEqual(self.post('cierres/cerrar/', base).status_code, 400)                  # falta confirmar la revision
+        r = self.post('cierres/cerrar/', {**base, 'confirmo': True})
+        self.assertEqual(r.status_code, 400)                                                    # queda uno sin coincidencia
+        self.assertIn('sin coincidencia', r.json()['message'])
+
+        accion = self.BASE + f'movimientos/{self.mov.id}/accion/'
+        r = self.client.post(accion, data=json.dumps({'accion': 'ignorar', 'motivo': 'Cargo ya contabilizado'}), content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+        r = self.post('cierres/cerrar/', {**base, 'confirmo': True})
+        self.assertEqual(r.status_code, 201, r.content)
+        dia = r.json()['dia']
+        self.assertEqual((dia['estado'], dia['cierre']['movimientos_total'], dia['cierre']['saldo_final_banco']), ('cerrado', 1, '960.00'))
+        self.assertEqual(dia['cierre']['cerrado_por'], 'cv_contador')
+
+        # el movimiento ahora esta bloqueado
+        r = self.client.post(accion, data=json.dumps({'accion': 'reabrir'}), content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+        movs = self.client.get(self.BASE + 'movimientos/?cuenta=Banco Cierre V&desde=2026-10-01&hasta=2026-10-31').json()['movimientos']
+        self.assertTrue(movs[0]['dia_cerrado'])
+
+        # reabrir el cierre (con motivo) lo desbloquea
+        cierre_id = dia['cierre']['id']
+        self.assertEqual(self.post(f'cierres/{cierre_id}/reabrir/', {'motivo': ''}).status_code, 400)
+        r = self.post(f'cierres/{cierre_id}/reabrir/', {'motivo': 'Falta una línea'})
+        self.assertEqual((r.status_code, r.json()['dia']['estado']), (200, 'listo'))
+        r = self.client.post(accion, data=json.dumps({'accion': 'reabrir'}), content_type='application/json')
+        self.assertEqual(r.status_code, 200)
+
+    def test_el_listado_de_cierres_y_el_pdf_incluyen_el_estado_de_cada_dia(self):
+        self.client.force_login(self.contador)
+        data = self.client.get(self.BASE + 'cierres/?cuenta=Banco Cierre V&desde=2026-10-05&hasta=2026-10-06').json()
+        self.assertEqual([d['estado'] for d in data['dias']], ['pendiente', 'sin_movimientos'])
+        self.assertEqual((data['resumen']['dias'], data['resumen']['cerrados'], data['resumen']['completo']), (2, 0, False))
+        r = self.client.get(self.BASE + 'pdf/?cuenta=Banco Cierre V&desde=2026-10-05&hasta=2026-10-06&conciliados=0')
+        self.assertEqual((r.status_code, r.content[:4]), (200, b'%PDF'))

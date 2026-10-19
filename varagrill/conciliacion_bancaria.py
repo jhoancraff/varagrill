@@ -20,6 +20,10 @@ Niveles de confianza de cada cruce (ver evaluar):
 
 Un registro del sistema solo se concilia contra UN movimiento (salvo los gastos de comision del
 dia). Nada de esto modifica pagos, gastos ni compras: solo crea vinculos (VGConciliacionMovimiento).
+
+Cierre diario (VGCierreConciliacion): cada dia se "cierra" cuando no queda nada por revisar; el cierre
+guarda la foto de los numeros del dia y bloquea el dia (no se tocan sus movimientos ni se importan
+lineas nuevas). Ver cerrar_dia / reabrir_cierre / listar_cierres.
 """
 import re
 from bisect import bisect_left, bisect_right
@@ -33,7 +37,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from .models import (
-    VGAbonoCompra, VGAbonoGasto, VGConciliacionMovimiento, VGExtractoBancario, VGGasto, VGIngresoExtra, VGLotePOS,
+    VGAbonoCompra, VGAbonoGasto, VGCierreConciliacion, VGConciliacionMovimiento, VGExtractoBancario, VGGasto, VGIngresoExtra, VGLotePOS,
     VGMetodoPago, VGMovimientoBancario, VGPago, VGTransferenciaCuenta,
 )
 
@@ -133,6 +137,32 @@ def _a_fecha(valor):
     return valor
 
 
+def fechas_cerradas(cuenta, desde, hasta):
+    """Dias de esa cuenta con un cierre vigente entre desde y hasta."""
+    return set(
+        VGCierreConciliacion.objects.filter(
+            cuenta_bancaria=normalizar_cuenta(cuenta), estado='vigente', fecha__range=(desde, hasta),
+        ).values_list('fecha', flat=True)
+    )
+
+
+def movimientos_en_dias_cerrados(cuenta, parseado):
+    """Lineas NUEVAS del archivo que caen en un dia ya cerrado (no se importan): {'cantidad', 'dias'}."""
+    cuenta = normalizar_cuenta(cuenta)
+    movimientos = parseado['movimientos']
+    if not movimientos:
+        return {'cantidad': 0, 'dias': []}
+    existentes = set(
+        VGMovimientoBancario.objects.filter(
+            cuenta_bancaria=cuenta, huella__in=[m['huella'] for m in movimientos],
+        ).values_list('huella', flat=True)
+    )
+    fechas = [m['fecha'].date() for m in movimientos]
+    cerrados = fechas_cerradas(cuenta, min(fechas), max(fechas))
+    en_cerrados = [m for m in movimientos if m['huella'] not in existentes and m['fecha'].date() in cerrados]
+    return {'cantidad': len(en_cerrados), 'dias': sorted({m['fecha'].date() for m in en_cerrados})}
+
+
 def importar_extracto(cuenta, parseado, nombre_archivo, usuario):
     """
     Guarda las lineas nuevas del archivo ya leido (banco_excel.parsear_extracto) y omite las que ya
@@ -148,13 +178,18 @@ def importar_extracto(cuenta, parseado, nombre_archivo, usuario):
     )
     nuevos = [m for m in movimientos if m['huella'] not in existentes]
     fechas = [m['fecha'].date() for m in movimientos]
+    # Un dia cerrado no admite lineas nuevas: para agregarlas hay que reabrir su cierre.
+    cerrados = fechas_cerradas(cuenta, min(fechas), max(fechas)) if fechas else set()
+    omitidos_cerrados = [m for m in nuevos if m['fecha'].date() in cerrados]
+    nuevos = [m for m in nuevos if m['fecha'].date() not in cerrados]
     with transaction.atomic():
         extracto = VGExtractoBancario.objects.create(
             cuenta_bancaria=cuenta, nombre_archivo=(nombre_archivo or '')[:255],
             huella_archivo=parseado['huella_archivo'],
             fecha_desde=min(fechas) if fechas else None, fecha_hasta=max(fechas) if fechas else None,
             movimientos_leidos=len(movimientos), movimientos_nuevos=len(nuevos),
-            duplicados_omitidos=len(movimientos) - len(nuevos), saltos_saldo=parseado['saltos_saldo'],
+            duplicados_omitidos=len(existentes), omitidos_dia_cerrado=len(omitidos_cerrados),
+            saltos_saldo=parseado['saltos_saldo'],
             creado_por=usuario, actualizado_por=usuario,
         )
         VGMovimientoBancario.objects.bulk_create([
@@ -528,7 +563,8 @@ def conciliar(cuenta, desde, hasta, usuario, solo_movimientos=None):
     movs_qs = _movimientos_en_rango(cuenta, desde, hasta).filter(estado__in=ESTADOS_RECONCILIABLES)
     if solo_movimientos is not None:
         movs_qs = movs_qs.filter(id__in=[m.id for m in solo_movimientos])
-    movs = list(movs_qs)
+    cerrados = fechas_cerradas(cuenta, desde, hasta)
+    movs = [m for m in movs_qs if _fecha_local(m.fecha) not in cerrados]
     total = defaultdict(int)
     if not movs:
         return dict(total)
@@ -572,6 +608,13 @@ class AccionInvalida(Exception):
     pass
 
 
+def _exigir_dia_abierto(mov):
+    if VGCierreConciliacion.objects.filter(
+        cuenta_bancaria=mov.cuenta_bancaria, estado='vigente', fecha=_fecha_local(mov.fecha),
+    ).exists():
+        raise AccionInvalida('Ese día ya está cerrado: reabre el cierre del día para cambiar algo.')
+
+
 def _refrescar_estado(mov):
     """Recalcula mov.estado a partir de sus vinculos (sin tocar ignorado)."""
     if mov.estado == 'ignorado':
@@ -590,6 +633,7 @@ def confirmar_vinculo(vinculo, usuario):
     if vinculo.estado == 'rechazado':
         raise AccionInvalida('Ese vínculo fue rechazado.')
     mov = vinculo.movimiento
+    _exigir_dia_abierto(mov)
     try:
         with transaction.atomic():
             vinculo.estado = 'confirmado'
@@ -604,6 +648,7 @@ def confirmar_vinculo(vinculo, usuario):
 
 def rechazar_vinculo(vinculo, usuario):
     mov = vinculo.movimiento
+    _exigir_dia_abierto(mov)
     if vinculo.estado == 'confirmado':
         raise AccionInvalida('Para rechazar un vínculo confirmado, primero deshaz la conciliación.')
     vinculo.estado = 'rechazado'
@@ -620,6 +665,7 @@ def rechazar_vinculo(vinculo, usuario):
 
 def vincular_manual(mov, tipo, origen_id, usuario):
     """Una persona elige un registro concreto del sistema para este movimiento."""
+    _exigir_dia_abierto(mov)
     if mov.estado == 'ignorado':
         raise AccionInvalida('Este movimiento está ignorado: reábrelo primero.')
     if mov.clase == 'comision':
@@ -675,6 +721,7 @@ def candidatos_para(mov, limite=8):
 
 
 def ignorar_movimiento(mov, motivo, usuario):
+    _exigir_dia_abierto(mov)
     motivo = (motivo or '').strip()
     if not motivo:
         raise AccionInvalida('Escribe el motivo para ignorar este movimiento.')
@@ -690,6 +737,7 @@ def ignorar_movimiento(mov, motivo, usuario):
 
 def reabrir_movimiento(mov, usuario):
     """Deshace una conciliacion o un 'ignorado' y lo deja pendiente para volver a cruzarlo."""
+    _exigir_dia_abierto(mov)
     with transaction.atomic():
         mov.vinculos.exclude(estado='rechazado').delete()
         mov.estado = 'pendiente'
@@ -711,7 +759,7 @@ def confirmar_probables(cuenta, desde, hasta, usuario):
         estado='sugerido', puntaje__gte=PUNTAJE_PROBABLE_MIN, nota='',
     ).exclude(metodo='comision_dia').select_related('movimiento')
     for v in sugeridos:
-        try:
+        try:  # confirmar_vinculo rechaza los movimientos de un dia cerrado
             confirmar_vinculo(v, usuario)
             confirmados += 1
         except AccionInvalida:
@@ -785,3 +833,226 @@ def resumen_movimientos(cuenta, desde, hasta):
         bloque['cantidad'] += 1
         bloque[clave] += m.monto
     return resumen
+
+
+# ---------------------------------------------------------------------------
+# Cierre diario de la conciliacion
+# ---------------------------------------------------------------------------
+def _saldo_final_y_saltos(movs):
+    """
+    (saldo de la ultima linea del dia, saltos de saldo dentro del dia) usando la cadena de saldos:
+    cada linea debe tener otra cuyo saldo sea (su saldo - su movimiento con signo); la ultima del dia
+    es la que no es "anterior" de ninguna. Las lineas del archivo no vienen ordenadas por hora, por eso
+    no basta con mirar la ultima fila. Si la cadena es ambigua se usa la fecha mas reciente.
+    """
+    con_saldo = [m for m in movs if m.saldo is not None]
+    if not con_saldo:
+        return None, 0
+
+    def firmado(m):
+        return m.monto if m.tipo == 'credito' else -m.monto
+
+    por_saldo = defaultdict(list)
+    for i, m in enumerate(con_saldo):
+        por_saldo[m.saldo].append(i)
+    son_anteriores, sin_anterior = set(), 0
+    for i, m in enumerate(con_saldo):
+        anteriores = [j for j in por_saldo.get(m.saldo - firmado(m), []) if j != i]
+        if anteriores:
+            son_anteriores.update(anteriores)
+        else:
+            sin_anterior += 1
+    finales = [m for i, m in enumerate(con_saldo) if i not in son_anteriores]
+    final = finales[0].saldo if len(finales) == 1 else max(con_saldo, key=lambda m: (m.fecha, m.id)).saldo
+    return final, max(0, sin_anterior - 1)
+
+
+def estadisticas_dias(cuenta, desde, hasta):
+    """
+    {fecha: numeros del dia} para cada dia del rango, aunque no tenga movimientos. Una sola pasada
+    por la base para todo el rango (los registros del sistema sin banco y el POS se piden una vez).
+    """
+    cuenta = normalizar_cuenta(cuenta)
+    por_dia = defaultdict(list)
+    for m in _movimientos_en_rango(cuenta, desde, hasta):
+        por_dia[_fecha_local(m.fecha)].append(m)
+    sin_banco = defaultdict(int)
+    for f in registros_sin_movimiento(cuenta, desde, hasta):
+        sin_banco[f['candidato'].fecha] += 1
+    pos = {f['fecha']: f for f in resumen_pos(cuenta, desde, hasta)}
+
+    resultado = {}
+    dia = desde
+    while dia <= hasta:
+        lista = por_dia.get(dia, [])
+        por_estado = defaultdict(int)
+        for m in lista:
+            por_estado[m.estado] += 1
+        pendientes_pos = sum(1 for m in lista if m.estado == 'pendiente' and m.clase == 'pos')
+        creditos = sum((m.monto for m in lista if m.tipo == 'credito'), Decimal('0'))
+        debitos = sum((m.monto for m in lista if m.tipo == 'debito'), Decimal('0'))
+        saldo_final, saltos = _saldo_final_y_saltos(lista)
+        saldo_inicial = (saldo_final - (creditos - debitos)) if saldo_final is not None else None
+        pendientes_otros = por_estado['pendiente'] - pendientes_pos
+        resultado[dia] = {
+            'fecha': dia, 'total': len(lista), 'conciliados': por_estado['conciliado'], 'ignorados': por_estado['ignorado'],
+            'por_revisar': por_estado['por_revisar'], 'sin_coincidencia': por_estado['sin_coincidencia'],
+            'pendientes_pos': pendientes_pos, 'pendientes_otros': pendientes_otros,
+            'bloqueos': por_estado['por_revisar'] + por_estado['sin_coincidencia'] + pendientes_otros,
+            'creditos': creditos.quantize(CENT), 'debitos': debitos.quantize(CENT),
+            'saldo_inicial': saldo_inicial, 'saldo_final': saldo_final, 'saltos_saldo': saltos,
+            'registros_sin_banco': sin_banco.get(dia, 0),
+            'pos_banco': pos[dia]['banco'] if dia in pos else Decimal('0'),
+            'pos_sistema': pos[dia]['sistema'] if dia in pos else Decimal('0'),
+        }
+        dia += timedelta(days=1)
+    return resultado
+
+
+def listar_cierres(cuenta, desde, hasta):
+    """
+    Estado de cada dia del rango: cerrado (con su foto), pendiente (hay movimientos sin resolver), listo
+    (todo resuelto, falta cerrarlo) o sin_movimientos (no hay lineas cargadas). En los cerrados se
+    revisa la continuidad del saldo contra el cierre anterior.
+    """
+    cuenta = normalizar_cuenta(cuenta)
+    estadisticas = estadisticas_dias(cuenta, desde, hasta)
+    cierres = {
+        c.fecha: c for c in VGCierreConciliacion.objects.filter(
+            cuenta_bancaria=cuenta, estado='vigente', fecha__range=(desde, hasta),
+        ).select_related('creado_por')
+    }
+    reaperturas = defaultdict(int)
+    for fecha in VGCierreConciliacion.objects.filter(
+        cuenta_bancaria=cuenta, estado='reabierto', fecha__range=(desde, hasta),
+    ).values_list('fecha', flat=True):
+        reaperturas[fecha] += 1
+
+    anterior = VGCierreConciliacion.objects.filter(
+        cuenta_bancaria=cuenta, estado='vigente', fecha__lt=desde, saldo_final_banco__isnull=False,
+    ).order_by('-fecha').first()
+    ultimo_final = anterior.saldo_final_banco if anterior else None
+    hueco_con_movimientos = False  # hubo un dia sin cerrar y con movimientos desde el ultimo cierre
+
+    dias = []
+    for dia in sorted(estadisticas):
+        s = estadisticas[dia]
+        cierre = cierres.get(dia)
+        if cierre is not None:
+            estado = 'cerrado'
+            continuidad = None
+            if cierre.saldo_inicial_banco is not None and ultimo_final is not None and not hueco_con_movimientos:
+                continuidad = abs(cierre.saldo_inicial_banco - ultimo_final) <= TOL_COMISION_DIA
+            if cierre.saldo_final_banco is not None:
+                ultimo_final = cierre.saldo_final_banco
+            hueco_con_movimientos = False
+        else:
+            estado = 'sin_movimientos' if s['total'] == 0 else ('pendiente' if s['bloqueos'] else 'listo')
+            continuidad = None
+            if s['total'] > 0:
+                hueco_con_movimientos = True
+        dias.append({
+            **s, 'estado': estado, 'cierre': cierre, 'continuidad': continuidad, 'reaperturas': reaperturas.get(dia, 0),
+        })
+
+    cerrados = [d for d in dias if d['estado'] == 'cerrado']
+    resumen = {
+        'dias': len(dias), 'cerrados': len(cerrados),
+        'pendientes': sum(1 for d in dias if d['estado'] == 'pendiente'),
+        'listos': sum(1 for d in dias if d['estado'] == 'listo'),
+        'sin_movimientos': sum(1 for d in dias if d['estado'] == 'sin_movimientos'),
+        'discontinuidades': sum(1 for d in cerrados if d['continuidad'] is False),
+        'creditos_cerrados': sum((d['cierre'].creditos for d in cerrados), Decimal('0')),
+        'debitos_cerrados': sum((d['cierre'].debitos for d in cerrados), Decimal('0')),
+    }
+    resumen['completo'] = resumen['cerrados'] == resumen['dias'] and resumen['discontinuidades'] == 0
+    return dias, resumen
+
+
+def continuidad_con_cierre_anterior(cuenta, fecha, saldo_inicial):
+    """
+    (True|False|None, saldo_final_del_cierre_anterior): si el saldo con que abre este dia es el mismo con que
+    cerro el ultimo dia cerrado. None si no hay con que comparar (primer cierre, sin saldos, o hay movimientos
+    de dias intermedios todavia sin cerrar).
+    """
+    anterior = VGCierreConciliacion.objects.filter(
+        cuenta_bancaria=cuenta, estado='vigente', fecha__lt=fecha, saldo_final_banco__isnull=False,
+    ).order_by('-fecha').first()
+    if anterior is None or saldo_inicial is None:
+        return None, None
+    hay_hueco = VGMovimientoBancario.objects.filter(
+        cuenta_bancaria=cuenta, fecha__date__gt=anterior.fecha, fecha__date__lt=fecha,
+    ).exists()
+    if hay_hueco:
+        return None, anterior.saldo_final_banco
+    return abs(anterior.saldo_final_banco - saldo_inicial) <= TOL_COMISION_DIA, anterior.saldo_final_banco
+
+
+def cerrar_dia(cuenta, fecha, nota, usuario):
+    """
+    Confirma la conciliacion de un dia y guarda su foto. Falla si quedan movimientos por revisar o sin
+    coincidencia, o si el dia aun no ocurre. Un dia sin movimientos solo se cierra con una nota que
+    explique por que (para que no se cierre "en blanco" por olvidar subir el archivo).
+    """
+    cuenta = normalizar_cuenta(cuenta)
+    _exigir_cuenta_ves(cuenta)
+    nota = (nota or '').strip()
+    if fecha > timezone.localdate():
+        raise AccionInvalida('No se puede cerrar un día que todavía no ha ocurrido.')
+    with transaction.atomic():
+        if VGCierreConciliacion.objects.select_for_update().filter(
+            cuenta_bancaria=cuenta, fecha=fecha, estado='vigente',
+        ).exists():
+            raise AccionInvalida('Ese día ya está cerrado.')
+        s = estadisticas_dias(cuenta, fecha, fecha)[fecha]
+        if s['bloqueos']:
+            partes = []
+            if s['por_revisar']:
+                partes.append(f"{s['por_revisar']} por revisar")
+            if s['sin_coincidencia']:
+                partes.append(f"{s['sin_coincidencia']} sin coincidencia")
+            if s['pendientes_otros']:
+                partes.append(f"{s['pendientes_otros']} pendientes")
+            raise AccionInvalida(
+                'No se puede cerrar el día: faltan por resolver ' + ', '.join(partes)
+                + '. Confírmalos, vincúlalos o ignóralos con un motivo.'
+            )
+        continuidad, saldo_anterior = continuidad_con_cierre_anterior(cuenta, fecha, s['saldo_inicial'])
+        if (s['saltos_saldo'] > 0 or continuidad is False) and not nota:
+            motivo = (
+                f"el saldo del día anterior cerró en Bs {saldo_anterior:,.2f} pero este día abre en Bs {s['saldo_inicial']:,.2f}"
+                if continuidad is False else f"la columna Saldo tiene {s['saltos_saldo']} salto(s) dentro del día"
+            )
+            raise AccionInvalida(
+                f'El saldo del banco no encadena ({motivo}): puede faltar alguna línea en el archivo. '
+                'Revisa el archivo, o escribe una nota que explique la diferencia para cerrar el día igual.'
+            )
+        if s['total'] == 0 and not nota:
+            raise AccionInvalida(
+                'Ese día no tiene movimientos del banco cargados. Sube el archivo, o escribe una nota que explique '
+                'por qué no hubo movimientos para poder cerrarlo.'
+            )
+        return VGCierreConciliacion.objects.create(
+            cuenta_bancaria=cuenta, fecha=fecha, estado='vigente', movimientos_total=s['total'],
+            conciliados=s['conciliados'], ignorados=s['ignorados'], pendientes_pos=s['pendientes_pos'],
+            creditos=s['creditos'], debitos=s['debitos'], saldo_inicial_banco=s['saldo_inicial'],
+            saldo_final_banco=s['saldo_final'], saltos_saldo=s['saltos_saldo'],
+            registros_sin_banco=s['registros_sin_banco'], pos_banco=s['pos_banco'], pos_sistema=s['pos_sistema'],
+            nota=nota[:255], creado_por=usuario, actualizado_por=usuario,
+        )
+
+
+def reabrir_cierre(cierre, motivo, usuario):
+    """Reabre un dia cerrado (queda registrado quien y por que); el dia vuelve a admitir cambios y se puede cerrar de nuevo."""
+    motivo = (motivo or '').strip()
+    if not motivo:
+        raise AccionInvalida('Escribe el motivo para reabrir el día.')
+    if cierre.estado != 'vigente':
+        raise AccionInvalida('Ese cierre ya fue reabierto.')
+    cierre.estado = 'reabierto'
+    cierre.reabierto_por = usuario
+    cierre.fecha_reapertura = timezone.now()
+    cierre.motivo_reapertura = motivo[:255]
+    cierre.actualizado_por = usuario
+    cierre.save()
+    return cierre

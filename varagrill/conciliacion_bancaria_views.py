@@ -15,7 +15,7 @@ from . import conciliacion_bancaria as motor
 from .auth_helpers import _auth_response, _is_admin_user
 from .banco_excel import ExtractoInvalido, parsear_extracto
 from .models import (
-    VGAbonoCompra, VGAbonoGasto, VGConciliacionMovimiento, VGExtractoBancario, VGGasto, VGIngresoExtra,
+    VGAbonoCompra, VGAbonoGasto, VGCierreConciliacion, VGConciliacionMovimiento, VGExtractoBancario, VGGasto, VGIngresoExtra,
     VGMovimientoBancario, VGPago, VGTransferenciaCuenta,
 )
 
@@ -111,8 +111,18 @@ def _serializar_movimientos(movs):
     por_mov = defaultdict(list)
     for v in vinculos:
         por_mov[v.movimiento_id].append(_serializar_vinculo(v, etiquetas))
+    cerrados = set()
+    if movs:
+        fechas = [timezone.localtime(m.fecha).date() for m in movs]
+        cerrados = set(
+            VGCierreConciliacion.objects.filter(
+                cuenta_bancaria__in={m.cuenta_bancaria for m in movs}, estado='vigente',
+                fecha__range=(min(fechas), max(fechas)),
+            ).values_list('cuenta_bancaria', 'fecha')
+        )
     return [
         {
+            'dia_cerrado': (m.cuenta_bancaria, timezone.localtime(m.fecha).date()) in cerrados,
             'id': m.id, 'fecha': timezone.localtime(m.fecha).isoformat(), 'referencia': m.referencia,
             'descripcion': m.descripcion, 'tipo': m.tipo, 'monto': _money(m.monto), 'saldo': _money(m.saldo),
             'observacion': m.observacion, 'clase': m.clase, 'clase_texto': m.get_clase_display(),
@@ -148,10 +158,50 @@ def _serializar_extracto(e):
         'desde': e.fecha_desde.isoformat() if e.fecha_desde else None,
         'hasta': e.fecha_hasta.isoformat() if e.fecha_hasta else None,
         'leidos': e.movimientos_leidos, 'nuevos': e.movimientos_nuevos, 'duplicados': e.duplicados_omitidos,
+        'omitidos_dia_cerrado': e.omitidos_dia_cerrado,
         'saltos_saldo': e.saltos_saldo,
         'subido_por': (e.creado_por.get_full_name() or e.creado_por.username) if e.creado_por else '',
         'fecha': timezone.localtime(e.fecha_creacion).isoformat(),
     }
+
+
+def _serializar_cierre(c):
+    if c is None:
+        return None
+    return {
+        'id': c.id, 'nota': c.nota, 'movimientos_total': c.movimientos_total, 'conciliados': c.conciliados,
+        'ignorados': c.ignorados, 'creditos': _money(c.creditos), 'debitos': _money(c.debitos),
+        'saldo_inicial_banco': _money(c.saldo_inicial_banco), 'saldo_final_banco': _money(c.saldo_final_banco),
+        'saltos_saldo': c.saltos_saldo, 'registros_sin_banco': c.registros_sin_banco,
+        'pos_banco': _money(c.pos_banco), 'pos_sistema': _money(c.pos_sistema),
+        'cerrado_por': (c.creado_por.get_full_name() or c.creado_por.username) if c.creado_por else '',
+        'fecha_cierre': timezone.localtime(c.fecha_creacion).isoformat(),
+    }
+
+
+def _serializar_dia(d):
+    return {
+        'fecha': d['fecha'].isoformat(), 'estado': d['estado'], 'total': d['total'], 'conciliados': d['conciliados'],
+        'ignorados': d['ignorados'], 'por_revisar': d['por_revisar'], 'sin_coincidencia': d['sin_coincidencia'],
+        'pendientes_pos': d['pendientes_pos'], 'pendientes_otros': d['pendientes_otros'], 'bloqueos': d['bloqueos'],
+        'creditos': _money(d['creditos']), 'debitos': _money(d['debitos']),
+        'saldo_inicial': _money(d['saldo_inicial']), 'saldo_final': _money(d['saldo_final']),
+        'saltos_saldo': d['saltos_saldo'], 'registros_sin_banco': d['registros_sin_banco'],
+        'pos_banco': _money(d['pos_banco']), 'pos_sistema': _money(d['pos_sistema']),
+        'continuidad': d['continuidad'], 'reaperturas': d['reaperturas'], 'cierre': _serializar_cierre(d['cierre']),
+    }
+
+
+def _serializar_resumen_cierres(r):
+    return {
+        **{k: r[k] for k in ('dias', 'cerrados', 'pendientes', 'listos', 'sin_movimientos', 'discontinuidades', 'completo')},
+        'creditos_cerrados': _money(r['creditos_cerrados']), 'debitos_cerrados': _money(r['debitos_cerrados']),
+    }
+
+
+def _aviso_dias_cerrados(cuenta, parseado):
+    r = motor.movimientos_en_dias_cerrados(cuenta, parseado)
+    return {'cantidad': r['cantidad'], 'dias': [d.isoformat() for d in r['dias']]}
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +269,8 @@ def conciliacion_importar_view(request):
         'por_clase': {
             clase: sum(1 for m in movimientos if m['clase'] == clase) for clase in {m['clase'] for m in movimientos}
         },
+        # lineas NUEVAS de dias ya cerrados: no se importan (hay que reabrir el cierre de ese dia)
+        'en_dias_cerrados': _aviso_dias_cerrados(cuenta, parseado),
     }
     if accion == 'preview':
         return _auth_response({'ok': True, 'resumen': resumen})
@@ -228,7 +280,8 @@ def conciliacion_importar_view(request):
     resultado = motor.conciliar(cuenta, desde, hasta, request.user)
     return _auth_response({
         'ok': True, 'resumen': resumen, 'extracto': _serializar_extracto(extracto), 'resultado': resultado,
-        'message': f'Se importaron {extracto.movimientos_nuevos} movimientos nuevos.',
+        'message': f'Se importaron {extracto.movimientos_nuevos} movimientos nuevos.'
+        + (f' {extracto.omitidos_dia_cerrado} línea(s) de días cerrados no se importaron.' if extracto.omitidos_dia_cerrado else ''),
     }, status=201)
 
 
@@ -401,3 +454,72 @@ def conciliacion_reverso_view(request):
         'ok': True,
         'registros': [{'sentido': f['sentido'], **_serializar_candidato(f['candidato'])} for f in filas],
     })
+
+
+@csrf_exempt
+def conciliacion_cierres_view(request):
+    """Estado de cada dia del rango (cerrado, pendiente, listo, sin movimientos) y el resumen del periodo."""
+    if request.method != 'GET':
+        return _metodo_no_permitido()
+    error = _sin_permiso(request)
+    if error:
+        return error
+    cuenta, rango = _cuenta_valida(request.GET.get('cuenta')), _rango(request.GET)
+    if cuenta is None or rango is None:
+        return _auth_response({'ok': False, 'message': 'Indica la cuenta y un rango de fechas válido.'}, status=400)
+    dias, resumen = motor.listar_cierres(cuenta, rango[0], rango[1])
+    return _auth_response({
+        'ok': True, 'dias': [_serializar_dia(d) for d in dias], 'resumen': _serializar_resumen_cierres(resumen),
+    })
+
+
+@csrf_exempt
+def conciliacion_cerrar_dia_view(request):
+    """Confirma la conciliacion de un dia: guarda su foto y lo bloquea. Exige marcar que se reviso."""
+    if request.method != 'POST':
+        return _metodo_no_permitido()
+    error = _sin_permiso(request)
+    if error:
+        return error
+    data = _leer_json(request)
+    if data is None:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+    cuenta = _cuenta_valida(data.get('cuenta'))
+    try:
+        fecha = date.fromisoformat(str(data.get('fecha')))
+    except (TypeError, ValueError):
+        fecha = None
+    if cuenta is None or fecha is None:
+        return _auth_response({'ok': False, 'message': 'Indica la cuenta y la fecha del día a cerrar.'}, status=400)
+    if data.get('confirmo') is not True:
+        return _auth_response(
+            {'ok': False, 'message': 'Debes confirmar que revisaste la conciliación de este día.'}, status=400,
+        )
+    try:
+        motor.cerrar_dia(cuenta, fecha, data.get('nota'), request.user)
+    except (motor.AccionInvalida, motor.CuentaNoSoportada) as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+    dias, resumen = motor.listar_cierres(cuenta, fecha, fecha)
+    return _auth_response({'ok': True, 'dia': _serializar_dia(dias[0])}, status=201)
+
+
+@csrf_exempt
+def conciliacion_reabrir_cierre_view(request, cierre_id):
+    if request.method != 'POST':
+        return _metodo_no_permitido()
+    error = _sin_permiso(request)
+    if error:
+        return error
+    data = _leer_json(request)
+    if data is None:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+    try:
+        cierre = VGCierreConciliacion.objects.get(pk=cierre_id)
+    except VGCierreConciliacion.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El cierre no existe.'}, status=404)
+    try:
+        motor.reabrir_cierre(cierre, data.get('motivo'), request.user)
+    except motor.AccionInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+    dias, resumen = motor.listar_cierres(cierre.cuenta_bancaria, cierre.fecha, cierre.fecha)
+    return _auth_response({'ok': True, 'dia': _serializar_dia(dias[0])})

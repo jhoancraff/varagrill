@@ -455,11 +455,24 @@ def reporte_conciliacion_bancaria_pdf_view(request):
         for dia, d in sorted(dias_comision.items())
     ]
 
+    ESTADOS_DIA = {'cerrado': 'Cerrado', 'pendiente': 'Pendiente', 'listo': 'Listo para cerrar', 'sin_movimientos': 'Sin movimientos'}
+    dias_cierre, _resumen_cierres = conciliacion.listar_cierres(cuenta, desde, hasta)
+    cierres = [
+        {
+            'fecha': d['fecha'], 'estado': ESTADOS_DIA[d['estado']], 'total': d['total'], 'conciliados': d['conciliados'],
+            'creditos': d['creditos'], 'debitos': d['debitos'], 'saldo_final': d['saldo_final'],
+            'continuidad': {True: 'Cuadra', False: 'No cuadra'}.get(d['continuidad'], '—'),
+            'cerrado_por': (d['cierre'].creado_por.get_full_name() or d['cierre'].creado_por.username)
+            if d['cierre'] and d['cierre'].creado_por else '',
+        }
+        for d in dias_cierre
+    ]
+
     ahora = timezone.localtime()
     pdf = generar_pdf_conciliacion_bancaria(
         cuenta, desde, hasta, conciliacion.resumen_movimientos(cuenta, desde, hasta), sin_coincidencia, por_revisar,
         conciliados, no_banco, comisiones, conciliacion.resumen_pos(cuenta, desde, hasta),
-        generado_en=ahora, incluir_conciliados=request.GET.get('conciliados', '1') != '0',
+        generado_en=ahora, incluir_conciliados=request.GET.get('conciliados', '1') != '0', cierres=cierres,
     )
     nombre_cuenta = cuenta.lower().replace(' ', '-')
     return responder_pdf(pdf, f'conciliacion-{nombre_cuenta}-{desde:%Y-%m-%d}-al-{hasta:%Y-%m-%d}', con_fecha=False)

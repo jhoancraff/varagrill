@@ -318,7 +318,16 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     loadOrderData();
   }, []);
 
+  // Solo quien ve el botón Cobro (cajera/admin) consulta cuántos pedidos hay por cobrar:
+  // para un mesero el backend responde 403 y la consulta cada 15 s era puro ruido.
+  const puedeVerCobro = isCajera || isAdmin;
+
   useEffect(() => {
+    if (!puedeVerCobro) {
+      setReadyToBillCount(0);
+      return undefined;
+    }
+
     let cancelled = false;
 
     const loadReadyToBill = async () => {
@@ -355,7 +364,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
       window.clearInterval(pollId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [puedeVerCobro]);
 
   useEffect(() => {
     // Correcciones de permisos, no navegación real del usuario — replaceView

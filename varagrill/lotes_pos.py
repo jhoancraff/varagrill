@@ -200,13 +200,8 @@ def clave_id_reporte(valor):
     return texto
 
 
-def _aplicar_id_reporte(lote, id_reporte, usuario):
-    """
-    Pone el ID del reporte del punto en `lote` (sin guardar). Valida el formato y que ese ID no este ya
-    en otro lote del MISMO metodo (dos lotes de metodos distintos del mismo banco si pueden compartirlo:
-    un mismo cierre del punto puede cubrir cobros de varios metodos). Devuelve True si cambio algo.
-    """
-    nuevo = normalizar_id_reporte(id_reporte)
+def _validar_id_reporte(lote, nuevo):
+    """Formato del ID (ya normalizado) y que no este en otro lote del MISMO metodo; lanza LoteError si no sirve."""
     if nuevo and not re.fullmatch(r'[A-Z0-9\-]{1,40}', nuevo):
         raise LoteError('El ID del reporte solo puede llevar letras, números y guiones (máximo 40 caracteres).')
     if nuevo:
@@ -217,12 +212,44 @@ def _aplicar_id_reporte(lote, id_reporte, usuario):
         for otro in otros:
             if clave_id_reporte(otro.id_reporte_punto) == clave_id_reporte(nuevo):
                 raise LoteError(f'El ID de reporte {nuevo} ya está registrado en el lote #{otro.numero} de {lote.metodo_pago.nombre}.')
+
+
+def _aplicar_id_reporte(lote, id_reporte, usuario):
+    """
+    Pone el ID del reporte del punto en `lote` (sin guardar). Valida el formato y que ese ID no este ya
+    en otro lote del MISMO metodo (dos lotes de metodos distintos del mismo banco si pueden compartirlo:
+    un mismo cierre del punto puede cubrir cobros de varios metodos). Devuelve True si cambio algo.
+    """
+    nuevo = normalizar_id_reporte(id_reporte)
+    _validar_id_reporte(lote, nuevo)
     anterior = lote.id_reporte_punto
     if anterior == nuevo:
         return False
     lote.id_reporte_punto = nuevo
     _anotar(lote, f'[{_sello()}] ID del reporte del punto: {nuevo or "(vacío)"} (antes: {anterior or "(vacío)"}) por {_etiqueta_usuario(usuario)}')
     return True
+
+
+def validar_ids_reporte(ids_reporte):
+    """
+    Revisa, ANTES de cerrar nada, los IDs que llegan junto con el cierre de caja ({lote_id: id}): que el
+    formato sirva, que no esten ya en otro lote del metodo y que no se repitan entre los lotes que se cierran.
+    Asi un ID mal puesto no deja el cierre de caja a medias.
+    """
+    vistos = {}
+    for lote_id, valor in (ids_reporte or {}).items():
+        nuevo = normalizar_id_reporte(valor)
+        if not nuevo:
+            continue
+        try:
+            lote = VGLotePOS.objects.select_related('metodo_pago').get(pk=int(lote_id))
+        except (TypeError, ValueError, VGLotePOS.DoesNotExist):
+            continue
+        _validar_id_reporte(lote, nuevo)
+        clave = (lote.metodo_pago_id, clave_id_reporte(nuevo))
+        if clave in vistos:
+            raise LoteError(f'El ID de reporte {nuevo} está repetido en dos lotes de {lote.metodo_pago.nombre}.')
+        vistos[clave] = lote.id
 
 
 def registrar_id_reporte(lote, id_reporte, usuario):
@@ -266,12 +293,15 @@ def cerrar_lote(lote, usuario, ahora=None, id_reporte=None):
         return lote
 
 
-def autoclausurar_lotes_abiertos(usuario, ahora=None):
+def autoclausurar_lotes_abiertos(usuario, ahora=None, ids_reporte=None):
     """
     Al cerrar la caja se cierran TODOS los lotes POS que sigan abiertos. Un lote
     abierto sin cobros vigentes (todos anulados) no tiene nada que cerrar: se marca
-    'anulado' con una nota. Devuelve los lotes que quedaron 'cerrado'.
+    'anulado' con una nota. Devuelve los lotes que quedaron 'cerrado'. `ids_reporte`
+    ({lote_id: id}) trae el ID del reporte del punto de cada lote, si ya lo tienen
+    (validar_ids_reporte debe haberse llamado antes).
     """
+    ids_reporte = {str(k): v for k, v in (ids_reporte or {}).items()}
     cerrados = []
     with transaction.atomic():
         for lote in VGLotePOS.objects.select_for_update().select_related('metodo_pago').filter(estado='abierto'):
@@ -281,7 +311,7 @@ def autoclausurar_lotes_abiertos(usuario, ahora=None):
                 lote.actualizado_por = usuario
                 lote.save(update_fields=['estado', 'notas', 'actualizado_por', 'fecha_actualizacion'])
                 continue
-            cerrados.append(cerrar_lote(lote, usuario, ahora))
+            cerrados.append(cerrar_lote(lote, usuario, ahora, id_reporte=ids_reporte.get(str(lote.id))))
     return cerrados
 
 

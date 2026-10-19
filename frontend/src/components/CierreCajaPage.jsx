@@ -1,3 +1,4 @@
+import IdReporteLoteModal from './IdReporteLoteModal';
 import { useCallback, useEffect, useState } from 'react';
 import Toast from './Toast';
 import useToast from '../hooks/useToast';
@@ -57,6 +58,9 @@ function CierreCajaPage({ isMobile, onBack }) {
     : [];
   const lotesAbiertosConCobros = lotesAbiertos.filter((lote) => lote.num_pagos > 0);
   const lotesCerradosDia = pos ? pos.lotes_dia.filter((lote) => lote.estado !== 'abierto') : [];
+  // ID del reporte detallado del punto de cada lote que se va a cerrar (opcional: se puede cargar despues).
+  const [idsReporte, setIdsReporte] = useState({});
+  const [editandoId, setEditandoId] = useState(null);
 
   const handleCerrarLote = async (lote) => {
     setSaving(true);
@@ -64,6 +68,7 @@ function CierreCajaPage({ isMobile, onBack }) {
       const json = await postLotePos({
         action: 'cerrar_lote',
         lote_id: lote.id,
+        id_reporte_punto: idsReporte[lote.id] || '',
       });
       showSuccess(json.message || 'Lote cerrado.');
       await loadReport();
@@ -93,6 +98,7 @@ function CierreCajaPage({ isMobile, onBack }) {
           action: 'cerrar_caja',
           fecha,
           notas,
+          ids_reporte: idsReporte,
         }),
       });
       const json = await response.json().catch(() => ({}));
@@ -203,9 +209,26 @@ function CierreCajaPage({ isMobile, onBack }) {
                         <span>${formatMonto(lote.monto_usd)} · Bs {formatMonto(lote.monto_bs)}</span>
                       </div>
                       {lote.num_pagos > 0 ? (
-                        <button type="button" disabled={saving} onClick={() => handleCerrarLote(lote)} style={secondaryButtonStyle}>
-                          Cerrar este lote
-                        </button>
+                        <>
+                          <label style={{ display: 'grid', gap: 4, color: 'var(--vg-f-f2e6e6)', fontSize: 13, fontWeight: 700 }}>
+                            ID del reporte detallado del punto (opcional)
+                            <input
+                              type="text"
+                              value={idsReporte[lote.id] || ''}
+                              onChange={(event) => setIdsReporte((actual) => ({ ...actual, [lote.id]: event.target.value }))}
+                              placeholder="Ej: 0061"
+                              maxLength={40}
+                              style={inputStyle}
+                            />
+                            <span style={mutedStyle}>
+                              Es el número del reporte que imprime el punto al cerrar. El banco lo repite en cada crédito del punto.
+                              Si aún no lo tienes, ciérralo igual y regístralo después en Lotes de punto de venta.
+                            </span>
+                          </label>
+                          <button type="button" disabled={saving} onClick={() => handleCerrarLote(lote)} style={secondaryButtonStyle}>
+                            Cerrar este lote
+                          </button>
+                        </>
                       ) : (
                         <div style={mutedStyle}>Sin cobros vigentes: se descarta solo al cerrar la caja.</div>
                       )}
@@ -227,6 +250,16 @@ function CierreCajaPage({ isMobile, onBack }) {
                         <span>${formatMonto(lote.monto_usd)} · Bs {formatMonto(lote.monto_bs)}</span>
                         {lote.estado === 'acreditado' ? <span>Acreditado {formatFechaConDia(lote.fecha_abono)}</span> : <span style={{ color: 'var(--vg-f-ffe3a3)' }}>Por acreditar</span>}
                       </div>
+                      {lote.estado !== 'anulado' ? (
+                        <div style={{ ...loteDatosStyle, alignItems: 'center' }}>
+                          <span style={mutedStyle}>
+                            {lote.id_reporte_punto ? `Reporte del punto: ${lote.id_reporte_punto}` : 'Sin ID de reporte del punto'}
+                          </span>
+                          <button type="button" disabled={saving} onClick={() => setEditandoId(lote)} style={secondaryButtonStyle}>
+                            {lote.id_reporte_punto ? 'Editar ID reporte' : 'Registrar ID reporte'}
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -263,6 +296,9 @@ function CierreCajaPage({ isMobile, onBack }) {
                 {lotesAbiertosConCobros.length > 0 ? (
                   <div style={{ padding: 12, borderRadius: 12, border: '1px dashed var(--vg-f-ffcf85-a400)', background: 'rgba(255,207,133,0.05)', color: 'var(--vg-f-ffe3a3)', fontWeight: 700 }}>
                     Al cerrar la caja se cerrarán automáticamente {lotesAbiertosConCobros.length} lote(s) abiertos de punto de venta.
+                    {lotesAbiertosConCobros.some((lote) => !(idsReporte[lote.id] || '').trim())
+                      ? ' Escribe arriba el ID del reporte del punto de cada lote (opcional); si no lo tienes, regístralo después en Lotes de punto de venta.'
+                      : ''}
                   </div>
                 ) : null}
                 <label style={{ display: 'grid', gap: 6, color: 'var(--vg-f-f2e6e6)' }}>
@@ -276,6 +312,19 @@ function CierreCajaPage({ isMobile, onBack }) {
             )}
           </section>
         </>
+      ) : null}
+
+      {editandoId ? (
+        <IdReporteLoteModal
+          modo="editar"
+          lote={editandoId}
+          onClose={() => setEditandoId(null)}
+          onDone={(mensaje) => {
+            setEditandoId(null);
+            showSuccess(mensaje);
+            loadReport();
+          }}
+        />
       ) : null}
     </section>
   );

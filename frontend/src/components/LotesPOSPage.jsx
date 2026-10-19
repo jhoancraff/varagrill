@@ -10,6 +10,7 @@ import {
   postLotePos,
 } from '../utils/lotesPos';
 import { RangoFechas } from './FiltroFechas';
+import IdReporteLoteModal from './IdReporteLoteModal';
 
 function todayIso() {
   const now = new Date();
@@ -254,7 +255,7 @@ function LotesPOSPage({ isMobile, onBack }) {
       </section>
 
       {idReporte ? (
-        <IdReporteModal
+        <IdReporteLoteModal
           modo={idReporte.modo}
           lote={idReporte.lote}
           onClose={() => setIdReporte(null)}
@@ -282,70 +283,6 @@ function LotesPOSPage({ isMobile, onBack }) {
         />
       ) : null}
     </section>
-  );
-}
-
-// ID del reporte detallado que imprime el punto de venta al cerrar su lote (ej. 0061). El banco lo repite en cada
-// credito del punto, asi la conciliacion bancaria une esos creditos con este lote aunque el banco los acredite en
-// varias partes. Al cerrar un lote es opcional (se puede cargar despues); al editar se puede corregir o borrar.
-function IdReporteModal({ modo, lote, onClose, onDone }) {
-  const [valor, setValor] = useState(lote.id_reporte_punto || '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const cerrando = modo === 'cerrar';
-
-  const guardar = async (event) => {
-    event.preventDefault();
-    setError('');
-    setSaving(true);
-    try {
-      const json = await postLotePos(
-        cerrando
-          ? { action: 'cerrar_lote', lote_id: lote.id, id_reporte_punto: valor }
-          : { action: 'registrar_id_reporte', lote_id: lote.id, id_reporte_punto: valor },
-      );
-      onDone(json.message || 'Listo.');
-    } catch (requestError) {
-      setError(requestError.message);
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div style={backdropStyle} onClick={saving ? undefined : onClose}>
-      <form style={modalCardStyle} onClick={(event) => event.stopPropagation()} onSubmit={guardar}>
-        <div style={modalTitleStyle}>{cerrando ? `Cerrar ${lote.codigo}` : `ID del reporte · ${lote.codigo}`}</div>
-        {cerrando ? (
-          <div style={mutedStyle}>
-            ¿Cerrar el lote por ${formatMonto(lote.monto_usd)}? Se imprimirá el detalle de cada cobro para compararlo con el cierre del punto, y los
-            próximos cobros de {lote.metodo_pago_nombre} abrirán un lote nuevo.
-          </div>
-        ) : null}
-        <label style={fieldStyle}>ID del reporte detallado del punto{cerrando ? ' (opcional, se puede cargar después)' : ''}
-          <input
-            type="text"
-            value={valor}
-            onChange={(event) => setValor(event.target.value)}
-            placeholder="Ej: 0061"
-            maxLength={40}
-            autoFocus
-            style={inputStyle}
-          />
-        </label>
-        <div style={mutedStyle}>
-          Es el número del reporte (cierre de lote) que imprime el punto de venta. El banco lo repite en cada crédito del punto
-          (por ejemplo «POS MAE 88013794 001 <strong>0061</strong> 3009»): con ese ID la conciliación bancaria une esos créditos con este lote.
-          {!cerrando ? ' Déjalo vacío para borrarlo.' : ''}
-        </div>
-        {error ? <div style={noticeStyle}>{error}</div> : null}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onClose} disabled={saving} style={secondaryButtonStyle}>Cancelar</button>
-          <button type="submit" disabled={saving} style={primaryButtonStyle}>
-            {saving ? 'Guardando...' : cerrando ? 'Cerrar lote' : 'Guardar'}
-          </button>
-        </div>
-      </form>
-    </div>
   );
 }
 

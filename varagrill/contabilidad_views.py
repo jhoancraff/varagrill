@@ -56,6 +56,7 @@ from .lotes_pos import (
     registrar_id_reporte,
     revertir_acreditacion,
     validar_cambio_metodo_pago,
+    validar_ids_reporte,
 )
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
@@ -825,12 +826,20 @@ def reporte_cuadre_caja_view(request):
             if efectivo_contado_final < 0:
                 return _auth_response({'ok': False, 'message': 'El monto contado no puede ser negativo.'}, status=400)
 
+        # IDs del reporte del punto de los lotes que se van a cerrar ({lote_id: id}); se validan antes de
+        # tocar nada para que un ID mal puesto no deje el cierre de caja a medias.
+        ids_reporte = data.get('ids_reporte') if isinstance(data.get('ids_reporte'), dict) else {}
+        try:
+            validar_ids_reporte(ids_reporte)
+        except LoteError as error:
+            return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
         with transaction.atomic():
             # Solo se autoclausura al cerrar el dia de HOY: los lotes se cierran "ahora"
             # (hora de corte real), no con la hora de un dia pasado.
             lotes_autocerrados = []
             if fecha == timezone.localdate():
-                lotes_autocerrados = autoclausurar_lotes_abiertos(request.user)
+                lotes_autocerrados = autoclausurar_lotes_abiertos(request.user, ids_reporte=ids_reporte)
 
             efectivo_esperado = efectivo_esperado_dia(fecha)
             consignado = total_consignado(fecha)

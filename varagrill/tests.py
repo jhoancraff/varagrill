@@ -5565,6 +5565,54 @@ class LotePosIdReporteTests(TestCase):
         r = self.client.post('/api/admin/lotes-pos/', data=json.dumps({'action': 'registrar_id_reporte', 'lote_id': repetido.id, 'id_reporte_punto': '61'}), content_type='application/json')
         self.assertEqual(r.status_code, 400)
 
+    # ---- las otras formas de cerrar un lote
+    def _lote_abierto_con_cobro(self, metodo=None):
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='llevar', estado='pagado', subtotal=Decimal('1'), total=Decimal('1'))
+        pago = VGPago.objects.create(
+            pedido=pedido, monto=Decimal('10'), metodo_pago=metodo or self.pos, estado='completado', tasa_cambio_referencia=Decimal('100'),
+        )
+        return self.lotes_pos.asignar_pago_a_lote(pago, self.admin)
+
+    def cerrar_caja(self, ids_reporte=None):
+        cuerpo = {'action': 'cerrar_caja', 'fecha': timezone.localdate().isoformat()}
+        if ids_reporte is not None:
+            cuerpo['ids_reporte'] = ids_reporte
+        self.client.force_login(self.admin)
+        return self.client.post('/api/admin/reportes/cuadre-caja/', data=json.dumps(cuerpo), content_type='application/json')
+
+    def test_cerrar_la_caja_guarda_el_id_de_reporte_de_cada_lote_que_se_cierra(self):
+        uno = self._lote_abierto_con_cobro(self.pos)
+        dos = self._lote_abierto_con_cobro(self.pos2)
+        r = self.cerrar_caja({str(uno.id): ' 0061 ', str(dos.id): '0061'})   # mismo ID en dos metodos del mismo banco: permitido
+        self.assertEqual(r.status_code, 201, r.content)
+        uno.refresh_from_db()
+        dos.refresh_from_db()
+        self.assertEqual((uno.estado, uno.id_reporte_punto, dos.estado, dos.id_reporte_punto), ('cerrado', '0061', 'cerrado', '0061'))
+
+    def test_cerrar_la_caja_sin_ids_cierra_igual_y_el_id_se_registra_despues(self):
+        lote = self._lote_abierto_con_cobro()
+        self.assertEqual(self.cerrar_caja().status_code, 201)
+        lote.refresh_from_db()
+        self.assertEqual((lote.estado, lote.id_reporte_punto), ('cerrado', ''))
+        self.assertEqual(self.lotes_pos.registrar_id_reporte(lote, '0061', self.admin).id_reporte_punto, '0061')
+
+    def test_un_id_invalido_al_cerrar_la_caja_no_deja_nada_a_medias(self):
+        bueno = self._lote_abierto_con_cobro(self.pos)
+        malo = self._lote_abierto_con_cobro(self.pos2)
+        r = self.cerrar_caja({str(bueno.id): '0061', str(malo.id): 'no vale!'})
+        self.assertEqual(r.status_code, 400)
+        bueno.refresh_from_db()
+        malo.refresh_from_db()
+        self.assertEqual((bueno.estado, malo.estado), ('abierto', 'abierto'))
+        self.assertFalse(VGCierreCaja.objects.exists())
+
+    def test_cerrar_un_lote_por_la_api_acepta_el_id(self):
+        lote = self._lote_abierto_con_cobro()
+        self.client.force_login(self.admin)
+        r = self.client.post('/api/admin/lotes-pos/', data=json.dumps({'action': 'cerrar_lote', 'lote_id': lote.id, 'id_reporte_punto': '0061'}), content_type='application/json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()['lote']['estado'], r.json()['lote']['id_reporte_punto']), ('cerrado', '0061'))
+
     # ---- conciliacion de los creditos POS por ese ID
     def test_los_creditos_con_el_id_del_lote_se_suman_y_se_concilian(self):
         lote = self.lote(1, '1000.00', id_reporte='0061')

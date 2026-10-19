@@ -327,6 +327,158 @@ class VGConciliacionBancaria(VGAuditoria):
 
 
 # ---------------------------------------------------------------------------
+# Conciliación bancaria por movimiento (extracto del banco vs. registros del sistema)
+# ---------------------------------------------------------------------------
+class VGExtractoBancario(VGAuditoria):
+    """
+    Un archivo de movimientos del banco (el Excel que se exporta de la banca en linea)
+    cargado al sistema para conciliar una cuenta. Puede cubrir un dia, un rango o un mes:
+    los archivos pueden solaparse (subir el dia 1 y luego todo el mes) porque cada linea
+    se identifica por su huella (ver VGMovimientoBancario.huella) y las repetidas se omiten.
+
+    cuenta_bancaria identifica la cuenta con el mismo criterio que VGConciliacionBancaria.
+    banco_nombre: VGMetodoPago.cuenta_bancaria (sin espacios sobrantes).
+    saltos_saldo cuenta cuantas veces la columna Saldo del archivo no encadena con la fila
+    anterior: una pista de que pueden faltar movimientos en el archivo.
+    """
+    cuenta_bancaria = models.CharField(max_length=80)
+    nombre_archivo = models.CharField(max_length=255, blank=True)
+    huella_archivo = models.CharField(max_length=64, blank=True)
+    fecha_desde = models.DateField(null=True, blank=True)
+    fecha_hasta = models.DateField(null=True, blank=True)
+    movimientos_leidos = models.PositiveIntegerField(default=0)
+    movimientos_nuevos = models.PositiveIntegerField(default=0)
+    duplicados_omitidos = models.PositiveIntegerField(default=0)
+    saltos_saldo = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "vg_extractos_bancarios"
+        verbose_name = "Extracto bancario"
+        verbose_name_plural = "Extractos bancarios"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"Extracto {self.cuenta_bancaria} — {self.nombre_archivo}"
+
+
+class VGMovimientoBancario(VGAuditoria):
+    """
+    Una linea del extracto del banco. `monto` se guarda siempre positivo, en la moneda de la
+    cuenta (hoy solo bolivares); el sentido lo da `tipo`. `clase` es lo que el sistema entiende
+    de la descripcion (pago movil recibido, comision, POS...) y decide contra que registros se
+    compara (ver conciliacion_bancaria.py).
+
+    estado: pendiente (aun no se concilio), conciliado (tiene un vinculo confirmado), por_revisar
+    (el sistema sugiere un registro y falta que alguien lo confirme), sin_coincidencia, ignorado
+    (alguien decidio que no necesita registro en el sistema, con motivo).
+    """
+    TIPOS = [("debito", "Débito"), ("credito", "Crédito")]
+    ESTADOS = [
+        ("pendiente", "Pendiente"),
+        ("conciliado", "Conciliado"),
+        ("por_revisar", "Por revisar"),
+        ("sin_coincidencia", "Sin coincidencia"),
+        ("ignorado", "Ignorado"),
+    ]
+    CLASES = [
+        ("pago_movil_recibido", "Pago móvil recibido"),
+        ("transferencia_recibida", "Transferencia recibida"),
+        ("pos", "Punto de venta"),
+        ("comision", "Comisión"),
+        ("pago_movil_enviado", "Pago móvil enviado"),
+        ("transferencia_enviada", "Transferencia enviada"),
+        ("compra_tarjeta", "Compra con tarjeta"),
+        ("otro_credito", "Otro crédito"),
+        ("otro_debito", "Otro débito"),
+    ]
+    extracto = models.ForeignKey(VGExtractoBancario, on_delete=models.CASCADE, related_name="movimientos")
+    cuenta_bancaria = models.CharField(max_length=80)
+    fecha = models.DateTimeField()
+    referencia = models.CharField(max_length=40, blank=True)
+    descripcion = models.CharField(max_length=255, blank=True)
+    tipo = models.CharField(max_length=7, choices=TIPOS)
+    monto = models.DecimalField(max_digits=16, decimal_places=2, validators=[MinValueValidator(0)])
+    saldo = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True)
+    observacion = models.CharField(max_length=255, blank=True)
+    clase = models.CharField(max_length=24, choices=CLASES)
+    huella = models.CharField(max_length=40)
+    estado = models.CharField(max_length=20, choices=ESTADOS, default="pendiente")
+    motivo_ignorado = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_movimientos_bancarios"
+        verbose_name = "Movimiento bancario"
+        verbose_name_plural = "Movimientos bancarios"
+        ordering = ["-fecha", "-id"]
+        indexes = [models.Index(fields=["cuenta_bancaria", "fecha"], name="idx_movbanc_cuenta_fecha")]
+        constraints = [
+            models.UniqueConstraint(fields=["cuenta_bancaria", "huella"], name="uniq_movbanc_cuenta_huella"),
+        ]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} {self.monto} — {self.descripcion}"
+
+
+class VGConciliacionMovimiento(VGAuditoria):
+    """
+    Vinculo entre un movimiento del banco y un registro del sistema (un pago, un abono de gasto
+    o de compra, una transferencia entre cuentas, un ingreso extra, un gasto de comision...).
+    `origen_tipo` + `origen_id` apuntan al registro sin FK porque son varias tablas distintas.
+
+    estado: sugerido (propuesta del sistema, falta confirmar), confirmado, rechazado (alguien dijo
+    que NO es ese registro; no se vuelve a sugerir para ese movimiento).
+
+    Un registro del sistema solo puede quedar confirmado contra UN movimiento, salvo los gastos
+    de comision: ahi muchos movimientos de comision de un dia suman un solo gasto del dia
+    (metodo "comision_dia").
+    """
+    ORIGENES = [
+        ("pago", "Pago de cobro"),
+        ("abono_gasto", "Abono de gasto"),
+        ("abono_compra", "Abono de compra"),
+        ("transferencia", "Transferencia entre cuentas"),
+        ("ingreso_extra", "Ingreso extra"),
+        ("gasto", "Gasto"),
+        ("lote_pos", "Lote POS"),
+    ]
+    METODOS = [
+        ("referencia", "Por referencia"),
+        ("monto_fecha", "Por monto y fecha"),
+        ("comision_dia", "Comisiones del día"),
+        ("manual", "Manual"),
+    ]
+    ESTADOS = [("sugerido", "Sugerido"), ("confirmado", "Confirmado"), ("rechazado", "Rechazado")]
+    movimiento = models.ForeignKey(VGMovimientoBancario, on_delete=models.CASCADE, related_name="vinculos")
+    origen_tipo = models.CharField(max_length=20, choices=ORIGENES)
+    origen_id = models.PositiveIntegerField()
+    monto_sistema = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    diferencia = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+    metodo = models.CharField(max_length=20, choices=METODOS)
+    puntaje = models.PositiveSmallIntegerField(default=0)
+    estado = models.CharField(max_length=12, choices=ESTADOS, default="sugerido")
+    nota = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_conciliaciones_movimiento"
+        verbose_name = "Vínculo de conciliación"
+        verbose_name_plural = "Vínculos de conciliación"
+        ordering = ["movimiento_id", "-puntaje"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["movimiento", "origen_tipo", "origen_id"], name="uniq_vinculo_movimiento_origen",
+            ),
+            models.UniqueConstraint(
+                fields=["origen_tipo", "origen_id"],
+                condition=models.Q(estado="confirmado") & ~models.Q(metodo="comision_dia"),
+                name="uniq_vinculo_origen_confirmado",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Movimiento #{self.movimiento_id} ↔ {self.origen_tipo} #{self.origen_id} ({self.estado})"
+
+
+# ---------------------------------------------------------------------------
 # Lotes de Punto de Venta (POS)
 # ---------------------------------------------------------------------------
 class VGLotePOS(VGAuditoria):

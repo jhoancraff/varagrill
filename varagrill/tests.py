@@ -1,4 +1,6 @@
 import json
+from types import SimpleNamespace
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.test import TestCase
@@ -4761,3 +4763,486 @@ class CobroSinPermisoTests(TestCase):
             r = self.client.get(self.URL)
             self.assertEqual(r.status_code, 200, rol)
             self.assertTrue(r.json()['ok'])
+
+
+from varagrill.models import VGMovimientoBancario  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Conciliacion bancaria por movimiento (extracto del banco vs. registros del sistema)
+# ---------------------------------------------------------------------------
+def _xlsx_bytes(hojas):
+    """Un .xlsx minimo: hojas = [(nombre, [[celda, ...], ...])]; str -> texto, int/float/Decimal -> numero."""
+    import io
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    def col(i):
+        return chr(ord('A') + i)
+
+    libro, rels, tipos, hojas_xml = [], [], [], []
+    for n, (nombre, filas) in enumerate(hojas, start=1):
+        libro.append(f'<sheet name="{escape(nombre)}" sheetId="{n}" r:id="rId{n}"/>')
+        rels.append(f'<Relationship Id="rId{n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{n}.xml"/>')
+        tipos.append(f'<Override PartName="/xl/worksheets/sheet{n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>')
+        xml_filas = []
+        for r, fila in enumerate(filas, start=1):
+            celdas = []
+            for c, valor in enumerate(fila):
+                ref = f'{col(c)}{r}'
+                if valor is None:
+                    continue
+                if isinstance(valor, (int, float, Decimal)):
+                    celdas.append(f'<c r="{ref}"><v>{valor}</v></c>')
+                else:
+                    celdas.append(f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(valor))}</t></is></c>')
+            xml_filas.append(f'<row r="{r}">{"".join(celdas)}</row>')
+        hojas_xml.append(f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{"".join(xml_filas)}</sheetData></worksheet>')
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as z:
+        z.writestr('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/>' + ''.join(tipos) + '</Types>')
+        z.writestr('xl/workbook.xml', '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' + ''.join(libro) + '</sheets></workbook>')
+        z.writestr('xl/_rels/workbook.xml.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + ''.join(rels) + '</Relationships>')
+        for n, xml in enumerate(hojas_xml, start=1):
+            z.writestr(f'xl/worksheets/sheet{n}.xml', xml)
+    return buffer.getvalue()
+
+
+ENCABEZADO_BANCO = ['Fecha', 'Referencia', 'Descripción', 'Tipo', 'Monto', 'Saldo', 'Observacion']
+
+
+class BancoExcelParserTests(TestCase):
+    """Lector del extracto del banco: el formato real del Banco Plaza (texto en formato español, una hoja por día)."""
+
+    def parsear(self, hojas, nombre='extracto.xlsx'):
+        from varagrill.banco_excel import parsear_extracto
+        return parsear_extracto(_xlsx_bytes(hojas), nombre)
+
+    def test_lee_el_formato_del_banco_plaza_con_varias_hojas_y_columnas_sueltas(self):
+        r = self.parsear([
+            ('01oct26-', [
+                ENCABEZADO_BANCO + [None, 'Gastos ', -169089.35],
+                ['01/10/2026 23:20:08', '000038526', 'COMPRA MAESTRO', 'Débito', '-36.828,00', '828.169,56', 'gasolina planta electrica'],
+                ['01/10/2026 23:09:48', '045613614', 'TRF BANESC V020657311 HAMADE D', 'Crédito', '25.346,92', '864.997,56', 'pago movil entrada negocio'],
+            ]),
+            ('02oct26', [
+                ['Fecha', 'Referencia', 'Descripción', 'Tipo', 'Monto', 'Saldo', 'observacion '],
+                ['02/10/2026 08:00:35', '940100612', 'POS MAE 88013794 001 0061 0110', 'Crédito', '100.074,03', '928.243,59', None],
+                ['02/10/2026 08:30:00', '548488258', 'DOM POS DGL 88013794 0001 0110', 'Débito', '-2.599,68', '1.006.010,40', 'comision'],
+            ]),
+            ('19oct', [[None, None]]),
+        ])
+        movs = r['movimientos']
+        self.assertEqual(len(movs), 4)
+        self.assertEqual(r['errores'], [])
+        self.assertEqual(r['hojas_omitidas'], [])  # una hoja vacia no cuenta como omitida
+        primero = movs[0]
+        self.assertEqual(primero['tipo'], 'debito')
+        self.assertEqual(primero['monto'], Decimal('36828.00'))        # el monto siempre queda positivo
+        self.assertEqual(primero['saldo'], Decimal('828169.56'))
+        self.assertEqual(primero['fecha'], datetime(2026, 10, 1, 23, 20, 8))
+        self.assertEqual(primero['observacion'], 'gasolina planta electrica')
+        self.assertEqual([m['clase'] for m in movs], ['compra_tarjeta', 'transferencia_recibida', 'pos', 'comision'])
+        self.assertEqual(movs[2]['observacion'], '')
+
+    def test_acepta_numeros_y_fechas_de_excel_y_csv(self):
+        r = self.parsear([('hoja', [
+            ['Fecha', 'Monto', 'Descripcion'],
+            [46296.5, -1234.5, 'TDY ENVIO A BNC 4125486135'],
+        ])])
+        m = r['movimientos'][0]
+        self.assertEqual(m['monto'], Decimal('1234.5'))
+        self.assertEqual(m['tipo'], 'debito')                          # sin columna Tipo manda el signo
+        self.assertEqual(m['clase'], 'pago_movil_enviado')
+        self.assertEqual(m['fecha'].date(), date(2026, 10, 1))
+
+        from varagrill.banco_excel import parsear_extracto
+        csv = 'Fecha;Referencia;Descripcion;Tipo;Monto\n01/10/2026 10:00:00;123;TDY RECIB DE VZLA 4245940617;Credito;1.733,12\n'
+        m = parsear_extracto(csv.encode('utf-8'), 'extracto.csv')['movimientos'][0]
+        self.assertEqual((m['tipo'], m['monto'], m['clase']), ('credito', Decimal('1733.12'), 'pago_movil_recibido'))
+
+    def test_una_transferencia_y_su_comision_comparten_referencia_y_no_se_toman_por_repetidas(self):
+        r = self.parsear([('d', [
+            ENCABEZADO_BANCO,
+            ['01/10/2026 11:05:53', '019331385', 'TRF PROVIN V020040168 ALFREDO', 'Débito', '-50.150,00', '749.560,69', ''],
+            ['01/10/2026 11:05:53', '019331385', 'COM TRF 019331385', 'Débito', '-150,45', '799.710,69', ''],
+            ['01/10/2026 11:05:53', '019331385', 'COM TRF 019331385', 'Débito', '-150,45', '799.710,69', ''],
+        ])])
+        self.assertEqual(len(r['movimientos']), 2)
+        self.assertEqual(r['repetidas_en_archivo'], 1)
+        self.assertEqual({m['clase'] for m in r['movimientos']}, {'transferencia_enviada', 'comision'})
+
+    def test_reporta_las_filas_ilegibles_y_los_archivos_invalidos(self):
+        r = self.parsear([('d', [
+            ENCABEZADO_BANCO,
+            ['no es fecha', '1', 'X', 'Débito', '-10,00', '5,00', ''],
+            ['01/10/2026 10:00:00', '2', 'Y', 'Débito', 'abc', '5,00', ''],
+            ['01/10/2026 10:00:00', '3', 'Z', 'Crédito', '10,00', '15,00', ''],
+        ])])
+        self.assertEqual(len(r['movimientos']), 1)
+        self.assertEqual([e['fila'] for e in r['errores']], [2, 3])
+
+        from varagrill.banco_excel import ExtractoInvalido, parsear_extracto
+        with self.assertRaises(ExtractoInvalido):
+            parsear_extracto(b'esto no es un excel', 'x.xlsx')
+        with self.assertRaises(ExtractoInvalido):
+            parsear_extracto(_xlsx_bytes([('d', [['Nombre', 'Cantidad'], ['a', 1]])]), 'x.xlsx')
+
+    def test_los_saltos_del_saldo_avisan_que_puede_faltar_una_linea(self):
+        completo = [
+            ENCABEZADO_BANCO,
+            ['01/10/2026 10:00:00', '1', 'A', 'Crédito', '100,00', '1.100,00', ''],
+            ['01/10/2026 11:00:00', '2', 'B', 'Débito', '-50,00', '1.050,00', ''],
+            ['01/10/2026 12:00:00', '3', 'C', 'Crédito', '25,00', '1.075,00', ''],
+        ]
+        self.assertEqual(self.parsear([('d', completo)])['saltos_saldo'], 0)
+        con_hueco = [completo[0], completo[1], completo[3]]  # falta la fila B
+        self.assertEqual(self.parsear([('d', con_hueco)])['saltos_saldo'], 1)
+
+
+class ConciliacionBancariaMotorTests(TestCase):
+    """Cruce de movimientos del banco contra pagos, gastos, compras y comisiones del sistema."""
+
+    CUENTA = 'Banco Prueba'
+
+    def setUp(self):
+        from varagrill.models import VGAbonoCompra, VGAbonoGasto, VGCategoriaGasto, VGCompra, VGExtractoBancario, VGGasto, VGLotePOS, VGMetodoPago, VGMovimientoBancario
+        self.M = SimpleNamespace(
+            AbonoCompra=VGAbonoCompra, AbonoGasto=VGAbonoGasto, Compra=VGCompra, Extracto=VGExtractoBancario,
+            Gasto=VGGasto, Lote=VGLotePOS, Mov=VGMovimientoBancario,
+        )
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='conc_admin', password='claveConc123', cedula='94000001', email='conc@test.test', id_role=rol,
+        )
+        # Dos espacios sobrantes a proposito: asi vienen de la base real ("Banco plaza natural   ").
+        self.pm = VGMetodoPago.objects.create(nombre='PM Prueba', moneda='VES', cuenta_bancaria='Banco Prueba  ')
+        self.pos = VGMetodoPago.objects.create(nombre='POS Prueba', moneda='VES', cuenta_bancaria='Banco Prueba', es_punto_venta=True)
+        self.cat = VGCategoriaGasto.objects.get_or_create(nombre='Servicios')[0]
+        self.cat_comision = VGCategoriaGasto.objects.get_or_create(nombre='comision')[0]
+        self.extracto = VGExtractoBancario.objects.create(cuenta_bancaria=self.CUENTA)
+        self.n = 0
+
+    # ---- ayudantes
+    def dt(self, dia, hora=12):
+        return timezone.make_aware(datetime(2026, 10, dia, hora, 0))
+
+    def mov(self, tipo, monto, ref='', desc='', dia=5, clase=None, obs=''):
+        from varagrill.banco_excel import clasificar
+        self.n += 1
+        return self.M.Mov.objects.create(
+            extracto=self.extracto, cuenta_bancaria=self.CUENTA, fecha=self.dt(dia), referencia=ref,
+            descripcion=desc, tipo=tipo, monto=Decimal(monto), observacion=obs,
+            clase=clase or clasificar(desc, tipo), huella=f'h{self.n}',
+        )
+
+    def pago(self, bs, ref='', dia=5, metodo=None):
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='llevar', estado='pagado', subtotal=Decimal('1'), total=Decimal('1'))
+        p = VGPago.objects.create(
+            pedido=pedido, monto=Decimal(bs) / Decimal('100'), metodo_pago=metodo or self.pm, estado='completado',
+            tasa_cambio_referencia=Decimal('100'), referencia=ref,
+        )
+        VGPago.objects.filter(pk=p.pk).update(fecha_pago=self.dt(dia))
+        return p
+
+    def gasto(self, bs, comprobante='', descripcion='Flete', dia=5, categoria=None, proveedor=''):
+        g = self.M.Gasto.objects.create(
+            categoria=categoria or self.cat, descripcion=descripcion, proveedor_nombre=proveedor, numero_comprobante=comprobante,
+            monto=Decimal(bs) / Decimal('100'), saldo_pendiente=0, estado_pago='pagado',
+            fecha_gasto=date(2026, 10, dia), tasa_cambio_referencia=Decimal('100'),
+        )
+        a = self.M.AbonoGasto.objects.create(gasto=g, monto=g.monto, metodo_pago=self.pm, tasa_cambio_referencia=Decimal('100'))
+        self.M.AbonoGasto.objects.filter(pk=a.pk).update(fecha_pago=self.dt(dia))
+        return g, a
+
+    def conciliar(self, desde=1, hasta=31):
+        from varagrill import conciliacion_bancaria as motor
+        return motor.conciliar(self.CUENTA, date(2026, 10, desde), date(2026, 10, hasta), self.admin)
+
+    # ---- importacion
+    def test_importar_omite_lo_ya_cargado_aunque_los_archivos_se_solapen(self):
+        from varagrill import conciliacion_bancaria as motor
+        from varagrill.banco_excel import parsear_extracto
+        dia1 = ['01/10/2026 10:00:00', '1', 'COMPRA MAESTRO', 'Débito', '-100,00', '900,00', '']
+        dia2 = ['02/10/2026 10:00:00', '2', 'COMPRA MAESTRO', 'Débito', '-50,00', '850,00', '']
+        primero = parsear_extracto(_xlsx_bytes([('d', [ENCABEZADO_BANCO, dia1])]), 'dia1.xlsx')
+        mes = parsear_extracto(_xlsx_bytes([('d', [ENCABEZADO_BANCO, dia1, dia2])]), 'mes.xlsx')
+        e1 = motor.importar_extracto('Banco Prueba ', primero, 'dia1.xlsx', self.admin)
+        e2 = motor.importar_extracto(self.CUENTA, mes, 'mes.xlsx', self.admin)
+        self.assertEqual((e1.movimientos_nuevos, e2.movimientos_nuevos, e2.duplicados_omitidos), (1, 1, 1))
+        self.assertEqual(self.M.Mov.objects.filter(cuenta_bancaria=self.CUENTA).count(), 2)
+
+    def test_una_cuenta_en_dolares_no_se_puede_conciliar_todavia(self):
+        from varagrill import conciliacion_bancaria as motor
+        VGMetodoPago.objects.create(nombre='Zelle Prueba', moneda='USD', cuenta_bancaria='Banco USD')
+        cuentas = {c['nombre']: c for c in motor.cuentas_disponibles()}
+        self.assertTrue(cuentas['Banco Prueba']['soportada'])
+        self.assertFalse(cuentas['Banco USD']['soportada'])
+        with self.assertRaises(motor.CuentaNoSoportada):
+            motor.conciliar('Banco USD', date(2026, 10, 1), date(2026, 10, 31), self.admin)
+
+    # ---- creditos
+    def test_credito_con_sufijo_de_referencia_y_monto_casi_igual_se_concilia_solo(self):
+        m = self.mov('credito', '5000.00', ref='000123456', desc='TDY RECIB DE VZLA 4245940617')
+        p = self.pago('5000.90', ref='3456')  # 90 centimos de diferencia por el redondeo de la tasa
+        self.assertEqual(self.conciliar()['conciliado'], 1)
+        m.refresh_from_db()
+        v = m.vinculos.get()
+        self.assertEqual((m.estado, v.estado, v.metodo, v.origen_tipo, v.origen_id), ('conciliado', 'confirmado', 'referencia', 'pago', p.id))
+        self.assertEqual(v.diferencia, Decimal('0.90'))
+
+    def test_credito_con_monto_exacto_sin_referencia_se_sugiere_y_se_confirma_a_mano(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('credito', '1234.50', ref='999', desc='TDY RECIB DE VZLA 4245940617')
+        p = self.pago('1234.50', ref='')
+        self.assertEqual(self.conciliar()['por_revisar'], 1)
+        m.refresh_from_db()
+        v = m.vinculos.get()
+        self.assertEqual((m.estado, v.estado, v.metodo), ('por_revisar', 'sugerido', 'monto_fecha'))
+        motor.confirmar_vinculo(v, self.admin)
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'conciliado')
+        # el mismo pago no puede conciliar otro movimiento
+        otro = self.mov('credito', '1234.50', ref='888', desc='TDY RECIB DE VZLA 4141111111', dia=6)
+        self.assertEqual(self.conciliar()['sin_coincidencia'], 1)
+        otro.refresh_from_db()
+        self.assertEqual(otro.estado, 'sin_coincidencia')
+        self.assertEqual(p.id, v.origen_id)
+
+    def test_credito_sin_ningun_registro_queda_sin_coincidencia(self):
+        m = self.mov('credito', '777.00', ref='1', desc='TRF BANESC V020657311 HAMADE D')
+        self.pago('99999.00', ref='5555')
+        self.assertEqual(self.conciliar(), {'sin_coincidencia': 1})
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'sin_coincidencia')
+
+    # ---- debitos
+    def test_debito_con_la_referencia_del_comprobante_del_gasto_se_concilia_solo(self):
+        m = self.mov('debito', '5000.00', ref='000025559', desc='TRF PROVIN V020040168 ALFREDO')
+        g, a = self.gasto('5000.00', comprobante='000025559')
+        self.assertEqual(self.conciliar()['conciliado'], 1)
+        v = m.vinculos.get()
+        self.assertEqual((v.origen_tipo, v.origen_id, v.metodo, v.estado), ('abono_gasto', a.id, 'referencia', 'confirmado'))
+
+    def test_referencia_que_coincide_con_un_monto_muy_distinto_avisa_de_un_posible_error_de_captura(self):
+        m = self.mov('debito', '737185.40', ref='000025559', desc='TRF B.PLUS J506500175')
+        self.gasto('32643.80', comprobante='000025559')
+        self.assertEqual(self.conciliar()['por_revisar'], 1)
+        v = m.vinculos.get()
+        self.assertEqual((v.estado, v.puntaje), ('sugerido', 60))
+        self.assertIn('difiere', v.nota)
+
+    def test_debito_sin_referencia_se_sugiere_por_monto_y_nombre_del_proveedor(self):
+        c = self.M.Compra.objects.create(proveedor_nombre='Despacho Alfredo', estado='recibido', total=Decimal('80'), saldo_pendiente=0)
+        a = self.M.AbonoCompra.objects.create(compra=c, monto=Decimal('80'), metodo_pago=self.pm, tasa_cambio_referencia=Decimal('100'))
+        self.M.AbonoCompra.objects.filter(pk=a.pk).update(fecha_pago=self.dt(5))
+        m = self.mov('debito', '8000.00', ref='555', desc='TRF VZLA V030067809 X', obs='Despacho alfredo')
+        self.assertEqual(self.conciliar()['por_revisar'], 1)
+        v = m.vinculos.get()
+        self.assertEqual((v.origen_tipo, v.origen_id, v.metodo, v.puntaje), ('abono_compra', a.id, 'monto_fecha', 90))
+
+    def test_un_registro_solo_se_sugiere_a_un_movimiento(self):
+        a = self.mov('debito', '3000.00', ref='1', desc='COMPRA MAESTRO', dia=5)
+        b = self.mov('debito', '3000.00', ref='2', desc='COMPRA MAESTRO', dia=5)
+        self.gasto('3000.00', descripcion='Hielo')
+        self.assertEqual(self.conciliar(), {'por_revisar': 1, 'sin_coincidencia': 1})
+        self.assertEqual(sorted(m.estado for m in self.M.Mov.objects.all()), ['por_revisar', 'sin_coincidencia'])
+
+    def test_rechazar_una_sugerencia_no_la_vuelve_a_proponer(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '3000.00', ref='1', desc='COMPRA MAESTRO')
+        self.gasto('3000.00', descripcion='Hielo')
+        self.conciliar()
+        motor.rechazar_vinculo(m.vinculos.get(estado='sugerido'), self.admin)
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'sin_coincidencia')
+        self.assertFalse(m.vinculos.filter(estado='sugerido').exists())
+        self.conciliar()  # correrlo otra vez tampoco lo reabre
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'sin_coincidencia')
+
+    def test_elegir_a_mano_un_candidato_y_ver_los_candidatos(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '4000.00', ref='1', desc='COMPRA MAESTRO', dia=5)
+        g, a = self.gasto('4300.00', descripcion='Carbon', dia=6)  # monto parecido (7%) pero no lo bastante para sugerirlo solo
+        self.conciliar()
+        self.assertEqual(self.M.Mov.objects.get(pk=m.pk).estado, 'sin_coincidencia')
+        candidatos = motor.candidatos_para(m)
+        self.assertEqual([(c.tipo, c.id) for c, _ in candidatos], [('abono_gasto', a.id)])
+        motor.vincular_manual(m, 'abono_gasto', a.id, self.admin)
+        m.refresh_from_db()
+        v = m.vinculos.get()
+        self.assertEqual((m.estado, v.estado, v.metodo), ('conciliado', 'confirmado', 'manual'))
+        with self.assertRaises(motor.AccionInvalida):
+            motor.vincular_manual(self.mov('debito', '4000.00', ref='2', desc='COMPRA MAESTRO', dia=6), 'abono_gasto', a.id, self.admin)
+
+    def test_ignorar_pide_motivo_y_reabrir_lo_devuelve_al_cruce(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '123.00', ref='1', desc='OTRO CARGO')
+        with self.assertRaises(motor.AccionInvalida):
+            motor.ignorar_movimiento(m, '  ', self.admin)
+        motor.ignorar_movimiento(m, 'Cargo del banco ya contabilizado', self.admin)
+        self.assertEqual(self.conciliar(), {})  # lo ignorado no se cruza
+        motor.reabrir_movimiento(m, self.admin)
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'sin_coincidencia')
+
+    def test_confirmar_probables_en_bloque_solo_toma_las_sugerencias_sin_dudas(self):
+        from varagrill import conciliacion_bancaria as motor
+        limpio = self.mov('debito', '3000.00', ref='1', desc='COMPRA MAESTRO')
+        self.gasto('3000.00', descripcion='Hielo')
+        dudoso = self.mov('debito', '9000.00', ref='2', desc='COMPRA MAESTRO')
+        self.gasto('9000.00', descripcion='Aceite A')
+        self.gasto('9000.00', descripcion='Aceite B')  # dos registros con el mismo monto: hay que elegir
+        self.conciliar()
+        self.assertEqual(motor.confirmar_probables(self.CUENTA, date(2026, 10, 1), date(2026, 10, 31), self.admin), 1)
+        limpio.refresh_from_db()
+        dudoso.refresh_from_db()
+        self.assertEqual((limpio.estado, dudoso.estado), ('conciliado', 'por_revisar'))
+
+    # ---- comisiones, POS, reverso
+    def test_las_comisiones_del_dia_se_comparan_en_suma_contra_el_gasto_de_comision(self):
+        a = self.mov('debito', '10.00', ref='1', desc='COM TRF 019331385')
+        b = self.mov('debito', '15.50', ref='2', desc='TDY COM.P2P BNC 4125486135')
+        self.gasto('25.50', descripcion='comision bancaria', categoria=self.cat_comision)
+        self.assertEqual(self.conciliar(), {'conciliado': 2})
+        for m in (a, b):
+            m.refresh_from_db()
+            v = m.vinculos.get()
+            self.assertEqual((m.estado, v.metodo, v.estado), ('conciliado', 'comision_dia', 'confirmado'))
+
+    def test_comisiones_cuya_suma_no_coincide_van_a_revision_y_sin_gasto_quedan_sin_coincidencia(self):
+        a = self.mov('debito', '10.00', ref='1', desc='COM TRF 019331385', dia=5)
+        self.gasto('30.00', descripcion='comision bancaria', categoria=self.cat_comision, dia=5)
+        b = self.mov('debito', '12.00', ref='2', desc='DOM POS DGL 88013794', dia=6)  # ese dia no hay gasto
+        self.assertEqual(self.conciliar(), {'por_revisar': 1, 'sin_coincidencia': 1})
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertEqual((a.estado, b.estado), ('por_revisar', 'sin_coincidencia'))
+        self.assertIn('difiere', a.vinculos.get().nota)
+
+    def test_el_pos_no_se_vincula_pero_se_compara_por_dia_de_acreditacion(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('credito', '990.00', ref='940100562', desc='POS MAE 88013794 001 0056 3009', dia=7)
+        self.M.Lote.objects.create(
+            numero=1, metodo_pago=self.pos, fecha_operacion=date(2026, 10, 6), estado='acreditado',
+            fecha_abono_real=date(2026, 10, 7), monto_bruto_sistema_bs=Decimal('1000.00'),
+        )
+        self.assertEqual(self.conciliar(), {'pos': 1})
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'pendiente')
+        fila = motor.resumen_pos(self.CUENTA, date(2026, 10, 1), date(2026, 10, 31))[0]
+        self.assertEqual((fila['banco'], fila['sistema'], fila['diferencia'], fila['porcentaje']),
+                         (Decimal('990.00'), Decimal('1000.00'), Decimal('-10.00'), Decimal('-1.00')))
+
+    def test_registros_del_sistema_que_no_estan_en_el_banco(self):
+        from varagrill import conciliacion_bancaria as motor
+        self.mov('credito', '500.00', ref='4444', desc='TDY RECIB DE VZLA 4245940617')
+        conciliado = self.pago('500.00', ref='4444')
+        faltante = self.pago('777.00', ref='5555', dia=6)
+        self.conciliar()
+        filas = motor.registros_sin_movimiento(self.CUENTA, date(2026, 10, 1), date(2026, 10, 31))
+        self.assertEqual([(f['sentido'], f['candidato'].id) for f in filas], [('credito', faltante.id)])
+        self.assertNotIn(conciliado.id, [f['candidato'].id for f in filas])
+
+
+class ConciliacionBancariaViewsTests(TestCase):
+    """Permisos (solo administrador y contador), importacion por API, acciones y PDF."""
+
+    BASE = '/api/admin/conciliacion-bancaria/'
+
+    def setUp(self):
+        for nombre in ('Administrador', 'Contador', 'Mesero', 'Cajera'):
+            VGRol.objects.get_or_create(nombre_role=nombre)
+        crear = lambda user, rol, ced: VGUsuario.objects.create_user(
+            username=user, password='claveConc123', cedula=ced, email=f'{user}@test.test', id_role=VGRol.objects.get(nombre_role=rol),
+        )
+        self.admin = crear('vc_admin', 'Administrador', '93000001')
+        self.contador = crear('vc_contador', 'Contador', '93000002')
+        self.mesero = crear('vc_mesero', 'Mesero', '93000003')
+        self.cajera = crear('vc_cajera', 'Cajera', '93000004')
+        VGMetodoPago.objects.create(nombre='PM Vista', moneda='VES', cuenta_bancaria='Banco Vista')
+        self.archivo = _xlsx_bytes([('01oct', [
+            ENCABEZADO_BANCO,
+            ['01/10/2026 10:00:00', '000111222', 'COMPRA MAESTRO', 'Débito', '-100,00', '900,00', 'hielo'],
+            ['01/10/2026 11:00:00', '000111333', 'TDY RECIB DE VZLA 4245940617', 'Crédito', '250,00', '1.150,00', ''],
+        ])])
+
+    def subir(self, accion, usuario=None, cuenta='Banco Vista'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.force_login(usuario or self.admin)
+        return self.client.post(self.BASE + 'importar/', {
+            'action': accion, 'cuenta': cuenta, 'archivo': SimpleUploadedFile('banco.xlsx', self.archivo),
+        })
+
+    def test_solo_administrador_y_contador_pueden_entrar(self):
+        urls = [self.BASE + 'cuentas/', self.BASE + 'movimientos/?cuenta=Banco Vista&desde=2026-10-01&hasta=2026-10-31']
+        for url in urls:
+            self.assertEqual(self.client.get(url).status_code, 401)             # sin sesion
+        for usuario in (self.mesero, self.cajera):
+            self.client.force_login(usuario)
+            for url in urls:
+                self.assertEqual(self.client.get(url).status_code, 403, usuario.username)
+            self.assertEqual(self.subir('preview', usuario).status_code, 403)
+        for usuario in (self.admin, self.contador):
+            self.client.force_login(usuario)
+            self.assertEqual(self.client.get(urls[0]).status_code, 200, usuario.username)
+
+    def test_la_vista_previa_no_guarda_y_la_confirmacion_si_y_no_duplica_al_repetir(self):
+        r = self.subir('preview')
+        self.assertEqual(r.status_code, 200, r.content)
+        resumen = r.json()['resumen']
+        self.assertEqual((resumen['leidos'], resumen['nuevos'], resumen['ya_cargados']), (2, 2, 0))
+        self.assertEqual((resumen['debitos'], resumen['creditos']), ('100.00', '250.00'))
+        self.assertEqual(VGMovimientoBancario.objects.count(), 0)
+
+        r = self.subir('confirm')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(VGMovimientoBancario.objects.count(), 2)
+
+        resumen = self.subir('preview').json()['resumen']
+        self.assertEqual((resumen['nuevos'], resumen['ya_cargados']), (0, 2))
+        self.subir('confirm')
+        self.assertEqual(VGMovimientoBancario.objects.count(), 2)
+
+    def test_cuenta_o_archivo_invalidos_dan_400(self):
+        self.assertEqual(self.subir('preview', cuenta='No existe').status_code, 400)
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.client.force_login(self.admin)
+        r = self.client.post(self.BASE + 'importar/', {'action': 'preview', 'cuenta': 'Banco Vista', 'archivo': SimpleUploadedFile('x.xlsx', b'basura')})
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.client.post(self.BASE + 'importar/', {'action': 'preview', 'cuenta': 'Banco Vista'}).status_code, 400)
+
+    def test_listar_movimientos_ignorar_y_reabrir_por_api(self):
+        self.subir('confirm')
+        url = self.BASE + 'movimientos/?cuenta=Banco Vista&desde=2026-10-01&hasta=2026-10-31'
+        data = self.client.get(url).json()
+        self.assertEqual(data['resumen']['total'], 2)
+        self.assertEqual(data['resumen']['estados']['sin_coincidencia']['cantidad'], 2)
+        mov = data['movimientos'][0]
+        self.assertEqual((mov['clase'], mov['tipo'], mov['monto']), ('compra_tarjeta', 'debito', '100.00'))
+
+        accion = self.BASE + f'movimientos/{mov["id"]}/accion/'
+        r = self.client.post(accion, data=json.dumps({'accion': 'ignorar', 'motivo': ''}), content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post(accion, data=json.dumps({'accion': 'ignorar', 'motivo': 'Cargo ya registrado'}), content_type='application/json')
+        self.assertEqual(r.json()['movimiento']['estado'], 'ignorado')
+        r = self.client.post(accion, data=json.dumps({'accion': 'reabrir'}), content_type='application/json')
+        self.assertEqual(r.json()['movimiento']['estado'], 'sin_coincidencia')
+        self.assertEqual(self.client.post(accion, data=json.dumps({'accion': 'volar'}), content_type='application/json').status_code, 400)
+        mesero_url = self.BASE + 'movimientos/999999/accion/'
+        self.assertEqual(self.client.post(mesero_url, data='{}', content_type='application/json').status_code, 404)
+
+    def test_el_pdf_lo_descargan_solo_administrador_y_contador(self):
+        self.subir('confirm')
+        url = self.BASE + 'pdf/?cuenta=Banco Vista&desde=2026-10-01&hasta=2026-10-31'
+        for usuario in (self.admin, self.contador):
+            self.client.force_login(usuario)
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 200, usuario.username)
+            self.assertEqual(r['Content-Type'], 'application/pdf')
+            self.assertTrue(r.content.startswith(b'%PDF'))
+        self.client.force_login(self.mesero)
+        self.assertIn(self.client.get(url).status_code, (401, 403))
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get(self.BASE + 'pdf/?cuenta=Banco Vista&desde=2026-10-31&hasta=2026-10-01').status_code, 400)

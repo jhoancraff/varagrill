@@ -71,6 +71,7 @@ from varagrill.reportes_pdf_views import (
     reporte_cuentas_por_cobrar_pdf_view,
     reporte_cuentas_por_pagar_pdf_view,
     reporte_facturado_pdf_view,
+    reporte_conciliacion_bancaria_pdf_view,
     reporte_margen_por_plato_pdf_view,
     reporte_gastos_pdf_view,
     reporte_inventario_pdf_view,
@@ -96,6 +97,17 @@ from varagrill.compras_views import (
     compra_nota_credito_view,
     reporte_notas_credito_compra_view,
     cuentas_por_pagar_view,
+)
+from varagrill.conciliacion_bancaria_views import (
+    conciliacion_candidatos_view,
+    conciliacion_conciliar_view,
+    conciliacion_confirmar_probables_view,
+    conciliacion_cuentas_view,
+    conciliacion_extractos_view,
+    conciliacion_importar_view,
+    conciliacion_movimiento_accion_view,
+    conciliacion_movimientos_view,
+    conciliacion_reverso_view,
 )
 from varagrill.contabilidad_views import (
     admin_ingresos_no_facturados_view,
@@ -237,6 +249,16 @@ urlpatterns = [
     path('api/admin/reportes/margen-ganancia/', reporte_margen_ganancia_view, name='admin-reporte-margen-ganancia'),
     path('api/admin/reportes/margen-productos/', reporte_margen_productos_view, name='admin-reporte-margen-productos'),
     path('api/admin/reportes/inventario-pdf/', reporte_inventario_pdf_view, name='admin-reporte-inventario-pdf'),
+    path('api/admin/conciliacion-bancaria/cuentas/', conciliacion_cuentas_view, name='conciliacion-cuentas'),
+    path('api/admin/conciliacion-bancaria/importar/', conciliacion_importar_view, name='conciliacion-importar'),
+    path('api/admin/conciliacion-bancaria/extractos/', conciliacion_extractos_view, name='conciliacion-extractos'),
+    path('api/admin/conciliacion-bancaria/movimientos/', conciliacion_movimientos_view, name='conciliacion-movimientos'),
+    path('api/admin/conciliacion-bancaria/movimientos/<int:movimiento_id>/accion/', conciliacion_movimiento_accion_view, name='conciliacion-movimiento-accion'),
+    path('api/admin/conciliacion-bancaria/movimientos/<int:movimiento_id>/candidatos/', conciliacion_candidatos_view, name='conciliacion-movimiento-candidatos'),
+    path('api/admin/conciliacion-bancaria/conciliar/', conciliacion_conciliar_view, name='conciliacion-conciliar'),
+    path('api/admin/conciliacion-bancaria/confirmar-probables/', conciliacion_confirmar_probables_view, name='conciliacion-confirmar-probables'),
+    path('api/admin/conciliacion-bancaria/reverso/', conciliacion_reverso_view, name='conciliacion-reverso'),
+    path('api/admin/conciliacion-bancaria/pdf/', reporte_conciliacion_bancaria_pdf_view, name='conciliacion-pdf'),
     path('api/admin/reportes/gastos-pdf/', reporte_gastos_pdf_view, name='admin-reporte-gastos-pdf'),
     path('api/admin/reportes/facturado-pdf/', reporte_facturado_pdf_view, name='admin-reporte-facturado-pdf'),
     path(

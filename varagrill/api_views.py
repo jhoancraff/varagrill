@@ -65,7 +65,7 @@ from .auth_helpers import (
 )
 from .delivery import CargoDeliveryInvalido, aplicar_cargo, resolver_cargo_delivery
 from .impresion_lpd import imprimir_nota_entrega_caja
-from .impresion_termica import imprimir_comandas_pedido
+from .impresion_termica import imprimir_comandas_pedido, mensaje_fallos_impresion, resumir_resultados_impresion
 from .ingredientes_excel import (
     InvalidExcelError,
     normalize_unidad,
@@ -289,15 +289,24 @@ def _notify_cocina_event(event_name, pedido, actor_user, previous_estado=None):
     # Excepción: si viene de "listo" (el mesero le dio "Volver a preparar" por
     # un error), no se reimprime la comanda — ya se imprimió la primera vez y
     # no se quiere duplicar el ticket en cocina por una corrección de estado.
+    #
+    # Devuelve {'ok', 'fallidas'} (ver resumir_resultados_impresion) si se intentó imprimir,
+    # o None si este evento no imprime: así la vista puede decirle al mesero que la
+    # comanda física NO salió aunque el pedido ya quedó registrado y visible en Caja.
+    impresion = None
     if event_name == 'PEDIDO_ACTUALIZADO' and pedido.estado == 'en_preparacion' and previous_estado != 'listo':
         try:
-            imprimir_comandas_pedido(pedido)
+            impresion = resumir_resultados_impresion(imprimir_comandas_pedido(pedido))
         except Exception:
             logger.exception('Fallo al imprimir comandas para pedido %s', pedido.id)
+            impresion = {
+                'ok': False,
+                'fallidas': [{'nombre': 'Comanda', 'destino': '', 'motivo': 'no se pudo armar el ticket'}],
+            }
 
     channel_layer = get_channel_layer()
     if channel_layer is None:
-        return
+        return impresion
 
     payload = {
         'event': event_name,
@@ -325,6 +334,8 @@ def _notify_cocina_event(event_name, pedido, actor_user, previous_estado=None):
             send_whatsapp_new_order_alert(pedido, actor_user)
         except Exception:
             logger.exception('Fallo al enviar alerta WhatsApp para pedido %s', pedido.id)
+
+    return impresion
 
 
 def _notify_usuario_event(event_name, pedido, actor_user):
@@ -2084,12 +2095,13 @@ def pedido_update_view(request, pedido_id):
         pedido.save()
 
     pedido = VGPedido.objects.select_related('mesa', 'cliente').prefetch_related('detalles__producto', 'detalles__adicionales__preparacion', 'detalles__opciones__preparacion', 'detalles__opciones__producto', 'detalles__opciones__grupo').get(pk=pedido.id)
-    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
+    impresion = _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user)
 
     return _auth_response({
         'ok': True,
         'message': 'Pedido actualizado correctamente.',
         'pedido': _serialize_order_detail(pedido),
+        'impresion': impresion,
     })
 
 
@@ -2422,10 +2434,16 @@ def pedido_detalle_reimprimir_view(request, pedido_id, detalle_id):
         }, status=409)
 
     try:
-        imprimir_comandas_pedido(pedido, detalles=[detalle])
+        impresion = resumir_resultados_impresion(imprimir_comandas_pedido(pedido, detalles=[detalle]))
     except Exception:
         logger.exception('Fallo al reimprimir item %s del pedido %s', detalle.id, pedido.id)
         return _auth_response({'ok': False, 'message': 'No se pudo reimprimir — revisa la impresora.'}, status=502)
+    if not impresion['ok']:
+        return _auth_response({
+            'ok': False,
+            'message': f'No se pudo reimprimir. Falló: {mensaje_fallos_impresion(impresion)}.',
+            'impresion': impresion,
+        }, status=502)
 
     return _auth_response({
         'ok': True,
@@ -6494,7 +6512,7 @@ def kitchen_order_status_update_view(request, pedido_id):
         elif next_state == 'entregado':
             pedido.detalles.filter(estado='listo').update(estado='entregado')
 
-    _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user, previous_estado=previous_estado)
+    impresion = _notify_cocina_event('PEDIDO_ACTUALIZADO', pedido, request.user, previous_estado=previous_estado)
     if next_state == 'listo':
         _notify_usuario_event('PEDIDO_LISTO', pedido, request.user)
 
@@ -6505,6 +6523,9 @@ def kitchen_order_status_update_view(request, pedido_id):
             'id': pedido.id,
             'estado': pedido.estado,
         },
+        # None si este cambio de estado no imprime; si imprime, {'ok', 'fallidas'}: el
+        # pedido queda registrado (y en Caja) aunque la comanda física no haya salido.
+        'impresion': impresion,
     })
 
 
@@ -6522,13 +6543,28 @@ def pedido_reimprimir_comanda_view(request, pedido_id):
     except VGPedido.DoesNotExist:
         return _auth_response({'ok': False, 'message': 'El pedido no existe.'}, status=404)
 
+    # El frontend puede pedir reintentar solo las impresoras que fallaron (lista de
+    # 'ip:puerto'), para no duplicar la comanda en las que sí imprimieron.
     try:
-        imprimir_comandas_pedido(pedido)
+        body = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        body = {}
+    destinos = body.get('destinos') if isinstance(body, dict) else None
+    solo_destinos = {str(d) for d in destinos} if isinstance(destinos, list) and destinos else None
+
+    try:
+        impresion = resumir_resultados_impresion(imprimir_comandas_pedido(pedido, solo_destinos=solo_destinos))
     except Exception:
         logger.exception('Fallo al reimprimir comandas para pedido %s', pedido.id)
         return _auth_response({'ok': False, 'message': 'No se pudo reimprimir la comanda. Revisa la impresora.'}, status=502)
+    if not impresion['ok']:
+        return _auth_response({
+            'ok': False,
+            'message': f'No se imprimió en: {mensaje_fallos_impresion(impresion)}.',
+            'impresion': impresion,
+        }, status=502)
 
-    return _auth_response({'ok': True, 'message': 'Comanda reimpresa correctamente.'})
+    return _auth_response({'ok': True, 'message': 'Comanda reimpresa correctamente.', 'impresion': impresion})
 
 
 # Apenas el mesero manda "Iniciar preparación" (se imprime la comanda y el
@@ -6547,8 +6583,12 @@ def pedidos_cobro_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
+    # 401 = sin sesion; 403 = con sesion pero sin permiso (un mesero): no es "volver a
+    # iniciar sesion", y el 401 llenaba el log con cada consulta de los meseros.
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para cobrar pedidos.'}, status=401)
     if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
-        return _auth_response({'ok': False, 'message': 'No tienes permiso para cobrar pedidos.'}, status=401)
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para cobrar pedidos.'}, status=403)
 
     if request.method == 'GET':
         _cancelar_pedidos_vacios(request.user)

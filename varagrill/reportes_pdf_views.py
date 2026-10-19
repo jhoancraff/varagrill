@@ -16,13 +16,15 @@ from django.utils import timezone
 from .api_views import (
     HIDDEN_INGREDIENT_IDS, _costo_unitario_efectivo, _serialize_compra, armar_margen_ganancia_detallado,
 )
+from . import conciliacion_bancaria as conciliacion
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user
+from .conciliacion_bancaria_views import _cuenta_valida, _etiquetas_origenes, _rango
 from .contabilidad_views import MAX_DIAS_RANGO_CUADRE_CAJA, _parse_rango_o_fecha_reporte
 from .facturacion_views import _serialize_nota_entrega
 from .gastos_views import _parse_fecha, _serialize_gasto
-from .models import VGCompra, VGGasto, VGIngrediente, VGNotaEntrega
+from .models import VGCompra, VGConciliacionMovimiento, VGGasto, VGIngrediente, VGMovimientoBancario, VGNotaEntrega
 from .pdf_reportes import (
-    generar_pdf_cuentas_por_cobrar, generar_pdf_cuentas_por_pagar, generar_pdf_facturado, generar_pdf_gastos,
+    generar_pdf_conciliacion_bancaria, generar_pdf_cuentas_por_cobrar, generar_pdf_cuentas_por_pagar, generar_pdf_facturado, generar_pdf_gastos,
     generar_pdf_inventario, generar_pdf_margen_por_plato,
 )
 from .reportes import detalle_ventas_rango
@@ -382,3 +384,95 @@ def reporte_cuentas_por_cobrar_pdf_view(request):
     else:
         nombre.append(f'{ahora:%Y-%m-%d}')
     return responder_pdf(pdf, '-'.join(nombre), con_fecha=False)
+
+
+@pdf_solo_admin
+def reporte_conciliacion_bancaria_pdf_view(request):
+    """
+    PDF de la conciliacion de movimientos del banco de UNA cuenta en un rango (un dia, varios o un mes):
+    resumen por estado, lo que no coincide, lo que falta por revisar, lo registrado en el sistema que no
+    aparece en el banco, comisiones por dia, POS por dia y (conciliados=1, por defecto) el detalle de lo
+    conciliado. Mismos datos que la pantalla de Conciliacion de movimientos.
+    """
+    cuenta, rango = _cuenta_valida(request.GET.get('cuenta')), _rango(request.GET)
+    if cuenta is None or rango is None:
+        return _auth_response({'ok': False, 'message': 'Indica la cuenta y un rango de fechas válido.'}, status=400)
+    desde, hasta = rango
+
+    movs = list(
+        VGMovimientoBancario.objects.filter(cuenta_bancaria=cuenta, fecha__date__gte=desde, fecha__date__lte=hasta)
+        .order_by('fecha', 'id')
+    )
+    vinculos = list(VGConciliacionMovimiento.objects.filter(movimiento__in=movs).exclude(estado='rechazado'))
+    etiquetas = _etiquetas_origenes(vinculos)
+    por_mov = {}
+    for v in sorted(vinculos, key=lambda v: -v.puntaje):
+        por_mov.setdefault(v.movimiento_id, []).append(v)
+
+    def _etiqueta(v):
+        return etiquetas.get((v.origen_tipo, v.origen_id), f'{v.get_origen_tipo_display()} #{v.origen_id}')
+
+    sin_coincidencia, por_revisar, conciliados, dias_comision = [], [], [], {}
+    for m in movs:
+        fecha = timezone.localtime(m.fecha).replace(tzinfo=None)
+        lista = por_mov.get(m.id, [])
+        if m.clase == 'comision' and m.estado != 'ignorado':
+            dia = dias_comision.setdefault(fecha.date(), {'banco': 0, 'sistema': None, 'diferencia': None, 'estados': set()})
+            dia['banco'] += m.monto
+            dia['estados'].add(m.estado)
+            if lista:
+                dia['sistema'], dia['diferencia'] = lista[0].monto_sistema, lista[0].diferencia
+        if m.estado == 'sin_coincidencia':
+            sin_coincidencia.append({
+                'fecha': fecha, 'referencia': m.referencia, 'descripcion': m.descripcion, 'tipo': m.tipo,
+                'monto': m.monto, 'observacion': m.observacion,
+            })
+        elif m.estado == 'por_revisar' and lista:
+            sugerido = lista[0]
+            por_revisar.append({
+                'fecha': fecha, 'referencia': m.referencia, 'descripcion': m.descripcion, 'monto': m.monto,
+                'sugerido': _etiqueta(sugerido), 'diferencia': sugerido.diferencia, 'nota': sugerido.nota,
+            })
+        elif m.estado == 'conciliado':
+            confirmados = [v for v in lista if v.estado == 'confirmado']
+            conciliados.append({
+                'fecha': fecha, 'referencia': m.referencia, 'descripcion': m.descripcion, 'tipo': m.tipo,
+                'monto': m.monto,
+                'con': (_etiqueta(confirmados[0]) + (' (suma del día)' if confirmados[0].metodo == 'comision_dia' else ''))
+                if confirmados else '',
+            })
+
+    no_banco = [
+        {'fecha': f['candidato'].fecha, 'sentido': f['sentido'], 'etiqueta': f['candidato'].etiqueta,
+         'referencia': f['candidato'].extra.get('referencia_original', ''), 'monto': f['candidato'].monto}
+        for f in conciliacion.registros_sin_movimiento(cuenta, desde, hasta)
+    ]
+    comisiones = [
+        {
+            'dia': dia, 'banco': d['banco'], 'sistema': d['sistema'], 'diferencia': d['diferencia'],
+            'estado': 'Conciliado' if d['estados'] == {'conciliado'} else ('Sin gasto' if d['sistema'] is None else 'Por revisar'),
+        }
+        for dia, d in sorted(dias_comision.items())
+    ]
+
+    ESTADOS_DIA = {'cerrado': 'Cerrado', 'pendiente': 'Pendiente', 'listo': 'Listo para cerrar', 'sin_movimientos': 'Sin movimientos'}
+    dias_cierre, _resumen_cierres = conciliacion.listar_cierres(cuenta, desde, hasta)
+    cierres = [
+        {
+            'fecha': d['fecha'], 'estado': ESTADOS_DIA[d['estado']], 'total': d['total'], 'conciliados': d['conciliados'],
+            'creditos': d['creditos'], 'debitos': d['debitos'], 'saldo_final': d['saldo_final'],
+            'continuidad': {True: 'Cuadra', False: 'No cuadra'}.get(d['continuidad'], '—'),
+            'cerrado_por': (d['cierre'].creado_por.get_full_name() or d['cierre'].creado_por.username)
+            if d['cierre'] and d['cierre'].creado_por else '',
+        }
+        for d in dias_cierre
+    ]
+
+    ahora = timezone.localtime()
+    pdf = generar_pdf_conciliacion_bancaria(
+        cuenta, desde, hasta, conciliacion.resumen_movimientos(cuenta, desde, hasta), sin_coincidencia, por_revisar,
+        conciliados, no_banco, comisiones, conciliacion.resumen_pos(cuenta, desde, hasta),
+        generado_en=ahora, incluir_conciliados=request.GET.get('conciliados', '1') != '0', cierres=cierres,
+    )
+    nombre_cuenta = cuenta.lower().replace(' ', '-')
+    return responder_pdf(pdf, f'conciliacion-{nombre_cuenta}-{desde:%Y-%m-%d}-al-{hasta:%Y-%m-%d}', con_fecha=False)

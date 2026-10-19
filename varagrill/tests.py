@@ -5466,3 +5466,190 @@ class ConciliacionCierreDiarioViewsTests(TestCase):
         self.assertEqual((data['resumen']['dias'], data['resumen']['cerrados'], data['resumen']['completo']), (2, 0, False))
         r = self.client.get(self.BASE + 'pdf/?cuenta=Banco Cierre V&desde=2026-10-05&hasta=2026-10-06&conciliados=0')
         self.assertEqual((r.status_code, r.content[:4]), (200, b'%PDF'))
+
+
+class LotePosIdReporteTests(TestCase):
+    """ID del reporte detallado del punto en el lote POS, y como une los creditos del banco con su lote."""
+
+    CUENTA = 'Banco Lote'
+
+    def setUp(self):
+        from varagrill import conciliacion_bancaria as motor
+        from varagrill import lotes_pos
+        from varagrill.models import VGExtractoBancario
+        self.motor, self.lotes_pos = motor, lotes_pos
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='lote_admin', password='claveLote123', cedula='90000001', email='lote@test.test', id_role=rol,
+        )
+        self.pos = VGMetodoPago.objects.create(nombre='POS Lote', moneda='VES', cuenta_bancaria='Banco Lote', es_punto_venta=True)
+        self.pos2 = VGMetodoPago.objects.create(nombre='POS Lote 2', moneda='VES', cuenta_bancaria='Banco Lote', es_punto_venta=True)
+        VGMetodoPago.objects.create(nombre='PM Lote', moneda='VES', cuenta_bancaria='Banco Lote')
+        self.extracto = VGExtractoBancario.objects.create(cuenta_bancaria=self.CUENTA)
+        self.n = 0
+
+    def lote(self, numero, bs, estado='cerrado', id_reporte='', metodo=None):
+        return VGLotePOS.objects.create(
+            numero=numero, metodo_pago=metodo or self.pos, estado=estado, fecha_operacion=date(2026, 9, 30),
+            monto_bruto_sistema_bs=Decimal(bs), id_reporte_punto=id_reporte,
+        )
+
+    def credito(self, monto, desc='POS MAE 88013794 001 0061 3009', dia=6):
+        self.n += 1
+        return VGMovimientoBancario.objects.create(
+            extracto=self.extracto, cuenta_bancaria=self.CUENTA, fecha=timezone.make_aware(datetime(2026, 10, dia, 8, 0)),
+            referencia=str(self.n), descripcion=desc, tipo='credito', monto=Decimal(monto), clase='pos', huella=f'l{self.n}',
+        )
+
+    def conciliar(self):
+        return self.motor.conciliar(self.CUENTA, date(2026, 10, 1), date(2026, 10, 31), self.admin)
+
+    # ---- el campo en el lote
+    def test_registrar_el_id_lo_normaliza_lo_anota_y_se_puede_corregir_o_borrar(self):
+        lote = self.lote(1, '1000.00')
+        lote = self.lotes_pos.registrar_id_reporte(lote, '  00 61 ', self.admin)
+        self.assertEqual(lote.id_reporte_punto, '0061')
+        self.assertIn('ID del reporte del punto: 0061', lote.notas)
+        lote = self.lotes_pos.registrar_id_reporte(lote, '0062', self.admin)       # corregir
+        self.assertEqual(lote.id_reporte_punto, '0062')
+        lote = self.lotes_pos.registrar_id_reporte(lote, '', self.admin)           # borrar
+        self.assertEqual(lote.id_reporte_punto, '')
+        with self.assertRaises(self.lotes_pos.LoteError):
+            self.lotes_pos.registrar_id_reporte(lote, 'no vale!', self.admin)
+
+    def test_se_puede_registrar_en_un_lote_acreditado_pero_no_en_uno_anulado(self):
+        acreditado = self.lote(1, '1000.00', estado='acreditado')
+        self.assertEqual(self.lotes_pos.registrar_id_reporte(acreditado, '55', self.admin).id_reporte_punto, '55')
+        anulado = self.lote(2, '1000.00', estado='anulado')
+        with self.assertRaises(self.lotes_pos.LoteError):
+            self.lotes_pos.registrar_id_reporte(anulado, '56', self.admin)
+
+    def test_el_mismo_id_no_se_repite_en_un_metodo_pero_si_entre_metodos_del_mismo_banco(self):
+        self.lote(1, '1000.00', id_reporte='0061')
+        otro = self.lote(2, '500.00')
+        with self.assertRaises(self.lotes_pos.LoteError) as ctx:
+            self.lotes_pos.registrar_id_reporte(otro, '61', self.admin)          # '61' y '0061' son el mismo ID
+        self.assertIn('#1', str(ctx.exception))
+        de_otro_metodo = self.lote(3, '500.00', metodo=self.pos2)
+        self.assertEqual(self.lotes_pos.registrar_id_reporte(de_otro_metodo, '0061', self.admin).id_reporte_punto, '0061')
+
+    def test_cerrar_un_lote_puede_guardar_el_id_de_una_vez(self):
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='llevar', estado='pagado', subtotal=Decimal('1'), total=Decimal('1'))
+        pago = VGPago.objects.create(
+            pedido=pedido, monto=Decimal('10'), metodo_pago=self.pos, estado='completado', tasa_cambio_referencia=Decimal('100'),
+        )
+        lote = self.lotes_pos.asignar_pago_a_lote(pago, self.admin)
+        lote = self.lotes_pos.cerrar_lote(lote, self.admin, id_reporte='0061')
+        self.assertEqual((lote.estado, lote.id_reporte_punto), ('cerrado', '0061'))
+
+    def test_la_api_de_lotes_registra_y_devuelve_el_id_solo_a_cajera_y_administrador(self):
+        for nombre in ('Cajera', 'Mesero'):
+            VGRol.objects.get_or_create(nombre_role=nombre)
+        cajera = VGUsuario.objects.create_user(
+            username='lote_cajera', password='claveLote123', cedula='90000002', email='lc@test.test', id_role=VGRol.objects.get(nombre_role='Cajera'),
+        )
+        mesero = VGUsuario.objects.create_user(
+            username='lote_mesero', password='claveLote123', cedula='90000003', email='lm@test.test', id_role=VGRol.objects.get(nombre_role='Mesero'),
+        )
+        lote = self.lote(1, '1000.00')
+        cuerpo = json.dumps({'action': 'registrar_id_reporte', 'lote_id': lote.id, 'id_reporte_punto': '0061'})
+        self.client.force_login(mesero)
+        self.assertEqual(self.client.post('/api/admin/lotes-pos/', data=cuerpo, content_type='application/json').status_code, 401)
+        self.client.force_login(cajera)
+        r = self.client.post('/api/admin/lotes-pos/', data=cuerpo, content_type='application/json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['lote']['id_reporte_punto'], '0061')
+        listado = self.client.get('/api/admin/lotes-pos/?desde=2026-10-01&hasta=2026-10-31').json()
+        self.assertEqual(listado['lotes'][0]['id_reporte_punto'], '0061')
+        repetido = self.lote(2, '300.00')
+        r = self.client.post('/api/admin/lotes-pos/', data=json.dumps({'action': 'registrar_id_reporte', 'lote_id': repetido.id, 'id_reporte_punto': '61'}), content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+
+    # ---- conciliacion de los creditos POS por ese ID
+    def test_los_creditos_con_el_id_del_lote_se_suman_y_se_concilian(self):
+        lote = self.lote(1, '1000.00', id_reporte='0061')
+        a = self.credito('600.00', 'POS MAE 88013794 001 0061 3009')
+        b = self.credito('395.00', 'POS CRE 88013794 001 0061 3009')   # el banco lo acredito en dos partes
+        self.assertEqual(self.conciliar(), {'conciliado': 2})
+        for m in (a, b):
+            m.refresh_from_db()
+            v = m.vinculos.get()
+            self.assertEqual((m.estado, v.origen_tipo, v.origen_id, v.metodo, v.estado), ('conciliado', 'lote_pos', lote.id, 'id_reporte', 'confirmado'))
+            self.assertEqual((v.monto_sistema, v.diferencia), (Decimal('1000.00'), Decimal('5.00')))
+
+    def test_el_id_con_ceros_o_sin_ceros_es_el_mismo(self):
+        self.lote(1, '1000.00', id_reporte='61')
+        m = self.credito('1000.00', 'POS MAE 88013794 001 0061 3009')
+        self.assertEqual(self.conciliar(), {'conciliado': 1})
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'conciliado')
+
+    def test_si_falta_un_credito_queda_por_revisar_con_la_diferencia_y_al_llegar_se_concilia(self):
+        self.lote(1, '1000.00', id_reporte='0061')
+        a = self.credito('600.00', 'POS MAE 88013794 001 0061 3009')
+        self.assertEqual(self.conciliar(), {'por_revisar': 1})
+        a.refresh_from_db()
+        v = a.vinculos.get()
+        self.assertEqual((a.estado, v.estado, v.diferencia), ('por_revisar', 'sugerido', Decimal('400.00')))
+        self.assertIn('Diferencia', v.nota)
+        b = self.credito('395.00', 'POS CRE 88013794 001 0061 3009', dia=7)   # llega despues
+        self.assertEqual(self.conciliar(), {'conciliado': 2})
+        for m in (a, b):
+            m.refresh_from_db()
+            self.assertEqual(m.estado, 'conciliado')
+
+    def test_el_mismo_id_en_otra_fecha_no_se_toma_por_bueno_se_sugiere_con_aviso(self):
+        # El punto repite numeros en dias distintos ("0061 0110" y "0061 0310"): el ID solo no basta.
+        self.lote(1, '1000.00', id_reporte='0061')                       # lote del 30/09
+        m = self.credito('1000.00', 'POS MAE 88013794 001 0061 0310')    # reporte del 03/10
+        self.assertEqual(self.conciliar(), {'por_revisar': 1})
+        m.refresh_from_db()
+        v = m.vinculos.get()
+        self.assertEqual((m.estado, v.estado, v.puntaje), ('por_revisar', 'sugerido', 40))
+        self.assertIn('fecha del reporte no coincide', v.nota)
+
+    def test_dos_reportes_con_el_mismo_id_en_fechas_distintas_van_a_su_propio_lote(self):
+        primero = self.lote(1, '1000.00', id_reporte='0061')                       # 30/09
+        segundo = VGLotePOS.objects.create(
+            numero=2, metodo_pago=self.pos2, estado='cerrado', fecha_operacion=date(2026, 10, 3),
+            monto_bruto_sistema_bs=Decimal('500.00'), id_reporte_punto='0061',
+        )
+        a = self.credito('1000.00', 'POS MAE 88013794 001 0061 3009')
+        b = self.credito('500.00', 'POS MAE 88013794 001 0061 0310')
+        self.assertEqual(self.conciliar(), {'conciliado': 2})
+        self.assertEqual((a.vinculos.get().origen_id, b.vinculos.get().origen_id), (primero.id, segundo.id))
+
+    def test_confirmar_un_credito_confirma_a_los_demas_del_mismo_reporte(self):
+        self.lote(1, '1000.00', id_reporte='0061')
+        a = self.credito('600.00', 'POS MAE 88013794 001 0061 3009')
+        b = self.credito('200.00', 'POS CRE 88013794 001 0061 3009')
+        self.conciliar()                                                 # suma 800 de 1000: por revisar los dos
+        self.motor.confirmar_vinculo(a.vinculos.get(), self.admin)
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertEqual((a.estado, b.estado), ('conciliado', 'conciliado'))
+
+    def test_sin_lote_con_ese_id_o_con_el_lote_abierto_el_credito_sigue_pendiente(self):
+        self.lote(1, '1000.00', id_reporte='0070')                        # otro ID
+        self.lote(2, '1000.00', estado='abierto', id_reporte='0061')      # abierto: aun no es lo que cerro el punto
+        m = self.credito('1000.00', 'POS MAE 88013794 001 0061 3009')
+        self.assertEqual(self.conciliar(), {'pos': 1})
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'pendiente')
+
+    def test_un_lote_de_otra_cuenta_no_se_toma(self):
+        otro = VGMetodoPago.objects.create(nombre='POS Otro Banco', moneda='VES', cuenta_bancaria='Otro Banco', es_punto_venta=True)
+        self.lote(1, '1000.00', id_reporte='0061', metodo=otro)
+        m = self.credito('1000.00', 'POS MAE 88013794 001 0061 3009')
+        self.assertEqual(self.conciliar(), {'pos': 1})
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'pendiente')
+
+    def test_rechazar_la_sugerencia_no_la_repite(self):
+        self.lote(1, '1000.00', id_reporte='0061')
+        m = self.credito('600.00', 'POS MAE 88013794 001 0061 3009')
+        self.conciliar()
+        self.motor.rechazar_vinculo(m.vinculos.get(estado='sugerido'), self.admin)
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'pendiente')
+        self.assertFalse(m.vinculos.filter(estado='sugerido').exists())

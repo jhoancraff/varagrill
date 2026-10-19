@@ -8,8 +8,11 @@ registros del sistema para saber si esa transaccion esta registrada o no.
     propias. El gasto guarda la referencia bancaria en `numero_comprobante`.
   - Comisiones (COM TRF, TDY COM.P2P, DOM POS): el negocio registra UN gasto "comision" por dia,
     asi que se comparan por dia: la suma de las comisiones del banco contra ese gasto.
-  - Punto de venta (POS): el banco acredita el lote, no cada venta. En esta fase solo se muestra
-    la comparacion por dia contra los lotes acreditados (ver resumen_pos); no se vinculan.
+  - Punto de venta (POS): el banco acredita el lote, no cada venta, y a veces en varias partes (una por
+    tipo de tarjeta). Cada credito trae en la descripcion el ID del reporte del punto ("POS MAE 88013794
+    001 0061 3009" -> 0061); si el lote del sistema tiene ese ID (VGLotePOS.id_reporte_punto), todos los
+    creditos con ese ID se suman y se comparan contra el monto del lote. Sin ID en el lote solo queda
+    la comparacion por dia contra los lotes acreditados (ver resumen_pos).
 
 Niveles de confianza de cada cruce (ver evaluar):
   seguro        referencia (exacta o sufijo de 4+ digitos) + monto dentro de la tolerancia -> se
@@ -36,6 +39,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from .lotes_pos import clave_id_reporte
 from .models import (
     VGAbonoCompra, VGAbonoGasto, VGCierreConciliacion, VGConciliacionMovimiento, VGExtractoBancario, VGGasto, VGIngresoExtra, VGLotePOS,
     VGMetodoPago, VGMovimientoBancario, VGPago, VGTransferenciaCuenta,
@@ -49,6 +53,8 @@ TOL_REF_ABS = Decimal('2.00')               # con referencia: hasta 2 Bs de dife
 TOL_REF_PCT = Decimal('0.01')               # ...o 1% del monto, lo que sea mayor
 TOL_MONTO_APROX_PCT = Decimal('0.01')       # sin referencia, "posible": hasta 1%
 TOL_COMISION_DIA = Decimal('0.05')          # suma de comisiones del dia vs el gasto
+TOL_POS_LOTE_PCT = Decimal('0.02')          # creditos POS de un lote vs el monto del lote en el sistema
+TOL_POS_LOTE_ABS = Decimal('1.00')
 VENTANA_CREDITO_DIAS = 1                    # monto igual, sin referencia
 VENTANA_DEBITO_DIAS = 7                     # el gasto se suele registrar despues del pago
 VENTANA_APROX_DIAS = 2
@@ -410,6 +416,27 @@ def evaluar(mov, candidato, es_credito):
 # ---------------------------------------------------------------------------
 # Conciliacion
 # ---------------------------------------------------------------------------
+RE_POS = re.compile(r'^POS\s+[A-Z]{2,4}\s+\d+\s+\d+\s+([A-Z0-9]+)\s+(\d{4})$')
+
+
+def pos_de(descripcion):
+    """(ID del reporte del punto, ddmm del reporte) de un credito POS del banco; ('', '') si no los trae. El ID va sin ceros a la izquierda."""
+    m = RE_POS.match(' '.join(str(descripcion or '').upper().split()))
+    return (clave_id_reporte(m.group(1)), m.group(2)) if m else ('', '')
+
+
+def lote_pos_de(descripcion):
+    return pos_de(descripcion)[0]
+
+
+def _ddmm_del_lote(lote):
+    """Los dias (ddmm) en que pudo imprimirse el reporte del punto de ese lote: el de su operacion y el de su cierre."""
+    dias = {lote.fecha_operacion.strftime('%d%m')}
+    if lote.fecha_cierre:
+        dias.add(timezone.localtime(lote.fecha_cierre).strftime('%d%m'))
+    return dias
+
+
 def _movimientos_en_rango(cuenta, desde, hasta):
     return VGMovimientoBancario.objects.filter(
         cuenta_bancaria=cuenta, fecha__date__gte=desde, fecha__date__lte=hasta,
@@ -552,6 +579,73 @@ def _comisiones_por_dia(movs, usuario, cuenta):
     return resultado
 
 
+def _conciliar_pos_por_id(cuenta, movs_pos, rechazados, usuario):
+    """
+    Une los creditos POS con el lote del sistema que tiene su mismo ID de reporte del punto: todos los
+    creditos del banco con ese ID (de cualquier fecha) se suman y se comparan contra el monto del lote.
+    Coincide (dentro del 2%) -> conciliados; no coincide (por ejemplo falta un credito) -> por revisar con la
+    diferencia a la vista. Sin lote con ese ID el credito sigue pendiente.
+    """
+    resultado = defaultdict(int)
+    if not movs_pos:
+        return resultado
+    ids_pos = [m.id for m in metodos_de_cuenta(cuenta) if m.es_punto_venta]
+    lotes_por_clave = defaultdict(list)
+    for lote in VGLotePOS.objects.filter(metodo_pago_id__in=ids_pos, estado__in=('cerrado', 'acreditado')).exclude(id_reporte_punto=''):
+        lotes_por_clave[clave_id_reporte(lote.id_reporte_punto)].append(lote)
+    # El ID solo no basta: el punto puede repetir el mismo numero en dias distintos ("0061 0110" y "0061 0310"),
+    # asi que los creditos se agrupan por ID y por la fecha (ddmm) que el banco anota junto al ID.
+    grupos = defaultdict(list)
+    for m in VGMovimientoBancario.objects.filter(cuenta_bancaria=cuenta, clase='pos', tipo='credito').exclude(estado='ignorado'):
+        clave, ddmm = pos_de(m.descripcion)
+        if clave:
+            grupos[(clave, ddmm)].append(m)
+
+    atendidos = set()
+    ids_alcance = {x.id for x in movs_pos}
+    for (clave, ddmm), grupo in grupos.items():
+        lotes_id = lotes_por_clave.get(clave)
+        en_alcance = [m for m in grupo if m.id in ids_alcance]
+        if not lotes_id or not en_alcance:
+            continue
+        lotes = [l for l in lotes_id if ddmm in _ddmm_del_lote(l)]
+        fecha_distinta = not lotes
+        if fecha_distinta:
+            lotes = lotes_id  # el ID coincide pero la fecha no: se sugiere para que una persona lo revise
+        suma_banco = sum((m.monto for m in grupo), Decimal('0'))
+        suma_sistema = sum((l.monto_bruto_sistema_bs for l in lotes), Decimal('0'))
+        diferencia = (suma_sistema - suma_banco).quantize(CENT)
+        monto_cuadra = abs(diferencia) <= max(TOL_POS_LOTE_ABS, (suma_sistema * TOL_POS_LOTE_PCT).quantize(CENT))
+        coincide = monto_cuadra and not fecha_distinta
+        lote_ref = lotes[0]
+        codigos = ', '.join(f'LOTE-{l.numero:06d}' for l in lotes)
+        nota = (
+            f'Reporte {lote_ref.id_reporte_punto} ({ddmm[:2]}/{ddmm[2:]}): {len(grupo)} crédito(s) del banco suman '
+            f'Bs {suma_banco:,.2f} y {codigos} suma Bs {suma_sistema:,.2f}.'
+            + (f' La fecha del reporte no coincide con la del lote ({ddmm[:2]}/{ddmm[2:]}).' if fecha_distinta else '')
+            + ('' if monto_cuadra else f' Diferencia Bs {diferencia:,.2f}: puede faltar un crédito del banco o el lote traer cobros de más.')
+        )
+        for m in en_alcance:
+            if (m.id, 'lote_pos', lote_ref.id) in rechazados:
+                continue
+            VGConciliacionMovimiento.objects.update_or_create(
+                movimiento=m, origen_tipo='lote_pos', origen_id=lote_ref.id,
+                defaults={
+                    'monto_sistema': suma_sistema, 'diferencia': diferencia, 'metodo': 'id_reporte',
+                    'puntaje': 100 if coincide else (40 if fecha_distinta else 55), 'estado': 'confirmado' if coincide else 'sugerido',
+                    'nota': nota[:255], 'creado_por': usuario, 'actualizado_por': usuario,
+                },
+            )
+            m.estado = 'conciliado' if coincide else 'por_revisar'
+            m.save(update_fields=['estado', 'fecha_actualizacion'])
+            resultado['conciliado' if coincide else 'por_revisar'] += 1
+            atendidos.add(m.id)
+    pendientes = sum(1 for m in movs_pos if m.id not in atendidos)
+    if pendientes:
+        resultado['pos'] += pendientes
+    return resultado
+
+
 def conciliar(cuenta, desde, hasta, usuario, solo_movimientos=None):
     """
     Corre el cruce para los movimientos de `cuenta` entre `desde` y `hasta` que aun no estan resueltos
@@ -577,12 +671,13 @@ def conciliar(cuenta, desde, hasta, usuario, solo_movimientos=None):
             VGConciliacionMovimiento.objects.filter(movimiento__in=movs, estado='rechazado')
             .values_list('movimiento_id', 'origen_tipo', 'origen_id')
         )
-        for m in movs:
-            if m.clase == 'pos':
-                if m.estado != 'pendiente':
-                    m.estado = 'pendiente'
-                    m.save(update_fields=['estado', 'fecha_actualizacion'])
-                total['pos'] += 1
+        movs_pos = [m for m in movs if m.clase == 'pos']
+        for m in movs_pos:
+            if m.estado != 'pendiente':
+                m.estado = 'pendiente'
+                m.save(update_fields=['estado', 'fecha_actualizacion'])
+        for clave, n in _conciliar_pos_por_id(cuenta, movs_pos, rechazados, usuario).items():
+            total[clave] += n
 
         creditos = [m for m in movs if m.tipo == 'credito' and m.clase not in ('pos', 'comision')]
         debitos = [m for m in movs if m.tipo == 'debito' and m.clase not in ('pos', 'comision')]
@@ -641,6 +736,24 @@ def confirmar_vinculo(vinculo, usuario):
             vinculo.save()
             mov.vinculos.filter(estado='sugerido').exclude(pk=vinculo.pk).delete()
             _refrescar_estado(mov)
+            if vinculo.metodo == 'id_reporte':
+                # los creditos del mismo reporte del punto se confirman juntos (son un solo lote)
+                hermanos = VGConciliacionMovimiento.objects.filter(
+                    metodo='id_reporte', estado='sugerido', origen_tipo=vinculo.origen_tipo, origen_id=vinculo.origen_id,
+                    movimiento__cuenta_bancaria=mov.cuenta_bancaria,
+                ).select_related('movimiento')
+                for h in hermanos:
+                    if h.movimiento_id == mov.id:
+                        continue
+                    try:
+                        _exigir_dia_abierto(h.movimiento)
+                    except AccionInvalida:
+                        continue
+                    h.estado = 'confirmado'
+                    h.actualizado_por = usuario
+                    h.save()
+                    h.movimiento.vinculos.filter(estado='sugerido').exclude(pk=h.pk).delete()
+                    _refrescar_estado(h.movimiento)
     except IntegrityError:
         raise AccionInvalida('Ese registro del sistema ya está conciliado con otro movimiento del banco.')
     return mov

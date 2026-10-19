@@ -21,6 +21,7 @@ Todo cambio de estado corre en transaction.atomic con select_for_update y es
 idempotente: repetir una accion sobre un lote que ya la tiene aplicada se rechaza,
 nunca duplica montos.
 """
+import re
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -183,11 +184,68 @@ def _sello():
     return timezone.localtime().strftime('%Y-%m-%d %H:%M')
 
 
-def cerrar_lote(lote, usuario, ahora=None):
+def normalizar_id_reporte(valor):
+    """El ID del reporte del punto sin espacios y en mayusculas ('0061', 'A-12')."""
+    return ''.join(str(valor or '').split()).upper()
+
+
+def clave_id_reporte(valor):
+    """
+    Forma comparable de un ID: los numericos sin ceros a la izquierda, porque el punto lo imprime
+    como '0061' y el banco como '0061' o '61' segun el formato. Vacio queda vacio.
+    """
+    texto = normalizar_id_reporte(valor)
+    if texto.isdigit():
+        return texto.lstrip('0') or '0'
+    return texto
+
+
+def _aplicar_id_reporte(lote, id_reporte, usuario):
+    """
+    Pone el ID del reporte del punto en `lote` (sin guardar). Valida el formato y que ese ID no este ya
+    en otro lote del MISMO metodo (dos lotes de metodos distintos del mismo banco si pueden compartirlo:
+    un mismo cierre del punto puede cubrir cobros de varios metodos). Devuelve True si cambio algo.
+    """
+    nuevo = normalizar_id_reporte(id_reporte)
+    if nuevo and not re.fullmatch(r'[A-Z0-9\-]{1,40}', nuevo):
+        raise LoteError('El ID del reporte solo puede llevar letras, números y guiones (máximo 40 caracteres).')
+    if nuevo:
+        otros = (
+            VGLotePOS.objects.filter(metodo_pago=lote.metodo_pago).exclude(pk=lote.pk).exclude(estado='anulado')
+            .exclude(id_reporte_punto='')
+        )
+        for otro in otros:
+            if clave_id_reporte(otro.id_reporte_punto) == clave_id_reporte(nuevo):
+                raise LoteError(f'El ID de reporte {nuevo} ya está registrado en el lote #{otro.numero} de {lote.metodo_pago.nombre}.')
+    anterior = lote.id_reporte_punto
+    if anterior == nuevo:
+        return False
+    lote.id_reporte_punto = nuevo
+    _anotar(lote, f'[{_sello()}] ID del reporte del punto: {nuevo or "(vacío)"} (antes: {anterior or "(vacío)"}) por {_etiqueta_usuario(usuario)}')
+    return True
+
+
+def registrar_id_reporte(lote, id_reporte, usuario):
+    """
+    Guarda (o corrige, o borra con vacio) el ID del reporte detallado del punto en un lote que no este
+    anulado. Se puede hacer antes o despues de acreditar: es lo que une los creditos del banco con el lote.
+    """
+    with transaction.atomic():
+        lote = VGLotePOS.objects.select_for_update().select_related('metodo_pago').get(pk=lote.pk)
+        if lote.estado == 'anulado':
+            raise LoteError('Un lote anulado no admite cambios.')
+        if _aplicar_id_reporte(lote, id_reporte, usuario):
+            lote.actualizado_por = usuario
+            lote.save(update_fields=['id_reporte_punto', 'notas', 'actualizado_por', 'fecha_actualizacion'])
+        return lote
+
+
+def cerrar_lote(lote, usuario, ahora=None, id_reporte=None):
     """
     Cierre (parcial) del lote abierto: recalcula el monto desde sus cobros, lo
     congela y pasa a 'cerrado'. El siguiente cobro POS de ese metodo abre un lote
-    nuevo automaticamente.
+    nuevo automaticamente. `id_reporte`, si viene, guarda de una vez el ID del reporte
+    detallado que imprimio el punto (se puede registrar despues con registrar_id_reporte).
     """
     with transaction.atomic():
         lote = VGLotePOS.objects.select_for_update().select_related('metodo_pago').get(pk=lote.pk)
@@ -196,11 +254,15 @@ def cerrar_lote(lote, usuario, ahora=None):
         if not lote.pagos.filter(estado='completado').exists():
             raise LoteError(f'El lote #{lote.numero} no tiene cobros para cerrar.')
         recalcular_lote(lote)
+        if id_reporte:
+            _aplicar_id_reporte(lote, id_reporte, usuario)
         lote.fecha_cierre = ahora or timezone.now()
         lote.estado = 'cerrado'
         lote.cerrado_por = usuario
         lote.actualizado_por = usuario
-        lote.save(update_fields=['fecha_cierre', 'estado', 'cerrado_por', 'actualizado_por', 'fecha_actualizacion'])
+        lote.save(update_fields=[
+            'fecha_cierre', 'estado', 'cerrado_por', 'actualizado_por', 'id_reporte_punto', 'notas', 'fecha_actualizacion',
+        ])
         return lote
 
 

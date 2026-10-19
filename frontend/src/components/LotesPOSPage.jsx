@@ -59,6 +59,7 @@ function LotesPOSPage({ isMobile, onBack }) {
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
   const [modal, setModal] = useState(null); // { modo: 'detalle' | 'reabrir' | 'anular' | 'revertir', lote }
+  const [idReporte, setIdReporte] = useState(null); // { modo: 'cerrar' | 'editar', lote }
   const { toast, showSuccess, showError, hideToast } = useToast();
 
   const loadLotes = useCallback(async () => {
@@ -113,10 +114,7 @@ function LotesPOSPage({ isMobile, onBack }) {
     }
   };
 
-  const cerrarLote = (lote) => ejecutar(
-    { action: 'cerrar_lote', lote_id: lote.id },
-    `¿Cerrar ${lote.codigo} por $${formatMonto(lote.monto_usd)}? Se imprimirá el detalle de cada cobro para compararlo con el cierre del punto, y los próximos cobros de ${lote.metodo_pago_nombre} abrirán un lote nuevo.`,
-  );
+  const cerrarLote = (lote) => setIdReporte({ modo: 'cerrar', lote });
 
   // Reimprime en la impresora de caja el detalle del lote (un renglon por cobro, con su nota de entrega).
   const imprimirLote = (lote) => ejecutar({ action: 'imprimir_lote', lote_id: lote.id });
@@ -197,7 +195,14 @@ function LotesPOSPage({ isMobile, onBack }) {
               <div style={headStyle}>Acciones</div>
               {lotes.map((lote) => (
                 <Fragment key={lote.id}>
-                  <div style={cellStyle}><strong>{lote.codigo}</strong></div>
+                  <div style={cellStyle}>
+                    <strong>{lote.codigo}</strong>
+                    {lote.id_reporte_punto ? (
+                      <span style={mutedStyle}>Reporte del punto: <strong>{lote.id_reporte_punto}</strong></span>
+                    ) : lote.estado === 'cerrado' || lote.estado === 'acreditado' ? (
+                      <span style={mutedStyle}>Sin ID de reporte del punto</span>
+                    ) : null}
+                  </div>
                   <div style={cellStyle}>
                     {lote.metodo_pago_nombre}
                     {lote.cuenta_bancaria ? <span style={mutedStyle}>{lote.cuenta_bancaria}</span> : null}
@@ -219,6 +224,11 @@ function LotesPOSPage({ isMobile, onBack }) {
                     ) : null}
                     {lote.estado !== 'anulado' && lote.num_pagos > 0 ? (
                       <button type="button" style={miniButtonStyle} disabled={working} onClick={() => imprimirLote(lote)}>Imprimir</button>
+                    ) : null}
+                    {lote.estado !== 'anulado' && lote.estado !== 'abierto' ? (
+                      <button type="button" style={miniButtonStyle} disabled={working} onClick={() => setIdReporte({ modo: 'editar', lote })}>
+                        {lote.id_reporte_punto ? 'Editar ID reporte' : 'ID reporte'}
+                      </button>
                     ) : null}
                     {lote.estado === 'cerrado' ? (
                       <button type="button" style={miniPrimaryStyle} disabled={working} onClick={() => acreditarLote(lote)}>Acreditar</button>
@@ -243,6 +253,19 @@ function LotesPOSPage({ isMobile, onBack }) {
         ) : null}
       </section>
 
+      {idReporte ? (
+        <IdReporteModal
+          modo={idReporte.modo}
+          lote={idReporte.lote}
+          onClose={() => setIdReporte(null)}
+          onDone={(mensaje) => {
+            setIdReporte(null);
+            showSuccess(mensaje);
+            loadLotes();
+          }}
+        />
+      ) : null}
+
       {modal ? (
         <LoteModal
           modo={modal.modo}
@@ -259,6 +282,70 @@ function LotesPOSPage({ isMobile, onBack }) {
         />
       ) : null}
     </section>
+  );
+}
+
+// ID del reporte detallado que imprime el punto de venta al cerrar su lote (ej. 0061). El banco lo repite en cada
+// credito del punto, asi la conciliacion bancaria une esos creditos con este lote aunque el banco los acredite en
+// varias partes. Al cerrar un lote es opcional (se puede cargar despues); al editar se puede corregir o borrar.
+function IdReporteModal({ modo, lote, onClose, onDone }) {
+  const [valor, setValor] = useState(lote.id_reporte_punto || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const cerrando = modo === 'cerrar';
+
+  const guardar = async (event) => {
+    event.preventDefault();
+    setError('');
+    setSaving(true);
+    try {
+      const json = await postLotePos(
+        cerrando
+          ? { action: 'cerrar_lote', lote_id: lote.id, id_reporte_punto: valor }
+          : { action: 'registrar_id_reporte', lote_id: lote.id, id_reporte_punto: valor },
+      );
+      onDone(json.message || 'Listo.');
+    } catch (requestError) {
+      setError(requestError.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={backdropStyle} onClick={saving ? undefined : onClose}>
+      <form style={modalCardStyle} onClick={(event) => event.stopPropagation()} onSubmit={guardar}>
+        <div style={modalTitleStyle}>{cerrando ? `Cerrar ${lote.codigo}` : `ID del reporte · ${lote.codigo}`}</div>
+        {cerrando ? (
+          <div style={mutedStyle}>
+            ¿Cerrar el lote por ${formatMonto(lote.monto_usd)}? Se imprimirá el detalle de cada cobro para compararlo con el cierre del punto, y los
+            próximos cobros de {lote.metodo_pago_nombre} abrirán un lote nuevo.
+          </div>
+        ) : null}
+        <label style={fieldStyle}>ID del reporte detallado del punto{cerrando ? ' (opcional, se puede cargar después)' : ''}
+          <input
+            type="text"
+            value={valor}
+            onChange={(event) => setValor(event.target.value)}
+            placeholder="Ej: 0061"
+            maxLength={40}
+            autoFocus
+            style={inputStyle}
+          />
+        </label>
+        <div style={mutedStyle}>
+          Es el número del reporte (cierre de lote) que imprime el punto de venta. El banco lo repite en cada crédito del punto
+          (por ejemplo «POS MAE 88013794 001 <strong>0061</strong> 3009»): con ese ID la conciliación bancaria une esos créditos con este lote.
+          {!cerrando ? ' Déjalo vacío para borrarlo.' : ''}
+        </div>
+        {error ? <div style={noticeStyle}>{error}</div> : null}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onClose} disabled={saving} style={secondaryButtonStyle}>Cancelar</button>
+          <button type="submit" disabled={saving} style={primaryButtonStyle}>
+            {saving ? 'Guardando...' : cerrando ? 'Cerrar lote' : 'Guardar'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

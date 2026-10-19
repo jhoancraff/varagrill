@@ -53,6 +53,7 @@ from .lotes_pos import (
     cerrar_lote,
     mover_pago_de_lote,
     reabrir_lote,
+    registrar_id_reporte,
     revertir_acreditacion,
     validar_cambio_metodo_pago,
 )
@@ -467,6 +468,7 @@ def _serialize_lote(lote, incluir_pagos=False):
         'fecha_acreditacion': lote.fecha_acreditacion.isoformat() if lote.fecha_acreditacion else None,
         'acreditado_por': (lote.acreditado_por.get_full_name() or lote.acreditado_por.username) if lote.acreditado_por else '',
         'notas': lote.notas,
+        'id_reporte_punto': lote.id_reporte_punto,
         'num_pagos': lote.pagos.filter(estado='completado').count(),
         'monto_usd': str(lote.monto_bruto_usd),
         'monto_bs': str(lote.monto_bruto_sistema_bs),
@@ -2281,9 +2283,9 @@ def admin_lotes_pos_view(request):
         return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
 
     action = str(data.get('action', '')).strip().lower()
-    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'reabrir_lote', 'anular_lote', 'revertir_acreditacion', 'mover_pago'):
+    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'registrar_id_reporte', 'reabrir_lote', 'anular_lote', 'revertir_acreditacion', 'mover_pago'):
         return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
-    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote') and not es_admin:
+    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'registrar_id_reporte') and not es_admin:
         return _auth_response({'ok': False, 'message': 'Solo administrador o contador puede hacer esto.'}, status=401)
 
     try:
@@ -2293,8 +2295,14 @@ def admin_lotes_pos_view(request):
 
     impresion = None
     try:
-        if action == 'cerrar_lote':
-            lote = cerrar_lote(lote, request.user)
+        if action == 'registrar_id_reporte':
+            lote = registrar_id_reporte(lote, data.get('id_reporte_punto'), request.user)
+            mensaje = (
+                f'Lote #{lote.numero}: ID del reporte del punto {lote.id_reporte_punto}.' if lote.id_reporte_punto
+                else f'Lote #{lote.numero}: ID del reporte del punto borrado.'
+            )
+        elif action == 'cerrar_lote':
+            lote = cerrar_lote(lote, request.user, id_reporte=data.get('id_reporte_punto'))
             mensaje = f'Lote #{lote.numero} cerrado. Cuando caiga en el banco, acredítalo.'
             # Al cerrar se imprime el detalle (cobro por cobro, con su nota de entrega) para
             # compararlo con el cierre del punto fisico. Un fallo de impresora no tumba el cierre.

@@ -429,9 +429,10 @@ class VGConciliacionMovimiento(VGAuditoria):
     estado: sugerido (propuesta del sistema, falta confirmar), confirmado, rechazado (alguien dijo
     que NO es ese registro; no se vuelve a sugerir para ese movimiento).
 
-    Un registro del sistema solo puede quedar confirmado contra UN movimiento, salvo los gastos
-    de comision: ahi muchos movimientos de comision de un dia suman un solo gasto del dia
-    (metodo "comision_dia").
+    Un registro del sistema solo puede quedar confirmado contra UN movimiento, salvo dos casos en los
+    que varios movimientos suman un mismo registro: los gastos de comision de un dia (metodo
+    "comision_dia") y los creditos POS de un lote, que el banco acredita en varias partes y se unen por
+    el ID del reporte del punto (metodo "id_reporte").
     """
     ORIGENES = [
         ("pago", "Pago de cobro"),
@@ -446,6 +447,7 @@ class VGConciliacionMovimiento(VGAuditoria):
         ("referencia", "Por referencia"),
         ("monto_fecha", "Por monto y fecha"),
         ("comision_dia", "Comisiones del día"),
+        ("id_reporte", "Por ID del reporte del punto"),
         ("manual", "Manual"),
     ]
     ESTADOS = [("sugerido", "Sugerido"), ("confirmado", "Confirmado"), ("rechazado", "Rechazado")]
@@ -470,7 +472,7 @@ class VGConciliacionMovimiento(VGAuditoria):
             ),
             models.UniqueConstraint(
                 fields=["origen_tipo", "origen_id"],
-                condition=models.Q(estado="confirmado") & ~models.Q(metodo="comision_dia"),
+                condition=models.Q(estado="confirmado") & ~models.Q(metodo__in=["comision_dia", "id_reporte"]),
                 name="uniq_vinculo_origen_confirmado",
             ),
         ]
@@ -584,6 +586,14 @@ class VGLotePOS(VGAuditoria):
     )
     fecha_abono_real = models.DateField(null=True, blank=True, help_text="Dia en que se acredito (sumo al saldo de la cuenta).")
     fecha_acreditacion = models.DateTimeField(null=True, blank=True)
+    id_reporte_punto = models.CharField(
+        max_length=40, blank=True, db_index=True,
+        help_text=(
+            "ID del reporte detallado (cierre de lote) que imprime el punto de venta, ej. '0061'. El banco lo repite en la "
+            "descripcion de cada credito POS ('POS MAE 88013794 001 0061 3009'), asi la conciliacion bancaria sabe a que lote "
+            "pertenece cada credito aunque el banco lo acredite en varias partes (debito, credito...)."
+        ),
+    )
 
     class Meta:
         db_table = "vg_lotes_pos"

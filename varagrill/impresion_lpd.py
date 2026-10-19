@@ -705,8 +705,6 @@ def _build_cierre_lote_pos_bytes(lote, es_reimpresion=False):
     out += _text(f'Metodo: {lote.metodo_pago.nombre}') + FEED
     if lote.cuenta_bancaria:
         out += _text(f'Banco: {lote.cuenta_bancaria}') + FEED
-    if lote.id_reporte_punto:
-        out += _text(f'Reporte del punto: {lote.id_reporte_punto}') + FEED
     out += _text(f'Operacion: {lote.fecha_operacion.strftime("%d/%m/%Y")}') + FEED
     if lote.fecha_cierre:
         out += _text(f'Cerrado: {timezone.localtime(lote.fecha_cierre).strftime("%d/%m/%Y %H:%M")}') + FEED

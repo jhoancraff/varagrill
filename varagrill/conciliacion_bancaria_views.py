@@ -16,7 +16,7 @@ from .auth_helpers import _auth_response, _is_admin_user
 from .banco_excel import ExtractoInvalido, parsear_extracto
 from .models import (
     VGAbonoCompra, VGAbonoGasto, VGCierreConciliacion, VGConciliacionMovimiento, VGExtractoBancario, VGGasto, VGIngresoExtra,
-    VGLotePOS, VGMovimientoBancario, VGPago, VGTransferenciaCuenta,
+    VGMovimientoBancario, VGPago, VGTransferenciaCuenta,
 )
 
 MAX_TAMANO_EXTRACTO_BYTES = 5 * 1024 * 1024
@@ -88,8 +88,6 @@ def _etiquetas_origenes(vinculos):
         etiquetas[('gasto', g.id)] = f'Gasto: {g.descripcion}'
     for t in VGTransferenciaCuenta.objects.filter(id__in=ids['transferencia']):
         etiquetas[('transferencia', t.id)] = f'Transferencia entre cuentas: {t.concepto}'
-    for l in VGLotePOS.objects.filter(id__in=ids['lote_pos']):
-        etiquetas[('lote_pos', l.id)] = f'Lote POS LOTE-{l.numero:06d}' + (f' · reporte {l.id_reporte_punto}' if l.id_reporte_punto else '')
     for i in VGIngresoExtra.objects.filter(id__in=ids['ingreso_extra']):
         etiquetas[('ingreso_extra', i.id)] = f'{i.get_tipo_display()}: {i.descripcion}'
     return etiquetas

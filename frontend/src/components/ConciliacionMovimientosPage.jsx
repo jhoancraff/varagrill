@@ -595,7 +595,7 @@ function FilaMovimiento({ mov, bloqueado, ocupado, onConfirmar, onRechazar, onBu
         ) : mov.estado === 'ignorado' ? (
           <span style={mutedStyle}>{mov.motivo_ignorado}</span>
         ) : mov.clase === 'pos' ? (
-          <span style={mutedStyle}>Sin lote con este ID de reporte: regístralo en el lote (Lotes de punto de venta) o compáralo por día en "POS por día"</span>
+          <span style={mutedStyle}>Se compara por día en la pestaña "POS por día"</span>
         ) : (
           <span style={mutedStyle}>—</span>
         )}

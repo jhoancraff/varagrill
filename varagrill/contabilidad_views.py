@@ -53,10 +53,8 @@ from .lotes_pos import (
     cerrar_lote,
     mover_pago_de_lote,
     reabrir_lote,
-    registrar_id_reporte,
     revertir_acreditacion,
     validar_cambio_metodo_pago,
-    validar_ids_reporte,
 )
 from .tasa_cambio import tasa_cambio_para_registro
 from .reportes import (
@@ -469,7 +467,6 @@ def _serialize_lote(lote, incluir_pagos=False):
         'fecha_acreditacion': lote.fecha_acreditacion.isoformat() if lote.fecha_acreditacion else None,
         'acreditado_por': (lote.acreditado_por.get_full_name() or lote.acreditado_por.username) if lote.acreditado_por else '',
         'notas': lote.notas,
-        'id_reporte_punto': lote.id_reporte_punto,
         'num_pagos': lote.pagos.filter(estado='completado').count(),
         'monto_usd': str(lote.monto_bruto_usd),
         'monto_bs': str(lote.monto_bruto_sistema_bs),
@@ -826,20 +823,12 @@ def reporte_cuadre_caja_view(request):
             if efectivo_contado_final < 0:
                 return _auth_response({'ok': False, 'message': 'El monto contado no puede ser negativo.'}, status=400)
 
-        # IDs del reporte del punto de los lotes que se van a cerrar ({lote_id: id}); se validan antes de
-        # tocar nada para que un ID mal puesto no deje el cierre de caja a medias.
-        ids_reporte = data.get('ids_reporte') if isinstance(data.get('ids_reporte'), dict) else {}
-        try:
-            validar_ids_reporte(ids_reporte)
-        except LoteError as error:
-            return _auth_response({'ok': False, 'message': str(error)}, status=400)
-
         with transaction.atomic():
             # Solo se autoclausura al cerrar el dia de HOY: los lotes se cierran "ahora"
             # (hora de corte real), no con la hora de un dia pasado.
             lotes_autocerrados = []
             if fecha == timezone.localdate():
-                lotes_autocerrados = autoclausurar_lotes_abiertos(request.user, ids_reporte=ids_reporte)
+                lotes_autocerrados = autoclausurar_lotes_abiertos(request.user)
 
             efectivo_esperado = efectivo_esperado_dia(fecha)
             consignado = total_consignado(fecha)
@@ -2292,9 +2281,9 @@ def admin_lotes_pos_view(request):
         return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
 
     action = str(data.get('action', '')).strip().lower()
-    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'registrar_id_reporte', 'reabrir_lote', 'anular_lote', 'revertir_acreditacion', 'mover_pago'):
+    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'reabrir_lote', 'anular_lote', 'revertir_acreditacion', 'mover_pago'):
         return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
-    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'registrar_id_reporte') and not es_admin:
+    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote') and not es_admin:
         return _auth_response({'ok': False, 'message': 'Solo administrador o contador puede hacer esto.'}, status=401)
 
     try:
@@ -2304,14 +2293,8 @@ def admin_lotes_pos_view(request):
 
     impresion = None
     try:
-        if action == 'registrar_id_reporte':
-            lote = registrar_id_reporte(lote, data.get('id_reporte_punto'), request.user)
-            mensaje = (
-                f'Lote #{lote.numero}: ID del reporte del punto {lote.id_reporte_punto}.' if lote.id_reporte_punto
-                else f'Lote #{lote.numero}: ID del reporte del punto borrado.'
-            )
-        elif action == 'cerrar_lote':
-            lote = cerrar_lote(lote, request.user, id_reporte=data.get('id_reporte_punto'))
+        if action == 'cerrar_lote':
+            lote = cerrar_lote(lote, request.user)
             mensaje = f'Lote #{lote.numero} cerrado. Cuando caiga en el banco, acredítalo.'
             # Al cerrar se imprime el detalle (cobro por cobro, con su nota de entrega) para
             # compararlo con el cierre del punto fisico. Un fallo de impresora no tumba el cierre.

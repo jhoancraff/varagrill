@@ -91,7 +91,6 @@ export function imprimirLoteEnNavegador(lote) {
     <h1>Cierre de lote de punto de venta — ${escapeHtml(lote.codigo)}</h1>
     <div class="meta">
       Método: ${escapeHtml(lote.metodo_pago_nombre)}${lote.cuenta_bancaria ? ` (${escapeHtml(lote.cuenta_bancaria)})` : ''}<br>
-      ${lote.id_reporte_punto ? `Reporte del punto: ${escapeHtml(lote.id_reporte_punto)}<br>` : ''}
       Operación: ${escapeHtml(formatFecha(lote.fecha_operacion))}${lote.fecha_cierre ? ` · Cerrado: ${escapeHtml(formatFechaHora(lote.fecha_cierre))}${lote.cerrado_por ? ` por ${escapeHtml(lote.cerrado_por)}` : ''}` : ' · Lote abierto (parcial)'}<br>
       Compara este detalle con el cierre de lote impreso por el punto.
     </div>

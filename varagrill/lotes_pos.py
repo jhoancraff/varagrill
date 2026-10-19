@@ -21,7 +21,6 @@ Todo cambio de estado corre en transaction.atomic con select_for_update y es
 idempotente: repetir una accion sobre un lote que ya la tiene aplicada se rechaza,
 nunca duplica montos.
 """
-import re
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -184,95 +183,11 @@ def _sello():
     return timezone.localtime().strftime('%Y-%m-%d %H:%M')
 
 
-def normalizar_id_reporte(valor):
-    """El ID del reporte del punto sin espacios y en mayusculas ('0061', 'A-12')."""
-    return ''.join(str(valor or '').split()).upper()
-
-
-def clave_id_reporte(valor):
-    """
-    Forma comparable de un ID: los numericos sin ceros a la izquierda, porque el punto lo imprime
-    como '0061' y el banco como '0061' o '61' segun el formato. Vacio queda vacio.
-    """
-    texto = normalizar_id_reporte(valor)
-    if texto.isdigit():
-        return texto.lstrip('0') or '0'
-    return texto
-
-
-def _validar_id_reporte(lote, nuevo):
-    """Formato del ID (ya normalizado) y que no este en otro lote del MISMO metodo; lanza LoteError si no sirve."""
-    if nuevo and not re.fullmatch(r'[A-Z0-9\-]{1,40}', nuevo):
-        raise LoteError('El ID del reporte solo puede llevar letras, números y guiones (máximo 40 caracteres).')
-    if nuevo:
-        otros = (
-            VGLotePOS.objects.filter(metodo_pago=lote.metodo_pago).exclude(pk=lote.pk).exclude(estado='anulado')
-            .exclude(id_reporte_punto='')
-        )
-        for otro in otros:
-            if clave_id_reporte(otro.id_reporte_punto) == clave_id_reporte(nuevo):
-                raise LoteError(f'El ID de reporte {nuevo} ya está registrado en el lote #{otro.numero} de {lote.metodo_pago.nombre}.')
-
-
-def _aplicar_id_reporte(lote, id_reporte, usuario):
-    """
-    Pone el ID del reporte del punto en `lote` (sin guardar). Valida el formato y que ese ID no este ya
-    en otro lote del MISMO metodo (dos lotes de metodos distintos del mismo banco si pueden compartirlo:
-    un mismo cierre del punto puede cubrir cobros de varios metodos). Devuelve True si cambio algo.
-    """
-    nuevo = normalizar_id_reporte(id_reporte)
-    _validar_id_reporte(lote, nuevo)
-    anterior = lote.id_reporte_punto
-    if anterior == nuevo:
-        return False
-    lote.id_reporte_punto = nuevo
-    _anotar(lote, f'[{_sello()}] ID del reporte del punto: {nuevo or "(vacío)"} (antes: {anterior or "(vacío)"}) por {_etiqueta_usuario(usuario)}')
-    return True
-
-
-def validar_ids_reporte(ids_reporte):
-    """
-    Revisa, ANTES de cerrar nada, los IDs que llegan junto con el cierre de caja ({lote_id: id}): que el
-    formato sirva, que no esten ya en otro lote del metodo y que no se repitan entre los lotes que se cierran.
-    Asi un ID mal puesto no deja el cierre de caja a medias.
-    """
-    vistos = {}
-    for lote_id, valor in (ids_reporte or {}).items():
-        nuevo = normalizar_id_reporte(valor)
-        if not nuevo:
-            continue
-        try:
-            lote = VGLotePOS.objects.select_related('metodo_pago').get(pk=int(lote_id))
-        except (TypeError, ValueError, VGLotePOS.DoesNotExist):
-            continue
-        _validar_id_reporte(lote, nuevo)
-        clave = (lote.metodo_pago_id, clave_id_reporte(nuevo))
-        if clave in vistos:
-            raise LoteError(f'El ID de reporte {nuevo} está repetido en dos lotes de {lote.metodo_pago.nombre}.')
-        vistos[clave] = lote.id
-
-
-def registrar_id_reporte(lote, id_reporte, usuario):
-    """
-    Guarda (o corrige, o borra con vacio) el ID del reporte detallado del punto en un lote que no este
-    anulado. Se puede hacer antes o despues de acreditar: es lo que une los creditos del banco con el lote.
-    """
-    with transaction.atomic():
-        lote = VGLotePOS.objects.select_for_update().select_related('metodo_pago').get(pk=lote.pk)
-        if lote.estado == 'anulado':
-            raise LoteError('Un lote anulado no admite cambios.')
-        if _aplicar_id_reporte(lote, id_reporte, usuario):
-            lote.actualizado_por = usuario
-            lote.save(update_fields=['id_reporte_punto', 'notas', 'actualizado_por', 'fecha_actualizacion'])
-        return lote
-
-
-def cerrar_lote(lote, usuario, ahora=None, id_reporte=None):
+def cerrar_lote(lote, usuario, ahora=None):
     """
     Cierre (parcial) del lote abierto: recalcula el monto desde sus cobros, lo
     congela y pasa a 'cerrado'. El siguiente cobro POS de ese metodo abre un lote
-    nuevo automaticamente. `id_reporte`, si viene, guarda de una vez el ID del reporte
-    detallado que imprimio el punto (se puede registrar despues con registrar_id_reporte).
+    nuevo automaticamente.
     """
     with transaction.atomic():
         lote = VGLotePOS.objects.select_for_update().select_related('metodo_pago').get(pk=lote.pk)
@@ -281,27 +196,20 @@ def cerrar_lote(lote, usuario, ahora=None, id_reporte=None):
         if not lote.pagos.filter(estado='completado').exists():
             raise LoteError(f'El lote #{lote.numero} no tiene cobros para cerrar.')
         recalcular_lote(lote)
-        if id_reporte:
-            _aplicar_id_reporte(lote, id_reporte, usuario)
         lote.fecha_cierre = ahora or timezone.now()
         lote.estado = 'cerrado'
         lote.cerrado_por = usuario
         lote.actualizado_por = usuario
-        lote.save(update_fields=[
-            'fecha_cierre', 'estado', 'cerrado_por', 'actualizado_por', 'id_reporte_punto', 'notas', 'fecha_actualizacion',
-        ])
+        lote.save(update_fields=['fecha_cierre', 'estado', 'cerrado_por', 'actualizado_por', 'fecha_actualizacion'])
         return lote
 
 
-def autoclausurar_lotes_abiertos(usuario, ahora=None, ids_reporte=None):
+def autoclausurar_lotes_abiertos(usuario, ahora=None):
     """
     Al cerrar la caja se cierran TODOS los lotes POS que sigan abiertos. Un lote
     abierto sin cobros vigentes (todos anulados) no tiene nada que cerrar: se marca
-    'anulado' con una nota. Devuelve los lotes que quedaron 'cerrado'. `ids_reporte`
-    ({lote_id: id}) trae el ID del reporte del punto de cada lote, si ya lo tienen
-    (validar_ids_reporte debe haberse llamado antes).
+    'anulado' con una nota. Devuelve los lotes que quedaron 'cerrado'.
     """
-    ids_reporte = {str(k): v for k, v in (ids_reporte or {}).items()}
     cerrados = []
     with transaction.atomic():
         for lote in VGLotePOS.objects.select_for_update().select_related('metodo_pago').filter(estado='abierto'):
@@ -311,7 +219,7 @@ def autoclausurar_lotes_abiertos(usuario, ahora=None, ids_reporte=None):
                 lote.actualizado_por = usuario
                 lote.save(update_fields=['estado', 'notas', 'actualizado_por', 'fecha_actualizacion'])
                 continue
-            cerrados.append(cerrar_lote(lote, usuario, ahora, id_reporte=ids_reporte.get(str(lote.id))))
+            cerrados.append(cerrar_lote(lote, usuario, ahora))
     return cerrados
 
 

@@ -10,7 +10,6 @@ import {
   postLotePos,
 } from '../utils/lotesPos';
 import { RangoFechas } from './FiltroFechas';
-import IdReporteLoteModal from './IdReporteLoteModal';
 
 function todayIso() {
   const now = new Date();
@@ -60,7 +59,6 @@ function LotesPOSPage({ isMobile, onBack }) {
   const [error, setError] = useState('');
   const [working, setWorking] = useState(false);
   const [modal, setModal] = useState(null); // { modo: 'detalle' | 'reabrir' | 'anular' | 'revertir', lote }
-  const [idReporte, setIdReporte] = useState(null); // { modo: 'cerrar' | 'editar', lote }
   const { toast, showSuccess, showError, hideToast } = useToast();
 
   const loadLotes = useCallback(async () => {
@@ -115,7 +113,10 @@ function LotesPOSPage({ isMobile, onBack }) {
     }
   };
 
-  const cerrarLote = (lote) => setIdReporte({ modo: 'cerrar', lote });
+  const cerrarLote = (lote) => ejecutar(
+    { action: 'cerrar_lote', lote_id: lote.id },
+    `¿Cerrar ${lote.codigo} por $${formatMonto(lote.monto_usd)}? Se imprimirá el detalle de cada cobro para compararlo con el cierre del punto, y los próximos cobros de ${lote.metodo_pago_nombre} abrirán un lote nuevo.`,
+  );
 
   // Reimprime en la impresora de caja el detalle del lote (un renglon por cobro, con su nota de entrega).
   const imprimirLote = (lote) => ejecutar({ action: 'imprimir_lote', lote_id: lote.id });
@@ -196,14 +197,7 @@ function LotesPOSPage({ isMobile, onBack }) {
               <div style={headStyle}>Acciones</div>
               {lotes.map((lote) => (
                 <Fragment key={lote.id}>
-                  <div style={cellStyle}>
-                    <strong>{lote.codigo}</strong>
-                    {lote.id_reporte_punto ? (
-                      <span style={mutedStyle}>Reporte del punto: <strong>{lote.id_reporte_punto}</strong></span>
-                    ) : lote.estado === 'cerrado' || lote.estado === 'acreditado' ? (
-                      <span style={mutedStyle}>Sin ID de reporte del punto</span>
-                    ) : null}
-                  </div>
+                  <div style={cellStyle}><strong>{lote.codigo}</strong></div>
                   <div style={cellStyle}>
                     {lote.metodo_pago_nombre}
                     {lote.cuenta_bancaria ? <span style={mutedStyle}>{lote.cuenta_bancaria}</span> : null}
@@ -225,11 +219,6 @@ function LotesPOSPage({ isMobile, onBack }) {
                     ) : null}
                     {lote.estado !== 'anulado' && lote.num_pagos > 0 ? (
                       <button type="button" style={miniButtonStyle} disabled={working} onClick={() => imprimirLote(lote)}>Imprimir</button>
-                    ) : null}
-                    {lote.estado !== 'anulado' && lote.estado !== 'abierto' ? (
-                      <button type="button" style={miniButtonStyle} disabled={working} onClick={() => setIdReporte({ modo: 'editar', lote })}>
-                        {lote.id_reporte_punto ? 'Editar ID reporte' : 'ID reporte'}
-                      </button>
                     ) : null}
                     {lote.estado === 'cerrado' ? (
                       <button type="button" style={miniPrimaryStyle} disabled={working} onClick={() => acreditarLote(lote)}>Acreditar</button>
@@ -253,19 +242,6 @@ function LotesPOSPage({ isMobile, onBack }) {
           </div>
         ) : null}
       </section>
-
-      {idReporte ? (
-        <IdReporteLoteModal
-          modo={idReporte.modo}
-          lote={idReporte.lote}
-          onClose={() => setIdReporte(null)}
-          onDone={(mensaje) => {
-            setIdReporte(null);
-            showSuccess(mensaje);
-            loadLotes();
-          }}
-        />
-      ) : null}
 
       {modal ? (
         <LoteModal

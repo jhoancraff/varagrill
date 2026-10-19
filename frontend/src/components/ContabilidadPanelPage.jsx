@@ -146,6 +146,7 @@ const reportSections = [
   { id: 'contabilidad-disponibilidad-cuentas', title: 'Disponibilidad diaria', icon: AvailabilityIcon },
   { id: 'flujo-bancario', title: 'Flujo bancario diario', icon: BankFlowIcon },
   { id: 'contabilidad-lotes-pos', title: 'Lotes de punto de venta', icon: PosTerminalIcon },
+  { id: 'contabilidad-conciliacion-movimientos', title: 'Conciliación de movimientos', icon: ReconciliationIcon },
   ...(CONCILIACION_BANCARIA_HABILITADA ? [{
     id: 'contabilidad-conciliacion-bancaria',
     title: 'Conciliación bancaria',
@@ -173,6 +174,7 @@ const reportGroups = [
       'contabilidad-disponibilidad-cuentas',
       'flujo-bancario',
       'contabilidad-lotes-pos',
+      'contabilidad-conciliacion-movimientos',
       'contabilidad-conciliacion-bancaria',
     ],
   },

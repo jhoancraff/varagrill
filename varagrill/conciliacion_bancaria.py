@@ -29,7 +29,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from .models import (
@@ -90,10 +90,15 @@ def cuentas_disponibles():
             continue
         g = grupos.setdefault(clave, {'nombre': normalizar_cuenta(metodo.cuenta_bancaria), 'metodos': []})
         g['metodos'].append(metodo)
+    cargados = {}
+    for fila in VGMovimientoBancario.objects.values('cuenta_bancaria').annotate(n=Count('id')):
+        clave = _clave_cuenta(fila['cuenta_bancaria'])
+        cargados[clave] = cargados.get(clave, 0) + fila['n']
     cuentas = []
     for g in sorted(grupos.values(), key=lambda x: x['nombre'].lower()):
         monedas = {m.moneda for m in g['metodos']}
         cuentas.append({
+            'movimientos_cargados': cargados.get(_clave_cuenta(g['nombre']), 0),
             'nombre': g['nombre'],
             'moneda': next(iter(monedas)) if len(monedas) == 1 else 'MIXTA',
             'soportada': monedas == {'VES'},
@@ -654,9 +659,14 @@ def candidatos_para(mov, limite=8):
         ev = evaluar(mov, c, es_credito)
         dias = _dias_entre(dia, c)
         if ev is None:
-            # mas laxo que el cruce automatico: el monto parecido (10%) y fecha cercana
+            # mas laxo que el cruce automatico: monto parecido (10%) y fecha cercana; si la observacion del
+            # banco comparte palabras con el registro (ej. "insumos para llevar"), sube en la lista.
             if dias <= VENTANA_DEBITO_DIAS and abs(c.monto - mov.monto) <= mov.monto * Decimal('0.10'):
-                ev = Evaluacion(10, 'manual', (c.monto - mov.monto).quantize(CENT), dias, 'Monto parecido.')
+                parecido = bool(_tokens(f'{mov.observacion} {mov.descripcion}') & _tokens(c.texto))
+                ev = Evaluacion(
+                    max(1, 10 + (25 if parecido else 0) - dias), 'manual', (c.monto - mov.monto).quantize(CENT), dias,
+                    'Monto y descripción parecidos.' if parecido else 'Monto parecido.',
+                )
             else:
                 continue
         filas.append((c, ev))

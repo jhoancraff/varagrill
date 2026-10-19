@@ -6583,8 +6583,12 @@ def pedidos_cobro_view(request):
     if request.method not in ['GET', 'POST']:
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
 
+    # 401 = sin sesion; 403 = con sesion pero sin permiso (un mesero): no es "volver a
+    # iniciar sesion", y el 401 llenaba el log con cada consulta de los meseros.
+    if not request.user.is_authenticated:
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion para cobrar pedidos.'}, status=401)
     if not (_is_admin_user(request.user) or _is_cajera_user(request.user)):
-        return _auth_response({'ok': False, 'message': 'No tienes permiso para cobrar pedidos.'}, status=401)
+        return _auth_response({'ok': False, 'message': 'No tienes permiso para cobrar pedidos.'}, status=403)
 
     if request.method == 'GET':
         _cancelar_pedidos_vacios(request.user)

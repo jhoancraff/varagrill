@@ -4732,3 +4732,32 @@ class ComandaNoImpresaTests(TestCase):
         r = self.client.post(f'/api/pedidos/{pedido.id}/items/{self.detalle_carne.id}/reimprimir/')
         self.assertEqual(r.status_code, 502)
         self.assertIn('Parrilla IMP', r.json()['message'])
+
+
+class CobroSinPermisoTests(TestCase):
+    """/api/pedidos/cobro/: sin sesion 401, con sesion pero sin permiso (mesero) 403, cajera y admin 200."""
+
+    URL = '/api/pedidos/cobro/'
+
+    def _usuario(self, rol, cedula):
+        role, _ = VGRol.objects.get_or_create(nombre_role=rol)
+        return VGUsuario.objects.create_user(
+            username=f'cobro_{rol.lower()}', password='claveCobro123', cedula=cedula,
+            email=f'cobro_{rol.lower()}@varagrill.test', id_role=role,
+        )
+
+    def test_sin_sesion_es_401(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+
+    def test_un_mesero_recibe_403_no_401(self):
+        self.client.force_login(self._usuario('Mesero', '95000001'))
+        r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(r.json()['ok'])
+
+    def test_cajera_y_administrador_pueden_consultar(self):
+        for rol, cedula in (('Cajera', '95000002'), ('Administrador', '95000003')):
+            self.client.force_login(self._usuario(rol, cedula))
+            r = self.client.get(self.URL)
+            self.assertEqual(r.status_code, 200, rol)
+            self.assertTrue(r.json()['ok'])

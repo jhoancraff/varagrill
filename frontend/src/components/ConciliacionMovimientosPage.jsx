@@ -92,12 +92,13 @@ async function llamar(url, { method = 'GET', body, formData } = {}) {
   return data;
 }
 
+// El estado se comunica con un punto y el texto del mismo color (sin recuadros): colores del tema, legibles en claro y oscuro.
 const ESTADOS = {
-  conciliado: { texto: 'Conciliado', fondo: 'rgba(46, 204, 113, 0.14)', borde: 'rgba(46, 204, 113, 0.55)' },
-  por_revisar: { texto: 'Por revisar', fondo: 'rgba(255, 193, 7, 0.16)', borde: 'rgba(255, 193, 7, 0.6)' },
-  sin_coincidencia: { texto: 'Sin coincidencia', fondo: 'rgba(255, 98, 98, 0.14)', borde: 'rgba(255, 98, 98, 0.55)' },
-  ignorado: { texto: 'Ignorado', fondo: 'rgba(var(--vg-ink), 0.06)', borde: 'rgba(var(--vg-ink), 0.25)' },
-  pendiente: { texto: 'Pendiente', fondo: 'rgba(90, 170, 255, 0.12)', borde: 'rgba(90, 170, 255, 0.5)' },
+  conciliado: { texto: 'Conciliado', color: 'var(--vg-f-9fe3b0)' },
+  por_revisar: { texto: 'Por revisar', color: 'var(--vg-f-ffcf7d)' },
+  sin_coincidencia: { texto: 'Sin coincidencia', color: 'var(--vg-f-ffb0b0)' },
+  ignorado: { texto: 'Ignorado', color: 'var(--vg-f-c8bbbb)' },
+  pendiente: { texto: 'Pendiente', color: 'var(--vg-f-9ecbff)' },
 };
 
 const PESTANAS = [
@@ -105,14 +106,41 @@ const PESTANAS = [
   { id: 'conciliado', texto: 'Conciliados' },
   { id: 'por_revisar', texto: 'Por revisar' },
   { id: 'sin_coincidencia', texto: 'Sin coincidencia' },
-  { id: 'sistema', texto: 'En el sistema, no en el banco' },
-  { id: 'pos', texto: 'POS por día' },
-  { id: 'cierres', texto: 'Cierres por día' },
+  { id: 'sistema', texto: 'Solo en el sistema' },
+  { id: 'pos', texto: 'POS' },
+  { id: 'cierres', texto: 'Cierres' },
 ];
 
-function EstadoBadge({ estado }) {
+function EstadoTexto({ estado, texto }) {
   const e = ESTADOS[estado] || ESTADOS.pendiente;
-  return <span style={{ ...badgeStyle, background: e.fondo, border: `1px solid ${e.borde}` }}>{e.texto}</span>;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: e.color, fontWeight: 700, fontSize: 12.5, whiteSpace: 'nowrap' }}>
+      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: e.color, flexShrink: 0 }} />
+      {texto || e.texto}
+    </span>
+  );
+}
+
+function horaDe(iso) {
+  return iso ? new Date(iso).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+}
+
+function diaLargo(iso) {
+  const [anio, mes, dia] = iso.split('-').map(Number);
+  const texto = new Date(anio, mes - 1, dia).toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' });
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+// Agrupa (en el orden recibido) los movimientos por dia: el dia se escribe una sola vez en un encabezado y cada fila solo lleva la hora.
+function agruparPorDia(movs) {
+  const grupos = [];
+  movs.forEach((m) => {
+    const dia = m.fecha.slice(0, 10);
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.dia === dia) ultimo.movs.push(m);
+    else grupos.push({ dia, movs: [m] });
+  });
+  return grupos;
 }
 
 function ConciliacionMovimientosPage({ isMobile, onBack }) {
@@ -130,6 +158,9 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
   const [sistema, setSistema] = useState(null);
   const [importando, setImportando] = useState(false);
   const [candidatosDe, setCandidatosDe] = useState(null);
+  // Registros tildados en el modal para un pago dividido: { 'tipo-id': candidato }. Se guardan completos
+  // para que sigan contando aunque se cambie entre "parecidos" y "todos los cercanos".
+  const [seleccion, setSeleccion] = useState({});
   const [ignorando, setIgnorando] = useState(null);
   const [pdfConConciliados, setPdfConConciliados] = useState(false);
   const [cierres, setCierres] = useState(null);
@@ -266,22 +297,53 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
     (data) => `${data.confirmados} movimientos confirmados.`,
   );
 
-  const abrirCandidatos = async (mov) => {
-    setCandidatosDe({ mov, lista: null });
+  const abrirCandidatos = async (mov, todos = false) => {
+    setCandidatosDe({ mov, lista: null, todos });
+    if (!candidatosDe || candidatosDe.mov.id !== mov.id) setSeleccion({});
     try {
-      const data = await llamar(`${API}movimientos/${mov.id}/candidatos/`);
-      setCandidatosDe({ mov, lista: data.candidatos });
+      const data = await llamar(`${API}movimientos/${mov.id}/candidatos/${todos ? '?todos=1' : ''}`);
+      setCandidatosDe({ mov, lista: data.candidatos, todos });
     } catch (e) {
       showError(e.message);
       setCandidatosDe(null);
     }
   };
 
+  const cerrarCandidatos = () => {
+    setCandidatosDe(null);
+    setSeleccion({});
+  };
+
   const vincular = async (candidato) => {
     const mov = candidatosDe.mov;
-    setCandidatosDe(null);
+    cerrarCandidatos();
     await postAccion(mov, { accion: 'elegir', tipo: candidato.tipo, origen_id: candidato.id }, 'Movimiento conciliado.');
   };
+
+  const alternarSeleccion = (candidato) => {
+    const clave = `${candidato.tipo}-${candidato.id}`;
+    setSeleccion((actual) => {
+      const nueva = { ...actual };
+      if (nueva[clave]) delete nueva[clave];
+      else nueva[clave] = candidato;
+      return nueva;
+    });
+  };
+
+  const vincularSeleccion = async () => {
+    const mov = candidatosDe.mov;
+    const registros = Object.values(seleccion).map((c) => ({ tipo: c.tipo, origen_id: c.id }));
+    cerrarCandidatos();
+    await postAccion(
+      mov,
+      { accion: 'elegir', registros },
+      registros.length > 1 ? `Movimiento conciliado con ${registros.length} registros.` : 'Movimiento conciliado.',
+    );
+  };
+
+  const seleccionados = Object.values(seleccion);
+  const sumaSeleccion = seleccionados.reduce((total, c) => total + Number(c.monto), 0);
+  const faltante = candidatosDe ? Number(candidatosDe.mov.monto) - sumaSeleccion : 0;
 
   const cuentaActual = cuentas.find((c) => c.nombre === cuenta);
 
@@ -291,17 +353,10 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
       <button type="button" onClick={onBack} style={backButtonStyle}>← Volver</button>
 
       <div style={headerRowStyle}>
-        <div>
-          <h2 style={titleStyle(isMobile)}>Conciliación de movimientos</h2>
-          <p style={subtitleStyle}>
-            Sube el archivo del banco y compara cada movimiento con lo registrado en el sistema: cobros, gastos y compras.
-          </p>
-        </div>
-        <div style={accionesStyle}>
-          <button type="button" style={primaryButtonStyle} onClick={() => setImportando(true)} disabled={!cuentaActual?.soportada}>
-            Importar extracto del banco
-          </button>
-        </div>
+        <h2 style={titleStyle(isMobile)}>Conciliación de movimientos</h2>
+        <button type="button" style={primaryButtonStyle} onClick={() => setImportando(true)} disabled={!cuentaActual?.soportada}>
+          Importar extracto
+        </button>
       </div>
 
       <div style={panelStyle}>
@@ -333,11 +388,11 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
             params={{ cuenta, desde: rango.desde, hasta: rango.hasta, conciliados: pdfConConciliados ? '1' : '0' }}
             onError={showError}
           >
-            Descargar PDF
+            PDF
           </BotonDescargarPdf>
-          <label style={checkStyle}>
+          <label style={checkStyle} title="Incluir en el PDF el detalle de los movimientos conciliados">
             <input type="checkbox" checked={pdfConConciliados} onChange={(e) => setPdfConConciliados(e.target.checked)} />
-            Incluir el detalle de los conciliados
+            con conciliados
           </label>
         </div>
       </div>
@@ -347,45 +402,59 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
 
       {!cargando && resumen ? (
         <>
-          <div style={tarjetasStyle(isMobile)}>
-            <Tarjeta titulo="Movimientos" valor={resumen.total} detalle={`Créditos Bs ${formatMonto(resumen.creditos)} · Débitos Bs ${formatMonto(resumen.debitos)}`} />
-            <Tarjeta
+          <div style={resumenStyle(isMobile)}>
+            <Cifra
               titulo="Conciliados"
-              valor={estados.conciliado?.cantidad || 0}
-              detalle={resumen.total ? `${Math.round(((estados.conciliado?.cantidad || 0) / resumen.total) * 100)} % del total` : ''}
+              valor={`${estados.conciliado?.cantidad || 0} de ${resumen.total}`}
+              avance={resumen.total ? (estados.conciliado?.cantidad || 0) / resumen.total : 0}
               onClick={() => setPestana('conciliado')}
             />
-            <Tarjeta titulo="Por revisar" valor={estados.por_revisar?.cantidad || 0} detalle="Falta confirmar" onClick={() => setPestana('por_revisar')} alerta={(estados.por_revisar?.cantidad || 0) > 0} />
-            <Tarjeta
-              titulo="Días cerrados"
-              valor={cierres ? `${cierres.resumen.cerrados} de ${cierres.resumen.dias}` : '—'}
-              detalle={cierres ? (cierres.resumen.completo ? 'Período completo y cuadrado' : `${cierres.resumen.pendientes} con pendientes · ${cierres.resumen.listos} listos`) : ''}
-              onClick={() => setPestana('cierres')}
-              alerta={Boolean(cierres && cierres.resumen.discontinuidades > 0)}
+            <Cifra
+              titulo="Por revisar"
+              valor={estados.por_revisar?.cantidad || 0}
+              color={(estados.por_revisar?.cantidad || 0) > 0 ? ESTADOS.por_revisar.color : undefined}
+              onClick={() => setPestana('por_revisar')}
             />
-            <Tarjeta
+            <Cifra
               titulo="Sin coincidencia"
               valor={estados.sin_coincidencia?.cantidad || 0}
-              detalle={`Bs ${formatMonto(Number(estados.sin_coincidencia?.creditos || 0) + Number(estados.sin_coincidencia?.debitos || 0))}`}
+              nota={(estados.sin_coincidencia?.cantidad || 0) > 0
+                ? `Bs ${formatMonto(Number(estados.sin_coincidencia?.creditos || 0) + Number(estados.sin_coincidencia?.debitos || 0))}`
+                : ''}
+              color={(estados.sin_coincidencia?.cantidad || 0) > 0 ? ESTADOS.sin_coincidencia.color : undefined}
               onClick={() => setPestana('sin_coincidencia')}
-              alerta={(estados.sin_coincidencia?.cantidad || 0) > 0}
             />
+            <Cifra
+              titulo="Días cerrados"
+              valor={cierres ? `${cierres.resumen.cerrados} de ${cierres.resumen.dias}` : '—'}
+              nota={cierres ? (cierres.resumen.completo ? 'Período cuadrado' : (cierres.resumen.pendientes ? `${cierres.resumen.pendientes} con pendientes` : '')) : ''}
+              color={cierres && cierres.resumen.discontinuidades > 0 ? ESTADOS.por_revisar.color : undefined}
+              onClick={() => setPestana('cierres')}
+            />
+            <div style={{ ...cifraStyle, cursor: 'default' }}>
+              <span style={mutedStyle}>Entradas y salidas</span>
+              <span style={{ ...cifraNotaStyle, color: ESTADOS.conciliado.color }}>+ Bs {formatMonto(resumen.creditos)}</span>
+              <span style={cifraNotaStyle}>− Bs {formatMonto(resumen.debitos)}</span>
+            </div>
           </div>
 
           <div style={pestanasStyle} role="tablist">
-            {PESTANAS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="tab"
-                aria-selected={pestana === p.id}
-                onClick={() => { setPestana(p.id); setVisibles(PAGINA); }}
-                style={pestana === p.id ? pestanaActivaStyle : pestanaStyle}
-              >
-                {p.texto}
-                {p.id !== 'todos' && p.id !== 'sistema' && p.id !== 'pos' && p.id !== 'cierres' ? ` (${estados[p.id]?.cantidad || 0})` : ''}
-              </button>
-            ))}
+            {PESTANAS.map((p) => {
+              const cantidad = ['conciliado', 'por_revisar', 'sin_coincidencia'].includes(p.id) ? estados[p.id]?.cantidad || 0 : null;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={pestana === p.id}
+                  onClick={() => { setPestana(p.id); setVisibles(PAGINA); }}
+                  style={pestana === p.id ? pestanaActivaStyle : pestanaStyle}
+                >
+                  {p.texto}
+                  {cantidad !== null ? <span style={{ marginLeft: 6, fontWeight: 600, opacity: 0.7 }}>{cantidad}</span> : null}
+                </button>
+              );
+            })}
           </div>
 
           {pestana === 'pos' ? <TablaPos filas={datos.pos} /> : null}
@@ -405,7 +474,7 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
                 type="search"
                 value={busqueda}
                 onChange={(e) => { setBusqueda(e.target.value); setVisibles(PAGINA); }}
-                placeholder="Buscar por descripción, referencia, observación o monto"
+                placeholder="Buscar por descripción, referencia o monto"
                 style={inputStyle}
               />
               {filtrados.length === 0 ? (
@@ -416,32 +485,47 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
                 </div>
               ) : (
                 <div style={tablaScrollStyle}>
-                  <table style={tablaStyle}>
-                    <thead>
+                  <table style={isMobile ? { ...tablaStyle, display: 'block' } : tablaStyle}>
+                    <thead style={isMobile ? { display: 'none' } : undefined}>
                       <tr>
-                        <th style={thStyle}>Fecha</th>
+                        <th style={thStyle}>Hora</th>
                         <th style={thStyle}>Movimiento del banco</th>
                         <th style={{ ...thStyle, textAlign: 'right' }}>Monto (Bs)</th>
-                        <th style={thStyle}>Estado</th>
                         <th style={thStyle}>En el sistema</th>
-                        <th style={thStyle}>Acciones</th>
+                        <th style={thStyle} />
                       </tr>
                     </thead>
-                    <tbody>
-                      {filtrados.slice(0, visibles).map((m) => (
-                        <FilaMovimiento
-                          key={m.id}
-                          mov={m}
-                          bloqueado={m.dia_cerrado}
-                          ocupado={ocupado}
-                          onConfirmar={(v) => postAccion(m, { accion: 'confirmar', vinculo_id: v.id }, 'Movimiento conciliado.')}
-                          onRechazar={(v) => postAccion(m, { accion: 'rechazar', vinculo_id: v.id }, 'Sugerencia rechazada.')}
-                          onBuscar={() => abrirCandidatos(m)}
-                          onIgnorar={() => setIgnorando({ mov: m, motivo: '' })}
-                          onReabrir={() => postAccion(m, { accion: 'reabrir' }, 'Movimiento reabierto.')}
-                        />
-                      ))}
-                    </tbody>
+                    {agruparPorDia(filtrados.slice(0, visibles)).map((grupo) => {
+                      const porResolver = grupo.movs.filter((m) => m.estado === 'por_revisar' || m.estado === 'sin_coincidencia').length;
+                      const cerrado = grupo.movs.every((m) => m.dia_cerrado);
+                      return (
+                        <tbody key={grupo.dia} style={isMobile ? { display: 'block' } : undefined}>
+                          <tr style={isMobile ? { display: 'block' } : undefined}>
+                            <td colSpan={5} style={isMobile ? { ...diaEncabezadoStyle, display: 'block' } : diaEncabezadoStyle}>
+                              <span style={{ fontWeight: 800, color: 'var(--vg-text-strong)' }}>{diaLargo(grupo.dia)}</span>
+                              <span style={{ ...mutedStyle, marginLeft: 12 }}>
+                                {grupo.movs.length} {grupo.movs.length === 1 ? 'movimiento' : 'movimientos'}
+                                {cerrado ? ' · día cerrado' : porResolver > 0 ? ` · ${porResolver} por resolver` : ''}
+                              </span>
+                            </td>
+                          </tr>
+                          {grupo.movs.map((m) => (
+                            <FilaMovimiento
+                              key={m.id}
+                              mov={m}
+                              bloqueado={m.dia_cerrado}
+                              ocupado={ocupado}
+                              compacto={isMobile}
+                              onConfirmar={(v) => postAccion(m, { accion: 'confirmar', vinculo_id: v.id }, 'Movimiento conciliado.')}
+                              onRechazar={(v) => postAccion(m, { accion: 'rechazar', vinculo_id: v.id }, 'Sugerencia rechazada.')}
+                              onBuscar={() => abrirCandidatos(m)}
+                              onIgnorar={() => setIgnorando({ mov: m, motivo: '' })}
+                              onReabrir={() => postAccion(m, { accion: 'reabrir' }, 'Movimiento reabierto.')}
+                            />
+                          ))}
+                        </tbody>
+                      );
+                    })}
                   </table>
                 </div>
               )}
@@ -471,31 +555,68 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
       ) : null}
 
       {candidatosDe ? (
-        <div style={backdropStyle} onClick={() => setCandidatosDe(null)}>
+        <div style={backdropStyle} onClick={cerrarCandidatos}>
           <div style={modalStyle(true)} onClick={(e) => e.stopPropagation()}>
             <div style={modalTituloStyle}>Elegir el registro del sistema</div>
             <div style={mutedStyle}>
               {candidatosDe.mov.descripcion} · Bs {formatMonto(candidatosDe.mov.monto)} · {formatFechaHora(candidatosDe.mov.fecha)}
+              {candidatosDe.mov.referencia ? ` · ref. ${candidatosDe.mov.referencia}` : ''}
             </div>
+            <div style={mutedStyle}>¿Pagó varios registros a la vez, como una compra y un gasto? Tilda todos y vincúlalos juntos.</div>
             {candidatosDe.lista === null ? <div style={emptyStyle}>Buscando...</div> : null}
             {candidatosDe.lista && candidatosDe.lista.length === 0 ? (
-              <div style={emptyStyle}>No hay registros parecidos en el sistema. Puede que esta operación no se haya registrado.</div>
-            ) : null}
-            {(candidatosDe.lista || []).map((c) => (
-              <div key={`${c.tipo}-${c.id}`} style={candidatoStyle}>
-                <div style={{ display: 'grid', gap: 2 }}>
-                  <strong style={{ color: 'var(--vg-text-strong)' }}>{c.etiqueta}</strong>
-                  <span style={mutedStyle}>
-                    {formatFecha(c.fecha)} · Bs {formatMonto(c.monto)}
-                    {c.referencia ? ` · ref. ${c.referencia}` : ''}
-                    {c.diferencia && Number(c.diferencia) !== 0 ? ` · diferencia Bs ${formatMonto(c.diferencia)}` : ''}
-                  </span>
-                </div>
-                <button type="button" style={primaryButtonStyle} onClick={() => vincular(c)}>Vincular</button>
+              <div style={emptyStyle}>
+                {candidatosDe.todos
+                  ? 'No hay registros libres en esta cuenta cerca de esa fecha. Puede que esta operación no se haya registrado.'
+                  : 'No hay registros parecidos en el sistema. Puede que esta operación no se haya registrado, o que sea un pago dividido: prueba "Ver todos los registros cercanos".'}
               </div>
-            ))}
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="button" style={secondaryButtonStyle} onClick={() => setCandidatosDe(null)}>Cerrar</button>
+            ) : null}
+            {(candidatosDe.lista || []).map((c) => {
+              const clave = `${c.tipo}-${c.id}`;
+              return (
+                <div key={clave} style={candidatoStyle}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flex: 1 }}>
+                    <input type="checkbox" checked={Boolean(seleccion[clave])} onChange={() => alternarSeleccion(c)} />
+                    <div style={{ display: 'grid', gap: 2 }}>
+                      <strong style={{ color: 'var(--vg-text-strong)' }}>{c.etiqueta}</strong>
+                      <span style={mutedStyle}>
+                        {formatFecha(c.fecha)} · Bs {formatMonto(c.monto)}
+                        {c.referencia ? ` · ref. ${c.referencia}` : ''}
+                        {!c.nota && c.diferencia && Number(c.diferencia) !== 0 ? ` · diferencia Bs ${formatMonto(c.diferencia)}` : ''}
+                      </span>
+                      {c.nota ? <span style={avisoTextoStyle}>{c.nota}</span> : null}
+                    </div>
+                  </label>
+                  <button type="button" style={chipStyle} onClick={() => vincular(c)} disabled={ocupado}>Vincular</button>
+                </div>
+              );
+            })}
+            {seleccionados.length > 0 ? (
+              <div style={Math.abs(faltante) <= 2 ? infoStyle : avisoStyle}>
+                <strong>{seleccionados.length} seleccionado{seleccionados.length === 1 ? '' : 's'}: Bs {formatMonto(sumaSeleccion)}</strong>
+                {' '}de Bs {formatMonto(candidatosDe.mov.monto)} del banco.
+                {Math.abs(faltante) <= 2
+                  ? ' Cuadra.'
+                  : ` ${faltante > 0 ? 'Faltan' : 'Sobran'} Bs ${formatMonto(Math.abs(faltante))}; se puede vincular igual y la diferencia queda anotada.`}
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                style={secondaryButtonStyle}
+                onClick={() => abrirCandidatos(candidatosDe.mov, !candidatosDe.todos)}
+                disabled={candidatosDe.lista === null}
+              >
+                {candidatosDe.todos ? 'Ver solo los parecidos' : 'Ver todos los registros cercanos'}
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="button" style={secondaryButtonStyle} onClick={cerrarCandidatos}>Cerrar</button>
+                {seleccionados.length > 0 ? (
+                  <button type="button" style={primaryButtonStyle} onClick={vincularSeleccion} disabled={ocupado}>
+                    {seleccionados.length === 1 ? 'Vincular el seleccionado' : `Vincular los ${seleccionados.length} juntos`}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
@@ -548,76 +669,92 @@ function ConciliacionMovimientosPage({ isMobile, onBack }) {
   );
 }
 
-function Tarjeta({ titulo, valor, detalle, onClick, alerta }) {
+// Una cifra del resumen: titulo, valor grande y, si hace falta, una nota corta o una barra de avance. Es un boton cuando lleva a una pestana.
+function Cifra({ titulo, valor, nota, color, avance, onClick }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      style={{ ...tarjetaStyle, cursor: onClick ? 'pointer' : 'default', borderColor: alerta ? 'rgba(255, 193, 7, 0.55)' : 'rgba(var(--vg-ink), 0.1)' }}
-    >
-      <span style={etiquetaStyle}>{titulo}</span>
-      <span style={tarjetaValorStyle}>{valor}</span>
-      <span style={mutedStyle}>{detalle}</span>
+    <button type="button" onClick={onClick} disabled={!onClick} style={{ ...cifraStyle, cursor: onClick ? 'pointer' : 'default' }}>
+      <span style={mutedStyle}>{titulo}</span>
+      <span style={{ ...cifraValorStyle, color: color || 'var(--vg-text-strong)' }}>{valor}</span>
+      {avance !== undefined ? (
+        <span aria-hidden="true" style={barraPistaStyle}>
+          <span style={{ ...barraRellenoStyle, width: `${Math.round(avance * 100)}%` }} />
+        </span>
+      ) : null}
+      {nota ? <span style={cifraNotaStyle}>{nota}</span> : null}
     </button>
   );
 }
 
-function FilaMovimiento({ mov, bloqueado, ocupado, onConfirmar, onRechazar, onBuscar, onIgnorar, onReabrir }) {
+function FilaMovimiento({ mov, bloqueado, ocupado, compacto, onConfirmar, onRechazar, onBuscar, onIgnorar, onReabrir }) {
   const sugerido = mov.vinculos.find((v) => v.estado === 'sugerido');
-  const confirmado = mov.vinculos.find((v) => v.estado === 'confirmado');
+  const confirmados = mov.vinculos.filter((v) => v.estado === 'confirmado');
+  const confirmado = confirmados[0];
   const vinculo = confirmado || sugerido;
+  // Un movimiento puede pagar varios registros a la vez (compra + gasto): se listan todos y su suma.
+  const pagoDividido = confirmados.length > 1 && confirmado.metodo !== 'comision_dia';
   const esCredito = mov.tipo === 'credito';
+  const esPos = mov.clase === 'pos';
+  // Las referencias de puros ceros (ej. las del POS) no dicen nada: no se muestran.
+  const detalle = [compacto ? horaDe(mov.fecha) : '', /[1-9]/.test(mov.referencia || '') ? `Ref. ${mov.referencia}` : '', mov.observacion].filter(Boolean).join(' · ');
+  // En celular la fila es un bloque de dos columnas (descripcion + monto) con el estado y las acciones debajo.
+  const celda = (normal, enCompacto) => (compacto ? { ...tdStyle, padding: 0, border: 'none', minWidth: 0, maxWidth: 'none', width: 'auto', ...enCompacto } : normal);
+  // Solo se muestra en la fila lo que pide una decision; el resto (metodo del cruce, diferencias ya aceptadas) queda en el tooltip.
+  const aviso = vinculo && mov.estado === 'por_revisar'
+    ? (vinculo.nota || (Number(vinculo.diferencia) !== 0 ? `Diferencia de Bs ${formatMonto(vinculo.diferencia)}` : ''))
+    : '';
+  const avisoDivido = pagoDividido && Number(confirmado.diferencia) !== 0 ? confirmado.nota : '';
+
   return (
-    <tr>
-      <td style={tdStyle}>{formatFechaHora(mov.fecha)}</td>
-      <td style={{ ...tdStyle, minWidth: 220 }}>
-        <div style={{ fontWeight: 700 }}>{mov.descripcion || '(sin descripción)'}</div>
-        <div style={mutedStyle}>
-          {mov.referencia ? `Ref. ${mov.referencia}` : ''}
-          {mov.observacion ? `${mov.referencia ? ' · ' : ''}${mov.observacion}` : ''}
-        </div>
+    <tr style={compacto ? { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '3px 12px', padding: '10px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' } : undefined}>
+      <td style={compacto ? { display: 'none' } : { ...tdStyle, ...mutedStyle, whiteSpace: 'nowrap', width: 52 }} title={formatFechaHora(mov.fecha)}>{horaDe(mov.fecha)}</td>
+      <td style={celda({ ...tdStyle, minWidth: 200, maxWidth: 340 }, {})}>
+        <div style={{ ...unaLineaStyle, fontWeight: 700 }} title={mov.descripcion}>{mov.descripcion || '(sin descripción)'}</div>
+        {detalle ? <div style={{ ...mutedStyle, ...unaLineaStyle }} title={detalle}>{detalle}</div> : null}
       </td>
-      <td style={{ ...tdStyle, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700 }}>
+      <td style={{
+        ...celda(tdStyle, {}), textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+        color: esCredito ? ESTADOS.conciliado.color : 'var(--vg-text-strong)',
+      }}
+      >
         {esCredito ? '+' : '−'} {formatMonto(mov.monto)}
       </td>
-      <td style={tdStyle}><EstadoBadge estado={mov.estado} /></td>
-      <td style={{ ...tdStyle, minWidth: 220 }}>
-        {vinculo ? (
-          <div style={{ display: 'grid', gap: 2 }}>
-            <span>{vinculo.etiqueta}</span>
-            <span style={mutedStyle}>
-              {vinculo.metodo_texto}
-              {Number(vinculo.diferencia) !== 0 ? ` · diferencia Bs ${formatMonto(vinculo.diferencia)}` : ''}
-            </span>
-            {vinculo.nota ? <span style={avisoTextoStyle}>{vinculo.nota}</span> : null}
-          </div>
-        ) : mov.estado === 'ignorado' ? (
-          <span style={mutedStyle}>{mov.motivo_ignorado}</span>
-        ) : mov.clase === 'pos' ? (
-          <span style={mutedStyle}>Se compara por día en la pestaña "POS por día"</span>
-        ) : (
-          <span style={mutedStyle}>—</span>
-        )}
+      <td style={celda({ ...tdStyle, minWidth: 220, maxWidth: 360 }, { gridColumn: '1 / -1' })}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <EstadoTexto
+            estado={mov.estado}
+            texto={pagoDividido ? 'Conciliado · pago dividido' : esPos ? 'POS · se concilia por lote' : undefined}
+          />
+          {pagoDividido ? (
+            confirmados.map((v) => (
+              <span key={v.id} style={{ ...unaLineaStyle, fontSize: 13 }} title={v.etiqueta}>
+                {v.etiqueta} <span style={mutedStyle}>· Bs {formatMonto(v.monto_sistema)}</span>
+              </span>
+            ))
+          ) : vinculo ? (
+            <span style={{ ...unaLineaStyle, fontSize: 13 }} title={`${vinculo.etiqueta} · ${vinculo.metodo_texto}`}>{vinculo.etiqueta}</span>
+          ) : mov.estado === 'ignorado' ? (
+            <span style={mutedStyle}>{mov.motivo_ignorado}</span>
+          ) : null}
+          {aviso || avisoDivido ? <span style={avisoTextoStyle}>{aviso || avisoDivido}</span> : null}
+        </div>
       </td>
-      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {bloqueado ? <span style={mutedStyle}>Día cerrado</span> : null}
+      <td style={{ ...celda({ ...tdStyle, whiteSpace: 'nowrap', textAlign: 'right' }, { gridColumn: '1 / -1', paddingTop: 4 }) }}>
+        <div style={{ display: 'flex', gap: 4, justifyContent: compacto ? 'flex-start' : 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
           {!bloqueado && mov.estado === 'por_revisar' && sugerido ? (
             <>
               <button type="button" style={primaryChipStyle} disabled={ocupado} onClick={() => onConfirmar(sugerido)}>Confirmar</button>
-              <button type="button" style={chipStyle} disabled={ocupado} onClick={() => onRechazar(sugerido)}>Rechazar</button>
-              {mov.clase !== 'comision' ? <button type="button" style={chipStyle} disabled={ocupado} onClick={onBuscar}>Elegir otro</button> : null}
+              <button type="button" style={enlaceStyle} disabled={ocupado} onClick={() => onRechazar(sugerido)}>Rechazar</button>
+              {mov.clase !== 'comision' ? <button type="button" style={enlaceStyle} disabled={ocupado} onClick={onBuscar}>Elegir otro</button> : null}
             </>
           ) : null}
           {!bloqueado && mov.estado === 'sin_coincidencia' ? (
             <>
               {mov.clase !== 'comision' ? <button type="button" style={chipStyle} disabled={ocupado} onClick={onBuscar}>Buscar</button> : null}
-              <button type="button" style={chipStyle} disabled={ocupado} onClick={onIgnorar}>Ignorar</button>
+              <button type="button" style={enlaceStyle} disabled={ocupado} onClick={onIgnorar}>Ignorar</button>
             </>
           ) : null}
           {!bloqueado && (mov.estado === 'conciliado' || mov.estado === 'ignorado') ? (
-            <button type="button" style={chipStyle} disabled={ocupado} onClick={onReabrir}>
+            <button type="button" style={enlaceStyle} disabled={ocupado} onClick={onReabrir}>
               {mov.estado === 'ignorado' ? 'Reabrir' : 'Deshacer'}
             </button>
           ) : null}
@@ -630,10 +767,7 @@ function FilaMovimiento({ mov, bloqueado, ocupado, onConfirmar, onRechazar, onBu
 function TablaPos({ filas }) {
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      <div style={infoStyle}>
-        El banco acredita cada lote del punto de venta, no cada venta. Aquí se compara lo que el banco acreditó cada día contra los lotes que el sistema
-        marcó como acreditados ese día.
-      </div>
+      <div style={mutedStyle}>Lo que el banco acreditó cada día por el punto de venta contra los lotes acreditados en el sistema.</div>
       {!filas || filas.length === 0 ? (
         <div style={emptyStyle}>No hay créditos de punto de venta ni lotes acreditados en este rango.</div>
       ) : (
@@ -670,10 +804,7 @@ function TablaSistema({ filas }) {
   if (filas === null) return <div style={emptyStyle}>Buscando...</div>;
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      <div style={infoStyle}>
-        Cobros y pagos registrados en el sistema para esta cuenta que no aparecen en el banco (ni como sugerencia). Pueden ser
-        operaciones que aún no llegan al banco, o registros con datos mal escritos.
-      </div>
+      <div style={mutedStyle}>Cobros y pagos del sistema que no aparecen en el banco: puede que aún no lleguen o que estén mal escritos.</div>
       {filas.length === 0 ? (
         <div style={emptyStyle}>Todo lo registrado en el sistema aparece en el banco.</div>
       ) : (
@@ -707,43 +838,38 @@ function TablaSistema({ filas }) {
 }
 
 const ESTADOS_DIA = {
-  cerrado: { texto: 'Cerrado', fondo: 'rgba(46, 204, 113, 0.14)', borde: 'rgba(46, 204, 113, 0.55)' },
-  listo: { texto: 'Listo para cerrar', fondo: 'rgba(90, 170, 255, 0.14)', borde: 'rgba(90, 170, 255, 0.55)' },
-  pendiente: { texto: 'Con pendientes', fondo: 'rgba(255, 193, 7, 0.16)', borde: 'rgba(255, 193, 7, 0.6)' },
-  sin_movimientos: { texto: 'Sin movimientos', fondo: 'rgba(var(--vg-ink), 0.06)', borde: 'rgba(var(--vg-ink), 0.25)' },
+  cerrado: { texto: 'Cerrado' },
+  listo: { texto: 'Listo para cerrar' },
+  pendiente: { texto: 'Con pendientes' },
+  sin_movimientos: { texto: 'Sin movimientos' },
 };
+// El estado de un dia usa los mismos colores que el de un movimiento.
+const ESTADO_A_COLOR = { cerrado: 'conciliado', listo: 'pendiente', pendiente: 'por_revisar', sin_movimientos: 'ignorado' };
 
 function TablaCierres({ datos, onCerrar, onReabrir, onVer }) {
   if (!datos) return <div style={emptyStyle}>Cargando cierres...</div>;
   const { resumen, dias } = datos;
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      <div style={infoStyle}>
-        Cada día se cierra cuando todo quedó resuelto: así queda registrado que se revisó contra el banco y el día se bloquea. Al final del mes,
-        si todos los días están cerrados y el saldo encadena de un día al siguiente, el período cuadra.
-      </div>
-      <div style={resumen.completo ? infoStyle : (resumen.discontinuidades > 0 ? avisoStyle : infoStyle)}>
-        <strong>{resumen.cerrados} de {resumen.dias} días cerrados.</strong>
-        {resumen.pendientes ? ` ${resumen.pendientes} con pendientes.` : ''}
+      <div style={mutedStyle}>
+        Un día se cierra cuando todo está resuelto: queda guardado y bloqueado.
         {resumen.listos ? ` ${resumen.listos} listos para cerrar.` : ''}
         {resumen.sin_movimientos ? ` ${resumen.sin_movimientos} sin movimientos cargados.` : ''}
-        {resumen.discontinuidades ? ` ${resumen.discontinuidades} día(s) cuyo saldo no encadena con el anterior.` : ''}
-        {resumen.completo ? ' El período está completo y cuadrado.' : ''}
       </div>
+      {resumen.discontinuidades > 0 ? (
+        <div style={avisoStyle}>{resumen.discontinuidades} día(s) con saldo que no encadena con el anterior: puede faltar alguna línea del banco.</div>
+      ) : null}
       <div style={tablaScrollStyle}>
         <table style={tablaStyle}>
           <thead>
             <tr>
               <th style={thStyle}>Día</th>
               <th style={thStyle}>Estado</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Mov.</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Faltan</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Créditos (Bs)</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Débitos (Bs)</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Entradas (Bs)</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Salidas (Bs)</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>Saldo final (Bs)</th>
-              <th style={thStyle}>Saldo vs. anterior</th>
               <th style={thStyle}>Cierre</th>
-              <th style={thStyle}>Acciones</th>
+              <th style={thStyle} />
             </tr>
           </thead>
           <tbody>
@@ -753,33 +879,35 @@ function TablaCierres({ datos, onCerrar, onReabrir, onVer }) {
                 <tr key={d.fecha}>
                   <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{formatFecha(d.fecha)}</td>
                   <td style={tdStyle}>
-                    <span style={{ ...badgeStyle, background: e.fondo, border: `1px solid ${e.borde}` }}>{e.texto}</span>
-                    {d.reaperturas ? <div style={mutedStyle}>reabierto {d.reaperturas} vez(ces)</div> : null}
+                    <div style={{ display: 'grid', gap: 2 }}>
+                      <EstadoTexto estado={ESTADO_A_COLOR[d.estado]} texto={e.texto} />
+                      <span style={mutedStyle}>
+                        {d.total} {d.total === 1 ? 'movimiento' : 'movimientos'}{d.bloqueos ? ` · ${d.bloqueos} por resolver` : ''}
+                        {d.reaperturas ? ` · reabierto ${d.reaperturas} ${d.reaperturas === 1 ? 'vez' : 'veces'}` : ''}
+                      </span>
+                    </div>
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.total}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.bloqueos || '—'}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMonto(d.creditos)}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{formatMonto(d.debitos)}</td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.saldo_final === null ? '—' : formatMonto(d.saldo_final)}</td>
-                  <td style={tdStyle}>
-                    {d.continuidad === true ? 'Cuadra' : d.continuidad === false ? <span style={avisoTextoStyle}>No cuadra</span> : '—'}
+                  <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatMonto(d.creditos)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatMonto(d.debitos)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {d.saldo_final === null ? '—' : formatMonto(d.saldo_final)}
+                    {d.continuidad === false ? <div style={avisoTextoStyle}>No encadena con el día anterior</div> : null}
                   </td>
-                  <td style={{ ...tdStyle, minWidth: 150 }}>
+                  <td style={{ ...tdStyle, minWidth: 150 }} title={d.cierre?.nota || ''}>
                     {d.cierre ? (
                       <div style={{ display: 'grid', gap: 2 }}>
                         <span>{d.cierre.cerrado_por}</span>
                         <span style={mutedStyle}>{formatFechaHora(d.cierre.fecha_cierre)}</span>
-                        {d.cierre.nota ? <span style={mutedStyle}>{d.cierre.nota}</span> : null}
                       </div>
                     ) : '—'}
                   </td>
-                  <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <td style={{ ...tdStyle, whiteSpace: 'nowrap', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
                       {d.estado === 'listo' || d.estado === 'sin_movimientos' ? (
                         <button type="button" style={primaryChipStyle} onClick={() => onCerrar(d)}>Cerrar día</button>
                       ) : null}
-                      {d.estado === 'cerrado' ? <button type="button" style={chipStyle} onClick={() => onReabrir(d)}>Reabrir</button> : null}
-                      {d.total > 0 ? <button type="button" style={chipStyle} onClick={() => onVer(d)}>Ver movimientos</button> : null}
+                      {d.total > 0 ? <button type="button" style={enlaceStyle} onClick={() => onVer(d)}>Ver</button> : null}
+                      {d.estado === 'cerrado' ? <button type="button" style={enlaceStyle} onClick={() => onReabrir(d)}>Reabrir</button> : null}
                     </div>
                   </td>
                 </tr>
@@ -952,8 +1080,7 @@ function ImportarModal({ cuenta, onCerrar, onImportado, onError }) {
       <div style={modalStyle(true)} onClick={(e) => e.stopPropagation()}>
         <div style={modalTituloStyle}>Importar extracto del banco</div>
         <div style={mutedStyle}>
-          Cuenta: <strong style={{ color: 'var(--vg-text-strong)' }}>{cuenta}</strong>. Puedes subir un día, un rango o el mes completo:
-          los movimientos que ya estaban cargados se omiten solos.
+          <strong style={{ color: 'var(--vg-text-strong)' }}>{cuenta}</strong> · Sube un día, un rango o el mes: lo ya cargado se omite solo.
         </div>
         <input
           type="file"
@@ -1020,10 +1147,9 @@ function Dato({ etiqueta, valor }) {
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 14, padding: isMobile ? 6 : 10 });
 const headerRowStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' };
 const titleStyle = (isMobile) => ({ margin: 0, color: 'var(--vg-text-strong)', fontSize: isMobile ? 26 : 32 });
-const subtitleStyle = { margin: '6px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeight: 1.5, fontSize: 14 };
 const mutedStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 };
 const backButtonStyle = { justifySelf: 'start', border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '8px 14px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
-const panelStyle = { display: 'grid', gap: 12, padding: 16, borderRadius: 18, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
+const panelStyle = { display: 'grid', gap: 10, padding: 12, borderRadius: 16, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
 const controlesStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(220px, 320px) 1fr', gap: 14, alignItems: 'end' });
 const accionesStyle = { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' };
 const checkStyle = { display: 'flex', alignItems: 'center', gap: 6, color: 'var(--vg-f-d2c3c3)', fontSize: 13, cursor: 'pointer' };
@@ -1035,19 +1161,25 @@ const avisoStyle = { padding: '8px 12px', borderRadius: 10, border: '1px solid v
 const avisoTextoStyle = { color: 'var(--vg-f-ffe3a3)', fontSize: 12 };
 const infoStyle = { padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-f-d2c3c3)', fontSize: 13 };
 const previewStyle = { display: 'grid', gap: 10, padding: 12, borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)' };
-const previewTituloStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' };
+const previewTituloStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 11.5, fontWeight: 800 };
 const datosGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 };
-const tarjetasStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 10 });
-const tarjetaStyle = { display: 'grid', gap: 4, textAlign: 'left', padding: 14, borderRadius: 16, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.03)', color: 'var(--vg-text-strong)' };
-const tarjetaValorStyle = { fontSize: 28, fontWeight: 800, color: 'var(--vg-text-strong)' };
-const pestanasStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' };
-const pestanaStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '8px 14px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
-const pestanaActivaStyle = { ...pestanaStyle, background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', borderColor: 'transparent', color: '#fff' };
+// Resumen en una sola franja (una sola caja con divisores, no cinco tarjetas sueltas).
+const resumenStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 1, borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'rgba(var(--vg-ink), 0.1)' });
+const cifraStyle = { display: 'grid', gap: 3, alignContent: 'start', textAlign: 'left', padding: '12px 14px', border: 'none', background: 'var(--vg-s-161010)', color: 'var(--vg-text-strong)', font: 'inherit' };
+const cifraValorStyle = { fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums' };
+const cifraNotaStyle = { color: 'var(--vg-f-c8bbbb)', fontSize: 12.5, fontVariantNumeric: 'tabular-nums' };
+const barraPistaStyle = { display: 'block', height: 4, borderRadius: 999, background: 'rgba(var(--vg-ink), 0.12)', overflow: 'hidden' };
+const barraRellenoStyle = { display: 'block', height: '100%', borderRadius: 999, background: 'var(--vg-f-9fe3b0)' };
+const unaLineaStyle = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+const enlaceStyle = { border: 'none', background: 'none', padding: '4px 6px', color: 'var(--vg-f-d2c3c3)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 3 };
+const diaEncabezadoStyle = { padding: '16px 8px 6px', borderBottom: '1px solid rgba(var(--vg-ink), 0.12)' };
+const pestanasStyle = { display: 'flex', gap: 4, flexWrap: 'wrap', borderBottom: '1px solid rgba(var(--vg-ink), 0.12)' };
+const pestanaStyle = { border: 'none', borderBottom: '2px solid transparent', marginBottom: -1, padding: '8px 12px', background: 'none', color: 'var(--vg-f-c8bbbb)', fontWeight: 600, cursor: 'pointer', fontSize: 13.5 };
+const pestanaActivaStyle = { ...pestanaStyle, color: 'var(--vg-text-strong)', fontWeight: 800, borderBottomColor: 'var(--vg-accent-primary)' };
 const tablaScrollStyle = { overflowX: 'auto' };
 const tablaStyle = { width: '100%', borderCollapse: 'collapse', fontSize: 13 };
 const thStyle = { textAlign: 'left', padding: '6px 8px', color: 'var(--vg-f-c8bbbb)', fontSize: 11.5, fontWeight: 700, borderBottom: '1px solid rgba(var(--vg-ink), 0.12)' };
-const tdStyle = { padding: '8px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)', color: 'var(--vg-text-strong)', verticalAlign: 'top' };
-const badgeStyle = { display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 11.5, fontWeight: 800, color: 'var(--vg-text-strong)', whiteSpace: 'nowrap' };
+const tdStyle = { padding: '9px 8px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)', color: 'var(--vg-text-strong)', verticalAlign: 'middle' };
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '11px 20px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 800, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const chipStyle = { border: '1px solid rgba(var(--vg-ink), 0.16)', borderRadius: 999, padding: '5px 11px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 12, cursor: 'pointer' };

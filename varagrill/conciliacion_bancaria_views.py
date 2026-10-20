@@ -378,7 +378,10 @@ def conciliacion_confirmar_probables_view(request):
 
 @csrf_exempt
 def conciliacion_movimiento_accion_view(request, movimiento_id):
-    """accion: confirmar (vinculo_id) | rechazar (vinculo_id) | elegir (tipo, origen_id) | ignorar (motivo) | reabrir."""
+    """
+    accion: confirmar (vinculo_id) | rechazar (vinculo_id) | elegir (tipo, origen_id, o `registros`: [{tipo, origen_id}, ...]
+    para un pago dividido en varios registros) | ignorar (motivo) | reabrir.
+    """
     if request.method != 'POST':
         return _metodo_no_permitido()
     error = _sin_permiso(request)
@@ -404,7 +407,12 @@ def conciliacion_movimiento_accion_view(request, movimiento_id):
             else:
                 motor.rechazar_vinculo(vinculo, request.user)
         elif accion == 'elegir':
-            motor.vincular_manual(mov, str(data.get('tipo', '')), data.get('origen_id'), request.user)
+            registros = data.get('registros')
+            if registros is None:
+                registros = [{'tipo': data.get('tipo', ''), 'origen_id': data.get('origen_id')}]
+            if not isinstance(registros, list) or not all(isinstance(r, dict) for r in registros):
+                return _auth_response({'ok': False, 'message': 'Datos invalidos.'}, status=400)
+            motor.vincular_varios(mov, [(str(r.get('tipo', '')), r.get('origen_id')) for r in registros], request.user)
         elif accion == 'ignorar':
             motor.ignorar_movimiento(mov, data.get('motivo'), request.user)
         elif accion == 'reabrir':
@@ -433,8 +441,9 @@ def conciliacion_candidatos_view(request, movimiento_id):
         return _auth_response({'ok': False, 'message': 'El movimiento no existe.'}, status=404)
     if mov.clase == 'comision':
         return _auth_response({'ok': True, 'candidatos': []})
+    todos = request.GET.get('todos') in ('1', 'true')
     return _auth_response({
-        'ok': True, 'candidatos': [_serializar_candidato(c, ev) for c, ev in motor.candidatos_para(mov)],
+        'ok': True, 'candidatos': [_serializar_candidato(c, ev) for c, ev in motor.candidatos_para(mov, todos=todos)],
     })
 
 

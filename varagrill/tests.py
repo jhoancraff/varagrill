@@ -5115,6 +5115,93 @@ class ConciliacionBancariaMotorTests(TestCase):
         dudoso.refresh_from_db()
         self.assertEqual((limpio.estado, dudoso.estado), ('conciliado', 'por_revisar'))
 
+    # ---- un movimiento que paga varios registros (compra + gasto en una sola transferencia)
+    def abono_compra(self, bs, referencia='', proveedor='Representaciones Andover', dia=5):
+        c = self.M.Compra.objects.create(proveedor_nombre=proveedor, estado='recibido', total=Decimal(bs) / Decimal('100'), saldo_pendiente=0)
+        a = self.M.AbonoCompra.objects.create(
+            compra=c, monto=c.total, metodo_pago=self.pm, referencia=referencia, tasa_cambio_referencia=Decimal('100'),
+        )
+        self.M.AbonoCompra.objects.filter(pk=a.pk).update(fecha_pago=self.dt(dia))
+        return c, a
+
+    def test_una_transferencia_que_paga_una_compra_y_un_gasto_con_la_misma_referencia_se_concilia_sola(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '1041173.16', ref='090819857', desc='TRF MERCAN J300969665 REPRESEN')
+        g, ag = self.gasto('316484.27', comprobante='90819857', descripcion='pitillos-papel de aluminio')
+        c, ac = self.abono_compra('724688.89', referencia='090819857')
+        self.assertEqual(self.conciliar(), {'conciliado': 1})
+        m.refresh_from_db()
+        vinculos = list(m.vinculos.order_by('id'))
+        self.assertEqual(m.estado, 'conciliado')
+        self.assertEqual(
+            sorted((v.origen_tipo, v.origen_id, v.estado, v.metodo) for v in vinculos),
+            sorted([('abono_gasto', ag.id, 'confirmado', 'referencia'), ('abono_compra', ac.id, 'confirmado', 'referencia')]),
+        )
+        self.assertEqual(sum(v.monto_sistema for v in vinculos), Decimal('1041173.16'))
+        self.assertIn('Pago dividido en 2 registros', vinculos[0].nota)
+        # ninguno de los dos queda como "en el sistema, no en el banco"
+        self.assertEqual(motor.registros_sin_movimiento(self.CUENTA, date(2026, 10, 1), date(2026, 10, 31)), [])
+
+    def test_con_la_misma_referencia_pero_una_suma_que_no_cuadra_no_se_une_sola(self):
+        m = self.mov('debito', '1041173.16', ref='090819857', desc='TRF MERCAN J300969665 REPRESEN')
+        self.gasto('316484.27', comprobante='90819857')
+        self.abono_compra('500000.00', referencia='090819857')
+        self.conciliar()
+        m.refresh_from_db()
+        self.assertNotEqual(m.estado, 'conciliado')
+        self.assertEqual(m.vinculos.filter(estado='confirmado').count(), 0)
+
+    def test_vincular_varios_a_mano_y_deshacerlo(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '1000.00', ref='77', desc='TRF PROVEEDOR')
+        g, ag = self.gasto('400.00', descripcion='Flete', dia=6)
+        c, ac = self.abono_compra('600.00', dia=6)
+        otro_g, otro_a = self.gasto('50.00', descripcion='Otro', dia=6)
+        motor.vincular_varios(m, [('abono_gasto', ag.id), ('abono_compra', ac.id)], self.admin)
+        m.refresh_from_db()
+        self.assertEqual(m.estado, 'conciliado')
+        self.assertEqual(m.vinculos.filter(estado='confirmado', metodo='manual').count(), 2)
+        self.assertNotIn('Difiere', m.vinculos.order_by('id').first().nota)
+        # lo vinculado no se puede usar en otro movimiento, ni agregar a un movimiento ya conciliado
+        otro_mov = self.mov('debito', '400.00', ref='78', desc='COMPRA MAESTRO', dia=6)
+        with self.assertRaises(motor.AccionInvalida):
+            motor.vincular_varios(otro_mov, [('abono_gasto', ag.id)], self.admin)
+        with self.assertRaises(motor.AccionInvalida):
+            motor.vincular_varios(m, [('abono_gasto', otro_a.id)], self.admin)
+        motor.reabrir_movimiento(m, self.admin)
+        m.refresh_from_db()
+        self.assertFalse(m.vinculos.filter(estado='confirmado').exists())
+        self.assertNotEqual(m.estado, 'conciliado')
+
+    def test_vincular_varios_anota_la_diferencia_si_la_suma_no_es_el_monto_del_banco(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '1000.00', ref='77', desc='TRF PROVEEDOR')
+        g, ag = self.gasto('400.00', dia=6)
+        c, ac = self.abono_compra('550.00', dia=6)
+        motor.vincular_varios(m, [('abono_gasto', ag.id), ('abono_compra', ac.id)], self.admin)
+        primero = m.vinculos.order_by('id').first()
+        self.assertEqual(primero.diferencia, Decimal('-50.00'))
+        self.assertIn('Difiere del banco en Bs 50.00', primero.nota)
+
+    def test_vincular_varios_sin_registros_o_con_uno_inexistente_falla(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '1000.00', ref='77', desc='TRF PROVEEDOR')
+        with self.assertRaises(motor.AccionInvalida):
+            motor.vincular_varios(m, [], self.admin)
+        with self.assertRaises(motor.AccionInvalida):
+            motor.vincular_varios(m, [('abono_gasto', 999999)], self.admin)
+
+    def test_candidatos_todos_incluye_registros_de_monto_muy_distinto_con_la_misma_referencia_primero(self):
+        from varagrill import conciliacion_bancaria as motor
+        m = self.mov('debito', '1000.00', ref='90819857', desc='TRF PROVEEDOR')
+        g, ag = self.gasto('400.00', descripcion='Flete', dia=5)
+        c, ac = self.abono_compra('100.00', dia=5, referencia='90819857')
+        normales = [(x.tipo, x.id) for x, _ in motor.candidatos_para(m)]
+        todos = [(x.tipo, x.id) for x, _ in motor.candidatos_para(m, todos=True)]
+        self.assertNotIn(('abono_gasto', ag.id), normales)
+        self.assertEqual(set(todos), {('abono_gasto', ag.id), ('abono_compra', ac.id)})
+        self.assertEqual(todos[0], ('abono_compra', ac.id))
+
     # ---- comisiones, POS, reverso
     def test_las_comisiones_del_dia_se_comparan_en_suma_contra_el_gasto_de_comision(self):
         a = self.mov('debito', '10.00', ref='1', desc='COM TRF 019331385')
@@ -5247,6 +5334,34 @@ class ConciliacionBancariaViewsTests(TestCase):
         self.assertEqual(self.client.post(accion, data=json.dumps({'accion': 'volar'}), content_type='application/json').status_code, 400)
         mesero_url = self.BASE + 'movimientos/999999/accion/'
         self.assertEqual(self.client.post(mesero_url, data='{}', content_type='application/json').status_code, 404)
+
+    def test_elegir_varios_registros_para_un_solo_movimiento_por_api(self):
+        from decimal import Decimal as D
+        from varagrill.models import VGAbonoCompra, VGAbonoGasto, VGCategoriaGasto, VGCompra, VGGasto
+        self.subir('confirm')
+        metodo = VGMetodoPago.objects.get(nombre='PM Vista')
+        debito = VGMovimientoBancario.objects.get(tipo='debito')  # Bs 100,00 del dia 01/10
+        tasa = D('100')
+        g = VGGasto.objects.create(
+            categoria=VGCategoriaGasto.objects.get_or_create(nombre='Servicios')[0], descripcion='Hielo', monto=D('0.40'),
+            saldo_pendiente=0, estado_pago='pagado', fecha_gasto=date(2026, 10, 1), tasa_cambio_referencia=tasa,
+        )
+        ag = VGAbonoGasto.objects.create(gasto=g, monto=g.monto, metodo_pago=metodo, tasa_cambio_referencia=tasa)
+        c = VGCompra.objects.create(proveedor_nombre='Prov', estado='recibido', total=D('0.60'), saldo_pendiente=0)
+        ac = VGAbonoCompra.objects.create(compra=c, monto=c.total, metodo_pago=metodo, tasa_cambio_referencia=tasa)
+        self.client.force_login(self.admin)
+        url = self.BASE + f'movimientos/{debito.id}/accion/'
+        r = self.client.post(url, data=json.dumps({'accion': 'elegir', 'registros': 'basura'}), content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post(url, data=json.dumps({'accion': 'elegir', 'registros': [
+            {'tipo': 'abono_gasto', 'origen_id': ag.id}, {'tipo': 'abono_compra', 'origen_id': ac.id},
+        ]}), content_type='application/json')
+        self.assertEqual(r.status_code, 200, r.content)
+        mov = r.json()['movimiento']
+        self.assertEqual(mov['estado'], 'conciliado')
+        self.assertEqual(sorted(v['origen_tipo'] for v in mov['vinculos']), ['abono_compra', 'abono_gasto'])
+        r = self.client.get(self.BASE + f'movimientos/{debito.id}/candidatos/?todos=1')
+        self.assertEqual(r.status_code, 200)
 
     def test_el_pdf_lo_descargan_solo_administrador_y_contador(self):
         self.subir('confirm')

@@ -5,6 +5,7 @@ import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilid
 import BotonDescargarPdf from './BotonDescargarPdf';
 import ReporteNotasCreditoCompra from './ReporteNotasCreditoCompra';
 import { RangoFechas } from './FiltroFechas';
+import MoneyInput from './MoneyInput';
 
 // `bsPreciso`, cuando viene, es el total_bs que ya calculó el backend (para
 // una compra con total_bs_factura, es el monto EXACTO que el analista
@@ -765,13 +766,14 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                         Bolívares (Bs)
                       </button>
                     </div>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="any"
+                    {/* Con separador de miles mientras se escribe (1,100.88), igual que los cobros;
+                        el valor que se guarda y se envía es el número limpio. En $ admite hasta
+                        6 decimales para que "Pagar todo el saldo" no pierda centavos. */}
+                    <MoneyInput
+                      maxDecimales={monedaAbono === 'VES' ? 2 : 6}
                       placeholder={monedaAbono === 'VES' ? 'Monto del abono en Bs' : 'Monto del abono en $'}
                       value={montoAbono}
-                      onChange={(event) => setMontoAbono(event.target.value)}
+                      onChange={setMontoAbono}
                       style={inputStyle}
                       required
                     />
@@ -780,13 +782,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                         <label style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>
                           Tasa de este pago (Bs por $) — cámbiala si el proveedor cobró a otra tasa
                         </label>
-                        <input
-                          type="number"
-                          min="0.0001"
-                          step="0.0001"
+                        <MoneyInput
+                          maxDecimales={4}
                           placeholder={Number.isFinite(tasaPorDefecto) && tasaPorDefecto > 0 ? `Sin cambiar usa ${tasaPorDefecto} (${origenTasaPorDefecto})` : 'Tasa en Bs por $'}
                           value={tasaAbono}
-                          onChange={(event) => setTasaAbono(event.target.value)}
+                          onChange={setTasaAbono}
                           style={inputStyle}
                         />
                         {Number.isFinite(tasaEfectiva) && tasaEfectiva > 0 ? (

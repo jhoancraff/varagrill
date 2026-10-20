@@ -438,8 +438,10 @@ def reporte_conciliacion_bancaria_pdf_view(request):
             conciliados.append({
                 'fecha': fecha, 'referencia': m.referencia, 'descripcion': m.descripcion, 'tipo': m.tipo,
                 'monto': m.monto,
-                'con': (_etiqueta(confirmados[0]) + (' (suma del día)' if confirmados[0].metodo == 'comision_dia' else ''))
-                if confirmados else '',
+                'con': (
+                    ' + '.join(_etiqueta(v) for v in confirmados)
+                    + (' (suma del día)' if confirmados[0].metodo == 'comision_dia' else '')
+                ) if confirmados else '',
             })
 
     no_banco = [

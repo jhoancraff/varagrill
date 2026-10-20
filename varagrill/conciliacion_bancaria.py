@@ -19,7 +19,11 @@ Niveles de confianza de cada cruce (ver evaluar):
   sin coincidencia
 
 Un registro del sistema solo se concilia contra UN movimiento (salvo los gastos de comision del
-dia). Nada de esto modifica pagos, gastos ni compras: solo crea vinculos (VGConciliacionMovimiento).
+dia). Al reves si: UN movimiento puede pagar VARIOS registros (ej. una sola transferencia al
+proveedor que salda una compra y un gasto): se vinculan todos juntos y su suma se compara con el
+monto del banco (ver vincular_varios; si comparten la referencia del banco y suman el monto, el
+cruce automatico los une solo). Nada de esto modifica pagos, gastos ni compras: solo crea vinculos
+(VGConciliacionMovimiento).
 
 Cierre diario (VGCierreConciliacion): cada dia se "cierra" cuando no queda nada por revisar; el cierre
 guarda la foto de los numeros del dia y bloquea el dia (no se tocan sus movimientos ni se importan
@@ -31,6 +35,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from itertools import combinations
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
@@ -58,6 +63,10 @@ MIN_DIGITOS_SUFIJO = 4
 HOLGURA_POOL_DIAS = 31                      # cuanto se amplian las fechas al buscar candidatos
 PUNTAJE_SEGURO = 95
 PUNTAJE_PROBABLE_MIN = 66                   # "confirmar probables" en bloque
+MIN_DIGITOS_GRUPO = 4                       # pago dividido automatico: referencia de al menos 4 digitos...
+MAX_GRUPO = 10                              # ...y hasta 10 registros con esa misma referencia
+VENTANA_TODOS_DIAS = 7                      # "ver todos" al elegir a mano: registros hasta 7 dias alrededor
+LIMITE_TODOS = 80
 
 ESTADOS_RECONCILIABLES = ('pendiente', 'por_revisar', 'sin_coincidencia')
 
@@ -427,6 +436,53 @@ def _guardar_vinculo(mov, candidato, ev, estado, usuario, metodo=None, nota=None
     )[0]
 
 
+def _tolerancia_referencia(mov):
+    return max(TOL_REF_ABS, (mov.monto * TOL_REF_PCT).quantize(CENT))
+
+
+def _guardar_grupo(mov, candidatos, usuario, metodo, puntaje):
+    """
+    Confirma varios registros del sistema contra UN movimiento (pago dividido). Cada registro queda con su
+    propio monto; la diferencia entre la suma y el banco se anota una sola vez (en el primero) y en la nota.
+    """
+    total = sum((c.monto for c in candidatos), Decimal('0'))
+    diferencia = (total - mov.monto).quantize(CENT)
+    nota = f'Pago dividido en {len(candidatos)} registros: suma Bs {total:,.2f}.'
+    if abs(diferencia) > _tolerancia_referencia(mov):
+        nota += f' Difiere del banco en Bs {abs(diferencia):,.2f}.'
+    fecha_mov = _fecha_local(mov.fecha)
+    for i, cand in enumerate(candidatos):
+        ev = Evaluacion(puntaje, metodo, diferencia if i == 0 else Decimal('0.00'), _dias_entre(fecha_mov, cand), nota)
+        _guardar_vinculo(mov, cand, ev, 'confirmado', usuario, metodo=metodo)
+
+
+def _grupo_por_referencia(mov, pool, ocupadas, rechazados, usados):
+    """
+    Varios registros con la MISMA referencia del banco cuya suma es el monto del movimiento (una transferencia que
+    paga, por ejemplo, una compra y un gasto a la vez). None si no hay, si un solo registro ya alcanza (eso lo
+    resuelve el cruce normal) o si la referencia es corta y podria coincidir por casualidad.
+    """
+    ref = _solo_digitos(mov.referencia)
+    if len(ref) < MIN_DIGITOS_GRUPO:
+        return None
+    fecha_mov = _fecha_local(mov.fecha)
+    mismos = [
+        c for c in pool
+        if c.referencia == ref and c.clave not in ocupadas and c.clave not in usados
+        and (mov.id, *c.clave) not in rechazados and _dias_entre(fecha_mov, c) <= VENTANA_REF_EXACTA_DIAS
+    ]
+    if len(mismos) < 2 or len(mismos) > MAX_GRUPO:
+        return None
+    tolerancia = _tolerancia_referencia(mov)
+    if any(abs(c.monto - mov.monto) <= tolerancia for c in mismos):
+        return None
+    for tamano in range(2, len(mismos) + 1):
+        for combo in combinations(mismos, tamano):
+            if abs(sum((c.monto for c in combo), Decimal('0')) - mov.monto) <= tolerancia:
+                return list(combo)
+    return None
+
+
 def _indexar(pool):
     """Indices para no comparar cada movimiento contra todo el pool: por monto (ordenado) y por ultimos 3 digitos de la referencia."""
     por_monto = sorted(range(len(pool)), key=lambda i: pool[i].monto)
@@ -454,9 +510,19 @@ def _conciliar_lado(movs, pool, ocupadas, rechazados, es_credito, usuario):
     pares = []
     por_mov = defaultdict(list)
     indice = _indexar(pool)
+    # Primero los pagos divididos (varios registros con la referencia del banco que suman su monto): esos
+    # registros ya no compiten por ningun otro movimiento.
+    grupos, usados_grupo = {}, set()
     for mov in movs:
+        grupo = _grupo_por_referencia(mov, pool, ocupadas, rechazados, usados_grupo)
+        if grupo:
+            grupos[mov.id] = grupo
+            usados_grupo.update(c.clave for c in grupo)
+    for mov in movs:
+        if mov.id in grupos:
+            continue
         for cand in _candidatos_de(mov, pool, indice):
-            if cand.clave in ocupadas or (mov.id, *cand.clave) in rechazados:
+            if cand.clave in ocupadas or cand.clave in usados_grupo or (mov.id, *cand.clave) in rechazados:
                 continue
             ev = evaluar(mov, cand, es_credito)
             if ev is not None:
@@ -473,6 +539,12 @@ def _conciliar_lado(movs, pool, ocupadas, rechazados, es_credito, usuario):
 
     resultado = defaultdict(int)
     for mov in movs:
+        if mov.id in grupos:
+            _guardar_grupo(mov, grupos[mov.id], usuario, 'referencia', 100)
+            mov.estado = 'conciliado'
+            mov.save(update_fields=['estado', 'fecha_actualizacion'])
+            resultado['conciliado'] += 1
+            continue
         asignado = asignados.get(mov.id)
         if asignado is None:
             mov.estado = 'sin_coincidencia'
@@ -665,45 +737,84 @@ def rechazar_vinculo(vinculo, usuario):
 
 def vincular_manual(mov, tipo, origen_id, usuario):
     """Una persona elige un registro concreto del sistema para este movimiento."""
+    return vincular_varios(mov, [(tipo, origen_id)], usuario)
+
+
+def vincular_varios(mov, origenes, usuario):
+    """
+    Una persona elige uno o VARIOS registros del sistema que este movimiento pago a la vez (ej. una transferencia
+    que salda una compra y un gasto del mismo proveedor). `origenes` es una lista de (tipo, origen_id). Todos
+    quedan confirmados juntos; si su suma no es el monto del banco, queda anotada la diferencia.
+    """
     _exigir_dia_abierto(mov)
     if mov.estado == 'ignorado':
         raise AccionInvalida('Este movimiento está ignorado: reábrelo primero.')
     if mov.clase == 'comision':
         raise AccionInvalida('Las comisiones se concilian por día contra el gasto de comisión.')
+    claves = list(dict.fromkeys((str(tipo), int(origen_id)) for tipo, origen_id in origenes))
+    if not claves:
+        raise AccionInvalida('Elige al menos un registro del sistema.')
+    if mov.vinculos.filter(estado='confirmado').exists():
+        raise AccionInvalida('Este movimiento ya está conciliado: deshaz la conciliación primero.')
     es_credito = mov.tipo == 'credito'
     dia = _fecha_local(mov.fecha)
     pool = _cargar_pool(mov.cuenta_bancaria, dia - timedelta(days=HOLGURA_POOL_DIAS), dia + timedelta(days=HOLGURA_POOL_DIAS), es_credito)
-    cand = next((c for c in pool if c.tipo == tipo and c.id == int(origen_id)), None)
-    if cand is None:
-        raise AccionInvalida('Ese registro no es un candidato válido para este movimiento.')
-    if cand.clave in _claves_ocupadas():
+    por_clave = {c.clave: c for c in pool}
+    elegidos = []
+    for clave in claves:
+        cand = por_clave.get(clave)
+        if cand is None:
+            raise AccionInvalida('Ese registro no es un candidato válido para este movimiento.')
+        elegidos.append(cand)
+    ocupadas = _claves_ocupadas()
+    if any(c.clave in ocupadas for c in elegidos):
         raise AccionInvalida('Ese registro del sistema ya está conciliado con otro movimiento del banco.')
-    ev = Evaluacion(
-        100, 'manual', (cand.monto - mov.monto).quantize(CENT), _dias_entre(dia, cand),
-        'Elegido manualmente.' if abs(cand.monto - mov.monto) <= TOL_MONTO_EXACTO else 'Elegido manualmente; el monto difiere.',
-    )
     try:
         with transaction.atomic():
             mov.vinculos.filter(estado='sugerido').delete()
-            _guardar_vinculo(mov, cand, ev, 'confirmado', usuario, metodo='manual')
+            if len(elegidos) == 1:
+                cand = elegidos[0]
+                ev = Evaluacion(
+                    100, 'manual', (cand.monto - mov.monto).quantize(CENT), _dias_entre(dia, cand),
+                    'Elegido manualmente.' if abs(cand.monto - mov.monto) <= TOL_MONTO_EXACTO else 'Elegido manualmente; el monto difiere.',
+                )
+                _guardar_vinculo(mov, cand, ev, 'confirmado', usuario, metodo='manual')
+            else:
+                _guardar_grupo(mov, elegidos, usuario, 'manual', 100)
             _refrescar_estado(mov)
     except IntegrityError:
         raise AccionInvalida('Ese registro del sistema ya está conciliado con otro movimiento del banco.')
     return mov
 
 
-def candidatos_para(mov, limite=8):
-    """Registros del sistema que podrian ser este movimiento, del mejor al peor (para elegir a mano)."""
+def candidatos_para(mov, limite=8, todos=False):
+    """
+    Registros del sistema que podrian ser este movimiento, del mejor al peor (para elegir a mano).
+    Con `todos`, cualquier registro libre de esa cuenta en los dias cercanos aunque su monto no se parezca: sirve para
+    armar un pago dividido (los de la misma referencia del banco van primero).
+    """
     es_credito = mov.tipo == 'credito'
     dia = _fecha_local(mov.fecha)
     pool = _cargar_pool(mov.cuenta_bancaria, dia - timedelta(days=HOLGURA_POOL_DIAS), dia + timedelta(days=HOLGURA_POOL_DIAS), es_credito)
     ocupadas = _claves_ocupadas()
+    ref_banco = _solo_digitos(mov.referencia)
     filas = []
     for c in pool:
         if c.clave in ocupadas:
             continue
         ev = evaluar(mov, c, es_credito)
         dias = _dias_entre(dia, c)
+        if todos:
+            if dias > VENTANA_TODOS_DIAS:
+                continue
+            if ev is None:
+                misma_ref = bool(ref_banco) and c.referencia == ref_banco
+                ev = Evaluacion(
+                    60 if misma_ref else max(1, 10 - dias), 'manual', (c.monto - mov.monto).quantize(CENT), dias,
+                    'Misma referencia que el banco.' if misma_ref else '',
+                )
+            filas.append((c, ev))
+            continue
         if ev is None:
             # mas laxo que el cruce automatico: monto parecido (10%) y fecha cercana; si la observacion del
             # banco comparte palabras con el registro (ej. "insumos para llevar"), sube en la lista.
@@ -716,6 +827,9 @@ def candidatos_para(mov, limite=8):
             else:
                 continue
         filas.append((c, ev))
+    if todos:
+        filas.sort(key=lambda x: (-x[1].puntaje, x[1].dias, x[0].monto))
+        return filas[:LIMITE_TODOS]
     filas.sort(key=lambda x: (-x[1].puntaje, abs(x[1].diferencia), x[1].dias))
     return filas[:limite]
 

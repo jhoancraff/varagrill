@@ -86,6 +86,9 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   // Tasa propia del abono (vacia = la de la factura/BCV). Ver tasaPorDefecto.
   const [tasaAbono, setTasaAbono] = useState('');
   const [metodoAbono, setMetodoAbono] = useState('');
+  // Nº de la transferencia / pago móvil con el que se pagó: se guarda en VGAbonoCompra.referencia
+  // (y VGAbonoGasto.referencia), que es lo que la conciliación bancaria cruza con el extracto.
+  const [referenciaAbono, setReferenciaAbono] = useState('');
   const [savingAbono, setSavingAbono] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
@@ -212,6 +215,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setMontoAbono('');
     setMonedaAbono('USD');
     setTasaAbono('');
+    setReferenciaAbono('');
     setSelectedCompraId(compra.id);
     setSelectedTipo(compra.tipo);
     fetchCompraDetalle(compra.id, compra.tipo);
@@ -272,6 +276,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
           // Solo si la tasa se cambio a mano: asi un abono normal sigue usando la de la factura.
           ...(selectedTipo === 'compra' && tasaAbonoManual ? { tasa_cambio: tasaAbono } : {}),
           metodo_pago_id: metodoPagoId,
+          referencia: referenciaAbono.trim(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -287,6 +292,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       setUltimoAbonoId(data.abono.id);
       setMontoAbono('');
       setTasaAbono('');
+      setReferenciaAbono('');
       await fetchCompras();
     } catch (requestError) {
       setFeedbackType('error');
@@ -649,7 +655,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                     <div style={{ color: 'var(--vg-f-9fe3b0)', fontWeight: 700, fontSize: 12, textTransform: 'uppercase' }}>Abonos registrados</div>
                     {compraDetalle.abonos.map((abono) => (
                       <div key={abono.id} style={lineaRowStyle}>
-                        <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
+                        <span>
+                          {abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}
+                          {abono.referencia ? ` · Ref. ${abono.referencia}` : ''}
+                        </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           {abono.tasa_manual ? <span title={`Pagado a tasa propia: ${abono.tasa_cambio_referencia}`} style={{ color: 'var(--vg-f-ffcf7d)', fontSize: 11.5 }}>tasa {abono.tasa_cambio_referencia}</span> : null}
                           {formatUsdBs(abono.monto, abono.tasa_cambio_referencia ?? tasaCambio, abono.monto_bs)}
@@ -812,6 +821,14 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                         <option key={metodo.id} value={metodo.id}>{metodo.nombre}</option>
                       ))}
                     </select>
+                    <input
+                      type="text"
+                      maxLength={100}
+                      placeholder="ID de la transferencia o pago móvil (opcional)"
+                      value={referenciaAbono}
+                      onChange={(event) => setReferenciaAbono(event.target.value)}
+                      style={inputStyle}
+                    />
                     <button type="submit" style={primaryButtonStyle} disabled={savingAbono}>
                       {savingAbono ? 'Registrando...' : 'Registrar abono'}
                     </button>

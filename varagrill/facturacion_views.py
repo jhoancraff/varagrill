@@ -1392,7 +1392,7 @@ def nota_entrega_reimprimir_view(request, nota_id):
         return _auth_response({'ok': False, 'message': 'No tienes permiso para reimprimir notas de entrega.'}, status=401)
 
     try:
-        nota = VGNotaEntrega.objects.get(pk=nota_id)
+        nota = VGNotaEntrega.objects.select_related('cliente').get(pk=nota_id)
     except VGNotaEntrega.DoesNotExist:
         return _auth_response({'ok': False, 'message': 'La nota de entrega no existe.'}, status=404)
 

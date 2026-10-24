@@ -207,7 +207,7 @@ def _metodo_pago_para_impresion(nota):
 
 def _build_recibo_bytes(
     pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None,
-    descuento_manual=None, descuento_manual_motivo='',
+    descuento_manual=None, descuento_manual_motivo='', cliente=None,
 ):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
     metodo_label = metodo_pago.nombre
@@ -228,6 +228,23 @@ def _build_recibo_bytes(
     out += _text('-' * LINE_WIDTH) + FEED
     out += _text(f'Referencia: {referencia}') + FEED
     out += _text(hora) + FEED
+    if cliente is not None:
+        nombre_cliente = ' '.join(
+            parte for parte in (cliente.nombre, cliente.apellido) if parte.strip()
+        )
+        if nombre_cliente:
+            out += _text(f'Cliente: {nombre_cliente}') + FEED
+        if cliente.numero_documento:
+            etiquetas_documento = {
+                'V': 'Cédula',
+                'E': 'Cédula',
+                'J': 'RIF',
+                'G': 'RIF',
+                'P': 'Pasaporte',
+            }
+            etiqueta_documento = etiquetas_documento.get(cliente.tipo_documento, 'Documento')
+            prefijo_documento = f'{cliente.tipo_documento}-' if cliente.tipo_documento else ''
+            out += _text(f'{etiqueta_documento}: {prefijo_documento}{cliente.numero_documento}') + FEED
 
     subtotal_total = 0
     impuesto_total = 0
@@ -331,6 +348,7 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
             pedidos, metodo_pago, nota.referencia, nota.total, nota.tasa_cambio_referencia,
             titulo=titulo, codigo=nota.codigo,
             descuento_manual=nota.descuento_monto, descuento_manual_motivo=nota.descuento_motivo,
+            cliente=nota.cliente,
         )
         logger.info('Enviando nota de entrega %s a %s (%s bytes)', nota.codigo, destino, len(ticket))
         enviar_trabajo_lpd(

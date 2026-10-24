@@ -4164,8 +4164,14 @@ class DeliveryCargoTests(TestCase):
 
         # el ticket suma: Subtotal 20 + Delivery (Media) 2 = TOTAL 22
         pedido.refresh_from_db()
-        ticket = _build_recibo_bytes([pedido], self.efectivo, 'REF', Decimal('22.00'), Decimal('100.0000'), titulo='NOTA DE ENTREGA', codigo='X')
+        nota_modelo = VGNotaEntrega.objects.select_related('cliente').get(pk=nota['id'])
+        ticket = _build_recibo_bytes(
+            [pedido], self.efectivo, 'REF', Decimal('22.00'), Decimal('100.0000'),
+            titulo='NOTA DE ENTREGA', codigo='X', cliente=nota_modelo.cliente,
+        )
         texto = ticket.decode('cp1252', errors='replace')
+        self.assertIn('Cliente: Cliente DL', texto)
+        self.assertIn('Cédula: V-97000111', texto)
         self.assertIn('Delivery (Media): $2.00', texto)
         self.assertIn('Subtotal: $20.00', texto)
         self.assertIn('TOTAL: $22.00', texto)

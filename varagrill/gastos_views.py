@@ -38,6 +38,11 @@ def _serialize_abono_gasto(abono):
         'referencia': abono.referencia,
         'fecha_pago': abono.fecha_pago.isoformat(),
         'tasa_cambio_referencia': str(abono.tasa_cambio_referencia) if abono.tasa_cambio_referencia is not None else None,
+        'tasa_manual': abono.tasa_manual,
+        'monto_bs': (
+            str((abono.monto * abono.tasa_cambio_referencia).quantize(Decimal('0.01')))
+            if abono.tasa_cambio_referencia else None
+        ),
         'creado_por': (abono.creado_por.get_full_name() or abono.creado_por.username) if abono.creado_por else '',
     }
 
@@ -95,6 +100,7 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_
     # sin importar que el BCV cambie despues. Uno registrado en dolares, en
     # cambio, debe mostrar su equivalente en bs actualizado con la tasa ACTUAL
     # mientras siga pendiente, para reflejar lo que realmente costaria saldarlo hoy.
+    hay_tasa_manual = any(abono.tasa_manual for abono in gasto.abonos.all())
     if gasto.moneda_origen == 'VES':
         tasa_para_bs = gasto.tasa_cambio_referencia
     else:
@@ -105,13 +111,20 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_
     if not tasa_para_bs:
         total_bs = saldo_pendiente_bs = None
     elif gasto.moneda_origen == 'VES':
-        total_bs = (gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))
         # Un gasto 'pagado' sin abonos (los que genera un lote POS al acreditarse, ver
         # VGGasto.lote_pos) no tiene saldo: nunca se le resta un VGAbonoGasto.
         saldo_pendiente_bs = (
             Decimal('0.00') if gasto.estado_pago == 'pagado'
             else (saldo_preciso * tasa_para_bs).quantize(Decimal('0.01'))
         )
+        if hay_tasa_manual:
+            abonado_bs = sum(
+                (abono.monto * (abono.tasa_cambio_referencia or tasa_para_bs) for abono in gasto.abonos.all()),
+                Decimal('0'),
+            )
+            total_bs = (abonado_bs + saldo_pendiente_bs).quantize(Decimal('0.01'))
+        else:
+            total_bs = (gasto.monto * tasa_para_bs).quantize(Decimal('0.01'))
     else:
         # Gasto en dolares: solo el saldo pendiente sigue a la tasa de hoy; lo ya
         # abonado queda fijo en los bolivares de cada abono (con su tasa congelada).
@@ -153,7 +166,9 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_
     return data
 
 
-def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator, tasa_cambio_referencia=None):
+def _registrar_abono_gasto(
+    gasto, monto, metodo_pago, referencia, operator, tasa_cambio_referencia=None, tasa_manual=False,
+):
     """
     Aplica un abono a un gasto: crea el VGAbonoGasto y deja saldo_pendiente/estado_pago
     consistentes. Usado tanto por gasto_abono_view (abono suelto) como por
@@ -164,6 +179,7 @@ def _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, operator, tasa
     abono = VGAbonoGasto.objects.create(
         gasto=gasto, monto=monto, metodo_pago=metodo_pago, referencia=referencia, creado_por=operator,
         tasa_cambio_referencia=tasa_cambio_referencia if tasa_cambio_referencia is not None else tasa_cambio_para_registro(),
+        tasa_manual=tasa_manual,
     )
     # 6 decimales, no 2 (ver el comentario en VGGasto.saldo_pendiente) —
     # nunca negativo. TOLERANCIA_CIERRE_ABONO perdona un residuo minusculo
@@ -589,6 +605,15 @@ def gasto_abono_view(request, gasto_id):
     if not tiene_monto and not tiene_monto_bs:
         return _auth_response({'ok': False, 'message': 'Indica el monto del abono.'}, status=400)
 
+    tasa_manual = None
+    if data.get('tasa_cambio') not in (None, ''):
+        try:
+            tasa_manual = Decimal(str(data.get('tasa_cambio'))).quantize(Decimal('0.0001'))
+        except InvalidOperation:
+            return _auth_response({'ok': False, 'message': 'La tasa no es valida.'}, status=400)
+        if tasa_manual <= 0:
+            return _auth_response({'ok': False, 'message': 'La tasa debe ser mayor a cero.'}, status=400)
+
     try:
         metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
@@ -622,7 +647,9 @@ def gasto_abono_view(request, gasto_id):
             # cuando se registró). Mezclar tasas entre mostrar y pagar es lo
             # que dejaba residuos o rechazaba el pago final (mismo bug que
             # compra_abono_view en compras_views.py, reportado 2026-09).
-            if gasto.moneda_origen == 'VES':
+            if tasa_manual is not None:
+                tasa_abono = tasa_manual
+            elif gasto.moneda_origen == 'VES':
                 tasa_abono = gasto.tasa_cambio_referencia
                 if not tasa_abono or tasa_abono <= 0:
                     tasa_actual = obtener_tasa_actual()
@@ -643,7 +670,7 @@ def gasto_abono_view(request, gasto_id):
                 return _auth_response({'ok': False, 'message': 'El monto no es valido.'}, status=400)
             if monto <= 0:
                 return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
-            tasa_abono = tasa_cambio_para_registro()
+            tasa_abono = tasa_manual if tasa_manual is not None else tasa_cambio_para_registro()
 
         if monto > gasto.saldo_pendiente + TOLERANCIA_REDONDEO_ABONO:
             return _auth_response({
@@ -652,7 +679,10 @@ def gasto_abono_view(request, gasto_id):
             }, status=400)
 
         referencia = str(data.get('referencia', '') or '').strip()
-        abono = _registrar_abono_gasto(gasto, monto, metodo_pago, referencia, request.user, tasa_cambio_referencia=tasa_abono)
+        abono = _registrar_abono_gasto(
+            gasto, monto, metodo_pago, referencia, request.user,
+            tasa_cambio_referencia=tasa_abono, tasa_manual=tasa_manual is not None,
+        )
 
     return _auth_response({
         'ok': True,

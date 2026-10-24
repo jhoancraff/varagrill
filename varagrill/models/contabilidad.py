@@ -1254,6 +1254,7 @@ class VGAbonoGasto(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    tasa_manual = models.BooleanField(default=False)
 
     class Meta:
         db_table = "vg_abonos_gasto"

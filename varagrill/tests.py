@@ -2671,6 +2671,71 @@ class AbonoCompraTasaPropiaTests(TestCase):
         self.assertEqual(final['total_bs'], '48520.00')  # 28.920 + 19.600
 
 
+class AbonoGastoTasaPropiaTests(TestCase):
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='tg_admin', password='claveAdmin123', cedula='93000011', email='tg_admin@varagrill.test', id_role=admin_role,
+        )
+        self.metodo = VGMetodoPago.objects.create(nombre='Banco VES gasto tasa propia', moneda='VES')
+        self.categoria = VGCategoriaGasto.objects.create(nombre='Gasto tasa propia test')
+        _set_tasa_actual('480.0000')
+        self.client.force_login(self.admin)
+
+    def gasto(self, moneda='VES'):
+        return VGGasto.objects.create(
+            categoria=self.categoria,
+            descripcion='Gasto pendiente tasa propia',
+            monto=Decimal('100'),
+            saldo_pendiente=Decimal('100'),
+            estado_pago='pendiente',
+            fecha_gasto=timezone.localdate(),
+            tasa_cambio_referencia=Decimal('480.0000'),
+            moneda_origen=moneda,
+        )
+
+    def abonar(self, gasto, **payload):
+        payload.setdefault('metodo_pago_id', self.metodo.id)
+        return self.client.post(
+            f'/api/admin/gastos/{gasto.id}/abonos/', data=json.dumps(payload), content_type='application/json',
+        )
+
+    def test_en_dolares_con_tasa_propia_guarda_los_bs_pagados(self):
+        gasto = self.gasto(moneda='USD')
+        response = self.abonar(gasto, monto='50', tasa_cambio='482.5')
+        self.assertEqual(response.status_code, 201, response.content)
+        abono = response.json()['abono']
+        self.assertEqual(abono['tasa_cambio_referencia'], '482.5000')
+        self.assertTrue(abono['tasa_manual'])
+        self.assertEqual(abono['monto_bs'], '24125.00')
+
+    def test_en_bolivares_con_tasa_propia_convierte_a_dolares_con_esa_tasa(self):
+        gasto = self.gasto()
+        response = self.abonar(gasto, monto_bs='24100', tasa_cambio='482')
+        self.assertEqual(response.status_code, 201, response.content)
+        gasto.refresh_from_db()
+        self.assertEqual(gasto.saldo_pendiente, Decimal('50.000000'))
+        self.assertTrue(response.json()['abono']['tasa_manual'])
+        self.assertEqual(response.json()['abono']['monto_bs'], '24100.00')
+        self.assertEqual(response.json()['gasto']['saldo_pendiente_bs'], '24000.00')
+        self.assertEqual(response.json()['gasto']['total_bs'], '48100.00')
+
+    def test_tasa_invalida_se_rechaza(self):
+        gasto = self.gasto()
+        self.assertEqual(self.abonar(gasto, monto='10', tasa_cambio='0').status_code, 400)
+        self.assertEqual(self.abonar(gasto, monto='10', tasa_cambio='abc').status_code, 400)
+        self.assertEqual(gasto.abonos.count(), 0)
+
+    def test_sin_tasa_manual_conserva_la_tasa_habitual(self):
+        gasto = self.gasto()
+        response = self.abonar(gasto, monto_bs='4800')
+        self.assertEqual(response.status_code, 201, response.content)
+        abono = response.json()['abono']
+        self.assertFalse(abono['tasa_manual'])
+        self.assertEqual(abono['tasa_cambio_referencia'], '480.0000')
+        self.assertEqual(abono['monto'], '10.000000')
+
+
 # ---------------------------------------------------------------------------
 # Reporte de margen de ganancia por producto (en vivo)
 # ---------------------------------------------------------------------------

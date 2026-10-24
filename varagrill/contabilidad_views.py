@@ -52,6 +52,8 @@ from .lotes_pos import (
     backfill_historico_metodo,
     cerrar_lote,
     mover_pago_de_lote,
+    agregar_ingreso_extra_a_lote,
+    asignar_ingreso_extra_a_lote,
     reabrir_lote,
     revertir_acreditacion,
     validar_cambio_metodo_pago,
@@ -114,6 +116,10 @@ def _serialize_ingreso_extra(ingreso):
         'descripcion': ingreso.descripcion,
         'metodo_pago_id': ingreso.metodo_pago_id,
         'metodo_pago_nombre': ingreso.metodo_pago.nombre,
+        'nota_entrega_id': ingreso.nota_entrega_id,
+        'nota_entrega_codigo': ingreso.nota_entrega.codigo if ingreso.nota_entrega_id else None,
+        'lote_pos_id': ingreso.lote_pos_id,
+        'lote_pos_numero': ingreso.lote_pos.numero if ingreso.lote_pos_id else None,
         'registrado_por': ingreso.creado_por.get_full_name() or ingreso.creado_por.username if ingreso.creado_por else '',
         'fecha_creacion': ingreso.fecha_creacion.isoformat(),
     }
@@ -141,7 +147,7 @@ def ingresos_extra_view(request):
             VGIngresoExtra.objects
             .filter(fecha_creacion__date=timezone.localdate())
             .exclude(tipo='ingreso_no_facturado')
-            .select_related('metodo_pago', 'creado_por')
+            .select_related('metodo_pago', 'creado_por', 'nota_entrega', 'lote_pos')
             .order_by('-fecha_creacion')
         )
         return _auth_response({'ok': True, 'ingresos': [_serialize_ingreso_extra(ingreso) for ingreso in ingresos]})
@@ -171,6 +177,16 @@ def ingresos_extra_view(request):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'Selecciona una cuenta valida.'}, status=400)
 
+    nota_entrega = None
+    nota_entrega_id = data.get('nota_entrega_id')
+    if tipo == 'pago_extra' and not nota_entrega_id:
+        return _auth_response({'ok': False, 'message': 'Selecciona la nota de entrega del excedente.'}, status=400)
+    if nota_entrega_id:
+        try:
+            nota_entrega = VGNotaEntrega.objects.get(pk=int(nota_entrega_id))
+        except (TypeError, ValueError, VGNotaEntrega.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La nota de entrega seleccionada no existe.'}, status=400)
+
     # Igual que nota_entrega_abono_view/factura_abono_view: monto_input llega en
     # la moneda de la cuenta elegida (lo que la cajera cuenta y escribe), pero
     # VGIngresoExtra.monto se guarda siempre en USD. Si la cuenta es en
@@ -192,18 +208,25 @@ def ingresos_extra_view(request):
         tasa_conversion = None
         monto = monto_input.quantize(Decimal('0.000001'))
 
-    ingreso = VGIngresoExtra.objects.create(
-        tipo=tipo,
-        monto=monto,
-        tasa_cambio_referencia=tasa_conversion,
-        descripcion=descripcion,
-        metodo_pago=metodo_pago,
-        creado_por=request.user,
-    )
+    with transaction.atomic():
+        ingreso = VGIngresoExtra.objects.create(
+            tipo=tipo,
+            monto=monto,
+            tasa_cambio_referencia=tasa_conversion,
+            descripcion=descripcion,
+            metodo_pago=metodo_pago,
+            nota_entrega=nota_entrega,
+            creado_por=request.user,
+        )
+        lote = asignar_ingreso_extra_a_lote(ingreso, request.user)
     return _auth_response({
         'ok': True,
-        'message': f'{ingreso.get_tipo_display()} registrada correctamente.',
+        'message': (
+            f'{ingreso.get_tipo_display()} registrada correctamente.'
+            + (f' Incluida en el lote POS #{lote.numero}.' if lote else '')
+        ),
         'ingreso': _serialize_ingreso_extra(ingreso),
+        'lote_pos_numero': lote.numero if lote else None,
     }, status=201)
 
 
@@ -468,6 +491,11 @@ def _serialize_lote(lote, incluir_pagos=False):
         'acreditado_por': (lote.acreditado_por.get_full_name() or lote.acreditado_por.username) if lote.acreditado_por else '',
         'notas': lote.notas,
         'num_pagos': lote.pagos.filter(estado='completado').count(),
+        'num_ingresos_extra': lote.ingresos_extra.filter(tipo__in=('propina', 'pago_extra')).count(),
+        'num_movimientos': (
+            lote.pagos.filter(estado='completado').count()
+            + lote.ingresos_extra.filter(tipo__in=('propina', 'pago_extra')).count()
+        ),
         'monto_usd': str(lote.monto_bruto_usd),
         'monto_bs': str(lote.monto_bruto_sistema_bs),
     }
@@ -492,6 +520,25 @@ def _serialize_lote(lote, incluir_pagos=False):
                 'estado': pago.estado,
             })
         data['pagos'] = pagos
+        data['ingresos_extra'] = [
+            {
+                'id': ingreso.id,
+                'tipo': ingreso.tipo,
+                'tipo_label': ingreso.get_tipo_display(),
+                'monto_usd': str(ingreso.monto),
+                'monto_bs': (
+                    str((ingreso.monto * ingreso.tasa_cambio_referencia).quantize(Decimal('0.01')))
+                    if ingreso.tasa_cambio_referencia else None
+                ),
+                'nota_entrega_codigo': ingreso.nota_entrega.codigo if ingreso.nota_entrega_id else None,
+                'descripcion': ingreso.descripcion,
+                'fecha_creacion': ingreso.fecha_creacion.isoformat(),
+                'estado': 'completado',
+            }
+            for ingreso in lote.ingresos_extra.select_related('nota_entrega').filter(
+                tipo__in=('propina', 'pago_extra'),
+            ).order_by('fecha_creacion')
+        ]
     return data
 
 
@@ -626,7 +673,7 @@ def reporte_cuadre_caja_view(request):
             VGIngresoExtra.objects
             .filter(fecha_creacion__date=fecha)
             .exclude(tipo='ingreso_no_facturado')
-            .select_related('metodo_pago', 'creado_por')
+            .select_related('metodo_pago', 'creado_por', 'nota_entrega', 'lote_pos')
             .order_by('-fecha_creacion')
         )
         pagos_dia = (
@@ -750,7 +797,7 @@ def reporte_cuadre_caja_view(request):
 
         # tipo == 'ingreso_extra'
         try:
-            ingreso = VGIngresoExtra.objects.select_related('metodo_pago').get(
+            ingreso = VGIngresoExtra.objects.select_related('metodo_pago', 'lote_pos').get(
                 pk=registro_id, fecha_creacion__date=fecha,
             )
         except VGIngresoExtra.DoesNotExist:
@@ -760,22 +807,28 @@ def reporte_cuadre_caja_view(request):
         if metodo_nuevo.id == ingreso.metodo_pago_id:
             return _auth_response({'ok': False, 'message': 'Ya está en esa cuenta.'}, status=400)
 
-        ingreso.metodo_pago = metodo_nuevo
-        update_fields = ['metodo_pago']
-        # Si pasa a ser una cuenta en bolivares y el registro no tenia tasa
-        # congelada (porque se cargo en una cuenta en dolares, sin necesitar
-        # ninguna), se congela la de ahora — sin esto, el monto en bolivares
-        # que se muestre despues no tendria con que convertirse.
-        if metodo_nuevo.moneda == 'VES' and not ingreso.tasa_cambio_referencia:
-            tasa_nueva = tasa_cambio_para_registro()
-            if tasa_nueva:
-                ingreso.tasa_cambio_referencia = tasa_nueva
-                update_fields.append('tasa_cambio_referencia')
-        ingreso.save(update_fields=update_fields)
-        VGCorreccionMetodoPago.objects.create(
-            tipo='ingreso_extra', registro_id=ingreso.id, metodo_anterior=metodo_anterior, metodo_nuevo=metodo_nuevo,
-            motivo=motivo, creado_por=request.user, actualizado_por=request.user,
-        )
+        bloqueo_lote = validar_cambio_metodo_pago(ingreso)
+        if bloqueo_lote:
+            return _auth_response({'ok': False, 'message': bloqueo_lote}, status=400)
+        if metodo_nuevo.es_punto_venta and metodo_nuevo.moneda != 'VES':
+            return _auth_response({'ok': False, 'message': 'Un método de punto de venta debe ser en bolívares.'}, status=400)
+
+        with transaction.atomic():
+            ingreso.metodo_pago = metodo_nuevo
+            update_fields = ['metodo_pago']
+            # Si pasa a una cuenta en bolivares y no tenia tasa congelada
+            # (porque se cargo en dolares), congela la de ahora.
+            if metodo_nuevo.moneda == 'VES' and not ingreso.tasa_cambio_referencia:
+                tasa_nueva = tasa_cambio_para_registro()
+                if tasa_nueva:
+                    ingreso.tasa_cambio_referencia = tasa_nueva
+                    update_fields.append('tasa_cambio_referencia')
+            ingreso.save(update_fields=update_fields)
+            aplicar_cambio_metodo_pago(ingreso, request.user)
+            VGCorreccionMetodoPago.objects.create(
+                tipo='ingreso_extra', registro_id=ingreso.id, metodo_anterior=metodo_anterior, metodo_nuevo=metodo_nuevo,
+                motivo=motivo, creado_por=request.user, actualizado_por=request.user,
+            )
         return _auth_response({
             'ok': True,
             'message': f'Se movió de {metodo_anterior.nombre} a {metodo_nuevo.nombre}.',
@@ -906,7 +959,7 @@ def reporte_cuadre_caja_rango_view(request):
         VGIngresoExtra.objects
         .filter(fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta)
         .exclude(tipo='ingreso_no_facturado')
-        .select_related('metodo_pago', 'creado_por')
+        .select_related('metodo_pago', 'creado_por', 'nota_entrega', 'lote_pos')
         .order_by('-fecha_creacion')
     )
 
@@ -2243,7 +2296,18 @@ def admin_lotes_pos_view(request):
                 lote = base.get(pk=int(lote_id))
             except (TypeError, ValueError, VGLotePOS.DoesNotExist):
                 return _auth_response({'ok': False, 'message': 'El lote no existe.'}, status=404)
-            return _auth_response({'ok': True, 'lote': _serialize_lote(lote, incluir_pagos=True)})
+            data_lote = _serialize_lote(lote, incluir_pagos=True)
+            if es_admin and lote.estado in ('abierto', 'cerrado', 'acreditado'):
+                extras_disponibles = VGIngresoExtra.objects.filter(
+                    metodo_pago_id=lote.metodo_pago_id,
+                    lote_pos__isnull=True,
+                    fecha_creacion__date=lote.fecha_operacion,
+                    tipo__in=('propina', 'pago_extra'),
+                ).select_related('metodo_pago', 'creado_por', 'nota_entrega').order_by('fecha_creacion')
+                data_lote['ingresos_extra_disponibles'] = [
+                    _serialize_ingreso_extra(ingreso) for ingreso in extras_disponibles
+                ]
+            return _auth_response({'ok': True, 'lote': data_lote})
 
         hoy = timezone.localdate()
         desde = _parse_fecha_reporte(request.GET.get('desde')) if request.GET.get('desde') else hoy - timedelta(days=30)
@@ -2281,7 +2345,10 @@ def admin_lotes_pos_view(request):
         return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
 
     action = str(data.get('action', '')).strip().lower()
-    if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'reabrir_lote', 'anular_lote', 'revertir_acreditacion', 'mover_pago'):
+    if action not in (
+        'cerrar_lote', 'acreditar_lote', 'imprimir_lote', 'reabrir_lote',
+        'anular_lote', 'revertir_acreditacion', 'mover_pago', 'agregar_ingreso_extra',
+    ):
         return _auth_response({'ok': False, 'message': 'Accion invalida.'}, status=400)
     if action not in ('cerrar_lote', 'acreditar_lote', 'imprimir_lote') and not es_admin:
         return _auth_response({'ok': False, 'message': 'Solo administrador o contador puede hacer esto.'}, status=401)
@@ -2326,6 +2393,21 @@ def admin_lotes_pos_view(request):
                     raise LoteError('La cuenta elegida no existe.')
             lote = mover_pago_de_lote(pago, request.user, data.get('motivo'), metodo_destino)
             mensaje = f'Cobro movido fuera del lote #{lote.numero}.' + (' El lote quedo sin cobros y se anulo.' if lote.estado == 'anulado' else '')
+        elif action == 'agregar_ingreso_extra':
+            try:
+                ingreso = VGIngresoExtra.objects.get(pk=int(data.get('ingreso_extra_id')))
+            except (TypeError, ValueError, VGIngresoExtra.DoesNotExist):
+                raise LoteError('El ingreso extra no existe.')
+            nota_entrega = None
+            if data.get('nota_entrega_id'):
+                try:
+                    nota_entrega = VGNotaEntrega.objects.get(pk=int(data.get('nota_entrega_id')))
+                except (TypeError, ValueError, VGNotaEntrega.DoesNotExist):
+                    raise LoteError('La nota de entrega seleccionada no existe.')
+            lote = agregar_ingreso_extra_a_lote(
+                ingreso, lote, request.user, data.get('motivo'), nota_entrega=nota_entrega,
+            )
+            mensaje = f'{ingreso.get_tipo_display()} agregada al lote #{lote.numero}.'
         elif action == 'revertir_acreditacion':
             lote = revertir_acreditacion(lote, request.user, data.get('motivo'))
             mensaje = f'Acreditación del lote #{lote.numero} revertida.'

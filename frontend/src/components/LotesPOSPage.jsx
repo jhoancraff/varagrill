@@ -191,7 +191,7 @@ function LotesPOSPage({ isMobile, onBack }) {
               <div style={headStyle}>Lote</div>
               <div style={headStyle}>Método</div>
               <div style={headStyle}>Operación</div>
-              <div style={headStyle}>Cobros</div>
+              <div style={headStyle}>Movimientos</div>
               <div style={headStyle}>Monto</div>
               <div style={headStyle}>Estado</div>
               <div style={headStyle}>Acciones</div>
@@ -203,7 +203,7 @@ function LotesPOSPage({ isMobile, onBack }) {
                     {lote.cuenta_bancaria ? <span style={mutedStyle}>{lote.cuenta_bancaria}</span> : null}
                   </div>
                   <div style={cellStyle}>{formatFecha(lote.fecha_operacion)}</div>
-                  <div style={cellStyle}>{lote.num_pagos}</div>
+                  <div style={cellStyle}>{lote.num_movimientos ?? lote.num_pagos}</div>
                   <div style={cellStyle}>
                     ${formatMonto(lote.monto_usd)}
                     <span style={mutedStyle}>Bs {formatMonto(lote.monto_bs)}</span>
@@ -271,8 +271,13 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
   const [error, setError] = useState('');
   // Mover un cobro de un lote cerrado (se dieron cuenta de que no va en ese lote).
   const [moviendo, setMoviendo] = useState(null); // pago elegido
+  const [ingresoParaAgregar, setIngresoParaAgregar] = useState(null);
   const [metodos, setMetodos] = useState([]);
   const [destinoMetodoId, setDestinoMetodoId] = useState('');
+  const [notasEntrega, setNotasEntrega] = useState([]);
+  const [cargandoNotas, setCargandoNotas] = useState(false);
+  const [errorNotas, setErrorNotas] = useState('');
+  const [notaEntregaId, setNotaEntregaId] = useState('');
 
   useEffect(() => {
     if (modo !== 'detalle' || !esAdmin || loteInicial.estado !== 'cerrado') return undefined;
@@ -312,6 +317,64 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
     }
   };
 
+  const agregarIngresoExtra = async (event) => {
+    event.preventDefault();
+    setError('');
+    if (!motivo.trim()) {
+      setError('El motivo es obligatorio.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const json = await postLotePos({
+        action: 'agregar_ingreso_extra',
+        lote_id: lote.id,
+        ingreso_extra_id: ingresoParaAgregar.id,
+        nota_entrega_id: notaEntregaId || null,
+        motivo,
+      });
+      onDone(json.message || 'Ingreso extra agregado al lote.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (modo !== 'detalle' || !esAdmin || !['abierto', 'cerrado', 'acreditado'].includes(loteInicial.estado)) return undefined;
+    let cancelado = false;
+    const isoLocal = (fecha) => {
+      const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 10);
+    };
+    const fechaOperacion = loteInicial.fecha_operacion
+      ? new Date(`${loteInicial.fecha_operacion}T00:00:00`)
+      : new Date();
+    const desde = new Date(fechaOperacion);
+    const hasta = new Date(fechaOperacion);
+    desde.setDate(desde.getDate() - 30);
+    hasta.setDate(hasta.getDate() + 90);
+    const params = new URLSearchParams({ desde: isoLocal(desde), hasta: isoLocal(hasta) });
+    setCargandoNotas(true);
+    setErrorNotas('');
+    fetch(`/api/notas-entrega/?${params.toString()}`, { credentials: 'include', cache: 'no-store' })
+      .then(async (response) => {
+        const json = await response.json();
+        if (!response.ok || !json.ok) throw new Error(json.message || 'No se pudieron cargar las notas de entrega.');
+        if (!cancelado) setNotasEntrega(Array.isArray(json.notas_entrega) ? json.notas_entrega : []);
+      })
+      .catch((requestError) => {
+        if (!cancelado) setErrorNotas(requestError.message || 'No se pudieron cargar las notas de entrega.');
+      })
+      .finally(() => {
+        if (!cancelado) setCargandoNotas(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [modo, esAdmin, loteInicial.estado, loteInicial.fecha_operacion]);
+
   useEffect(() => {
     if (modo !== 'detalle') return undefined;
     let cancelado = false;
@@ -350,7 +413,7 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
         <div style={modalTitleStyle}>{modo === 'detalle' ? `${lote.codigo} — detalle` : `${MOTIVO_TITULOS[modo]} ${lote.codigo}`}</div>
         <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>
-          {lote.metodo_pago_nombre}{lote.cuenta_bancaria ? ` · ${lote.cuenta_bancaria}` : ''} · operado el {formatFecha(lote.fecha_operacion)} · {lote.num_pagos} cobro(s)
+          {lote.metodo_pago_nombre}{lote.cuenta_bancaria ? ` · ${lote.cuenta_bancaria}` : ''} · operado el {formatFecha(lote.fecha_operacion)} · {lote.num_movimientos ?? lote.num_pagos} movimiento(s)
         </div>
         <div style={{ color: 'var(--vg-text-strong)', fontWeight: 800, fontSize: 20 }}>
           ${formatMonto(lote.monto_usd)} <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 14, fontWeight: 600 }}>· Bs {formatMonto(lote.monto_bs)}</span>
@@ -393,6 +456,48 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
                 ))}
               </div>
             ) : null}
+            {lote.ingresos_extra?.length ? (
+              <div style={{ display: 'grid', gap: 4 }}>
+                <div style={sectionLabelStyle}>Propinas y pagos extra del lote</div>
+                {lote.ingresos_extra.map((ingreso) => (
+                  <div key={`ingreso-${ingreso.id}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, color: 'var(--vg-f-f2e6e6)' }}>
+                    <span>
+                      {ingreso.tipo_label} · {formatFechaHora(ingreso.fecha_creacion)}
+                      {ingreso.nota_entrega_codigo ? ` · Nota ${ingreso.nota_entrega_codigo}` : ''}
+                      {ingreso.descripcion ? ` · ${ingreso.descripcion}` : ''}
+                    </span>
+                    <span>{ingreso.monto_bs ? `Bs ${formatMonto(ingreso.monto_bs)} · ` : ''}${formatMonto(ingreso.monto_usd)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {esAdmin && lote.ingresos_extra_disponibles?.length ? (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={sectionLabelStyle}>Ingresos extra sin lote de este día</div>
+                {lote.ingresos_extra_disponibles.map((ingreso) => (
+                  <div key={`disponible-${ingreso.id}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--vg-f-f2e6e6)' }}>
+                    <span>
+                      {ingreso.tipo_label}
+                      {ingreso.nota_entrega_codigo ? ` · Nota ${ingreso.nota_entrega_codigo}` : ''}
+                      {ingreso.descripcion ? ` · ${ingreso.descripcion}` : ''}
+                      {' · '}{formatFechaHora(ingreso.fecha_creacion)}
+                    </span>
+                    <button
+                      type="button"
+                      style={moverButtonStyle}
+                      onClick={() => {
+                        setIngresoParaAgregar(ingreso);
+                        setNotaEntregaId(ingreso.nota_entrega_id ? String(ingreso.nota_entrega_id) : '');
+                        setMotivo('');
+                        setError('');
+                      }}
+                    >
+                      Agregar al lote
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {moviendo ? (
               <form onSubmit={moverCobro} style={moverFormStyle}>
                 <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
@@ -416,6 +521,56 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                   <button type="button" onClick={() => setMoviendo(null)} disabled={saving} style={secondaryButtonStyle}>Cancelar</button>
                   <button type="submit" disabled={saving} style={primaryButtonStyle}>{saving ? 'Moviendo...' : 'Mover cobro'}</button>
+                </div>
+              </form>
+            ) : null}
+            {ingresoParaAgregar ? (
+              <form onSubmit={agregarIngresoExtra} style={moverFormStyle}>
+                <div style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
+                  Agregar {ingresoParaAgregar.tipo_label} de ${formatMonto(ingresoParaAgregar.monto)} al {lote.codigo}
+                  {ingresoParaAgregar.nota_entrega_codigo ? ` · Nota ${ingresoParaAgregar.nota_entrega_codigo}` : ''}
+                </div>
+                {lote.estado === 'acreditado' ? (
+                  <div style={mutedStyle}>
+                    El lote ya está acreditado; se actualizará su desglose histórico sin cambiar su estado ni volver a acreditar.
+                  </div>
+                ) : null}
+                {ingresoParaAgregar.tipo === 'pago_extra' && !ingresoParaAgregar.nota_entrega_id ? (
+                  <label style={fieldStyle}>Nota de entrega (obligatoria)
+                    <select
+                      value={notaEntregaId}
+                      onChange={(event) => setNotaEntregaId(event.target.value)}
+                      style={inputStyle}
+                      className="admin-dark-select"
+                      disabled={cargandoNotas || Boolean(errorNotas)}
+                      required
+                    >
+                      <option value="">{cargandoNotas ? 'Cargando notas...' : 'Selecciona una nota...'}</option>
+                      {notasEntrega.map((nota) => (
+                        <option key={nota.id} value={nota.id}>
+                          {nota.codigo} · {new Date(nota.fecha_emision).toLocaleDateString('es-VE')}
+                        </option>
+                      ))}
+                    </select>
+                    {errorNotas ? <div style={noticeStyle}>{errorNotas}</div> : null}
+                    {!cargandoNotas && !errorNotas && notasEntrega.length === 0 ? (
+                      <div style={mutedStyle}>No hay notas de entrega para el período del lote.</div>
+                    ) : null}
+                  </label>
+                ) : null}
+                <label style={fieldStyle}>Motivo (obligatorio, queda anotado)
+                  <input type="text" value={motivo} onChange={(event) => setMotivo(event.target.value)} style={inputStyle} />
+                </label>
+                {error ? <div style={noticeStyle}>{error}</div> : null}
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setIngresoParaAgregar(null)} disabled={saving} style={secondaryButtonStyle}>Cancelar</button>
+                  <button
+                    type="submit"
+                    disabled={saving || (ingresoParaAgregar.tipo === 'pago_extra' && !ingresoParaAgregar.nota_entrega_id && (!notaEntregaId || cargandoNotas || Boolean(errorNotas)))}
+                    style={primaryButtonStyle}
+                  >
+                    {saving ? 'Agregando...' : 'Confirmar ingreso'}
+                  </button>
                 </div>
               </form>
             ) : null}

@@ -703,14 +703,16 @@ def _compute_product_unit_cost(product, ingredient_costs, preparation_cost_map, 
     no el de una receta de plato. Ver el docstring de VGConfiguracionCosteo.
     """
     total = Decimal('0')
+    if product.subreceta_vinculada_id:
+        return preparation_cost_map.get(
+            product.subreceta_vinculada_id, {'costo_unitario': Decimal('0')},
+        )['costo_unitario']
     for component in _product_recipe_components(product):
         if component['tipo'] == 'ingrediente':
             total += component['cantidad'] * ingredient_costs.get(component['referencia_id'], Decimal('0'))
         else:
             costs = preparation_cost_map.get(component['referencia_id'], {'costo_unitario': Decimal('0')})
             total += component['cantidad'] * costs['costo_unitario']
-    if product.subreceta_vinculada_id:
-        return total
     return _aplicar_rendimiento_receta(total, config)
 
 
@@ -4912,13 +4914,28 @@ def admin_products_view(request):
             data_producto['costo_receta'] = str(costo_receta.quantize(Decimal('0.0001')))
             data_producto['costo_con_margen_produccion'] = str((costo_receta * factor_produccion).quantize(Decimal('0.0001')))
             productos_serializados.append(data_producto)
-        ingredients = list(
-            VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS).order_by('nombre').values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario')
-        )
+        ingredients = [
+            {
+                'id': row['id'],
+                'nombre': row['nombre'],
+                'unidad_medida': row['unidad_medida'],
+                'stock_actual': row['stock_actual'],
+                'costo_unitario': _costo_unitario_efectivo(
+                    row['costo_unitario'], row['precio_compra'], row['peso_real'],
+                ),
+            }
+            for row in VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS)
+            .order_by('nombre')
+            .values('id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario', 'precio_compra', 'peso_real')
+        ]
         recetas = [
             {
                 'id': receta.id,
                 'nombre': receta.nombre,
+                'costo_receta': str(
+                    _compute_product_recipe_cost(receta, preparation_cost_map, config_sin_rendimiento)
+                    .quantize(Decimal('0.0001'))
+                ),
                 'costo_unitario_calculado': str(
                     _compute_product_recipe_cost(receta, preparation_cost_map, config_costeo).quantize(Decimal('0.01'))
                 ),
@@ -4933,6 +4950,11 @@ def admin_products_view(request):
             {
                 'id': preparation['id'],
                 'nombre': preparation['nombre'],
+                'costo_receta_producto': str(
+                    preparation_cost_map.get(
+                        preparation['id'], {'costo_unitario': Decimal('0')},
+                    )['costo_unitario'].quantize(Decimal('0.0001'))
+                ),
                 # 6 decimales, no 2 — ver comentario equivalente más arriba (mismo motivo).
                 'costo_unitario_calculado': str(
                     preparation_cost_map.get(preparation['id'], {'costo_unitario': Decimal('0')})['costo_unitario']

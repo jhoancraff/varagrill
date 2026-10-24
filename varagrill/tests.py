@@ -1575,7 +1575,7 @@ from datetime import timedelta  # noqa: E402
 from django.db import IntegrityError, transaction  # noqa: E402
 
 from varagrill import lotes_pos  # noqa: E402
-from varagrill.models import VGCierreCaja, VGLotePOS, VGPago  # noqa: E402
+from varagrill.models import VGIngresoExtra, VGCierreCaja, VGLotePOS, VGNotaEntrega, VGPago  # noqa: E402
 from varagrill.reportes import disponibilidad_por_cuenta, flujo_bancario_mensual, pos_por_cobrar_transitorio  # noqa: E402
 
 
@@ -1894,12 +1894,32 @@ class ImpresionCierreLotePOSTests(LotesPOSBase):
         texto = _build_cierre_lote_pos_bytes(lote).decode('cp1252', errors='replace')
         self.assertIn('CIERRE DE LOTE POS', texto)
         self.assertIn(f'LOTE-{lote.numero:06d}', texto)
-        self.assertIn('COBROS DEL LOTE (2)', texto)
+        self.assertIn('MOVIMIENTOS DEL LOTE (2)', texto)
         self.assertIn('Bs.4.000,00', texto)   # 40 USD x 100
         self.assertIn('Bs.6.000,00', texto)   # 60 USD x 100
         self.assertIn('TOTAL Bs.', texto)
         self.assertIn('10.000,00', texto)
         self.assertIn('REIMPRESION', _build_cierre_lote_pos_bytes(lote, es_reimpresion=True).decode('cp1252', errors='replace'))
+
+    def test_ticket_incluye_propinas_y_excedentes_con_nota(self):
+        from varagrill.impresion_lpd import _build_cierre_lote_pos_bytes
+        self.pago('10')
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        VGIngresoExtra.objects.create(
+            tipo='pago_extra', monto=Decimal('2'), tasa_cambio_referencia=Decimal('100'),
+            metodo_pago=self.pos, nota_entrega=nota,
+        )
+        ingreso = VGIngresoExtra.objects.get(tipo='pago_extra')
+        lotes_pos.asignar_ingreso_extra_a_lote(ingreso, self.admin)
+        lote = self.cerrar(VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto'))
+
+        texto = _build_cierre_lote_pos_bytes(lote).decode('cp1252', errors='replace')
+
+        self.assertIn('MOVIMIENTOS DEL LOTE (2)', texto)
+        self.assertIn('Pago extra', texto)
+        self.assertIn('Nota 00000001', texto)
+        self.assertIn('Bs.200,00', texto)
+        self.assertIn('Total en dolares', texto)
 
     def test_cerrar_lote_imprime_y_un_fallo_de_impresora_no_tumba_el_cierre(self):
         from unittest.mock import patch
@@ -2179,6 +2199,171 @@ class MoverCobroDeLoteCerradoTests(LotesPOSBase):
         self.assertEqual(r.json()['lote']['monto_usd'], '30.000000')
         # Un cobro que no es de ese lote se rechaza.
         self.assertEqual(post(action='mover_pago', lote_id=lote_a.id, pago_id=lote_b.pagos.first().id, motivo='x').status_code, 400)
+
+
+class IngresosExtraPOSLoteTests(LotesPOSBase):
+    def ingreso_extra(self, tipo='pago_extra', monto='5', metodo=None, nota=None):
+        return VGIngresoExtra.objects.create(
+            tipo=tipo,
+            monto=Decimal(monto),
+            tasa_cambio_referencia=self.tasa_hoy.tasa,
+            metodo_pago=metodo or self.pos,
+            nota_entrega=nota,
+            descripcion='Excedente de prueba',
+        )
+
+    def test_propina_y_pago_extra_se_suman_al_lote_pos(self):
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        extra = self.ingreso_extra(nota=nota)
+        propina = self.ingreso_extra(tipo='propina', monto='2')
+
+        lotes_pos.asignar_ingreso_extra_a_lote(extra, self.admin)
+        lotes_pos.asignar_ingreso_extra_a_lote(propina, self.admin)
+
+        lote = VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto')
+        self.assertEqual(extra.lote_pos_id, lote.pk)
+        self.assertEqual(propina.lote_pos_id, lote.pk)
+        self.assertEqual(lote.monto_bruto_usd, Decimal('7.000000'))
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('700.00'))
+
+    def test_lote_con_solo_propina_se_puede_cerrar(self):
+        propina = self.ingreso_extra(tipo='propina')
+        lotes_pos.asignar_ingreso_extra_a_lote(propina, self.admin)
+        lote = VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto')
+
+        cerrado = lotes_pos.cerrar_lote(lote, self.admin)
+
+        self.assertEqual(cerrado.estado, 'cerrado')
+        self.assertEqual(cerrado.monto_bruto_usd, Decimal('5.000000'))
+
+    def test_mover_ultimo_pago_no_anula_lote_que_aun_tiene_propina(self):
+        pago = self.pago('10')
+        propina = self.ingreso_extra(tipo='propina', monto='2')
+        lotes_pos.asignar_ingreso_extra_a_lote(propina, self.admin)
+        lote = self.cerrar(pago.lote_pos)
+
+        lotes_pos.mover_pago_de_lote(pago, self.admin, 'Corregir el pago')
+
+        lote.refresh_from_db()
+        self.assertEqual(lote.estado, 'cerrado')
+        self.assertEqual(lote.monto_bruto_usd, Decimal('2.000000'))
+
+    def test_ingreso_extra_puede_agregarse_a_lote_cerrado_con_auditoria(self):
+        pago = self.pago('10')
+        lote = self.cerrar(pago.lote_pos)
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        ingreso = self.ingreso_extra(nota=nota, monto='3')
+
+        lotes_pos.agregar_ingreso_extra_a_lote(
+            ingreso, lote, self.admin, 'Excedente de la nota de entrega',
+        )
+
+        lote.refresh_from_db()
+        ingreso.refresh_from_db()
+        self.assertEqual(ingreso.lote_pos_id, lote.pk)
+        self.assertEqual(lote.monto_bruto_usd, Decimal('13.000000'))
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('1300.00'))
+        self.assertIn('Excedente de la nota de entrega', lote.notas)
+
+    def test_api_agrega_ingreso_a_lote_acreditado(self):
+        pago = self.pago('10')
+        lote = self.acreditar(self.cerrar(pago.lote_pos))
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        ingreso = self.ingreso_extra(nota=nota, monto='3')
+        self.client.force_login(self.admin)
+
+        detalle = self.client.get(f'/api/admin/lotes-pos/?lote_id={lote.id}').json()['lote']
+        self.assertEqual([item['id'] for item in detalle['ingresos_extra_disponibles']], [ingreso.id])
+        response = self.client.post('/api/admin/lotes-pos/', data=json.dumps({
+            'action': 'agregar_ingreso_extra',
+            'lote_id': lote.id,
+            'ingreso_extra_id': ingreso.id,
+            'motivo': 'Asociar excedente a lote conciliado',
+        }), content_type='application/json')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['lote']['estado'], 'acreditado')
+        self.assertEqual(response.json()['lote']['monto_usd'], '13.000000')
+
+    def test_api_agrega_excedente_historico_a_lote_acreditado_y_vincula_nota(self):
+        pago = self.pago('10')
+        lote = self.acreditar(self.cerrar(pago.lote_pos))
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        ingreso = self.ingreso_extra(nota=None, monto='3')
+        self.client.force_login(self.admin)
+        url = '/api/admin/lotes-pos/'
+
+        payload = {
+            'action': 'agregar_ingreso_extra',
+            'lote_id': lote.id,
+            'ingreso_extra_id': ingreso.id,
+            'motivo': 'Vincular excedente histórico con nota',
+        }
+        sin_nota = self.client.post(url, data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(sin_nota.status_code, 400)
+        ingreso.refresh_from_db()
+        self.assertIsNone(ingreso.lote_pos_id)
+        self.assertIsNone(ingreso.nota_entrega_id)
+
+        payload['nota_entrega_id'] = nota.id
+        response = self.client.post(url, data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 200, response.content)
+        ingreso.refresh_from_db()
+        lote.refresh_from_db()
+        self.assertEqual(ingreso.lote_pos_id, lote.id)
+        self.assertEqual(ingreso.nota_entrega_id, nota.id)
+        self.assertEqual(lote.estado, 'acreditado')
+        self.assertEqual(lote.monto_bruto_usd, Decimal('13.000000'))
+
+    def test_ingreso_agregado_a_lote_acreditado_no_duplica_disponibilidad(self):
+        pago = self.pago('10')
+        lote = self.acreditar(self.cerrar(pago.lote_pos))
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        ingreso = self.ingreso_extra(nota=nota, monto='3')
+        saldo_antes = self.saldo_banco('Banesco')['saldo_disponible']
+
+        lotes_pos.agregar_ingreso_extra_a_lote(
+            ingreso, lote, self.admin, 'Asociar excedente a su lote bancario',
+        )
+
+        lote.refresh_from_db()
+        saldo_despues = self.saldo_banco('Banesco')['saldo_disponible']
+        self.assertEqual(lote.estado, 'acreditado')
+        self.assertEqual(lote.monto_bruto_usd, Decimal('13.000000'))
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('1300.00'))
+        self.assertEqual(saldo_despues, saldo_antes)
+        self.assertIn('Asociar excedente a su lote bancario', lote.notas)
+        from varagrill.reportes import detalle_flujo_bancario_dia
+        movimientos = detalle_flujo_bancario_dia(self.hoy, 'Banesco', 'entrada')
+        self.assertEqual(len(movimientos), 1)
+        self.assertEqual(movimientos[0]['tipo_registro'], 'lote_pos')
+        self.assertEqual(movimientos[0]['monto'], Decimal('13.000000'))
+
+    @patch('varagrill.contabilidad_views.tasa_cambio_para_registro', return_value=Decimal('100.0000'))
+    def test_api_exige_nota_para_pago_extra_y_asigna_al_lote_pos(self, _tasa):
+        nota = VGNotaEntrega.objects.create(metodo_pago=self.pos)
+        self.client.force_login(self.admin)
+        url = '/api/contabilidad/ingresos-extra/'
+        sin_nota = self.client.post(url, data=json.dumps({
+            'tipo': 'pago_extra', 'monto': '200', 'metodo_pago_id': self.pos.id,
+        }), content_type='application/json')
+        self.assertEqual(sin_nota.status_code, 400)
+        self.assertEqual(VGIngresoExtra.objects.count(), 0)
+
+        response = self.client.post(url, data=json.dumps({
+            'tipo': 'pago_extra',
+            'monto': '200',
+            'metodo_pago_id': self.pos.id,
+            'nota_entrega_id': nota.id,
+        }), content_type='application/json')
+
+        self.assertEqual(response.status_code, 201, response.content)
+        ingreso = VGIngresoExtra.objects.get()
+        lote = VGLotePOS.objects.get(metodo_pago=self.pos, estado='abierto')
+        self.assertEqual(ingreso.nota_entrega_id, nota.id)
+        self.assertEqual(ingreso.lote_pos_id, lote.id)
+        self.assertEqual(lote.monto_bruto_sistema_bs, Decimal('200.00'))
 
 
 # ---------------------------------------------------------------------------
@@ -2554,7 +2739,7 @@ class MargenProductosReporteTests(TestCase):
 
     def test_el_margen_de_produccion_tambien_aplica_a_productos_ligados_a_una_subreceta(self):
         from varagrill.models import VGPreparacion, VGProducto, VGRecetaPreparacion
-        sub = VGPreparacion.objects.create(nombre='Salsa MP test', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        sub = VGPreparacion.objects.create(nombre='Salsa MP test', rendimiento_cantidad='1', rendimiento_unidad='g')
         VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=self.ingrediente, cantidad_requerida='1')
         ligado = VGProducto.objects.create(nombre='Salsa vendida MP test', categoria=self.categoria, precio_venta='3.00', subreceta_vinculada=sub)
         f = self.fila(ligado)
@@ -2627,6 +2812,52 @@ class MargenProductosReporteTests(TestCase):
         f = filas()
         self.assertEqual(Decimal(f[self.producto.id]['costo_receta']), Decimal('1.20'))
         self.assertEqual(Decimal(f[self.producto.id]['costo_con_margen_produccion']), Decimal('1.32'))
+
+    def test_el_editor_recibe_el_mismo_costo_efectivo_que_usa_el_reporte(self):
+        from varagrill.models import VGPreparacion, VGProducto, VGRecetaPreparacion, VGRecetaProducto
+        self.ingrediente.costo_unitario = Decimal('9.99')
+        self.ingrediente.precio_compra = Decimal('12.00')
+        self.ingrediente.peso_real = Decimal('4.00')
+        self.ingrediente.save()
+        categoria_recetas = type(self.categoria).objects.create(nombre='Recetas')
+        receta = VGProducto.objects.create(
+            nombre='Arepa sopa receta MP test', categoria=categoria_recetas, precio_venta='0',
+        )
+        VGRecetaProducto.objects.create(producto=receta, ingrediente=self.ingrediente, cantidad_requerida='1')
+        producto_vinculado = VGProducto.objects.create(
+            nombre='Arepa sopa vinculada MP test', categoria=self.categoria, precio_venta='3.00',
+            receta_vinculada=receta,
+        )
+        subreceta = VGPreparacion.objects.create(
+            nombre='Arepa sopa subreceta MP test', rendimiento_cantidad='2', rendimiento_unidad='g',
+        )
+        VGRecetaPreparacion.objects.create(
+            preparacion=subreceta, ingrediente=self.ingrediente, cantidad_requerida='2',
+        )
+        producto_subreceta = VGProducto.objects.create(
+            nombre='Arepa sopa subreceta producto MP test', categoria=self.categoria, precio_venta='3.00',
+            subreceta_vinculada=subreceta,
+        )
+
+        response = self.client.get('/api/admin/productos/')
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        producto = next(p for p in data['products'] if p['id'] == self.producto.id)
+        vinculado = next(p for p in data['products'] if p['id'] == producto_vinculado.id)
+        vinculado_subreceta = next(p for p in data['products'] if p['id'] == producto_subreceta.id)
+        ingrediente = next(i for i in data['ingredients'] if i['id'] == self.ingrediente.id)
+        receta_seleccionable = next(r for r in data['recetas'] if r['id'] == receta.id)
+        subreceta_seleccionable = next(s for s in data['subrecetas'] if s['id'] == subreceta.id)
+
+        self.assertEqual(Decimal(producto['costo_receta']), Decimal('3.0000'))
+        self.assertEqual(Decimal(vinculado['costo_receta']), Decimal('3.0000'))
+        self.assertEqual(Decimal(receta_seleccionable['costo_receta']), Decimal(vinculado['costo_receta']))
+        self.assertEqual(Decimal(vinculado_subreceta['costo_receta']), Decimal('3.0000'))
+        self.assertEqual(
+            Decimal(subreceta_seleccionable['costo_receta_producto']),
+            Decimal(vinculado_subreceta['costo_receta']),
+        )
+        self.assertEqual(Decimal(ingrediente['costo_unitario']), Decimal('3.000000'))
 
     def test_senala_los_ingredientes_sin_costo_aunque_esten_dentro_de_una_subreceta(self):
         from varagrill.models import VGIngrediente, VGPreparacion, VGProducto, VGRecetaPreparacion, VGRecetaProducto

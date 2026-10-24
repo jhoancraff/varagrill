@@ -104,7 +104,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     fetchIngresosExtra();
   }, [fetchIngresosExtra]);
 
-  const handleRegistrarIngresoExtra = async ({ monto, descripcion, metodoPagoId }) => {
+  const handleRegistrarIngresoExtra = async ({ monto, descripcion, metodoPagoId, notaEntregaId }) => {
     const montoNumber = Number(monto);
     if (!montoNumber || montoNumber <= 0) {
       showError('Ingresa un monto válido.');
@@ -126,6 +126,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
           monto: montoNumber,
           descripcion,
           metodo_pago_id: Number(metodoPagoId),
+          nota_entrega_id: notaEntregaId ? Number(notaEntregaId) : null,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -1443,7 +1444,7 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
             + Registrar propina
           </button>
           <button type="button" onClick={() => setIngresoModalTipo('pago_extra')} style={pagoExtraButtonStyle}>
-            + Pago extra
+            + Excedente / pago extra
           </button>
         </div>
 
@@ -1465,6 +1466,12 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                 <span style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 12 }}>{ingreso.metodo_pago_nombre}</span>
                 {ingreso.descripcion ? (
                   <span style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 12 }}>{ingreso.descripcion}</span>
+                ) : null}
+                {ingreso.nota_entrega_codigo ? (
+                  <span style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 12 }}>Nota {ingreso.nota_entrega_codigo}</span>
+                ) : null}
+                {ingreso.lote_pos_numero ? (
+                  <span style={{ color: 'var(--vg-f-a89999)', fontSize: 11 }}>Lote POS #{ingreso.lote_pos_numero}</span>
                 ) : null}
                 <span style={{ color: 'var(--vg-f-a89999)', fontSize: 11, marginLeft: 'auto' }}>
                   {ingreso.registrado_por} · {formatFechaHora(ingreso.fecha_creacion)}
@@ -1570,8 +1577,40 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
   const [monto, setMonto] = useState('');
   const [descripcion, setDescripcion] = useState('');
   const [metodoPagoId, setMetodoPagoId] = useState('');
+  const [notaEntregaId, setNotaEntregaId] = useState('');
+  const [notasEntrega, setNotasEntrega] = useState([]);
+  const [cargandoNotas, setCargandoNotas] = useState(true);
+  const [errorNotas, setErrorNotas] = useState('');
 
   const esPropina = tipo === 'propina';
+  useEffect(() => {
+    let cancelado = false;
+    const hoy = new Date();
+    const isoLocal = (fecha) => {
+      const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 10);
+    };
+    const desde = new Date(hoy);
+    desde.setDate(desde.getDate() - 90);
+    const params = new URLSearchParams({ desde: isoLocal(desde), hasta: isoLocal(hoy) });
+    setCargandoNotas(true);
+    setErrorNotas('');
+    fetch(`/api/notas-entrega/?${params.toString()}`, { credentials: 'include', cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudieron cargar las notas de entrega.');
+        if (!cancelado) setNotasEntrega(Array.isArray(data.notas_entrega) ? data.notas_entrega : []);
+      })
+      .catch((error) => {
+        if (!cancelado) setErrorNotas(error.message || 'No se pudieron cargar las notas de entrega.');
+      })
+      .finally(() => {
+        if (!cancelado) setCargandoNotas(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
   const metodoSeleccionado = metodosPago.find((metodo) => String(metodo.id) === String(metodoPagoId));
   // El monto se escribe siempre en la moneda de la cuenta elegida (igual que un
   // abono de nota de entrega/factura) — si es una cuenta en bolívares, acá se
@@ -1587,7 +1626,7 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
           ×
         </button>
         <div style={ingresoModalTitleStyle}>
-          {esPropina ? 'Registrar propina' : 'Registrar pago extra'}
+          {esPropina ? 'Registrar propina' : 'Registrar excedente / pago extra'}
         </div>
         <label style={ingresoFieldLabelStyle}>
           Cuenta donde se abonará
@@ -1607,6 +1646,29 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
         </label>
 
         <label style={ingresoFieldLabelStyle}>
+          Nota de entrega{esPropina ? ' (opcional)' : ' (obligatoria)'}
+          <select
+            value={notaEntregaId}
+            onChange={(event) => setNotaEntregaId(event.target.value)}
+            style={ingresoInputStyle}
+            className="admin-dark-select"
+            disabled={cargandoNotas || Boolean(errorNotas)}
+            required={!esPropina}
+          >
+            <option value="">{cargandoNotas ? 'Cargando notas...' : 'Selecciona una nota de entrega...'}</option>
+            {notasEntrega.map((nota) => (
+              <option key={nota.id} value={nota.id}>
+                {nota.codigo} · {new Date(nota.fecha_emision).toLocaleDateString('es-VE')}
+              </option>
+            ))}
+          </select>
+          {errorNotas ? <span style={{ color: 'var(--vg-f-ff9191)', fontSize: 12 }}>{errorNotas}</span> : null}
+          {!cargandoNotas && !errorNotas && notasEntrega.length === 0 ? (
+            <span style={{ color: 'var(--vg-f-a89999)', fontSize: 12 }}>No hay notas de entrega en los últimos 90 días.</span>
+          ) : null}
+        </label>
+
+        <label style={ingresoFieldLabelStyle}>
           Monto ({esBs ? 'Bs' : '$'})
           <MoneyInput
             value={monto}
@@ -1623,7 +1685,7 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
             value={descripcion}
             onChange={(event) => setDescripcion(event.target.value)}
             style={ingresoInputStyle}
-            placeholder={esPropina ? 'Ej: Propina Mesa 4' : 'Ej: Redondeo Mesa 4'}
+            placeholder={esPropina ? 'Ej: Propina Mesa 4' : 'Ej: Excedente Mesa 4'}
           />
         </label>
 
@@ -1633,9 +1695,9 @@ function IngresoExtraModal({ tipo, metodosPago, submitting, onClose, onSubmit })
           </button>
           <button
             type="button"
-            onClick={() => onSubmit({ monto, descripcion, metodoPagoId })}
+            onClick={() => onSubmit({ monto, descripcion, metodoPagoId, notaEntregaId })}
             style={esPropina ? propinaButtonStyle : pagoExtraButtonStyle}
-            disabled={submitting}
+            disabled={submitting || (esPropina === false && (cargandoNotas || Boolean(errorNotas) || !notaEntregaId))}
           >
             {submitting ? 'Registrando...' : 'Registrar'}
           </button>

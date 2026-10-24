@@ -295,7 +295,7 @@ def _cargar_pool(cuenta, desde, hasta, es_credito):
             ))
         for i in VGIngresoExtra.objects.filter(
             metodo_pago_id__in=ids_sin_efectivo, fecha_creacion__date__range=(desde, hasta),
-        ).select_related('metodo_pago'):
+        ).exclude(metodo_pago__es_punto_venta=True, lote_pos__isnull=False).select_related('metodo_pago'):
             monto = _bs(i.monto, i.tasa_cambio_referencia)
             if monto is None:
                 continue

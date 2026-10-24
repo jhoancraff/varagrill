@@ -105,6 +105,10 @@ class VGIngresoExtra(VGAuditoria):
     directo desde Disponibilidad Bancaria (ver admin_ingresos_no_facturados_view
     e ingresos_extra_view), no desde Cobro. Para este tipo la descripcion es
     obligatoria (unica diferencia de validacion respecto a propina/pago_extra).
+
+    Las propinas y los pagos extra cobrados por un metodo POS también pertenecen
+    a un lote POS, separados de los pagos de la venta. Pago extra requiere la
+    nota de entrega que originó el excedente; propina puede asociarse si se conoce.
     """
     TIPOS = [
         ("propina", "Propina"),
@@ -116,6 +120,16 @@ class VGIngresoExtra(VGAuditoria):
     tasa_cambio_referencia = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
     descripcion = models.CharField(max_length=255, blank=True)
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="ingresos_extra")
+    nota_entrega = models.ForeignKey(
+        "varagrill.VGNotaEntrega", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="ingresos_extra",
+        help_text="Nota de entrega que origina el pago extra; opcional para propinas.",
+    )
+    lote_pos = models.ForeignKey(
+        "varagrill.VGLotePOS", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="ingresos_extra",
+        help_text="Lote POS al que pertenece esta propina o pago extra si se cobró con un método POS.",
+    )
 
     class Meta:
         db_table = "vg_ingresos_extra"
@@ -540,7 +554,8 @@ class VGCierreConciliacion(VGAuditoria):
 # ---------------------------------------------------------------------------
 class VGLotePOS(VGAuditoria):
     """
-    Lote de cobros por punto de venta (debito/credito) de UN metodo de pago
+    Lote de cobros por punto de venta (debito/credito y propinas/pagos extra)
+    de UN metodo de pago
     es_punto_venta — el "cierre de lote" de la maquina fisica. El dinero de un
     cobro POS no esta disponible el dia de la venta: queda "por acreditar" hasta
     que el personal revisa el punto/banco y, si el lote cayo, toca Acreditar.

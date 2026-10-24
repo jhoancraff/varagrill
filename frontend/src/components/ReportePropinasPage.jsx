@@ -176,7 +176,7 @@ function ReportePropinasPage({ isMobile, onBack }) {
                 >
                   <option value="">Todos</option>
                   <option value="propina">Propina</option>
-                  <option value="pago_extra">Pago extra</option>
+                  <option value="pago_extra">Excedente / pago extra</option>
                 </select>
               </label>
               <label style={dateLabelStyle}>
@@ -256,7 +256,11 @@ function ReportePropinasPage({ isMobile, onBack }) {
                         ? new Date(item.fecha_creacion).toLocaleDateString('es-VE')
                         : new Date(item.fecha_creacion).toLocaleTimeString('es-VE')}
                     </div>
-                    <div style={cellStyle}>{item.descripcion || '—'}</div>
+                    <div style={cellStyle}>
+                      {item.descripcion || '—'}
+                      {item.nota_entrega_codigo ? ` · Nota ${item.nota_entrega_codigo}` : ''}
+                      {item.lote_pos_numero ? ` · Lote POS #${item.lote_pos_numero}` : ''}
+                    </div>
                     {!rango && item.ultima_correccion ? (
                       <div style={correccionNotaStyle}>
                         ✎ Corregido de {item.ultima_correccion.metodo_anterior} a {item.ultima_correccion.metodo_nuevo} por{' '}

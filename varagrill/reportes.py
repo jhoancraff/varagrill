@@ -842,7 +842,9 @@ def disponibilidad_por_cuenta(fecha):
         if fila_pos['acreditado_bs']:
             saldo_bs_por_metodo[metodo_id] = saldo_bs_por_metodo.get(metodo_id, Decimal('0')) + fila_pos['acreditado_bs']
 
-    for ingreso in VGIngresoExtra.objects.filter(fecha_creacion__date__lte=fecha).select_related('metodo_pago'):
+    for ingreso in VGIngresoExtra.objects.filter(
+        fecha_creacion__date__lte=fecha,
+    ).exclude(metodo_pago__es_punto_venta=True, lote_pos__isnull=False).select_related('metodo_pago'):
         if ingreso.metodo_pago.moneda != 'VES':
             continue
         tasa = ingreso.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(ingreso.fecha_creacion).date())
@@ -900,6 +902,7 @@ def disponibilidad_por_cuenta(fecha):
     )
     ingresos_extra_por_metodo = _totales_por_metodo(
         VGIngresoExtra.objects.filter(fecha_creacion__date__lte=fecha)
+        .exclude(metodo_pago__es_punto_venta=True, lote_pos__isnull=False)
     )
     gastos_por_metodo = _totales_por_metodo(
         VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha)
@@ -1162,6 +1165,7 @@ def flujo_bancario_mensual(anio, mes, banco_clave):
     for ingreso in (
         VGIngresoExtra.objects
         .filter(fecha_creacion__date__gte=desde, fecha_creacion__date__lte=hasta, metodo_pago_id__in=metodo_ids)
+        .exclude(metodo_pago__es_punto_venta=True, lote_pos__isnull=False)
         .select_related('metodo_pago')
     ):
         dia = timezone.localtime(ingreso.fecha_creacion).date()
@@ -1331,6 +1335,7 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
         for ingreso in (
             VGIngresoExtra.objects
             .filter(fecha_creacion__date=fecha, metodo_pago_id__in=metodo_ids)
+            .exclude(metodo_pago__es_punto_venta=True, lote_pos__isnull=False)
             .select_related('metodo_pago')
         ):
             nombre = ingreso.get_tipo_display()

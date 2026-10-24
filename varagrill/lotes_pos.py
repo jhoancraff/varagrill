@@ -26,7 +26,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from .models import VGCorreccionMetodoPago, VGCorrelativoFiscal, VGLotePOS, VGPago
+from .models import VGCorreccionMetodoPago, VGCorrelativoFiscal, VGIngresoExtra, VGLotePOS, VGPago
 
 SEIS_DECIMALES = Decimal('0.000001')
 CENTIMOS = Decimal('0.01')
@@ -61,12 +61,18 @@ def _pagos_vigentes(lote):
     return lote.pagos.filter(estado='completado').select_related('nota_entrega', 'factura')
 
 
+def _ingresos_extra_vigentes(lote):
+    return lote.ingresos_extra.filter(tipo__in=('propina', 'pago_extra')).select_related('nota_entrega')
+
+
+def _tasa_de_ingreso_extra(ingreso):
+    return ingreso.tasa_cambio_referencia or _tasa_para_fecha(timezone.localtime(ingreso.fecha_creacion).date())
+
+
 def recalcular_lote(lote, forzar=False):
     """
-    Vuelve a sumar los cobros vigentes de un lote ABIERTO (los anulados no
-    cuentan). Un lote ya cerrado queda congelado: es lo que la maquina cerro.
-    `forzar` lo recalcula igual: solo lo usa mover_pago_de_lote, cuando un
-    administrador saca a proposito un cobro de un lote cerrado.
+    Vuelve a sumar los cobros e ingresos extra vigentes de un lote ABIERTO. Un
+    lote ya cerrado queda congelado salvo que una accion administrativa lo fuerce.
     """
     if lote.estado != 'abierto' and not forzar:
         return lote
@@ -77,6 +83,11 @@ def recalcular_lote(lote, forzar=False):
         tasa = _tasa_de_pago(pago)
         if tasa:
             bruto_bs += (pago.monto * tasa).quantize(CENTIMOS)
+    for ingreso in _ingresos_extra_vigentes(lote):
+        bruto_usd += ingreso.monto
+        tasa = _tasa_de_ingreso_extra(ingreso)
+        if tasa:
+            bruto_bs += (ingreso.monto * tasa).quantize(CENTIMOS)
     lote.monto_bruto_usd = bruto_usd.quantize(SEIS_DECIMALES)
     lote.monto_bruto_sistema_bs = bruto_bs
     lote.save(update_fields=['monto_bruto_usd', 'monto_bruto_sistema_bs', 'fecha_actualizacion'])
@@ -134,6 +145,18 @@ def asignar_pago_a_lote(pago, usuario=None):
     return lote
 
 
+def asignar_ingreso_extra_a_lote(ingreso, usuario=None):
+    """Asigna propinas y pagos extra de métodos POS al lote abierto del método."""
+    if ingreso.tipo not in ('propina', 'pago_extra') or not ingreso.metodo_pago.es_punto_venta:
+        return None
+    with transaction.atomic():
+        lote = obtener_o_crear_lote_abierto(ingreso.metodo_pago, usuario)
+        ingreso.lote_pos = lote
+        ingreso.save(update_fields=['lote_pos'])
+        recalcular_lote(lote)
+    return lote
+
+
 def pago_anulado(pago):
     """Un cobro POS se anulo (devolucion/reembolso): si su lote sigue abierto, se recalcula la sumatoria."""
     if pago.lote_pos_id:
@@ -163,7 +186,10 @@ def aplicar_cambio_metodo_pago(pago, usuario=None):
             pago.lote_pos = None
             pago.save(update_fields=['lote_pos'])
             recalcular_lote(lote_anterior)
-        asignar_pago_a_lote(pago, usuario)
+        if isinstance(pago, VGIngresoExtra):
+            asignar_ingreso_extra_a_lote(pago, usuario)
+        else:
+            asignar_pago_a_lote(pago, usuario)
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +219,8 @@ def cerrar_lote(lote, usuario, ahora=None):
         lote = VGLotePOS.objects.select_for_update().select_related('metodo_pago').get(pk=lote.pk)
         if lote.estado != 'abierto':
             raise LoteError(f'El lote #{lote.numero} ya no esta abierto.')
-        if not lote.pagos.filter(estado='completado').exists():
-            raise LoteError(f'El lote #{lote.numero} no tiene cobros para cerrar.')
+        if not _pagos_vigentes(lote).exists() and not _ingresos_extra_vigentes(lote).exists():
+            raise LoteError(f'El lote #{lote.numero} no tiene movimientos para cerrar.')
         recalcular_lote(lote)
         lote.fecha_cierre = ahora or timezone.now()
         lote.estado = 'cerrado'
@@ -207,15 +233,15 @@ def cerrar_lote(lote, usuario, ahora=None):
 def autoclausurar_lotes_abiertos(usuario, ahora=None):
     """
     Al cerrar la caja se cierran TODOS los lotes POS que sigan abiertos. Un lote
-    abierto sin cobros vigentes (todos anulados) no tiene nada que cerrar: se marca
+    abierto sin movimientos vigentes no tiene nada que cerrar: se marca
     'anulado' con una nota. Devuelve los lotes que quedaron 'cerrado'.
     """
     cerrados = []
     with transaction.atomic():
         for lote in VGLotePOS.objects.select_for_update().select_related('metodo_pago').filter(estado='abierto'):
-            if not lote.pagos.filter(estado='completado').exists():
+            if not _pagos_vigentes(lote).exists() and not _ingresos_extra_vigentes(lote).exists():
                 lote.estado = 'anulado'
-                _anotar(lote, 'Autoanulado al cerrar la caja: no tenia cobros vigentes.')
+                _anotar(lote, 'Autoanulado al cerrar la caja: no tenia movimientos vigentes.')
                 lote.actualizado_por = usuario
                 lote.save(update_fields=['estado', 'notas', 'actualizado_por', 'fecha_actualizacion'])
                 continue
@@ -326,9 +352,9 @@ def mover_pago_de_lote(pago, usuario, motivo, metodo_destino=None):
             else f'a la cuenta {pago.metodo_pago.nombre} (fuera de lotes)'
         )
         _anotar(origen, f'[{_sello()}] {_etiqueta_usuario(usuario)} saco el cobro #{pago.id} y lo paso {hacia}: {motivo}')
-        if not origen.pagos.filter(estado='completado').exists():
+        if not _pagos_vigentes(origen).exists() and not _ingresos_extra_vigentes(origen).exists():
             origen.estado = 'anulado'
-            _anotar(origen, 'Anulado automaticamente: se quedo sin cobros.')
+            _anotar(origen, 'Anulado automaticamente: se quedo sin movimientos.')
         origen.actualizado_por = usuario
         origen.save(update_fields=['estado', 'notas', 'actualizado_por', 'fecha_actualizacion'])
         if destino:
@@ -336,6 +362,50 @@ def mover_pago_de_lote(pago, usuario, motivo, metodo_destino=None):
             destino.save(update_fields=['notas', 'fecha_actualizacion'])
             recalcular_lote(destino)
         return origen
+
+
+def agregar_ingreso_extra_a_lote(ingreso, lote_destino, usuario, motivo, nota_entrega=None):
+    """Añade un ingreso extra sin lote a uno no anulado, dejando auditoría."""
+    motivo = (motivo or '').strip()
+    if not motivo:
+        raise LoteError('El motivo es obligatorio.')
+    if ingreso.tipo not in ('propina', 'pago_extra'):
+        raise LoteError('Solo se pueden agregar propinas o pagos extra a un lote POS.')
+
+    with transaction.atomic():
+        ingreso = VGIngresoExtra.objects.select_for_update().get(pk=ingreso.pk)
+        destino = VGLotePOS.objects.select_for_update().select_related('metodo_pago').get(pk=lote_destino.pk)
+        if ingreso.lote_pos_id:
+            raise LoteError('Este ingreso ya pertenece a un lote POS.')
+        if ingreso.tipo == 'pago_extra':
+            if nota_entrega is not None and ingreso.nota_entrega_id not in (None, nota_entrega.pk):
+                raise LoteError('El excedente ya está vinculado a otra nota de entrega.')
+            if nota_entrega is None and not ingreso.nota_entrega_id:
+                raise LoteError('El excedente debe estar vinculado a una nota de entrega.')
+        if not ingreso.metodo_pago.es_punto_venta or ingreso.metodo_pago_id != destino.metodo_pago_id:
+            raise LoteError('El ingreso y el lote deben pertenecer al mismo método de punto de venta.')
+        if destino.estado not in ('abierto', 'cerrado', 'acreditado'):
+            raise LoteError('No se puede agregar a un lote anulado.')
+        if timezone.localtime(ingreso.fecha_creacion).date() != destino.fecha_operacion:
+            raise LoteError('El ingreso no corresponde a la fecha de operación de este lote.')
+
+        ingreso.lote_pos = destino
+        update_fields = ['lote_pos']
+        if nota_entrega is not None and not ingreso.nota_entrega_id:
+            ingreso.nota_entrega = nota_entrega
+            update_fields.append('nota_entrega')
+        ingreso.save(update_fields=update_fields)
+        recalcular_lote(destino, forzar=destino.estado != 'abierto')
+        _anotar(
+            destino,
+            f'[{_sello()}] {_etiqueta_usuario(usuario)} agrego el ingreso extra #{ingreso.id}: {motivo}',
+        )
+        update_fields = ['notas', 'fecha_actualizacion']
+        if usuario is not None:
+            destino.actualizado_por = usuario
+            update_fields.append('actualizado_por')
+        destino.save(update_fields=update_fields)
+        return destino
 
 
 def reabrir_lote(lote, usuario, motivo):
@@ -378,14 +448,18 @@ def anular_lote(lote, usuario, motivo):
         if lote.estado not in ESTADOS_NO_ACREDITADOS:
             raise LoteError('Un lote acreditado ya no se puede anular: revierte la acreditacion primero.')
         pagos = list(lote.pagos.all())
-        if lote.estado == 'abierto' and any(p.estado == 'completado' for p in pagos):
-            raise LoteError('Un lote abierto con cobros no se anula: ciérralo o muévele la cuenta a los cobros.')
+        ingresos_extra = list(_ingresos_extra_vigentes(lote))
+        if lote.estado == 'abierto' and (
+            any(p.estado == 'completado' for p in pagos) or ingresos_extra
+        ):
+            raise LoteError('Un lote abierto con movimientos no se anula: ciérralo primero.')
         destino = None
-        if pagos and lote.estado == 'cerrado':
+        if (pagos or ingresos_extra) and lote.estado == 'cerrado':
             lote.estado = 'anulado'  # libera la constraint antes de resolver el lote destino
             lote.save(update_fields=['estado'])
             destino = obtener_o_crear_lote_abierto(lote.metodo_pago, usuario)
             lote.pagos.update(lote_pos=destino)
+            lote.ingresos_extra.update(lote_pos=destino)
             recalcular_lote(destino)
         _anotar(lote, f'[{_sello()}] Anulado por {_etiqueta_usuario(usuario)}: {motivo}'
                 + (f' (cobros movidos al lote #{destino.numero})' if destino else ''))
@@ -400,42 +474,61 @@ def anular_lote(lote, usuario, motivo):
 # ---------------------------------------------------------------------------
 def backfill_historico_metodo(metodo, usuario=None):
     """
-    Cuando un metodo se marca como POS, sus cobros anteriores (sin lote) se agrupan
+    Cuando un metodo se marca como POS, sus cobros e ingresos extra anteriores (sin lote) se agrupan
     en un VGLotePOS por dia para NO alterar los saldos que el usuario ya conoce:
     los dias que ya pasaron quedan 'acreditado' (abono = ese mismo dia, el saldo no
     cambia ni un centimo) y los de hoy entran al lote abierto actual. Idempotente:
     solo toca cobros sin lote. Devuelve cuantos lotes historicos creo.
     """
     hoy = timezone.localdate()
-    pagos_por_dia = {}
+    operaciones_por_dia = {}
     for pago in (
         VGPago.objects.filter(metodo_pago=metodo, estado='completado', lote_pos__isnull=True)
         .select_related('nota_entrega', 'factura').order_by('fecha_pago')
     ):
-        pagos_por_dia.setdefault(timezone.localtime(pago.fecha_pago).date(), []).append(pago)
+        operaciones_por_dia.setdefault(timezone.localtime(pago.fecha_pago).date(), {'pagos': [], 'ingresos': []})['pagos'].append(pago)
+    for ingreso in (
+        VGIngresoExtra.objects.filter(
+            metodo_pago=metodo, tipo__in=('propina', 'pago_extra'), lote_pos__isnull=True,
+        ).order_by('fecha_creacion')
+    ):
+        operaciones_por_dia.setdefault(timezone.localtime(ingreso.fecha_creacion).date(), {'pagos': [], 'ingresos': []})['ingresos'].append(ingreso)
 
     creados = 0
     with transaction.atomic():
-        for dia, pagos in sorted(pagos_por_dia.items()):
+        for dia, operaciones in sorted(operaciones_por_dia.items()):
+            pagos = operaciones['pagos']
+            ingresos = operaciones['ingresos']
             if dia >= hoy:
                 for pago in pagos:
                     asignar_pago_a_lote(pago, usuario)
+                for ingreso in ingresos:
+                    asignar_ingreso_extra_a_lote(ingreso, usuario)
                 continue
-            bruto_usd = sum((p.monto for p in pagos), Decimal('0')).quantize(SEIS_DECIMALES)
+            bruto_usd = sum((p.monto for p in pagos), Decimal('0')) + sum((i.monto for i in ingresos), Decimal('0'))
+            bruto_usd = bruto_usd.quantize(SEIS_DECIMALES)
             bruto_bs = Decimal('0')
             for pago in pagos:
                 tasa = _tasa_de_pago(pago)
                 if tasa:
                     bruto_bs += (pago.monto * tasa).quantize(CENTIMOS)
+            for ingreso in ingresos:
+                tasa = _tasa_de_ingreso_extra(ingreso)
+                if tasa:
+                    bruto_bs += (ingreso.monto * tasa).quantize(CENTIMOS)
             lote = VGLotePOS.objects.create(
                 numero=VGCorrelativoFiscal.siguiente(SERIE_LOTE_POS),
                 metodo_pago=metodo, cuenta_bancaria=metodo.cuenta_bancaria, fecha_operacion=dia,
-                fecha_cierre=pagos[-1].fecha_pago, estado='acreditado', moneda=metodo.moneda,
+                fecha_cierre=max(
+                    [p.fecha_pago for p in pagos] + [i.fecha_creacion for i in ingresos]
+                ), estado='acreditado', moneda=metodo.moneda,
                 monto_bruto_usd=bruto_usd, monto_bruto_sistema_bs=bruto_bs,
-                fecha_abono_real=dia, fecha_acreditacion=pagos[-1].fecha_pago,
+                fecha_abono_real=dia,
+                fecha_acreditacion=max([p.fecha_pago for p in pagos] + [i.fecha_creacion for i in ingresos]),
                 notas='Lote generado automaticamente a partir del historico al activar el metodo como punto de venta.',
                 creado_por=usuario, actualizado_por=usuario,
             )
             VGPago.objects.filter(pk__in=[p.pk for p in pagos]).update(lote_pos=lote)
+            VGIngresoExtra.objects.filter(pk__in=[i.pk for i in ingresos]).update(lote_pos=lote)
             creados += 1
     return creados

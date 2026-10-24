@@ -208,18 +208,11 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
     ? (form.vinculo_tipo === 'receta' ? recetas : subrecetas).find((item) => String(item.id) === String(form.vinculo_id))
     : null;
 
-  // Costo con el % de rendimiento global ya aplicado. Si hay receta/subreceta vinculada, el
-  // backend ya lo aplicó (solo para recetas, nunca subrecetas — ver _compute_product_recipe_cost).
-  // Si el producto lleva ingredientes propios directos, ESO es su receta: se suma el % acá mismo.
-  const costoConRendimiento = useMemo(() => {
-    if (selectedVinculo) {
-      return Number(selectedVinculo.costo_unitario_calculado || 0);
-    }
+  const costoIngredientes = useMemo(() => {
     if (ingredientes.length === 0) {
       return null;
     }
-    const rendimientoPct = Number(configCosteo.rendimiento_receta_pct || 0);
-    const costoBruto = ingredientes.reduce((total, item) => {
+    return ingredientes.reduce((total, item) => {
       const ingrediente = ingredients.find((candidate) => String(candidate.id) === String(item.referencia_id));
       if (!ingrediente) return total;
       const cantidadEnUnidadBase = item.unidad !== item.unidadBase
@@ -227,8 +220,25 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
         : Number(item.cantidad || 0);
       return total + cantidadEnUnidadBase * Number(ingrediente.costo_unitario || 0);
     }, 0);
-    return costoBruto * (1 + rendimientoPct / 100);
-  }, [selectedVinculo, ingredientes, ingredients, configCosteo]);
+  }, [ingredientes, ingredients]);
+
+  const costoRecetaReporte = useMemo(() => {
+    if (selectedVinculo) {
+      const costoReportado = form.vinculo_tipo === 'receta'
+        ? selectedVinculo.costo_receta
+        : selectedVinculo.costo_receta_producto;
+      return Number(costoReportado ?? selectedVinculo.costo_unitario_calculado ?? 0);
+    }
+    return costoIngredientes;
+  }, [selectedVinculo, form.vinculo_tipo, costoIngredientes]);
+
+  const costoConRendimiento = useMemo(() => {
+    if (costoRecetaReporte === null) {
+      return null;
+    }
+    const rendimientoPct = Number(configCosteo.rendimiento_receta_pct || 0);
+    return costoRecetaReporte * (1 + rendimientoPct / 100);
+  }, [costoRecetaReporte, configCosteo]);
 
   const margenEfectivoPct = form.margen_ganancia_pct !== ''
     ? Number(form.margen_ganancia_pct || 0)
@@ -553,8 +563,25 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                 <input type="number" min="0" step="0.01" value={form.precio_venta} onChange={(event) => handleChange('precio_venta', event.target.value)} style={inputStyle} />
               </label>
               <label style={fieldStyle}>
-                <span style={labelStyle}>Costo estimado</span>
-                <input type="number" min="0" step="0.01" value={form.costo_estimado} onChange={(event) => handleChange('costo_estimado', event.target.value)} style={inputStyle} />
+                <span style={labelStyle}>
+                  {costoRecetaReporte !== null ? 'Costo de receta (calculado)' : 'Costo estimado manual'}
+                </span>
+                {costoRecetaReporte !== null ? (
+                  <>
+                    <input
+                      type="number"
+                      value={costoRecetaReporte.toFixed(4)}
+                      readOnly
+                      style={{ ...inputStyle, cursor: 'not-allowed', opacity: 0.85 }}
+                    />
+                    <span style={costReferenceHintStyle}>Se calcula con los ingredientes y coincide con la columna Costo del reporte.</span>
+                  </>
+                ) : (
+                  <>
+                    <input type="number" min="0" step="0.01" value={form.costo_estimado} onChange={(event) => handleChange('costo_estimado', event.target.value)} style={inputStyle} />
+                    <span style={costReferenceHintStyle}>Sin receta, puedes registrar un costo estimado manual.</span>
+                  </>
+                )}
               </label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>Margen de ganancia (%)</span>
@@ -586,7 +613,14 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
             {costoConRendimiento !== null ? (
               <div style={costReferenceBoxStyle}>
                 <div>
-                  <div style={costReferenceLabelStyle}>Costo con rendimiento: ${costoConRendimiento.toFixed(4)}</div>
+                  <div style={costReferenceLabelStyle}>
+                    Costo de receta (columna Costo del reporte): ${costoRecetaReporte.toFixed(2)}
+                    {form.venta_por_peso ? ' /kg' : ''}
+                  </div>
+                  <div style={costReferenceLabelStyle}>
+                    Costo con rendimiento: ${costoConRendimiento.toFixed(4)}
+                    {form.venta_por_peso ? ' /kg' : ''}
+                  </div>
                   <div style={costReferenceValueStyle}>Precio sugerido: ${precioSugerido.toFixed(2)}</div>
                   <p style={costReferenceHintStyle}>
                     Margen: {margenEfectivoPct.toFixed(2)}% {form.margen_ganancia_pct === '' ? '(por defecto)' : '(propio)'}
@@ -595,12 +629,11 @@ function AnalystEditProductPage({ isMobile, isAdmin, productId, onBack, onProduc
                 <button
                   type="button"
                   onClick={() => {
-                    handleChange('costo_estimado', costoConRendimiento.toFixed(4));
                     handleChange('precio_venta', precioSugerido.toFixed(2));
                   }}
                   style={useCostButtonStyle}
                 >
-                  Usar estos valores
+                  Usar precio sugerido
                 </button>
               </div>
             ) : null}

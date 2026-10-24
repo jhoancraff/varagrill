@@ -676,13 +676,23 @@ def _build_cierre_lote_pos_bytes(lote, es_reimpresion=False):
     registro el sistema contra el cierre de lote que imprime el punto fisico. Los
     montos en Bs usan la tasa congelada de cada cobro (nunca la de hoy).
     """
-    from .lotes_pos import _tasa_de_pago  # import tardio: evita ciclos entre modulos
+    from .lotes_pos import _tasa_de_ingreso_extra, _tasa_de_pago  # import tardio: evita ciclos entre modulos
 
     datos_fiscales = VGDatosFiscalesEmisor.objects.first()
     pagos = list(
         lote.pagos.filter(estado='completado')
         .select_related('nota_entrega__cliente', 'factura', 'creado_por')
         .order_by('fecha_pago')
+    )
+    ingresos_extra = list(
+        lote.ingresos_extra.filter(tipo__in=('propina', 'pago_extra'))
+        .select_related('nota_entrega', 'creado_por')
+        .order_by('fecha_creacion')
+    )
+    movimientos = sorted(
+        [(pago.fecha_pago, 'pago', pago) for pago in pagos]
+        + [(ingreso.fecha_creacion, 'ingreso_extra', ingreso) for ingreso in ingresos_extra],
+        key=lambda item: item[0],
     )
     titulo = 'CIERRE DE LOTE POS'
     if lote.estado == 'abierto':
@@ -712,26 +722,36 @@ def _build_cierre_lote_pos_bytes(lote, es_reimpresion=False):
             out += _text(f'Por: {lote.cerrado_por.get_full_name() or lote.cerrado_por.username}') + FEED
     out += _text('-' * LINE_WIDTH) + FEED
     out += BOLD_ON
-    out += _text(f'COBROS DEL LOTE ({len(pagos)})') + FEED
+    out += _text(f'MOVIMIENTOS DEL LOTE ({len(movimientos)})') + FEED
     out += BOLD_OFF
     out += _text('Compara con el cierre del punto') + FEED
     out += _text('-' * LINE_WIDTH) + FEED
 
     total_bs = Decimal('0')
     total_usd = Decimal('0')
-    for pago in pagos:
-        tasa = _tasa_de_pago(pago)
-        monto_bs = (pago.monto * tasa).quantize(Decimal('0.01')) if tasa else None
-        total_usd += pago.monto
+    for fecha_movimiento, tipo_movimiento, movimiento in movimientos:
+        if tipo_movimiento == 'pago':
+            monto = movimiento.monto
+            tasa = _tasa_de_pago(movimiento)
+            origen = _origen_pago_corto(movimiento)
+            detalle = _cliente_pago_corto(movimiento)
+            referencia = movimiento.referencia if movimiento.referencia and not movimiento.referencia.startswith('ABONO-') else ''
+            if referencia:
+                detalle = f'{detalle[:14]} Ref:{referencia[:12]}'.strip()
+        else:
+            monto = movimiento.monto
+            tasa = _tasa_de_ingreso_extra(movimiento)
+            origen = movimiento.get_tipo_display()
+            detalle = f'Nota {movimiento.nota_entrega.codigo}' if movimiento.nota_entrega_id else ''
+            if movimiento.descripcion:
+                detalle = f'{detalle} {movimiento.descripcion}'.strip()
+        monto_bs = (monto * tasa).quantize(Decimal('0.01')) if tasa else None
+        total_usd += monto
         if monto_bs is not None:
             total_bs += monto_bs
-        hora = timezone.localtime(pago.fecha_pago).strftime('%H:%M')
-        monto_txt = f'Bs.{_formatear_bs(monto_bs)}' if monto_bs is not None else f'${pago.monto:.2f}'
-        out += _text(_fila_izq_der(f'{hora} {_origen_pago_corto(pago)}', monto_txt)) + FEED
-        detalle = _cliente_pago_corto(pago)
-        referencia = pago.referencia if pago.referencia and not pago.referencia.startswith('ABONO-') else ''
-        if referencia:
-            detalle = f'{detalle[:14]} Ref:{referencia[:12]}'.strip()
+        hora = timezone.localtime(fecha_movimiento).strftime('%H:%M')
+        monto_txt = f'Bs.{_formatear_bs(monto_bs)}' if monto_bs is not None else f'${monto:.2f}'
+        out += _text(_fila_izq_der(f'{hora} {origen}', monto_txt)) + FEED
         if detalle:
             out += _text(f'  {detalle}'[:LINE_WIDTH]) + FEED
 
@@ -740,7 +760,7 @@ def _build_cierre_lote_pos_bytes(lote, es_reimpresion=False):
     out += _text(_fila_izq_der('TOTAL Bs.', _formatear_bs(total_bs))) + FEED
     out += BOLD_OFF
     out += _text(_fila_izq_der('Total en dolares', f'${total_usd:.2f}')) + FEED
-    out += _text(_fila_izq_der('Cantidad de cobros', len(pagos))) + FEED
+    out += _text(_fila_izq_der('Cantidad de movimientos', len(movimientos))) + FEED
     out += _text('-' * LINE_WIDTH) + FEED
     out += ALIGN_CENTER
     out += _text('Documento sin efecto fiscal') + FEED

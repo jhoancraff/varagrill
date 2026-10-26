@@ -101,6 +101,18 @@ function EstadoResultadosPage({ isMobile, onBack, onNavigate }) {
                 <BsAmount amountUsd={data.ventas_total} bs={data.ventas_total_bs} tasa={tasaCambio} />
               </span>
             </div>
+            {data.servicios_adicionales && Number(data.servicios_adicionales.total) > 0 ? (
+              <div style={servicioDetalleStyle} title="Ya incluidos en las ventas. Sin costo: pasan completos a la utilidad bruta.">
+                <span>
+                  Incluye servicios adicionales (sin costo):{' '}
+                  {data.servicios_adicionales.items.map((item) => `${item.cantidad}× ${item.nombre}`).join(', ')}
+                </span>
+                <span>
+                  ${formatMonto(data.servicios_adicionales.total)}
+                  <BsAmount amountUsd={data.servicios_adicionales.total} bs={data.servicios_adicionales.total_bs} tasa={tasaCambio} />
+                </span>
+              </div>
+            ) : null}
             <div style={lineRowStyle}>
               <span style={lineLabelStyle}>
                 (−) Costo de ventas
@@ -250,6 +262,7 @@ const lineRowStyle = { display: 'flex', justifyContent: 'space-between', alignIt
 const lineLabelStyle = { color: 'var(--vg-f-d2c3c3)', fontSize: 14.5 };
 const lineValueStyle = { color: 'var(--vg-text-strong)', fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap' };
 const categoriaChipStyle = { display: 'inline-flex', padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, color: 'var(--vg-f-c8bbbb)', background: 'rgba(var(--vg-ink), 0.06)' };
+const servicioDetalleStyle = { display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '2px 4px 8px', color: 'var(--vg-f-9fe3b0)', fontSize: 13 };
 const avisoStyle = { color: 'var(--vg-f-a89999)', fontSize: 12.5, lineHeight: 1.5 };
 const alertaCostoStyle = {
   padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ffbe5a-a350)', background: 'rgba(255, 170, 60, 0.1)',

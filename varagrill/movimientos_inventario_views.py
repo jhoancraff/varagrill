@@ -216,6 +216,7 @@ def _serializar_pedido(pedido):
         'subtotal': str(pedido.subtotal),
         'total': str(pedido.total),
         'cargo_delivery': str(pedido.cargo_delivery),
+        'cargo_servicios': str(pedido.cargo_servicios),
         'notas': pedido.notas,
         'productos': [
             {

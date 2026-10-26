@@ -67,6 +67,11 @@ from varagrill.api_views import (
     tasa_cambio_view,
 )
 from varagrill.delivery_views import pedido_cargo_delivery_view, zonas_delivery_view
+from varagrill.servicios_adicionales_views import (
+    pedido_servicios_view,
+    servicio_adicional_detail_view,
+    servicios_adicionales_view,
+)
 from varagrill.reportes_pdf_views import (
     reporte_cuentas_por_cobrar_pdf_view,
     reporte_cuentas_por_pagar_pdf_view,
@@ -323,6 +328,9 @@ urlpatterns = [
     path('api/pedidos/<int:pedido_id>/reimprimir-comanda/', pedido_reimprimir_comanda_view, name='pedido-reimprimir-comanda'),
     path('api/clientes/buscar/', clientes_buscar_view, name='clientes-buscar'),
     path('api/delivery/zonas/', zonas_delivery_view, name='delivery-zonas'),
+    path('api/servicios-adicionales/', servicios_adicionales_view, name='servicios-adicionales'),
+    path('api/servicios-adicionales/<int:servicio_id>/', servicio_adicional_detail_view, name='servicio-adicional-detalle'),
+    path('api/pedidos/<int:pedido_id>/servicios/', pedido_servicios_view, name='pedido-servicios'),
     path('api/pedidos/<int:pedido_id>/delivery/', pedido_cargo_delivery_view, name='pedido-cargo-delivery'),
     path('api/admin/datos-fiscales/', datos_fiscales_view, name='admin-datos-fiscales'),
     path('api/prefacturas/', prefacturas_view, name='prefacturas'),

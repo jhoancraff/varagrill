@@ -267,6 +267,7 @@ def _ticket_recibo(
     propina_total = 0
     delivery_total = 0
     delivery_etiquetas = []
+    servicios_total = 0
 
     for pedido in pedidos:
         mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
@@ -283,6 +284,13 @@ def _ticket_recibo(
                 _agregar_item_recibo(ticket, detalle, moneda, tasa)
         for detalle in sueltos:
             _agregar_item_recibo(ticket, detalle, moneda, tasa)
+        # Servicios adicionales (no son platos: ver servicios_adicionales.py), cada uno con su cantidad y monto.
+        servicios_pedido = list(pedido.servicios.all())
+        if servicios_pedido:
+            ticket.izq('SERVICIOS ADICIONALES', negrita=True)
+            for servicio in servicios_pedido:
+                ticket.item(f'{servicio.cantidad}x {servicio.nombre}', _monto_texto(servicio.subtotal, moneda, tasa))
+            servicios_total += pedido.cargo_servicios
         subtotal_total += pedido.subtotal
         impuesto_total += pedido.impuesto
         descuento_total += pedido.descuento
@@ -293,6 +301,8 @@ def _ticket_recibo(
 
     ticket.separador()
     ticket.fila('Subtotal:', _monto_texto(subtotal_total, moneda, tasa))
+    if servicios_total > 0:
+        ticket.fila('Servicios:', _monto_texto(servicios_total, moneda, tasa))
     if delivery_total > 0:
         # El envio va en su propia linea (no es un producto): sin ella el ticket no sumaria al TOTAL.
         etiqueta = delivery_etiquetas[0] if len(delivery_etiquetas) == 1 else 'Delivery'
@@ -358,7 +368,7 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
         tasa = tasa_actual.tasa if tasa_actual else None
     pedidos = list(
         nota.pedidos.select_related('mesa')
-        .prefetch_related('detalles__producto', 'detalles__opciones', 'detalles__adicionales__preparacion')
+        .prefetch_related('detalles__producto', 'detalles__opciones', 'detalles__adicionales__preparacion', 'servicios')
         .all()
     )
 

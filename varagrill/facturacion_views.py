@@ -174,6 +174,7 @@ def _pedidos_facturables_por_ids(pedido_ids):
             'detalles__adicionales__preparacion',
             'detalles__opciones__preparacion',
             'detalles__opciones__producto',
+            'servicios',
         )
     )
     found_ids = {pedido.id for pedido in pedidos}
@@ -231,6 +232,15 @@ def _lineas_data_desde_pedidos(pedidos, porcentaje_iva):
                 'cantidad': Decimal('1'),
                 'precio_unitario': pedido.cargo_delivery,
                 'porcentaje_iva': porcentaje_iva,
+            })
+        # Los servicios adicionales tampoco son productos y no llevan IVA (ver servicios_adicionales.py).
+        for servicio in pedido.servicios.all():
+            lineas.append({
+                'descripcion': servicio.nombre,
+                'producto_id': None,
+                'cantidad': Decimal(servicio.cantidad),
+                'precio_unitario': servicio.precio_unitario,
+                'porcentaje_iva': Decimal('0'),
             })
     return lineas
 
@@ -1069,6 +1079,12 @@ def _serialize_nota_entrega(nota, incluir_detalle=True, tasa_pago_actual=None):
         'pedidos': [pedido.id for pedido in nota.pedidos.all()],
         # Lo que se cobro de delivery en esta nota (ya esta dentro de `total`), para mostrarlo como linea aparte.
         'cargo_delivery': str(sum((pedido.cargo_delivery for pedido in nota.pedidos.all()), Decimal('0'))),
+        # Servicios adicionales de esta nota (ya estan dentro de `total`), una fila por servicio.
+        'servicios': [
+            {'nombre': s.nombre, 'cantidad': s.cantidad, 'precio_unitario': str(s.precio_unitario), 'subtotal': str(s.subtotal)}
+            for pedido in nota.pedidos.all() for s in pedido.servicios.all()
+        ],
+        'cargo_servicios': str(sum((pedido.cargo_servicios for pedido in nota.pedidos.all()), Decimal('0'))),
         'zona_delivery': ', '.join(sorted({
             pedido.zona_delivery_nombre for pedido in nota.pedidos.all()
             if pedido.cargo_delivery > 0 and pedido.zona_delivery_nombre

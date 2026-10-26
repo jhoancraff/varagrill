@@ -122,6 +122,15 @@ const MealsIcon = () => (
   </svg>
 );
 
+const ServicesIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 18h18" />
+    <path d="M5 18a7 7 0 0 1 14 0" />
+    <path d="M12 6v3" />
+    <path d="M10 6h4" />
+  </svg>
+);
+
 const analystSections = [
   { id: 'admin-users', title: 'Usuarios', icon: UsersIcon },
   { id: 'admin-mesas', title: 'Mesas', icon: TablesIcon },
@@ -134,6 +143,7 @@ const analystSections = [
   { id: 'admin-printers', title: 'Impresoras', icon: PrinterIcon },
   { id: 'admin-payment-methods', title: 'Métodos de pago', icon: PaymentMethodsIcon },
   { id: 'admin-delivery-zonas', title: 'Zonas de delivery', icon: DeliveryZonesIcon },
+  { id: 'admin-servicios-adicionales', title: 'Servicios adicionales', icon: ServicesIcon },
   { id: 'admin-datos-fiscales', title: 'Datos fiscales', icon: FiscalDataIcon },
   { id: 'admin-compras', title: 'Compras', icon: PurchasesIcon },
   { id: 'admin-comida-empleados', title: 'Comida de empleados', icon: MealsIcon },
@@ -155,7 +165,7 @@ const analystGroups = [
   {
     id: 'operacion-local',
     title: 'Operación del local',
-    ids: ['admin-mesas', 'admin-users', 'admin-comida-empleados', 'admin-printers', 'admin-delivery-zonas'],
+    ids: ['admin-mesas', 'admin-users', 'admin-comida-empleados', 'admin-printers', 'admin-delivery-zonas', 'admin-servicios-adicionales'],
   },
   {
     id: 'pagos-administracion',

@@ -933,6 +933,34 @@ class VGZonaDelivery(VGAuditoria):
         return f"{self.nombre} (${self.tarifa})"
 
 
+class VGServicioAdicional(VGAuditoria):
+    """
+    Servicio adicional que se le cobra al cliente junto con su pedido (descorche, decoración, alquiler de salón,
+    torta de cumpleaños...). Lo crea el administrador o el contador. No es un producto ni un ingrediente: no sale
+    en cocina, no descuenta inventario y no lleva IVA, así que lo que se cobra es una entrada neta (100 % de
+    ganancia, sin costo de ventas). El precio es siempre el del catálogo, en dólares; cambiarlo aquí no toca los
+    pedidos ya registrados (cada línea guarda el precio con el que se cobró, ver VGPedidoServicio). No se borra:
+    se desactiva, y deja de ofrecerse en los pedidos nuevos.
+    """
+    nombre = models.CharField(max_length=120, unique=True)
+    descripcion = models.CharField(max_length=255, blank=True)
+    precio = models.DecimalField(
+        max_digits=10, decimal_places=2, validators=[MinValueValidator(0)],
+        help_text="Precio en dólares que se cobra por cada vez que se agrega a un pedido.",
+    )
+    activo = models.BooleanField(default=True, help_text="Un servicio inactivo no se ofrece en los pedidos nuevos.")
+    orden = models.PositiveSmallIntegerField(default=0, help_text="Orden en que se muestran los servicios.")
+
+    class Meta:
+        db_table = "vg_servicios_adicionales"
+        verbose_name = "Servicio adicional"
+        verbose_name_plural = "Servicios adicionales"
+        ordering = ["orden", "nombre"]
+
+    def __str__(self):
+        return f"{self.nombre} (${self.precio})"
+
+
 class VGPedido(VGAuditoria):
     TIPOS = [
         ("local", "Local"),
@@ -974,6 +1002,10 @@ class VGPedido(VGAuditoria):
     impuesto = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     descuento = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     propina = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cargo_servicios = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0,
+        help_text="Suma de los servicios adicionales del pedido (ver VGPedidoServicio). Ya esta sumado en `total`; no son productos, asi que no salen en cocina ni descuentan inventario ni llevan IVA.",
+    )
     cargo_delivery = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
         help_text="Lo que se cobra por el envio (ingreso del restaurante). Ya esta sumado en `total`; NO es un producto ni un ingrediente, asi que no sale en cocina ni en los reportes de productos y margen. Solo se cobra una vez por delivery: las rondas no lo repiten.",
@@ -997,6 +1029,29 @@ class VGPedido(VGAuditoria):
 
     def __str__(self):
         return f"Pedido #{self.pk}"
+
+
+class VGPedidoServicio(models.Model):
+    """
+    Un servicio adicional agregado a un pedido (ver VGServicioAdicional). Un pedido puede llevar varios, y el mismo
+    servicio puede agregarse más de una vez (cantidad). Guarda el nombre y el precio del catálogo del momento en que
+    se agregó, para que cambiar o desactivar el servicio después no altere lo ya cobrado.
+    """
+    pedido = models.ForeignKey(VGPedido, on_delete=models.CASCADE, related_name="servicios")
+    servicio = models.ForeignKey(
+        VGServicioAdicional, on_delete=models.PROTECT, null=True, blank=True, related_name="pedidos_servicio",
+    )
+    nombre = models.CharField(max_length=120)
+    cantidad = models.PositiveSmallIntegerField(default=1)
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "vg_pedido_servicios"
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.cantidad}x {self.nombre} — Pedido #{self.pedido_id}"
 
 
 class VGDetallePedido(models.Model):

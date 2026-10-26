@@ -669,6 +669,11 @@ function NotasEntregaHistorialPage({ isMobile, onBack, embedded = false, refresh
                       {textoUsdBs(notaDetalle.cargo_delivery, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
                     </span>
                   ) : null}
+                  {(notaDetalle.servicios || []).map((servicio) => (
+                    <span key={`${servicio.nombre}-${servicio.precio_unitario}`}>
+                      Servicio: {servicio.cantidad}× {servicio.nombre} — ${Number(servicio.subtotal).toFixed(2)}
+                    </span>
+                  ))}
                   <span style={{ fontWeight: 800, color: 'var(--vg-text-strong)' }}>
                     Total: {textoUsdBs(notaDetalle.total, notaDetalle.moneda, notaDetalle.tasa_cambio_referencia || tasaCambio)}
                   </span>

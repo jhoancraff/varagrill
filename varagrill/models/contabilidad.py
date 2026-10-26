@@ -1225,6 +1225,16 @@ class VGGasto(VGAuditoria):
         ),
     )
 
+    inhabilitado = models.BooleanField(
+        default=False, db_index=True,
+        help_text=(
+            "Un gasto inhabilitado deja de contar en todos lados: sus pagos ya no salen del banco ni de la caja "
+            "(el dinero 'vuelve'), ni suma al estado de resultados, a las cuentas por pagar ni a la conciliacion. "
+            "No se borra: queda con su historial y se puede rehabilitar. Siempre con motivo "
+            "(ver VGInhabilitacionGasto y gastos_inhabilitacion.py)."
+        ),
+    )
+
     class Meta:
         db_table = "vg_gastos"
         verbose_name = "Gasto"
@@ -1295,3 +1305,36 @@ class VGCorreccionGasto(VGAuditoria):
 
     def __str__(self):
         return f"Corrección gasto #{self.gasto_id}: {self.motivo[:40]}"
+
+
+class VGInhabilitacionGasto(VGAuditoria):
+    """
+    Auditoría OBLIGATORIA de cada vez que un gasto se inhabilita o se rehabilita (ver
+    gastos_inhabilitacion.py). Guarda quién, cuándo y por qué, qué advertencias vio y aceptó, y qué
+    cambió en el banco: cuánto dinero 'volvió' (o volvió a salir) de cada cuenta y qué vínculos de
+    conciliación se deshicieron. El motivo nunca puede ir vacío.
+    """
+    ACCIONES = [("inhabilitado", "Inhabilitado"), ("rehabilitado", "Rehabilitado")]
+    gasto = models.ForeignKey(VGGasto, on_delete=models.CASCADE, related_name="inhabilitaciones")
+    accion = models.CharField(max_length=15, choices=ACCIONES)
+    motivo = models.TextField()
+    monto_gasto = models.DecimalField(max_digits=14, decimal_places=6)
+    estado_pago = models.CharField(max_length=20, blank=True)
+    abonos_afectados = models.PositiveIntegerField(default=0)
+    # Dólares que vuelven al banco/caja (inhabilitar) o que vuelven a salir (rehabilitar).
+    monto_usd_afectado = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    # [{cuenta, metodo, abonos, usd, bs}] — lo que cambia en cada cuenta.
+    efecto_cuentas = models.JSONField(default=list, blank=True)
+    # [{codigo, mensaje}] — las advertencias que la persona vio y aceptó.
+    advertencias_aceptadas = models.JSONField(default=list, blank=True)
+    # [{movimiento_id, fecha, monto, referencia}] — movimientos del banco que quedaron sin ese vínculo.
+    vinculos_deshechos = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = "vg_inhabilitaciones_gasto"
+        verbose_name = "Inhabilitación de gasto"
+        verbose_name_plural = "Inhabilitaciones de gasto"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"{self.get_accion_display()} gasto #{self.gasto_id}: {self.motivo[:40]}"

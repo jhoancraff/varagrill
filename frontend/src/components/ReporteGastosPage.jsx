@@ -5,6 +5,7 @@ import useToast from '../hooks/useToast';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import BotonDescargarPdf from './BotonDescargarPdf';
 import { RangoFechas } from './FiltroFechas';
+import InhabilitarGastoModal from './InhabilitarGastoModal';
 
 function formatUsdBs(amount, tasa) {
   const usd = `$${Number(amount).toFixed(2)}`;
@@ -59,6 +60,8 @@ const ESTADO_LABELS = {
   pagado: { label: 'Pagado', color: 'var(--vg-f-9fe3b0)', background: 'rgba(80, 200, 130, 0.18)' },
 };
 
+const ESTADO_INHABILITADO = { label: 'Inhabilitado', color: 'var(--vg-f-ffb0b0)', background: 'rgba(255, 98, 98, 0.14)' };
+
 const FILAS_POR_PAGINA = 50;
 
 function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
@@ -87,6 +90,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [loadingAbonosDetalle, setLoadingAbonosDetalle] = useState(false);
 
   const [pagina, setPagina] = useState(0);
+  const [inhabilitandoGasto, setInhabilitandoGasto] = useState(null);
 
   const [editandoGastoId, setEditandoGastoId] = useState(null);
   const [editDetalle, setEditDetalle] = useState(null);
@@ -157,7 +161,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
   // cerrado cambiara con el tiempo aunque los gastos no cambiaran).
   const bsTotalesPorCategoria = useMemo(() => {
     const totales = new Map();
-    gastos.forEach((gasto) => {
+    gastos.filter((gasto) => !gasto.inhabilitado).forEach((gasto) => {
       const tasa = Number(tasaDeRegistro(gasto, tasaCambio));
       if (!Number.isFinite(tasa) || tasa <= 0) return;
       const bs = Number(gasto.monto) * tasa;
@@ -168,6 +172,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
 
   const bsTotalGeneral = useMemo(() => (
     gastos.reduce((suma, gasto) => {
+      if (gasto.inhabilitado) return suma;
       const tasa = Number(tasaDeRegistro(gasto, tasaCambio));
       if (!Number.isFinite(tasa) || tasa <= 0) return suma;
       return suma + Number(gasto.monto) * tasa;
@@ -244,6 +249,10 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
   };
 
   const handleAbrirEdicion = async (gasto) => {
+    if (gasto.inhabilitado) {
+      showError('Este gasto está inhabilitado: rehabilítalo para poder editarlo.');
+      return;
+    }
     setEditandoGastoId(gasto.id);
     setEditDetalle(null);
     setEditError('');
@@ -425,7 +434,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
               <div style={headStyle}></div>
 
               {gastosPagina.map((gasto) => {
-                const badge = ESTADO_LABELS[gasto.estado_pago];
+                const badge = gasto.inhabilitado ? ESTADO_INHABILITADO : ESTADO_LABELS[gasto.estado_pago];
                 return (
                   <Fragment key={gasto.id}>
                     <div key={`id-${gasto.id}`} style={cellStyle}>
@@ -440,8 +449,13 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                       </div>
                     </div>
                     <div key={`cat-${gasto.id}`} style={cellStyle}>{gasto.categoria_nombre}</div>
-                    <div key={`desc-${gasto.id}`} style={cellPrimaryStyle}>
-                      <div>{gasto.descripcion}</div>
+                    <div key={`desc-${gasto.id}`} style={gasto.inhabilitado ? { ...cellPrimaryStyle, opacity: 0.6 } : cellPrimaryStyle}>
+                      <div style={gasto.inhabilitado ? { textDecoration: 'line-through' } : undefined}>{gasto.descripcion}</div>
+                      {gasto.inhabilitado && gasto.inhabilitacion ? (
+                        <div style={{ fontSize: 11, color: 'var(--vg-f-ffb0b0)' }} title={gasto.inhabilitacion.motivo}>
+                          Inhabilitado por {gasto.inhabilitacion.por || '—'}: {gasto.inhabilitacion.motivo}
+                        </div>
+                      ) : null}
                       {gasto.proveedor_nombre ? <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>{gasto.proveedor_nombre}</div> : null}
                       {gasto.ultima_correccion ? (
                         <div style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }} title={gasto.ultima_correccion.motivo}>
@@ -459,7 +473,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                       <span style={countBadgeStyle(badge)}>{badge?.label || gasto.estado_pago}</span>
                     </div>
                     <div key={`accion-${gasto.id}`} style={{ ...cellStyle, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {gasto.estado_pago !== 'pagado' ? (
+                      {gasto.estado_pago !== 'pagado' && !gasto.inhabilitado ? (
                         <button type="button" onClick={() => handleAbrirAbono(gasto)} style={secondaryButtonStyle}>
                           {abonandoId === gasto.id ? 'Cerrar' : 'Abonar'}
                         </button>
@@ -469,6 +483,9 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                           {verAbonosId === gasto.id ? 'Ocultar' : 'Ver abonos'}
                         </button>
                       ) : null}
+                      <button type="button" onClick={() => setInhabilitandoGasto(gasto)} style={gasto.inhabilitado ? secondaryButtonStyle : inhabilitarButtonStyle}>
+                        {gasto.inhabilitado ? 'Rehabilitar' : 'Inhabilitar'}
+                      </button>
                     </div>
                     {abonandoId === gasto.id ? (
                       <div key={`abono-${gasto.id}`} style={{ gridColumn: '1 / -1' }}>
@@ -535,6 +552,19 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
           </div>
         ) : null}
       </section>
+
+      {inhabilitandoGasto ? (
+        <InhabilitarGastoModal
+          gasto={inhabilitandoGasto}
+          onClose={() => setInhabilitandoGasto(null)}
+          onDone={(mensaje) => {
+            setInhabilitandoGasto(null);
+            setVerAbonosId(null);
+            showSuccess(mensaje);
+            loadGastos();
+          }}
+        />
+      ) : null}
 
       {editandoGastoId ? (
         <EditarGastoModal
@@ -693,6 +723,8 @@ const countBadgeStyle = (badge) => ({
 const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto', gap: 8, padding: '10px 0' });
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+
+const inhabilitarButtonStyle = { border: '1px solid var(--vg-f-ff9191-a220)', borderRadius: 999, padding: '8px 14px', background: 'transparent', color: 'var(--vg-f-ffb0b0)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
 const miniPrintButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 8, padding: '2px 6px', background: 'rgba(var(--vg-ink), 0.04)', cursor: 'pointer', fontSize: 12, lineHeight: 1 };
 

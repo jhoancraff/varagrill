@@ -13,8 +13,9 @@ from django.db import transaction
 from django.db.models import Sum
 from django.views.decorators.csrf import csrf_exempt
 
+from . import gastos_inhabilitacion
 from .auth_helpers import _auth_response, _is_admin_user
-from .models import VGAbonoGasto, VGCategoriaGasto, VGCorreccionGasto, VGGasto, VGMetodoPago
+from .models import VGAbonoGasto, VGCategoriaGasto, VGCorreccionGasto, VGGasto, VGInhabilitacionGasto, VGMetodoPago
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
 
 # Mismos valores y mismo motivo que en facturacion_views.py/compras_views.py:
@@ -83,7 +84,22 @@ def _ultimas_correcciones_gasto(gasto_ids):
     return resultado
 
 
-def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_actual=None):
+def _ultimas_inhabilitaciones(gastos):
+    """Auditoría vigente (la última) de los gastos que hoy están inhabilitados: {gasto_id: {motivo, por, fecha}}."""
+    ids = [g.id for g in gastos if g.inhabilitado]
+    if not ids:
+        return {}
+    resultado = {}
+    for registro in (
+        VGInhabilitacionGasto.objects.filter(gasto_id__in=ids, accion='inhabilitado')
+        .select_related('creado_por').order_by('gasto_id', '-fecha_creacion')
+    ):
+        if registro.gasto_id not in resultado:
+            resultado[registro.gasto_id] = gastos_inhabilitacion.serializar_auditoria(registro)
+    return resultado
+
+
+def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_actual=None, inhabilitacion=None):
     # tasa_actual: quien serializa muchos gastos (ej. el PDF) la consulta una sola vez y la pasa;
     # si no llega, se consulta aqui como siempre.
     # saldo_pendiente se guarda con solo 2 decimales (ver docstring de VGGasto),
@@ -158,6 +174,8 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_
         'saldo_pendiente_bs': str(saldo_pendiente_bs) if saldo_pendiente_bs is not None else None,
         'creado_por': (gasto.creado_por.get_full_name() or gasto.creado_por.username) if gasto.creado_por else '',
         'ultima_correccion': ultima_correccion,
+        'inhabilitado': gasto.inhabilitado,
+        'inhabilitacion': inhabilitacion,
     }
     if incluir_detalle:
         data['abonos'] = [
@@ -284,11 +302,16 @@ def admin_gastos_view(request):
             except (ValueError, TypeError):
                 pass
 
+        if str(request.GET.get('inhabilitados', '') or '').strip().lower() == 'ocultar':
+            gastos = gastos.filter(inhabilitado=False)
         gastos = list(gastos.order_by('-fecha_gasto', '-fecha_creacion'))
         correcciones = _ultimas_correcciones_gasto([gasto.id for gasto in gastos])
+        inhabilitaciones = _ultimas_inhabilitaciones(gastos)
+        # Los inhabilitados se muestran (para poder rehabilitarlos) pero no suman a ningún total.
+        gastos_vigentes = [gasto for gasto in gastos if not gasto.inhabilitado]
 
         totales_por_categoria = {}
-        for gasto in gastos:
+        for gasto in gastos_vigentes:
             entry = totales_por_categoria.setdefault(
                 gasto.categoria_id, {'categoria_id': gasto.categoria_id, 'categoria_nombre': gasto.categoria.nombre, 'total': Decimal('0')},
             )
@@ -298,8 +321,11 @@ def admin_gastos_view(request):
             'ok': True,
             'fecha_desde': fecha_desde.isoformat(),
             'fecha_hasta': fecha_hasta.isoformat(),
-            'gastos': [_serialize_gasto(gasto, ultima_correccion=correcciones.get(gasto.id)) for gasto in gastos],
-            'total_general': str(sum((gasto.monto for gasto in gastos), Decimal('0'))),
+            'gastos': [
+                _serialize_gasto(gasto, ultima_correccion=correcciones.get(gasto.id), inhabilitacion=inhabilitaciones.get(gasto.id))
+                for gasto in gastos
+            ],
+            'total_general': str(sum((gasto.monto for gasto in gastos_vigentes), Decimal('0'))),
             'totales_por_categoria': [
                 {**entry, 'total': str(entry['total'])} for entry in sorted(totales_por_categoria.values(), key=lambda e: e['categoria_nombre'])
             ],
@@ -430,7 +456,10 @@ def gasto_detail_view(request, gasto_id):
         except VGGasto.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
         ultima_correccion = _ultimas_correcciones_gasto([gasto.id]).get(gasto.id)
-        return _auth_response({'ok': True, 'gasto': _serialize_gasto(gasto, incluir_detalle=True, ultima_correccion=ultima_correccion)})
+        inhabilitacion = _ultimas_inhabilitaciones([gasto]).get(gasto.id)
+        return _auth_response({'ok': True, 'gasto': _serialize_gasto(
+            gasto, incluir_detalle=True, ultima_correccion=ultima_correccion, inhabilitacion=inhabilitacion,
+        )})
 
     try:
         data = json.loads(request.body.decode('utf-8')) if request.body else {}
@@ -452,6 +481,9 @@ def gasto_detail_view(request, gasto_id):
             gasto = VGGasto.objects.select_for_update().select_related('categoria').get(pk=gasto_id)
         except VGGasto.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
+
+        if gasto.inhabilitado:
+            return _auth_response({'ok': False, 'message': 'Este gasto está inhabilitado: rehabilítalo para poder editarlo.'}, status=409)
 
         abonos = list(gasto.abonos.select_related('metodo_pago').order_by('fecha_pago'))
         # El metodo de pago vive en el VGAbonoGasto, no en el VGGasto (ver su
@@ -625,6 +657,9 @@ def gasto_abono_view(request, gasto_id):
         except VGGasto.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
 
+        if gasto.inhabilitado:
+            return _auth_response({'ok': False, 'message': 'Este gasto está inhabilitado: no se le pueden registrar pagos.'}, status=409)
+
         if gasto.estado_pago == 'pagado':
             return _auth_response({'ok': False, 'message': 'Este gasto ya esta saldado.'}, status=409)
 
@@ -690,3 +725,58 @@ def gasto_abono_view(request, gasto_id):
         'gasto': _serialize_gasto(gasto, incluir_detalle=True),
         'abono': _serialize_abono_gasto(abono),
     }, status=201)
+
+
+@csrf_exempt
+def gasto_inhabilitar_view(request, gasto_id):
+    """
+    GET ?accion=inhabilitar|rehabilitar: vista previa — qué cambia en cada cuenta, qué vínculos de conciliación se
+    deshacen, las advertencias que hay que aceptar y lo que bloquea. No toca nada.
+    POST {accion, motivo, aceptadas: [codigos]}: inhabilita o rehabilita el gasto (ver gastos_inhabilitacion.py).
+    El motivo es obligatorio y queda guardado en VGInhabilitacionGasto junto con lo que se aceptó.
+    """
+    if request.method not in ('GET', 'POST'):
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    try:
+        gasto = VGGasto.objects.select_related('categoria').get(pk=gasto_id)
+    except VGGasto.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'El gasto no existe.'}, status=404)
+
+    if request.method == 'GET':
+        accion = str(request.GET.get('accion') or ('rehabilitar' if gasto.inhabilitado else 'inhabilitar')).strip().lower()
+        try:
+            vista = gastos_inhabilitacion.vista_previa(gasto, accion)
+        except gastos_inhabilitacion.InhabilitacionInvalida as exc:
+            return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+        vista['motivo_minimo'] = gastos_inhabilitacion.MOTIVO_MINIMO
+        return _auth_response({'ok': True, **vista})
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    accion = str(data.get('accion', '') or '').strip().lower()
+    try:
+        registro = gastos_inhabilitacion.aplicar(gasto_id, accion, data.get('motivo'), data.get('aceptadas'), request.user)
+    except gastos_inhabilitacion.InhabilitacionInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+    except gastos_inhabilitacion.InhabilitacionBloqueada as exc:
+        return _auth_response({'ok': False, 'message': str(exc), 'bloqueos': exc.bloqueos}, status=409)
+    except gastos_inhabilitacion.RequiereConfirmacion as exc:
+        return _auth_response({
+            'ok': False, 'requiere_confirmacion': True, 'advertencias': exc.advertencias,
+            'message': 'Acepta las advertencias para continuar.',
+        }, status=409)
+
+    gasto.refresh_from_db()
+    return _auth_response({
+        'ok': True,
+        'message': 'Gasto inhabilitado.' if registro.accion == 'inhabilitado' else 'Gasto rehabilitado.',
+        'gasto': _serialize_gasto(gasto, incluir_detalle=True, inhabilitacion=_ultimas_inhabilitaciones([gasto]).get(gasto.id)),
+        'auditoria': gastos_inhabilitacion.serializar_auditoria(registro),
+    })

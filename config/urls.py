@@ -150,6 +150,7 @@ from varagrill.gastos_views import (
     admin_gastos_view,
     gasto_abono_view,
     gasto_detail_view,
+    gasto_inhabilitar_view,
 )
 from varagrill.devoluciones_views import (
     devolucion_crear_view,
@@ -223,6 +224,7 @@ urlpatterns = [
     path('api/admin/gastos/', admin_gastos_view, name='admin-gastos'),
     path('api/admin/gastos/<int:gasto_id>/', gasto_detail_view, name='admin-gasto-detail'),
     path('api/admin/gastos/<int:gasto_id>/abonos/', gasto_abono_view, name='admin-gasto-abono'),
+    path('api/admin/gastos/<int:gasto_id>/inhabilitar/', gasto_inhabilitar_view, name='admin-gasto-inhabilitar'),
     path('api/admin/categorias-gasto/', admin_categorias_gasto_view, name='admin-categorias-gasto'),
     path('api/admin/categorias/', admin_categorias_view, name='admin-categorias'),
     path('api/admin/impresora-caja/', admin_impresora_caja_view, name='admin-impresora-caja'),

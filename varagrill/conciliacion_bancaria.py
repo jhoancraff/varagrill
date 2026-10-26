@@ -308,7 +308,9 @@ def _cargar_pool(cuenta, desde, hasta, es_credito):
     # Debitos: se incluyen TODOS los metodos no efectivo de la cuenta (una compra con tarjeta de debito
     # se registra con el metodo de punto de venta).
     for a in (
-        VGAbonoGasto.objects.filter(metodo_pago_id__in=ids_sin_efectivo, fecha_pago__date__range=(desde, hasta))
+        VGAbonoGasto.objects.filter(
+            metodo_pago_id__in=ids_sin_efectivo, fecha_pago__date__range=(desde, hasta), gasto__inhabilitado=False,
+        )
         .select_related('gasto__categoria', 'metodo_pago')
     ):
         if _es_gasto_comision(a.gasto):
@@ -590,7 +592,7 @@ def _comisiones_por_dia(movs, usuario, cuenta):
             Decimal('0'),
         )
         gastos = [
-            g for g in VGGasto.objects.filter(fecha_gasto=dia).select_related('categoria')
+            g for g in VGGasto.objects.filter(fecha_gasto=dia, inhabilitado=False).select_related('categoria')
             if _es_gasto_comision(g) and g.tasa_cambio_referencia
         ]
         elegido = None

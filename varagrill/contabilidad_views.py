@@ -1906,7 +1906,9 @@ def reporte_estado_resultados_view(request):
             # A la tasa de esa misma venta, igual que sus bolivares de venta (el costo no tiene tasa propia).
             costo_ventas_bs += costo_nota * tasa
 
-    gastos = VGGasto.objects.filter(fecha_gasto__gte=desde, fecha_gasto__lte=hasta).select_related('categoria')
+    gastos = VGGasto.objects.filter(
+        fecha_gasto__gte=desde, fecha_gasto__lte=hasta, inhabilitado=False,
+    ).select_related('categoria')
 
     # gastos_total_bs suma monto x SU PROPIA tasa_cambio_referencia por cada gasto
     # (congelada al crearlo, ver gastos_views.py) — no el total en USD del período

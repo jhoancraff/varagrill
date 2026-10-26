@@ -5892,3 +5892,184 @@ class ConciliacionCierreDiarioViewsTests(TestCase):
         self.assertEqual((data['resumen']['dias'], data['resumen']['cerrados'], data['resumen']['completo']), (2, 0, False))
         r = self.client.get(self.BASE + 'pdf/?cuenta=Banco Cierre V&desde=2026-10-05&hasta=2026-10-06&conciliados=0')
         self.assertEqual((r.status_code, r.content[:4]), (200, b'%PDF'))
+
+
+class TicketsCajaEstiloGraficoTests(TestCase):
+    """Nota de entrega, cuenta del cliente y nota de cobro salen como imagen (logo + tipografia) con respaldo en texto."""
+
+    def _ticket(self):
+        from varagrill.ticket_grafico import Ticket
+        ticket = Ticket()
+        ticket.logo()
+        ticket.centro('VARAGRILL', negrita=True, grande=True)
+        ticket.centro('NOTA DE ENTREGA', negrita=True)
+        ticket.separador()
+        ticket.campo('Cliente:', 'María Fernanda Rodríguez')
+        ticket.item('1x Pork Belly con yuca frita y ensalada mixta', '$9.50')
+        ticket.detalle('  - sin cebolla')
+        ticket.fila('Subtotal:', '$9.50')
+        ticket.total_dual('$9.50', 'Bs. 8.329,58')
+        return ticket
+
+    def test_el_ticket_grafico_es_un_raster_escpos_del_ancho_configurado(self):
+        from varagrill.ticket_grafico import ancho_ticket
+        datos = self._ticket().to_raster_bytes()
+        self.assertTrue(datos.startswith(b'\x1b@'))
+        self.assertIn(b'\x1dv0\x00', datos)
+        self.assertTrue(datos.endswith(b'\x1dV\x00'))
+        ancho = ancho_ticket()
+        self.assertEqual(ancho % 8, 0)
+        # cada franja GS v 0 declara el ancho en bytes (xL xH) justo tras el encabezado
+        posicion = datos.index(b'\x1dv0\x00') + 4
+        self.assertEqual(int.from_bytes(datos[posicion:posicion + 2], 'little'), ancho // 8)
+        self.assertGreater(len(datos), len(self._ticket().to_text_bytes()) * 10)
+
+    def test_la_imagen_tiene_tinta_y_el_texto_plano_conserva_el_contenido(self):
+        imagen = self._ticket().to_image()
+        self.assertEqual(imagen.size[0] % 8, 0)
+        self.assertLess(min(imagen.getdata()), 50)  # hay pixeles negros (logo y letras)
+        lineas = self._ticket().texto_plano()
+        self.assertIn('Cliente: María Fernanda', ' '.join(lineas))
+        self.assertIn('TOTAL: $9.50', lineas)
+
+    def test_el_logo_de_varagrill_existe_y_es_blanco_y_negro(self):
+        from PIL import Image
+        from varagrill.ticket_grafico import LOGO_PATH
+        logo = Image.open(LOGO_PATH)
+        self.assertEqual(logo.mode, 'L')
+        valores = set(logo.getdata())
+        self.assertLessEqual(valores, {0, 255})
+        self.assertIn('varagrill', LOGO_PATH)
+
+    def test_si_falla_el_dibujo_se_imprime_en_texto(self):
+        from varagrill.ticket_grafico import Ticket
+        with patch.object(Ticket, 'to_raster_bytes', side_effect=OSError('sin fuentes')):
+            datos = self._ticket().to_bytes()
+        self.assertEqual(datos, self._ticket().to_text_bytes())
+        self.assertNotIn(b'\x1dv0', datos)
+
+    def test_se_puede_apagar_el_ticket_grafico_por_configuracion(self):
+        with self.settings(TICKET_CAJA_GRAFICO=False):
+            datos = self._ticket().to_bytes()
+        self.assertNotIn(b'\x1dv0', datos)
+
+    # --- los tres documentos -------------------------------------------------------------------
+    def _cliente(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(nombre='Ana', apellido='Pérez', numero_documento='12345678', tipo_documento='V')
+
+    def test_la_nota_de_entrega_dice_varagrill_y_no_imprime_la_referencia_autogenerada(self):
+        from types import SimpleNamespace
+        from varagrill.impresion_lpd import _ticket_recibo
+        metodo = SimpleNamespace(nombre='EFECTIVO $', moneda='USD')
+        ticket = _ticket_recibo([], metodo, 'COBRO-20261023212109-5532', Decimal('10.00'), Decimal('100'),
+                                titulo='NOTA DE ENTREGA', codigo='00001939')
+        texto = ticket.texto_plano()
+        self.assertEqual(ticket.ops[0], ('logo',))
+        self.assertIn('VARAGRILL', texto)
+        self.assertIn('Nº 00001939', texto)
+        self.assertIn('TOTAL: $10.00', texto)
+        self.assertNotIn('COBRO-', ' '.join(texto))
+        self.assertIn(b'\x1dv0', ticket.to_bytes())
+        # una referencia real del cliente si se imprime
+        real = _ticket_recibo([], metodo, '9826', Decimal('10.00'), Decimal('100'), codigo='X').texto_plano()
+        self.assertIn('Referencia: 9826', real)
+
+    def test_la_nota_de_entrega_lleva_fecha_cliente_cedula_y_total_en_dolares_y_bolivares_sin_metodo(self):
+        from datetime import datetime
+        from types import SimpleNamespace
+        from varagrill.impresion_lpd import _ticket_recibo
+        emision = timezone.make_aware(datetime(2026, 10, 23, 17, 21))
+        ticket = _ticket_recibo(
+            [], None, None, Decimal('10.00'), Decimal('887.3020'), titulo='NOTA DE ENTREGA', codigo='00001939',
+            moneda='USD', cliente=self._cliente(), total_ambas_monedas=True, fecha=emision,
+        )
+        texto = ticket.texto_plano()
+        junto = ' '.join(texto)
+        self.assertIn('Fecha: 23/10/2026 17:21', texto)
+        self.assertIn('Cliente: Ana Pérez', texto)
+        self.assertIn('Cédula: V-12345678', texto)
+        self.assertIn('TOTAL: $10.00', texto)
+        self.assertIn('       Bs. 8.873,02', texto)
+        self.assertNotIn('Método de pago', junto)
+        self.assertNotIn('Referencia', junto)
+
+    def test_la_nota_de_entrega_lleva_los_datos_de_la_empresa_bajo_el_logo(self):
+        from types import SimpleNamespace
+        from varagrill.impresion_lpd import _ticket_recibo
+        datos = SimpleNamespace(
+            nombre_comercial='VARA GRILL', razon_social='DON HECTOR GOURMENT', rif='J-31081705-7',
+            domicilio_fiscal='AV 3 CC LOS CARDONES LOCAL 34', telefono='0412-7301898',
+        )
+        ticket = _ticket_recibo([], None, None, Decimal('10.00'), Decimal('100'), codigo='1', moneda='USD',
+                                total_ambas_monedas=True, datos_fiscales=datos)
+        texto = ticket.texto_plano()
+        self.assertEqual(ticket.ops[0], ('logo',))
+        self.assertEqual(texto[:5], ['VARAGRILL', 'DON HECTOR GOURMENT', 'RIF: J-31081705-7', 'AV 3 CC LOS CARDONES LOCAL 34', 'Tel: 0412-7301898'])
+        # el título es siempre VARAGRILL (no el nombre comercial 'VARA GRILL' de los datos fiscales); sin datos también
+        self.assertEqual(_ticket_recibo([], None, None, Decimal('1'), None, moneda='USD').texto_plano()[0], 'VARAGRILL')
+
+    def test_imprimir_la_nota_de_entrega_no_pasa_metodo_ni_referencia_y_siempre_trae_bolivares(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from varagrill import impresion_lpd
+        nota = MagicMock()
+        nota.pedidos.select_related.return_value.prefetch_related.return_value.all.return_value = []
+        nota.codigo, nota.id, nota.total = '00000042', 42, Decimal('10.00')
+        nota.moneda, nota.tasa_cambio_referencia, nota.referencia = 'VES', Decimal('100'), '9826'
+        nota.descuento_monto, nota.descuento_motivo = Decimal('0'), ''
+        nota.fecha_emision, nota.cliente = timezone.now(), self._cliente()
+        config = SimpleNamespace(activo=True, ip='10.0.0.5', puerto=515, cola='caja')
+        with patch.object(impresion_lpd.VGImpresoraCaja, 'obtener_config', return_value=config), \
+                patch.object(impresion_lpd, 'enviar_trabajo_lpd') as enviar, \
+                patch.object(impresion_lpd, '_ticket_recibo', wraps=impresion_lpd._ticket_recibo) as armar:
+            exito, motivo = impresion_lpd.imprimir_nota_entrega_caja(nota)
+        self.assertEqual((exito, motivo), (True, None))
+        args, kwargs = armar.call_args
+        self.assertIsNone(args[1])      # método de pago
+        self.assertIsNone(args[2])      # referencia
+        self.assertEqual((kwargs['moneda'], kwargs['total_ambas_monedas']), ('USD', True))
+        self.assertEqual(kwargs['cliente'].numero_documento, '12345678')
+        self.assertTrue(enviar.called)
+
+    def test_la_nota_de_cobro_lleva_logo_monto_cobrado_y_saldo(self):
+        from types import SimpleNamespace
+        from varagrill.impresion_lpd import _ticket_nota_cobro
+        nota = SimpleNamespace(codigo='00000012', total=Decimal('20.00'), cliente=self._cliente())
+        pago = SimpleNamespace(
+            id=1, numero_cobro=7, nota_entrega=nota, metodo_pago=SimpleNamespace(nombre='Pago movil', moneda='VES'),
+            tasa_cambio_referencia=Decimal('100'), monto=Decimal('5.00'), referencia='ABONO-20261023212109-12',
+            saldo_posterior=Decimal('15.00'), fecha_pago=timezone.now(), creado_por=None,
+        )
+        ticket = _ticket_nota_cobro(pago)
+        texto = ticket.texto_plano()
+        self.assertEqual(ticket.ops[0], ('logo',))
+        self.assertIn('VARAGRILL', texto)
+        self.assertIn('NOTA DE COBRO', texto)
+        self.assertIn('Nº COB-000007', texto)
+        self.assertIn('MONTO COBRADO: Bs. 500,00', texto)
+        self.assertIn('Saldo pendiente: Bs. 1.500,00', texto)
+        self.assertIn('Tasa: Bs. 100,00 por $1', texto)
+        self.assertNotIn('ABONO-', ' '.join(texto))
+        self.assertIn('REIMPRESION', ' '.join(_ticket_nota_cobro(pago, es_reimpresion=True).texto_plano()))
+        pago.saldo_posterior = Decimal('0')
+        self.assertIn('Nota de entrega SALDADA', _ticket_nota_cobro(pago).texto_plano())
+
+    def test_la_cuenta_del_cliente_muestra_dolares_y_bolivares(self):
+        from types import SimpleNamespace
+        from varagrill.impresion_lpd import _ticket_documento_venta
+        lineas = [SimpleNamespace(cantidad=Decimal('2'), descripcion='Pork Belly', subtotal=Decimal('10.00'), precio_unitario=Decimal('5.00'))]
+        ticket = _ticket_documento_venta(
+            'CUENTA (no es factura fiscal)', 'PF-000001', self._cliente(), lineas, Decimal('10.00'), Decimal('0'),
+            Decimal('10.00'), 'USD', Decimal('100'), None, mostrar_iva=False, info_encabezado=['Mesa: 4'],
+            mostrar_ambas_monedas=True,
+        )
+        texto = ticket.texto_plano()
+        self.assertEqual(ticket.ops[0], ('logo',))
+        self.assertIn('VARAGRILL', texto)      # sin datos fiscales cargados
+        self.assertIn('CUENTA (no es factura fiscal)', texto)
+        self.assertIn('Mesa: 4', texto)
+        self.assertIn('2x Pork Belly', texto)
+        self.assertIn('TOTAL: $10.00', texto)
+        self.assertIn('       Bs. 1.000,00', texto)
+        self.assertIn(b'\x1dv0', ticket.to_bytes())

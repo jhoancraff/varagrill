@@ -15,6 +15,7 @@ los bytes ESC/POS tal cual, sin reformatear — el equivalente LPD de "impresió
 Sin dependencias externas: solo `socket`, igual que impresion_termica.py.
 """
 import logging
+import re
 import socket
 from decimal import Decimal
 
@@ -38,8 +39,12 @@ from .impresion_termica import (
     _tipo_pedido_label,
 )
 from .models import VGDatosFiscalesEmisor, VGImpresoraCaja, VGTasaCambio
+from .ticket_grafico import Ticket
 
 logger = logging.getLogger(__name__)
+
+# Referencias que el sistema inventa al cobrar sin referencia del cliente: no dicen nada, no se imprimen.
+_REFERENCIA_AUTOGENERADA = re.compile(r'^(COBRO|ABONO)-\d{14}-\d+$')
 
 LPD_ORIGIN_HOST = 'varagrill'
 # Windows puede tardar varios segundos en despertar el spooler LPD y confirmar
@@ -166,6 +171,33 @@ def _monto_texto_ambas_monedas(valor_usd, tasa):
     return f'${valor_usd:.2f}'
 
 
+def _agregar_encabezado_empresa(ticket, datos_fiscales, con_telefono=False):
+    """
+    Logo, el nombre VARAGRILL y los datos fiscales de la empresa (lo que hay cargado en VGDatosFiscalesEmisor).
+    El título es siempre VARAGRILL: el nombre comercial de los datos fiscales ("VARA GRILL") no se imprime.
+    """
+    ticket.logo()
+    ticket.centro('VARAGRILL', negrita=True, grande=True)
+    if datos_fiscales:
+        if datos_fiscales.razon_social:
+            ticket.centro(datos_fiscales.razon_social)
+        if datos_fiscales.rif:
+            ticket.centro(f'RIF: {datos_fiscales.rif}')
+        if datos_fiscales.domicilio_fiscal:
+            ticket.centro(datos_fiscales.domicilio_fiscal)
+        if con_telefono and datos_fiscales.telefono:
+            ticket.centro(f'Tel: {datos_fiscales.telefono}')
+
+
+def _agregar_cliente(ticket, cliente):
+    """Cliente y cédula/RIF del documento (no imprime nada si no hay cliente)."""
+    if cliente is None:
+        return
+    ticket.campo('Cliente:', f'{cliente.nombre} {cliente.apellido}'.strip())
+    if cliente.numero_documento:
+        ticket.campo('Cédula:', f'{cliente.tipo_documento or "V"}-{cliente.numero_documento}')
+
+
 def _producto_label(detalle):
     producto = getattr(detalle, 'producto', None)
     if producto is None:
@@ -174,60 +206,52 @@ def _producto_label(detalle):
     return nombre or 'Plato eliminado'
 
 
-def _render_recibo_item(detalle, moneda, tasa):
-    out = bytearray()
-    nombre_producto = _producto_label(detalle)
-    out += _text(f'{_cantidad_label(detalle)} {nombre_producto}') + FEED
+def _agregar_item_recibo(ticket, detalle, moneda, tasa):
+    ticket.item(
+        f'{_cantidad_label(detalle)} {_producto_label(detalle)}',
+        _monto_texto(detalle.subtotal, moneda, tasa),
+    )
     if detalle.notas:
-        out += _text(f'  - {detalle.notas}') + FEED
-    out += _text(f'  {_monto_texto(detalle.subtotal, moneda, tasa)}') + FEED
+        ticket.detalle(f'  - {detalle.notas}')
     for opcion in detalle.opciones.all():
         nombre_opcion = getattr(opcion, 'nombre', None) or 'Opción eliminada'
         if opcion.precio_unitario:
-            out += _text(f'  » {opcion.grupo_nombre}: {nombre_opcion}  {_monto_texto(opcion.subtotal, moneda, tasa)}') + FEED
+            ticket.detalle(f'  » {opcion.grupo_nombre}: {nombre_opcion}  {_monto_texto(opcion.subtotal, moneda, tasa)}')
         else:
-            out += _text(f'  » {opcion.grupo_nombre}: {nombre_opcion}') + FEED
+            ticket.detalle(f'  » {opcion.grupo_nombre}: {nombre_opcion}')
     for adicional in detalle.adicionales.all():
         preparacion = getattr(adicional, 'preparacion', None)
         nombre_adicional = getattr(preparacion, 'nombre', None) or 'Adicional eliminado'
-        out += _text(f'  + {adicional.cantidad}x {nombre_adicional}  {_monto_texto(adicional.subtotal, moneda, tasa)}') + FEED
-    return bytes(out)
+        ticket.detalle(f'  + {adicional.cantidad}x {nombre_adicional}  {_monto_texto(adicional.subtotal, moneda, tasa)}')
 
 
-def _metodo_pago_para_impresion(nota):
-    pagos = list(
-        nota.pagos.filter(estado='completado')
-        .select_related('metodo_pago')
-        .order_by('-fecha_pago', '-id')
-    )
-    if pagos and len({pago.metodo_pago.moneda for pago in pagos}) == 1:
-        return pagos[0].metodo_pago
-    return nota.metodo_pago
-
-
-def _build_recibo_bytes(
+def _ticket_recibo(
     pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None,
     descuento_manual=None, descuento_manual_motivo='',
+    moneda=None, cliente=None, total_ambas_monedas=False, fecha=None, datos_fiscales=None,
 ):
-    hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
-    metodo_label = metodo_pago.nombre
-    moneda = metodo_pago.moneda
+    """
+    `metodo_pago` puede ser None (la nota de entrega se emite antes de saber con qué paga el cliente: no
+    se imprime método ni referencia). Con `total_ambas_monedas` el TOTAL sale en dólares y en bolívares.
+    `fecha` es la de emisión del documento; sin ella, la de ahora. `datos_fiscales` (VGDatosFiscalesEmisor)
+    pone bajo el logo el nombre comercial, razón social, RIF, domicilio y teléfono de la empresa.
+    """
+    hora = timezone.localtime(fecha).strftime('%d/%m/%Y %H:%M') if fecha else timezone.localtime().strftime('%d/%m/%Y %H:%M')
+    metodo_label = metodo_pago.nombre if metodo_pago is not None else None
+    if moneda is None:
+        moneda = metodo_pago.moneda
 
-    out = bytearray()
-    out += INIT
-    out += KANJI_OFF
-    out += ESC_POS_WCP1252
-    out += ALIGN_CENTER
-    out += _text('VARAGRILL') + FEED
-    out += BOLD_ON
-    out += _text(titulo) + FEED
-    out += BOLD_OFF
+    ticket = Ticket()
+    _agregar_encabezado_empresa(ticket, datos_fiscales, con_telefono=True)
+    ticket.separador()
+    ticket.centro(titulo, negrita=True)
     if codigo:
-        out += _text(f'Nº {codigo}') + FEED
-    out += ALIGN_LEFT
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Referencia: {referencia}') + FEED
-    out += _text(hora) + FEED
+        ticket.centro(f'Nº {codigo}')
+    ticket.separador()
+    if referencia and not _REFERENCIA_AUTOGENERADA.match(referencia):
+        ticket.campo('Referencia:', referencia)
+    ticket.campo('Fecha:', hora)
+    _agregar_cliente(ticket, cliente)
 
     subtotal_total = 0
     impuesto_total = 0
@@ -238,21 +262,19 @@ def _build_recibo_bytes(
 
     for pedido in pedidos:
         mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
-        out += _text('-' * LINE_WIDTH) + FEED
-        out += _text(f'Pedido #{pedido.id} - {mesa_label} - {_tipo_pedido_label(pedido.tipo_pedido)}') + FEED
+        ticket.separador()
+        ticket.izq(f'Pedido #{pedido.id} - {mesa_label} - {_tipo_pedido_label(pedido.tipo_pedido)}', negrita=True)
         # Mismo criterio que la comanda de cocina: los ítems de un plato armado se
         # agrupan bajo "PLATO N" (para no confundir, por ejemplo, dos yucas de
         # gramajes distintos que vinieron en platos diferentes); lo que no se armó
         # como plato se lista igual que antes, sin ese título.
         platos, sueltos = _group_detalles_por_plato(pedido.detalles.all())
         for numero_plato, (_grupo_id, items) in enumerate(platos, start=1):
-            out += BOLD_ON
-            out += _text(f'PLATO {numero_plato}') + FEED
-            out += BOLD_OFF
+            ticket.izq(f'PLATO {numero_plato}', negrita=True)
             for detalle in items:
-                out += _render_recibo_item(detalle, moneda, tasa)
+                _agregar_item_recibo(ticket, detalle, moneda, tasa)
         for detalle in sueltos:
-            out += _render_recibo_item(detalle, moneda, tasa)
+            _agregar_item_recibo(ticket, detalle, moneda, tasa)
         subtotal_total += pedido.subtotal
         impuesto_total += pedido.impuesto
         descuento_total += pedido.descuento
@@ -261,37 +283,40 @@ def _build_recibo_bytes(
             delivery_total += pedido.cargo_delivery
             delivery_etiquetas.append(texto_cargo(pedido))
 
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Subtotal: {_monto_texto(subtotal_total, moneda, tasa)}') + FEED
+    ticket.separador()
+    ticket.fila('Subtotal:', _monto_texto(subtotal_total, moneda, tasa))
     if delivery_total > 0:
         # El envio va en su propia linea (no es un producto): sin ella el ticket no sumaria al TOTAL.
         etiqueta = delivery_etiquetas[0] if len(delivery_etiquetas) == 1 else 'Delivery'
-        out += _text(f'{etiqueta}: {_monto_texto(delivery_total, moneda, tasa)}') + FEED
+        ticket.fila(f'{etiqueta}:', _monto_texto(delivery_total, moneda, tasa))
     if impuesto_total > 0:
-        out += _text(f'Impuesto: {_monto_texto(impuesto_total, moneda, tasa)}') + FEED
+        ticket.fila('Impuesto:', _monto_texto(impuesto_total, moneda, tasa))
     if descuento_total > 0:
-        out += _text(f'Descuento: -{_monto_texto(descuento_total, moneda, tasa)}') + FEED
+        ticket.fila('Descuento:', f'-{_monto_texto(descuento_total, moneda, tasa)}')
     if descuento_manual:
         # Descuento manual aplicado al cobrar (ver VGNotaEntrega.descuento_monto),
         # distinto del descuento por pedido de arriba — se imprime con su
         # motivo para que quede constancia en el ticket físico, no solo en la
         # base de datos (auditoría, ver pedidos_cobro_view).
-        out += _text(f'Descuento aplicado: -{_monto_texto(descuento_manual, moneda, tasa)}') + FEED
+        ticket.fila('Descuento aplicado:', f'-{_monto_texto(descuento_manual, moneda, tasa)}')
         if descuento_manual_motivo:
-            out += _text(f'Motivo: {descuento_manual_motivo}') + FEED
+            ticket.campo('Motivo:', descuento_manual_motivo)
     if propina_total > 0:
-        out += _text(f'Propina: {_monto_texto(propina_total, moneda, tasa)}') + FEED
-    out += BOLD_ON
-    out += _text(f'TOTAL: {_monto_texto(total, moneda, tasa)}') + FEED
-    out += BOLD_OFF
-    out += _text(f'Metodo de pago: {metodo_label}') + FEED
-    out += ALIGN_CENTER
-    out += _text('¡Gracias por su visita!') + FEED
-    out += ALIGN_LEFT
+        ticket.fila('Propina:', _monto_texto(propina_total, moneda, tasa))
+    ticket.separador()
+    if total_ambas_monedas:
+        ticket.total_dual(f'${total:.2f}', f'Bs. {_formatear_bs(total * tasa)}' if tasa else None)
+    else:
+        ticket.fila('TOTAL:', _monto_texto(total, moneda, tasa), negrita=True, grande=True)
+    if metodo_label:
+        ticket.campo('Método de pago:', metodo_label)
+    ticket.centro('¡Gracias por su visita!')
+    return ticket
 
-    out += FEED + FEED + FEED + FEED
-    out += CUT
-    return bytes(out)
+
+def _build_recibo_bytes(*args, **kwargs):
+    """Nota de entrega / recibo de caja en ESC/POS de texto (respaldo del ticket gráfico y pruebas)."""
+    return _ticket_recibo(*args, **kwargs).to_text_bytes()
 
 
 def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
@@ -317,7 +342,12 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
         logger.warning('Impresora de caja activa pero sin IP/cola configurada; se omite la nota de entrega.')
         return False, 'La impresora de caja no tiene IP o cola configurada.'
 
-    metodo_pago = _metodo_pago_para_impresion(nota)
+    # La nota se emite antes de saber con qué paga el cliente (cada abono lleva su propio método): el ticket
+    # no menciona método ni referencia, muestra los precios en dólares y el total en dólares y en bolívares.
+    tasa = nota.tasa_cambio_referencia
+    if tasa is None:
+        tasa_actual = VGTasaCambio.objects.order_by('-fecha_actualizacion').first()
+        tasa = tasa_actual.tasa if tasa_actual else None
     pedidos = list(
         nota.pedidos.select_related('mesa')
         .prefetch_related('detalles__producto', 'detalles__opciones', 'detalles__adicionales__preparacion')
@@ -327,11 +357,13 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
     titulo = 'NOTA DE ENTREGA' + (' (REIMPRESION)' if es_reimpresion else '')
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
-        ticket = _build_recibo_bytes(
-            pedidos, metodo_pago, nota.referencia, nota.total, nota.tasa_cambio_referencia,
+        ticket = _ticket_recibo(
+            pedidos, None, None, nota.total, tasa,
             titulo=titulo, codigo=nota.codigo,
             descuento_manual=nota.descuento_monto, descuento_manual_motivo=nota.descuento_motivo,
-        )
+            moneda='USD', cliente=nota.cliente, total_ambas_monedas=True, fecha=nota.fecha_emision,
+            datos_fiscales=VGDatosFiscalesEmisor.objects.first(),
+        ).to_bytes()
         logger.info('Enviando nota de entrega %s a %s (%s bytes)', nota.codigo, destino, len(ticket))
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,
@@ -347,7 +379,7 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
 # ---------------------------------------------------------------------------
 # Nota de cobro (ticket de cada abono a una nota de entrega)
 # ---------------------------------------------------------------------------
-def _build_cobro_nota_entrega_bytes(pago, es_reimpresion=False):
+def _ticket_nota_cobro(pago, es_reimpresion=False):
     """
     Ticket de la NOTA DE COBRO de un abono (VGPago) a una nota de entrega:
     datos fiscales de la empresa, numero de cobro, nota de entrega a la que
@@ -374,65 +406,41 @@ def _build_cobro_nota_entrega_bytes(pago, es_reimpresion=False):
     if pago.creado_por:
         cajero = pago.creado_por.get_full_name() or pago.creado_por.username
 
-    out = bytearray()
-    out += INIT
-    out += KANJI_OFF
-    out += ESC_POS_WCP1252
-    out += ALIGN_CENTER
-    out += BOLD_ON
-    out += _text((datos_fiscales.nombre_comercial if datos_fiscales and datos_fiscales.nombre_comercial else None) or 'VARAGRILL') + FEED
-    out += BOLD_OFF
-    if datos_fiscales:
-        if datos_fiscales.razon_social:
-            out += _text(datos_fiscales.razon_social) + FEED
-        if datos_fiscales.rif:
-            out += _text(f'RIF: {datos_fiscales.rif}') + FEED
-        if datos_fiscales.domicilio_fiscal:
-            out += _text(datos_fiscales.domicilio_fiscal) + FEED
-        if datos_fiscales.telefono:
-            out += _text(f'Tel: {datos_fiscales.telefono}') + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += BOLD_ON
-    out += _text('NOTA DE COBRO' + (' (REIMPRESION)' if es_reimpresion else '')) + FEED
-    out += _text(f'Nº {codigo_cobro}') + FEED
-    out += BOLD_OFF
-    out += ALIGN_LEFT
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Fecha: {fecha_hora}') + FEED
-    out += _text(f'Nota de entrega: {nota.codigo}') + FEED
-    cliente = nota.cliente
-    if cliente is not None:
-        nombre_completo = f'{cliente.nombre} {cliente.apellido}'.strip()
-        out += _text(f'Cliente: {nombre_completo}') + FEED
-        if cliente.numero_documento:
-            out += _text(f'{cliente.tipo_documento}-{cliente.numero_documento}') + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Método de pago: {metodo.nombre}') + FEED
-    out += _text(f'Moneda: {"Bolívares" if en_bs else "Dólares"}') + FEED
-    if pago.referencia and not pago.referencia.startswith('ABONO-'):
-        out += _text(f'Referencia: {pago.referencia}') + FEED
+    ticket = Ticket()
+    _agregar_encabezado_empresa(ticket, datos_fiscales, con_telefono=True)
+    ticket.separador()
+    ticket.centro('NOTA DE COBRO', negrita=True)
+    ticket.centro(f'Nº {codigo_cobro}' + (' (REIMPRESION)' if es_reimpresion else ''))
+    ticket.separador()
+    ticket.campo('Fecha:', fecha_hora)
+    ticket.campo('Nota de entrega:', nota.codigo)
+    _agregar_cliente(ticket, nota.cliente)
+    ticket.separador()
+    ticket.campo('Método de pago:', metodo.nombre)
+    ticket.campo('Moneda:', 'Bolívares' if en_bs else 'Dólares')
+    if pago.referencia and not _REFERENCIA_AUTOGENERADA.match(pago.referencia):
+        ticket.campo('Referencia:', pago.referencia)
     if en_bs:
-        out += _text(f'Tasa: Bs. {_formatear_bs(tasa)} por $1') + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Total de la nota: {monto_texto(nota.total)}') + FEED
-    out += BOLD_ON
-    out += _text(f'MONTO COBRADO: {monto_texto(pago.monto)}') + FEED
-    out += BOLD_OFF
+        ticket.campo('Tasa:', f'Bs. {_formatear_bs(tasa)} por $1')
+    ticket.separador()
+    ticket.fila('Total de la nota:', monto_texto(nota.total))
+    ticket.fila('MONTO COBRADO:', monto_texto(pago.monto), negrita=True)
     if pago.saldo_posterior is not None:
         if pago.saldo_posterior > 0:
-            out += _text(f'Saldo pendiente: {monto_texto(pago.saldo_posterior)}') + FEED
+            ticket.fila('Saldo pendiente:', monto_texto(pago.saldo_posterior))
         else:
-            out += _text('Nota de entrega SALDADA') + FEED
+            ticket.centro('Nota de entrega SALDADA', negrita=True)
     if cajero:
-        out += _text(f'Cajero: {cajero}') + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += ALIGN_CENTER
-    out += _text('Documento sin efecto fiscal') + FEED
-    out += _text('¡Gracias por su visita!') + FEED
-    out += ALIGN_LEFT
-    out += FEED + FEED + FEED + FEED
-    out += CUT
-    return bytes(out)
+        ticket.campo('Cajero:', cajero)
+    ticket.separador()
+    ticket.centro('Documento sin efecto fiscal')
+    ticket.centro('¡Gracias por su visita!')
+    return ticket
+
+
+def _build_cobro_nota_entrega_bytes(pago, es_reimpresion=False):
+    """Nota de cobro en ESC/POS de texto (respaldo del ticket gráfico y pruebas)."""
+    return _ticket_nota_cobro(pago, es_reimpresion).to_text_bytes()
 
 
 def imprimir_cobro_nota_entrega_caja(pago, es_reimpresion=False):
@@ -450,7 +458,7 @@ def imprimir_cobro_nota_entrega_caja(pago, es_reimpresion=False):
 
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
-        ticket = _build_cobro_nota_entrega_bytes(pago, es_reimpresion=es_reimpresion)
+        ticket = _ticket_nota_cobro(pago, es_reimpresion=es_reimpresion).to_bytes()
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,
             job_id=pago.id, nombre_trabajo=f'Cobro {pago.numero_cobro or pago.id}',
@@ -465,78 +473,63 @@ def imprimir_cobro_nota_entrega_caja(pago, es_reimpresion=False):
 # ---------------------------------------------------------------------------
 # Pre-factura / factura (modulo de facturacion)
 # ---------------------------------------------------------------------------
-def _render_documento_linea(linea, monto_fn):
-    out = bytearray()
-    out += _text(f'{linea.cantidad}x {linea.descripcion}') + FEED
-    precio_texto = monto_fn(linea.precio_unitario)
-    subtotal_texto = monto_fn(linea.subtotal)
-    out += _text(f'  {precio_texto} c/u  {subtotal_texto}') + FEED
-    return bytes(out)
+def _agregar_linea_documento(ticket, linea, monto_fn, ambas_monedas, tasa):
+    texto = f'{linea.cantidad}x {linea.descripcion}'
+    if ambas_monedas:
+        # Dólares a la derecha y bolívares debajo: los dos montos juntos no caben en el renglón.
+        ticket.item(texto, f'${linea.subtotal:.2f}')
+        if tasa:
+            ticket.detalle(f'Bs. {_formatear_bs(linea.subtotal * tasa)}')
+        return
+    ticket.item(texto, monto_fn(linea.subtotal))
+    if linea.cantidad != 1:
+        ticket.detalle(f'{monto_fn(linea.precio_unitario)} c/u')
 
 
-def _build_documento_venta_bytes(
+def _ticket_documento_venta(
     titulo, subtitulo, cliente, lineas, subtotal, total_iva, total, moneda, tasa, datos_fiscales,
     extra_lineas=None, mostrar_iva=True, info_encabezado=None, mostrar_ambas_monedas=False,
 ):
     hora = timezone.localtime().strftime('%d/%m/%Y %H:%M')
 
-    out = bytearray()
-    out += INIT
-    out += KANJI_OFF
-    out += ESC_POS_WCP1252
-    out += ALIGN_CENTER
-    out += BOLD_ON
-    out += _text((datos_fiscales.nombre_comercial if datos_fiscales and datos_fiscales.nombre_comercial else None) or 'VARAGRILL') + FEED
-    out += BOLD_OFF
-    if datos_fiscales:
-        if datos_fiscales.razon_social:
-            out += _text(datos_fiscales.razon_social) + FEED
-        if datos_fiscales.rif:
-            out += _text(f'RIF: {datos_fiscales.rif}') + FEED
-        if datos_fiscales.domicilio_fiscal:
-            out += _text(datos_fiscales.domicilio_fiscal) + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += BOLD_ON
-    out += _text(titulo) + FEED
-    out += BOLD_OFF
+    ticket = Ticket()
+    _agregar_encabezado_empresa(ticket, datos_fiscales)
+    ticket.separador()
+    ticket.centro(titulo, negrita=True)
     if subtitulo:
-        out += _text(subtitulo) + FEED
-    out += ALIGN_LEFT
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(hora) + FEED
+        ticket.centro(subtitulo)
+    ticket.separador()
+    ticket.campo('Fecha:', hora)
     for texto in (info_encabezado or []):
-        out += _text(texto) + FEED
-    if cliente is not None:
-        nombre_completo = f'{cliente.nombre} {cliente.apellido}'.strip()
-        out += _text(f'Cliente: {nombre_completo}') + FEED
-        if cliente.numero_documento:
-            out += _text(f'{cliente.tipo_documento}-{cliente.numero_documento}') + FEED
-    out += _text('-' * LINE_WIDTH) + FEED
+        ticket.izq(texto)
+    _agregar_cliente(ticket, cliente)
+    ticket.separador()
 
     monto_fn = (lambda valor: _monto_texto_ambas_monedas(valor, tasa)) if mostrar_ambas_monedas \
         else (lambda valor: _monto_texto(valor, moneda, tasa))
 
     for linea in lineas:
-        out += _render_documento_linea(linea, monto_fn)
+        _agregar_linea_documento(ticket, linea, monto_fn, mostrar_ambas_monedas, tasa)
 
-    out += _text('-' * LINE_WIDTH) + FEED
+    ticket.separador()
     if mostrar_iva:
-        out += _text(f'Subtotal: {monto_fn(subtotal)}') + FEED
-        out += _text(f'IVA: {monto_fn(total_iva)}') + FEED
-    out += BOLD_ON
-    out += _text(f'TOTAL: {monto_fn(total)}') + FEED
-    out += BOLD_OFF
+        ticket.fila('Subtotal:', monto_fn(subtotal))
+        ticket.fila('IVA:', monto_fn(total_iva))
+    if mostrar_ambas_monedas:
+        ticket.total_dual(f'${total:.2f}', f'Bs. {_formatear_bs(total * tasa)}' if tasa else None)
+    else:
+        ticket.fila('TOTAL:', monto_fn(total), negrita=True, grande=True)
 
     for texto in (extra_lineas or []):
-        out += _text(texto) + FEED
+        ticket.izq(texto)
 
-    out += ALIGN_CENTER
-    out += _text('¡Gracias por su visita!') + FEED
-    out += ALIGN_LEFT
+    ticket.centro('¡Gracias por su visita!')
+    return ticket
 
-    out += FEED + FEED + FEED + FEED
-    out += CUT
-    return bytes(out)
+
+def _build_documento_venta_bytes(*args, **kwargs):
+    """Cuenta/factura en ESC/POS de texto (respaldo del ticket gráfico y pruebas)."""
+    return _ticket_documento_venta(*args, **kwargs).to_text_bytes()
 
 
 def imprimir_prefactura_caja(prefactura):
@@ -579,12 +572,12 @@ def imprimir_prefactura_caja(prefactura):
 
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
-        ticket = _build_documento_venta_bytes(
+        ticket = _ticket_documento_venta(
             'CUENTA (no es factura fiscal)', codigo, prefactura.cliente,
             list(prefactura.lineas.all()), prefactura.subtotal, prefactura.total_iva, prefactura.total,
             prefactura.moneda, tasa, datos_fiscales, mostrar_iva=False,
             info_encabezado=info_encabezado, mostrar_ambas_monedas=True,
-        )
+        ).to_bytes()
         logger.info('Enviando pre-factura %s a %s (%s bytes)', codigo, destino, len(ticket))
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,
@@ -627,11 +620,11 @@ def imprimir_factura_caja(factura, es_reimpresion=False):
 
     destino = f'{config.ip}:{config.puerto} (cola "{config.cola}")'
     try:
-        ticket = _build_documento_venta_bytes(
+        ticket = _ticket_documento_venta(
             f'FACTURA {codigo}', f'Control: {factura.numero_control:08d}', factura.cliente,
             list(factura.lineas.all()), factura.subtotal, factura.total_iva, factura.total,
             factura.moneda, factura.tasa_cambio_referencia, datos_fiscales, extra_lineas=extra_lineas,
-        )
+        ).to_bytes()
         logger.info('Enviando factura %s a %s (%s bytes)', codigo, destino, len(ticket))
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,

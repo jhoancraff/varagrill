@@ -234,6 +234,14 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+# Impresora de CAJA: los tickets (nota de entrega, cuenta del cliente, nota de
+# cobro, factura) salen como imagen con el logo y una tipografia de recibo (ver
+# varagrill/ticket_grafico.py). TICKET_CAJA_ANCHO_PUNTOS: 576 = papel de 80 mm
+# (el de la impresora de caja), 384 = papel de 58 mm. TICKET_CAJA_GRAFICO=false
+# vuelve al ticket de solo texto.
+TICKET_CAJA_ANCHO_PUNTOS = int(os.getenv('TICKET_CAJA_ANCHO_PUNTOS', '576') or 576)
+TICKET_CAJA_GRAFICO = os.getenv('TICKET_CAJA_GRAFICO', 'true').lower() in ('true', '1', 't')
+
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny'],
 }

@@ -103,7 +103,7 @@ def reporte_gastos_pdf_view(request):
 
     gastos = list(
         VGGasto.objects.select_related('categoria', 'creado_por').prefetch_related('abonos')
-        .filter(fecha_gasto__gte=fecha_desde, fecha_gasto__lte=fecha_hasta)
+        .filter(fecha_gasto__gte=fecha_desde, fecha_gasto__lte=fecha_hasta, inhabilitado=False)
         .order_by('categoria__nombre', 'fecha_gasto', 'id')
     )
     tasa_actual = obtener_tasa_actual() if any(g.moneda_origen == 'USD' for g in gastos) else None
@@ -278,7 +278,7 @@ def reporte_cuentas_por_pagar_pdf_view(request):
             pagadas = base.filter(estado_pago='pagada')
             cuentas += [_cuenta_de_compra(c) for c in _en_rango(pagadas, 'fecha_actualizacion__date', desde, hasta)]
     if tipo in ('todos', 'gasto'):
-        base = VGGasto.objects.select_related('categoria', 'creado_por').prefetch_related('abonos')
+        base = VGGasto.objects.select_related('categoria', 'creado_por').prefetch_related('abonos').filter(inhabilitado=False)
         gastos = []
         if estado in ('pendientes', 'todos'):
             pendientes = base.filter(estado_pago__in=['pendiente', 'abonada_parcial'])

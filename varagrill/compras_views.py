@@ -466,6 +466,7 @@ def cuentas_por_pagar_view(request):
         gastos = (
             VGGasto.objects.filter(
                 estado_pago='pagado', fecha_actualizacion__date__gte=desde, fecha_actualizacion__date__lte=hasta,
+                inhabilitado=False,
             )
             .select_related('categoria', 'creado_por')
             .order_by('-fecha_actualizacion')
@@ -476,7 +477,7 @@ def cuentas_por_pagar_view(request):
             .order_by('fecha_creacion')
         )
         gastos = (
-            VGGasto.objects.filter(estado_pago__in=['pendiente', 'abonada_parcial'])
+            VGGasto.objects.filter(estado_pago__in=['pendiente', 'abonada_parcial'], inhabilitado=False)
             .select_related('categoria', 'creado_por')
             .order_by('fecha_creacion')
         )

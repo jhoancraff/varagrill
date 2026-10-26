@@ -6079,3 +6079,193 @@ class TicketsCajaEstiloGraficoTests(TestCase):
         self.assertIn('TOTAL: $10.00', texto)
         self.assertIn('       Bs. 1.000,00', texto)
         self.assertIn(b'\x1dv0', ticket.to_bytes())
+
+
+class InhabilitarGastoTests(TestCase):
+    """Inhabilitar un gasto: el dinero vuelve al banco, con motivo obligatorio, advertencias y auditoria."""
+
+    def setUp(self):
+        from varagrill.models import VGAbonoGasto, VGCategoriaGasto, VGGasto
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='inh_admin', password='claveInh123', cedula='96000001', email='inh@test.test', id_role=rol,
+        )
+        self.client.force_login(self.admin)
+        _set_tasa_actual('100.0000')
+        self.metodo = VGMetodoPago.objects.create(nombre='Transf Inh', moneda='VES', cuenta_bancaria='Banco Inh')
+        self.cat = VGCategoriaGasto.objects.get_or_create(nombre='Servicios')[0]
+        self.hoy = timezone.localdate()
+        # gasto de $100 pagado en Bs (tasa 100) = Bs 10.000 que salieron del banco
+        self.gasto = VGGasto.objects.create(
+            categoria=self.cat, descripcion='Luz de octubre', monto=Decimal('100'), saldo_pendiente=0,
+            estado_pago='pagado', fecha_gasto=self.hoy, tasa_cambio_referencia=Decimal('100'),
+        )
+        self.abono = VGAbonoGasto.objects.create(
+            gasto=self.gasto, monto=Decimal('100'), metodo_pago=self.metodo, tasa_cambio_referencia=Decimal('100'),
+        )
+
+    def url(self, gasto=None):
+        return f'/api/admin/gastos/{(gasto or self.gasto).id}/inhabilitar/'
+
+    def post(self, cuerpo, gasto=None):
+        return self.client.post(self.url(gasto), data=json.dumps(cuerpo), content_type='application/json')
+
+    def saldo_bs(self):
+        from varagrill.reportes import disponibilidad_por_cuenta
+        _cuentas, bancos = disponibilidad_por_cuenta(self.hoy)
+        return next(b for b in bancos if b['nombre'] == 'Banco Inh')['saldo_disponible_bs']
+
+    def test_inhabilitar_hace_subir_el_banco_y_deja_la_auditoria(self):
+        from varagrill.models import VGInhabilitacionGasto
+        self.assertEqual(self.saldo_bs(), Decimal('-10000.00'))
+
+        # la vista previa dice que el dinero vuelve y no toca nada
+        previa = self.client.get(self.url()).json()
+        self.assertEqual(previa['accion'], 'inhabilitar')
+        self.assertEqual([a['codigo'] for a in previa['advertencias']], ['devuelve_al_banco'])
+        self.assertIn('Banco Inh: Bs 10.000,00', previa['advertencias'][0]['detalle'])
+        self.assertEqual(previa['bloqueos'], [])
+        self.assertEqual(self.saldo_bs(), Decimal('-10000.00'))
+
+        # sin motivo: 400; con motivo pero sin aceptar la advertencia: 409 y no cambia nada
+        self.assertEqual(self.post({'accion': 'inhabilitar', 'motivo': 'corto', 'aceptadas': ['devuelve_al_banco']}).status_code, 400)
+        r = self.post({'accion': 'inhabilitar', 'motivo': 'Se cargo dos veces por error'})
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(r.json()['requiere_confirmacion'])
+        self.assertEqual([a['codigo'] for a in r.json()['advertencias']], ['devuelve_al_banco'])
+        self.assertEqual(self.saldo_bs(), Decimal('-10000.00'))
+        self.assertEqual(VGInhabilitacionGasto.objects.count(), 0)
+
+        r = self.post({'accion': 'inhabilitar', 'motivo': 'Se cargo dos veces por error', 'aceptadas': ['devuelve_al_banco']})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()['gasto']['inhabilitado'])
+        self.gasto.refresh_from_db()
+        self.assertTrue(self.gasto.inhabilitado)
+        self.assertEqual(self.saldo_bs(), Decimal('0.00'))           # el banco subio lo que habia salido
+
+        auditoria = VGInhabilitacionGasto.objects.get()
+        self.assertEqual((auditoria.accion, auditoria.motivo, auditoria.creado_por), ('inhabilitado', 'Se cargo dos veces por error', self.admin))
+        self.assertEqual(auditoria.monto_usd_afectado, Decimal('100.00'))
+        self.assertEqual(auditoria.efecto_cuentas[0]['cuenta'], 'Banco Inh')
+        self.assertEqual(auditoria.efecto_cuentas[0]['bs'], '10000.00')
+        self.assertEqual([a['codigo'] for a in auditoria.advertencias_aceptadas], ['devuelve_al_banco'])
+
+        # no se puede inhabilitar dos veces
+        r = self.post({'accion': 'inhabilitar', 'motivo': 'Otra vez por si acaso', 'aceptadas': ['devuelve_al_banco']})
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.json()['bloqueos'][0]['codigo'], 'ya_inhabilitado')
+
+    def test_rehabilitar_vuelve_a_sacar_el_dinero_del_banco(self):
+        from varagrill.models import VGInhabilitacionGasto
+        self.post({'accion': 'inhabilitar', 'motivo': 'Se cargo dos veces por error', 'aceptadas': ['devuelve_al_banco']})
+        self.assertEqual(self.saldo_bs(), Decimal('0.00'))
+        previa = self.client.get(self.url()).json()      # ya inhabilitado: la vista previa es de rehabilitar
+        self.assertEqual((previa['accion'], previa['advertencias'][0]['codigo']), ('rehabilitar', 'vuelve_a_salir'))
+        r = self.post({'accion': 'rehabilitar', 'motivo': 'Resulto que si era un gasto real', 'aceptadas': ['vuelve_a_salir']})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(self.saldo_bs(), Decimal('-10000.00'))
+        self.assertEqual(
+            list(VGInhabilitacionGasto.objects.order_by('id').values_list('accion', flat=True)), ['inhabilitado', 'rehabilitado'],
+        )
+
+    def test_un_gasto_inhabilitado_no_suma_ni_se_puede_pagar_ni_editar(self):
+        self.post({'accion': 'inhabilitar', 'motivo': 'Se cargo dos veces por error', 'aceptadas': ['devuelve_al_banco']})
+        lista = self.client.get('/api/admin/gastos/').json()
+        fila = next(g for g in lista['gastos'] if g['id'] == self.gasto.id)
+        self.assertTrue(fila['inhabilitado'])
+        self.assertEqual(fila['inhabilitacion']['motivo'], 'Se cargo dos veces por error')
+        self.assertEqual(Decimal(lista['total_general']), Decimal('0'))
+        self.assertEqual(self.client.get('/api/admin/gastos/?inhabilitados=ocultar').json()['gastos'], [])
+        # no sale en cuentas por pagar ni en el estado de resultados
+        from varagrill.models import VGGasto
+        pendiente = VGGasto.objects.create(
+            categoria=self.cat, descripcion='Pendiente', monto=Decimal('5'), saldo_pendiente=Decimal('5'),
+            estado_pago='pendiente', fecha_gasto=self.hoy, tasa_cambio_referencia=Decimal('100'),
+        )
+        self.post({'accion': 'inhabilitar', 'motivo': 'No era un gasto del negocio', 'aceptadas': ['sin_pagos']}, gasto=pendiente)
+        por_pagar = self.client.get('/api/cuentas-por-pagar/').json()['compras']
+        self.assertNotIn(pendiente.id, [c['id'] for c in por_pagar if c['tipo'] == 'gasto'])
+        # ni abonarlo ni editarlo
+        r = self.client.post(
+            f'/api/admin/gastos/{pendiente.id}/abonos/',
+            data=json.dumps({'monto': '1', 'metodo_pago_id': self.metodo.id}), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 409)
+        r = self.client.post(
+            f'/api/admin/gastos/{self.gasto.id}/', data=json.dumps({'action': 'editar', 'motivo': 'x', 'monto': '50'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 409)
+
+    def test_un_gasto_de_un_mes_anterior_pide_aceptar_el_cambio_de_periodo(self):
+        from varagrill.models import VGGasto
+        viejo = VGGasto.objects.create(
+            categoria=self.cat, descripcion='Alquiler del mes pasado', monto=Decimal('50'), saldo_pendiente=Decimal('50'),
+            estado_pago='pendiente', fecha_gasto=self.hoy.replace(day=1) - timedelta(days=3), tasa_cambio_referencia=Decimal('100'),
+        )
+        codigos = [a['codigo'] for a in self.client.get(self.url(viejo)).json()['advertencias']]
+        self.assertEqual(sorted(codigos), ['periodo_pasado', 'sin_pagos'])
+        r = self.post({'accion': 'inhabilitar', 'motivo': 'Ese alquiler no corresponde', 'aceptadas': ['sin_pagos']}, gasto=viejo)
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual([a['codigo'] for a in r.json()['advertencias']], ['periodo_pasado'])
+
+    def test_solo_el_administrador_puede_inhabilitar(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(self.url()).status_code, 401)
+        self.assertEqual(self.post({'accion': 'inhabilitar', 'motivo': 'Intento sin sesion'}).status_code, 401)
+        cajera = VGUsuario.objects.create_user(
+            username='inh_cajera', password='claveInh123', cedula='96000002', email='inhc@test.test',
+            id_role=VGRol.objects.get(nombre_role='Cajera'),
+        )
+        self.client.force_login(cajera)
+        self.assertEqual(self.post({'accion': 'inhabilitar', 'motivo': 'Intento de la cajera'}).status_code, 401)
+        self.gasto.refresh_from_db()
+        self.assertFalse(self.gasto.inhabilitado)
+
+    # ---- conciliacion bancaria
+    def _movimiento_conciliado(self, dia=None):
+        from varagrill import conciliacion_bancaria as motor
+        from varagrill.models import VGExtractoBancario, VGMovimientoBancario
+        dia = dia or self.hoy
+        extracto = VGExtractoBancario.objects.create(cuenta_bancaria='Banco Inh')
+        mov = VGMovimientoBancario.objects.create(
+            extracto=extracto, cuenta_bancaria='Banco Inh', fecha=timezone.make_aware(datetime.combine(dia, datetime.min.time().replace(hour=12))),
+            referencia='123456', descripcion='TRF PROVEEDOR', tipo='debito', monto=Decimal('10000.00'), clase='transferencia_enviada',
+            huella='inh1',
+        )
+        motor.vincular_manual(mov, 'abono_gasto', self.abono.id, self.admin)
+        mov.refresh_from_db()
+        self.assertEqual(mov.estado, 'conciliado')
+        return mov
+
+    def test_inhabilitar_un_gasto_conciliado_deshace_el_vinculo_y_lo_audita(self):
+        from varagrill.models import VGConciliacionMovimiento, VGInhabilitacionGasto
+        mov = self._movimiento_conciliado()
+        previa = self.client.get(self.url()).json()
+        self.assertEqual([a['codigo'] for a in previa['advertencias']], ['devuelve_al_banco', 'conciliado'])
+        r = self.post({
+            'accion': 'inhabilitar', 'motivo': 'Era un pago duplicado del banco', 'aceptadas': ['devuelve_al_banco', 'conciliado'],
+        })
+        self.assertEqual(r.status_code, 200, r.content)
+        mov.refresh_from_db()
+        self.assertFalse(VGConciliacionMovimiento.objects.filter(movimiento=mov, estado='confirmado').exists())
+        self.assertNotEqual(mov.estado, 'conciliado')
+        deshechos = VGInhabilitacionGasto.objects.get().vinculos_deshechos
+        self.assertEqual([d['movimiento_id'] for d in deshechos], [mov.id])
+        # el pago inhabilitado ya no aparece como candidato ni como "en el sistema, no en el banco"
+        from varagrill import conciliacion_bancaria as motor
+        self.assertEqual(motor.registros_sin_movimiento('Banco Inh', self.hoy, self.hoy), [])
+
+    def test_si_el_dia_del_movimiento_esta_cerrado_bloquea(self):
+        from varagrill.models import VGCierreConciliacion
+        self._movimiento_conciliado()
+        VGCierreConciliacion.objects.create(cuenta_bancaria='Banco Inh', fecha=self.hoy, estado='vigente')
+        previa = self.client.get(self.url()).json()
+        self.assertEqual([b['codigo'] for b in previa['bloqueos']], ['dia_conciliacion_cerrado'])
+        r = self.post({
+            'accion': 'inhabilitar', 'motivo': 'Era un pago duplicado del banco', 'aceptadas': ['devuelve_al_banco', 'conciliado'],
+        })
+        self.assertEqual(r.status_code, 409)
+        self.gasto.refresh_from_db()
+        self.assertFalse(self.gasto.inhabilitado)

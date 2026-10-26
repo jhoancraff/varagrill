@@ -439,7 +439,7 @@ def gastos_efectivo_dia(fecha):
     """Suma de VGAbonoGasto en `fecha` pagados con un metodo que cuenta como efectivo fisico."""
     total = (
         VGAbonoGasto.objects
-        .filter(fecha_pago__date=fecha, metodo_pago__es_efectivo=True)
+        .filter(fecha_pago__date=fecha, metodo_pago__es_efectivo=True, gasto__inhabilitado=False)
         .aggregate(total=Sum('monto'))
         .get('total')
     )
@@ -504,7 +504,7 @@ def efectivo_esperado_por_moneda(fecha):
 
     for abono in (
         VGAbonoGasto.objects
-        .filter(fecha_pago__date=fecha, metodo_pago__es_efectivo=True)
+        .filter(fecha_pago__date=fecha, metodo_pago__es_efectivo=True, gasto__inhabilitado=False)
         .select_related('metodo_pago')
     ):
         if abono.metodo_pago.moneda == 'VES':
@@ -853,7 +853,7 @@ def disponibilidad_por_cuenta(fecha):
         else:
             saldo_bs_incompleto.add(ingreso.metodo_pago_id)
 
-    for abono in VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha).select_related('metodo_pago'):
+    for abono in VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha, gasto__inhabilitado=False).select_related('metodo_pago'):
         if abono.metodo_pago.moneda != 'VES':
             continue
         tasa = abono.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(abono.fecha_pago).date())
@@ -905,7 +905,7 @@ def disponibilidad_por_cuenta(fecha):
         .exclude(metodo_pago__es_punto_venta=True, lote_pos__isnull=False)
     )
     gastos_por_metodo = _totales_por_metodo(
-        VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha)
+        VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha, gasto__inhabilitado=False)
     )
     compras_por_metodo = _totales_por_metodo(
         VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha)
@@ -1186,7 +1186,10 @@ def flujo_bancario_mensual(anio, mes, banco_clave):
     # en que se tipearon, no en el dia en que de verdad salio la plata.
     for abono in (
         VGAbonoGasto.objects
-        .filter(gasto__fecha_gasto__gte=desde, gasto__fecha_gasto__lte=hasta, metodo_pago_id__in=metodo_ids)
+        .filter(
+            gasto__fecha_gasto__gte=desde, gasto__fecha_gasto__lte=hasta, metodo_pago_id__in=metodo_ids,
+            gasto__inhabilitado=False,
+        )
         .select_related('metodo_pago', 'gasto')
     ):
         dia = abono.gasto.fecha_gasto
@@ -1362,7 +1365,7 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
 
         for abono in (
             VGAbonoGasto.objects
-            .filter(gasto__fecha_gasto=fecha, metodo_pago_id__in=metodo_ids)
+            .filter(gasto__fecha_gasto=fecha, metodo_pago_id__in=metodo_ids, gasto__inhabilitado=False)
             .select_related('metodo_pago', 'gasto')
         ):
             tasa_abono = abono.tasa_cambio_referencia or tasa_para_fecha(fecha)

@@ -1841,7 +1841,7 @@ def reporte_estado_resultados_view(request):
             fecha_emision__date__lte=hasta,
             estado__in=['pagada', 'abonada_parcial'],
         )
-        .prefetch_related('pedidos__detalles__producto')
+        .prefetch_related('pedidos__detalles__producto', 'pedidos__servicios')
     )
     # Costos actuales de ingredientes/preparaciones: solo como ultimo recurso para lineas viejas sin costo
     # congelado (ver _costo_con_margen_detalle). Se cargan una sola vez.
@@ -1859,6 +1859,10 @@ def reporte_estado_resultados_view(request):
     costo_ventas = Decimal('0')
     costo_ventas_bs = Decimal('0')
     lineas_costo_estimado = 0
+    # Servicios adicionales (ver servicios_adicionales.py): entrada neta, sin costo de ventas. nombre -> {cantidad, total, total_bs}.
+    servicios_por_nombre = {}
+    servicios_total = Decimal('0')
+    servicios_total_bs = Decimal('0')
     # producto_id -> {nombre, motivo, unidades, ventas}: lo vendido cuyo costo salio en 0.
     productos_sin_costo = {}
     motivo_por_producto = {}
@@ -1871,6 +1875,24 @@ def reporte_estado_resultados_view(request):
 
         # Una nota abonada a medias cuenta solo la parte cobrada de la venta: el costo, la misma parte.
         fraccion_cobrada = min(Decimal('1'), monto_cobrado / nota.total) if nota.total > 0 else Decimal('1')
+
+        # Un descuento rebaja la nota completa, servicios incluidos: cada servicio cuenta en la misma proporcion que se cobro.
+        bruto_nota = sum(
+            (p.subtotal + p.cargo_servicios + p.cargo_delivery + p.impuesto + p.propina for p in nota.pedidos.all()), Decimal('0'),
+        )
+        factor_descuento = min(Decimal('1'), nota.total / bruto_nota) if bruto_nota > 0 else Decimal('1')
+        for pedido in nota.pedidos.all():
+            for servicio in pedido.servicios.all():
+                venta_servicio = servicio.subtotal * factor_descuento * fraccion_cobrada
+                fila_servicio = servicios_por_nombre.setdefault(
+                    servicio.nombre, {'nombre': servicio.nombre, 'cantidad': 0, 'total': Decimal('0'), 'total_bs': Decimal('0')},
+                )
+                fila_servicio['cantidad'] += servicio.cantidad
+                fila_servicio['total'] += venta_servicio
+                servicios_total += venta_servicio
+                if tasa:
+                    fila_servicio['total_bs'] += venta_servicio * tasa
+                    servicios_total_bs += venta_servicio * tasa
 
         costo_nota = Decimal('0')
         for pedido in nota.pedidos.all():
@@ -1980,6 +2002,18 @@ def reporte_estado_resultados_view(request):
         'ventas_total_bs': str(ventas_total_bs.quantize(Decimal('0.01'))),
         'costo_ventas': str(costo_ventas.quantize(Decimal('0.01'))),
         'costo_ventas_bs': str(costo_ventas_bs.quantize(Decimal('0.01'))),
+        # Servicios adicionales cobrados (ya estan dentro de `ventas_total`): sin costo, pasan completos a la utilidad bruta.
+        'servicios_adicionales': {
+            'total': str(servicios_total.quantize(Decimal('0.01'))),
+            'total_bs': str(servicios_total_bs.quantize(Decimal('0.01'))),
+            'items': [
+                {
+                    'nombre': fila['nombre'], 'cantidad': fila['cantidad'], 'total': str(fila['total'].quantize(Decimal('0.01'))),
+                    'total_bs': str(fila['total_bs'].quantize(Decimal('0.01'))),
+                }
+                for fila in sorted(servicios_por_nombre.values(), key=lambda f: -f['total'])
+            ],
+        },
         # Lineas vendidas sin costo congelado al cobrar (ventas viejas): su costo es el actual, estimado.
         'costo_lineas_estimadas': lineas_costo_estimado,
         # Productos vendidos cuyo costo salio en 0: sus ventas cuentan enteras como utilidad.

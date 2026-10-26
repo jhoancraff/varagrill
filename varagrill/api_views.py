@@ -64,6 +64,7 @@ from .auth_helpers import (
     _is_owner_user,
 )
 from .delivery import CargoDeliveryInvalido, aplicar_cargo, resolver_cargo_delivery
+from .servicios_adicionales import ServiciosInvalidos, aplicar_servicios, resolver_servicios, serializar_lineas
 from .impresion_lpd import imprimir_nota_entrega_caja
 from .impresion_termica import imprimir_comandas_pedido, mensaje_fallos_impresion, resumir_resultados_impresion
 from .ingredientes_excel import (
@@ -1750,6 +1751,8 @@ def _serialize_order_detail(pedido):
         'zona_delivery_id': pedido.zona_delivery_id,
         'zona_delivery_nombre': pedido.zona_delivery_nombre,
         'tarifa_delivery': str(pedido.tarifa_delivery) if pedido.tarifa_delivery is not None else None,
+        'cargo_servicios': str(pedido.cargo_servicios),
+        'servicios': serializar_lineas(pedido),
         'subtotal': str(pedido.subtotal),
         'total': str(pedido.total),
         'items': _serialize_order_items(pedido),
@@ -1877,6 +1880,12 @@ def pedido_create_view(request):
     except CargoDeliveryInvalido as error:
         return _auth_response({'ok': False, 'message': str(error)}, status=400)
 
+    # Servicios adicionales (ver servicios_adicionales.py): cualquier rol puede agregar uno o varios, y el mismo más de una vez.
+    try:
+        servicios = resolver_servicios(data.get('servicios'))
+    except ServiciosInvalidos as error:
+        return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
     with transaction.atomic():
         built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         # Si TODOS los productos del pedido son de categorías "no_requiere_cocina" (ej.
@@ -1936,11 +1945,12 @@ def pedido_create_view(request):
                     precio_unitario=opcion['precio_unitario'],
                 )
 
-        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento'] + cargo['cargo_delivery']
+        aplicar_servicios(pedido, servicios)
+        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento'] + cargo['cargo_delivery'] + pedido.cargo_servicios
         pedido.subtotal = subtotal.quantize(Decimal('0.01'))
         pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
-        pedido.save(update_fields=['subtotal', 'total', 'actualizado_por'])
+        pedido.save(update_fields=['subtotal', 'total', 'cargo_servicios', 'actualizado_por'])
 
         if nota_credito is not None:
             nota_credito.pedido_nuevo = pedido
@@ -1958,6 +1968,7 @@ def pedido_create_view(request):
                 'tipo_pedido': pedido.tipo_pedido,
                 'subtotal': str(pedido.subtotal),
                 'cargo_delivery': str(pedido.cargo_delivery),
+                'cargo_servicios': str(pedido.cargo_servicios),
                 'total': str(pedido.total),
                 'items': len(parsed['parsed_lines']),
             },
@@ -2044,6 +2055,14 @@ def pedido_update_view(request, pedido_id):
         except CargoDeliveryInvalido as error:
             return _auth_response({'ok': False, 'message': str(error)}, status=400)
 
+        # Si la pantalla manda los servicios se reemplazan; si no, el pedido conserva los que ya tenía.
+        servicios = None
+        if 'servicios' in data:
+            try:
+                servicios = resolver_servicios(data.get('servicios'), pedido_actual=pedido)
+            except ServiciosInvalidos as error:
+                return _auth_response({'ok': False, 'message': str(error)}, status=400)
+
         built_lines, subtotal = _build_order_lines(parsed['parsed_lines'], parsed['products_map'], parsed['preparaciones_map'])
         # Mismo criterio que pedido_create_view: si el pedido editado queda compuesto
         # solo por categorías "no_requiere_cocina", pasa a 'entregado' de una vez.
@@ -2090,7 +2109,9 @@ def pedido_update_view(request, pedido_id):
                     precio_unitario=opcion['precio_unitario'],
                 )
 
-        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento'] + cargo['cargo_delivery']
+        if servicios is not None:
+            aplicar_servicios(pedido, servicios)
+        total = subtotal + parsed['impuesto'] + parsed['propina'] - parsed['descuento'] + cargo['cargo_delivery'] + pedido.cargo_servicios
         pedido.subtotal = subtotal.quantize(Decimal('0.01'))
         pedido.total = total.quantize(Decimal('0.01'))
         pedido.actualizado_por = request.user
@@ -2123,7 +2144,7 @@ def _recalcular_totales_pedido(pedido, usuario):
         )
         for d in pedido.detalles.all()
     )
-    total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento + pedido.cargo_delivery
+    total = subtotal + pedido.impuesto + pedido.propina - pedido.descuento + pedido.cargo_delivery + pedido.cargo_servicios
     pedido.subtotal = subtotal.quantize(Decimal('0.01'))
     pedido.total = total.quantize(Decimal('0.01'))
     pedido.actualizado_por = usuario
@@ -6326,6 +6347,8 @@ def pedidos_delivery_view(request):
                     'estado': p.estado,
                     'total': str(p.total),
                     'cargo_delivery': str(p.cargo_delivery),
+                    'cargo_servicios': str(p.cargo_servicios),
+                    'servicios': serializar_lineas(p),
                     'zona_delivery_nombre': p.zona_delivery_nombre,
                     'notas': p.notas,
                     'creado_en': p.fecha_creacion.isoformat(),
@@ -6644,6 +6667,8 @@ def pedidos_cobro_view(request):
                     'descuento': str(pedido.descuento),
                     'propina': str(pedido.propina),
                     'cargo_delivery': str(pedido.cargo_delivery),
+                    'cargo_servicios': str(pedido.cargo_servicios),
+                    'servicios': serializar_lineas(pedido),
                     'zona_delivery_id': pedido.zona_delivery_id,
                     'zona_delivery_nombre': pedido.zona_delivery_nombre,
                     'total': str(pedido.total),

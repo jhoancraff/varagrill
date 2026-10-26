@@ -579,6 +579,38 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
     }
   };
 
+  // Cambiar los servicios adicionales de un pedido antes de cobrarlo (ver servicios_adicionales_views.pedido_servicios_view):
+  // cualquier rol puede. Si ya se le había dado la cuenta del cliente, esa cuenta queda con el total viejo: se descarta
+  // para que se genere de nuevo.
+  const handleCambiarServicios = async (pedido, servicios, groupKey) => {
+    try {
+      const response = await fetch(`/api/pedidos/${pedido.id}/servicios/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') || '' },
+        credentials: 'include',
+        body: JSON.stringify({ servicios }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) {
+        showError(data.message || 'No se pudieron cambiar los servicios.');
+        return false;
+      }
+      showSuccess(`Servicios del pedido #${pedido.id} actualizados: $${Number(data.pedido.cargo_servicios).toFixed(2)}.`);
+      if (groupKey) {
+        setPrefacturaByGroup((current) => {
+          const copy = { ...current };
+          delete copy[groupKey];
+          return copy;
+        });
+      }
+      await fetchPedidos();
+      return true;
+    } catch (requestError) {
+      showError('Error de red al cambiar los servicios.');
+      return false;
+    }
+  };
+
   // Cancelar un pedido individual desde caja (antes de cobrarlo) — solo visible para
   // quien puede hacerlo (ver canCancelarPedidos, resuelto en WelcomeScreen a partir
   // del rol). El backend vuelve a validar el permiso igual, esto es solo la UI.
@@ -1181,8 +1213,19 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                               </div>
                             ) : null}
 
+                            {(pedido.servicios || []).length > 0 ? (
+                              <div style={{ display: 'grid', gap: 2 }}>
+                                {pedido.servicios.map((servicio) => (
+                                  <div key={`srv-${servicio.id}`} style={itemNoteDetailStyle}>
+                                    Servicio: {servicio.cantidad}x {servicio.nombre} — ${servicio.subtotal}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+
                             <div style={detailTotalsStyle}>
                               <span>Subtotal: ${pedido.subtotal}<BsAmount amountUsd={pedido.subtotal} tasa={tasaGrupo} /></span>
+                              {Number(pedido.cargo_servicios) > 0 ? <span>Servicios: ${pedido.cargo_servicios}<BsAmount amountUsd={pedido.cargo_servicios} tasa={tasaGrupo} /></span> : null}
                               {Number(pedido.impuesto) > 0 ? <span>Impuesto: ${pedido.impuesto}<BsAmount amountUsd={pedido.impuesto} tasa={tasaGrupo} /></span> : null}
                               {Number(pedido.descuento) > 0 ? <span>Descuento: -${pedido.descuento}<BsAmount amountUsd={pedido.descuento} tasa={tasaGrupo} /></span> : null}
                               {Number(pedido.propina) > 0 ? <span>Propina: ${pedido.propina}<BsAmount amountUsd={pedido.propina} tasa={tasaGrupo} /></span> : null}
@@ -1197,6 +1240,11 @@ function CheckoutPage({ isMobile, onBack, lastKitchenEvent, canCancelarPedidos =
                                 <BsAmount amountUsd={pedido.total} tasa={tasaGrupo} style={{ color: 'var(--vg-f-e0c9a3)' }} />
                               </span>
                             </div>
+
+                            <ServiciosEditor
+                              pedido={pedido}
+                              onGuardar={(servicios) => handleCambiarServicios(pedido, servicios, selectedGroup.key)}
+                            />
 
                             {pedido.tipo_pedido === 'delivery' && (pedido.grupo_id === pedido.id) ? (
                               <DeliveryCargoEditor
@@ -1749,6 +1797,94 @@ function groupItemsByPlato(items) {
     .sort((a, b) => a[0] - b[0])
     .map(([grupoId, groupedItems]) => ({ grupoId, items: groupedItems }));
   return { platos, sueltos };
+}
+
+// Servicios adicionales de un pedido (descorche, decoración...): agregar uno o varios, el mismo más de una vez, o quitarlos
+// antes de cobrar. El precio siempre es el del catálogo; no llevan IVA.
+function ServiciosEditor({ pedido, onGuardar }) {
+  const [abierto, setAbierto] = useState(false);
+  const [catalogo, setCatalogo] = useState([]);
+  const [lineas, setLineas] = useState([]);
+  const [guardando, setGuardando] = useState(false);
+
+  const abrir = async () => {
+    setLineas((pedido.servicios || []).map((s) => ({
+      servicioId: s.servicio_id, nombre: s.nombre, precio: Number(s.precio_unitario), cantidad: s.cantidad,
+    })));
+    setAbierto(true);
+    try {
+      const response = await fetch('/api/servicios-adicionales/', { credentials: 'include', cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok) setCatalogo(Array.isArray(data.servicios) ? data.servicios : []);
+    } catch (requestError) {
+      // Sin catálogo solo se pueden quitar o cambiar cantidades de los que ya tiene.
+    }
+  };
+
+  const agregar = (servicioId) => {
+    const servicio = catalogo.find((item) => item.id === servicioId);
+    if (!servicio) return;
+    setLineas((actual) => (
+      actual.some((l) => l.servicioId === servicioId)
+        ? actual.map((l) => (l.servicioId === servicioId ? { ...l, cantidad: Math.min(99, l.cantidad + 1) } : l))
+        : [...actual, { servicioId, nombre: servicio.nombre, precio: Number(servicio.precio), cantidad: 1 }]
+    ));
+  };
+  const cambiar = (servicioId, delta) => setLineas((actual) => actual
+    .map((l) => (l.servicioId === servicioId ? { ...l, cantidad: Math.min(99, l.cantidad + delta) } : l))
+    .filter((l) => l.cantidad > 0));
+
+  const guardar = async () => {
+    setGuardando(true);
+    const ok = await onGuardar(lineas.map((l) => ({ servicio_id: l.servicioId, cantidad: l.cantidad })));
+    setGuardando(false);
+    if (ok) setAbierto(false);
+  };
+
+  if (!abierto) {
+    return (
+      <div>
+        <button type="button" onClick={abrir} style={deliveryEditorButtonStyle}>
+          {Number(pedido.cargo_servicios) > 0 ? 'Cambiar servicios adicionales' : 'Agregar servicio adicional'}
+        </button>
+      </div>
+    );
+  }
+
+  const total = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  return (
+    <div style={deliveryEditorStyle}>
+      <select
+        value=""
+        onChange={(event) => { if (event.target.value) agregar(Number(event.target.value)); }}
+        style={deliveryEditorInputStyle}
+        className="admin-dark-select"
+      >
+        <option value="">Agregar un servicio...</option>
+        {catalogo.map((servicio) => (
+          <option key={servicio.id} value={servicio.id}>{servicio.nombre} — ${Number(servicio.precio).toFixed(2)}</option>
+        ))}
+      </select>
+      {lineas.map((l) => (
+        <div key={l.servicioId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <span style={{ flex: 1 }}>{l.nombre}</span>
+          <button type="button" onClick={() => cambiar(l.servicioId, -1)} style={deliveryEditorButtonStyle} aria-label="Quitar uno">−</button>
+          <span style={{ minWidth: 18, textAlign: 'center' }}>{l.cantidad}</span>
+          <button type="button" onClick={() => cambiar(l.servicioId, 1)} style={deliveryEditorButtonStyle} aria-label="Agregar uno">+</button>
+          <span style={{ minWidth: 64, textAlign: 'right', fontWeight: 700 }}>${(l.precio * l.cantidad).toFixed(2)}</span>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <strong>Servicios: ${total.toFixed(2)}</strong>
+        <span style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={guardar} disabled={guardando} style={deliveryEditorSaveStyle}>
+            {guardando ? 'Guardando...' : 'Guardar'}
+          </button>
+          <button type="button" onClick={() => setAbierto(false)} disabled={guardando} style={deliveryEditorButtonStyle}>Cancelar</button>
+        </span>
+      </div>
+    </div>
+  );
 }
 
 // Cambio del cargo de delivery de un pedido: elegir otra zona o escribir el monto que se va a cobrar. Caja

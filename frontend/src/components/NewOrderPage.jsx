@@ -58,6 +58,10 @@ function NewOrderPage({
   const [puedeCambiarMontoDelivery, setPuedeCambiarMontoDelivery] = useState(false);
   const [zonaDeliveryId, setZonaDeliveryId] = useState('');
   const [cargoDelivery, setCargoDelivery] = useState('');
+  // Servicios adicionales (descorche, decoración...): el catálogo lo arma el administrador; cualquier rol puede agregar
+  // uno o varios al pedido, y el mismo más de una vez. No llevan IVA ni pasan por cocina.
+  const [serviciosCatalogo, setServiciosCatalogo] = useState([]);
+  const [serviciosElegidos, setServiciosElegidos] = useState([]);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [catalogType, setCatalogType] = useState('Todos');
   const [searchTerm, setSearchTerm] = useState('');
@@ -199,9 +203,39 @@ function NewOrderPage({
   // El delivery se cobra una sola vez, en el pedido original: una ronda agregada o un canje no lo repiten.
   const cobraDelivery = orderHeader.tipoPedido === 'delivery' && !initialGrupoPedidoId && !initialNotaCreditoId;
   const deliveryFee = cobraDelivery ? Math.max(0, Number(cargoDelivery) || 0) : 0;
-  const totalEstimado = subtotalProductos + deliveryFee;
+  const serviciosTotal = serviciosElegidos.reduce((suma, elegido) => {
+    const servicio = serviciosCatalogo.find((item) => item.id === elegido.servicioId);
+    return suma + (servicio ? Number(servicio.precio) * elegido.cantidad : 0);
+  }, 0);
+  const totalEstimado = subtotalProductos + deliveryFee + serviciosTotal;
   const zonaDeliveryElegida = zonasDelivery.find((zona) => String(zona.id) === String(zonaDeliveryId));
   const deliveryLabel = zonaDeliveryElegida ? `Delivery (${zonaDeliveryElegida.nombre})` : 'Delivery';
+
+  useEffect(() => {
+    let cancelado = false;
+    fetch('/api/servicios-adicionales/', { credentials: 'include', cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelado && data && data.ok) setServiciosCatalogo(Array.isArray(data.servicios) ? data.servicios : []);
+      })
+      .catch(() => {
+        // Sin catálogo el pedido se registra igual, sin servicios.
+      });
+    return () => { cancelado = true; };
+  }, []);
+
+  const agregarServicio = (servicioId) => {
+    setServiciosElegidos((actual) => (
+      actual.some((item) => item.servicioId === servicioId)
+        ? actual.map((item) => (item.servicioId === servicioId ? { ...item, cantidad: Math.min(99, item.cantidad + 1) } : item))
+        : [...actual, { servicioId, cantidad: 1 }]
+    ));
+  };
+  const cambiarCantidadServicio = (servicioId, delta) => {
+    setServiciosElegidos((actual) => actual
+      .map((item) => (item.servicioId === servicioId ? { ...item, cantidad: Math.min(99, item.cantidad + delta) } : item))
+      .filter((item) => item.cantidad > 0));
+  };
 
   useEffect(() => {
     if (!cobraDelivery) {
@@ -588,6 +622,7 @@ function NewOrderPage({
     // Cargo de delivery: la zona (su tarifa se usa si no hay monto) y el monto final que caja dejó.
     zona_delivery_id: cobraDelivery && zonaDeliveryId && zonaDeliveryId !== 'otro' ? Number(zonaDeliveryId) : null,
     cargo_delivery: cobraDelivery && cargoDelivery !== '' ? cargoDelivery : null,
+    servicios: serviciosElegidos.map((item) => ({ servicio_id: item.servicioId, cantidad: item.cantidad })),
     items: cartItems.map((item) => ({
       product_id: Number(item.productId),
       cantidad: Number(item.quantity || 1),
@@ -654,6 +689,7 @@ function NewOrderPage({
           queueCurrentOrder(payload);
           showSuccess(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
           setCartItems([]);
+          setServiciosElegidos([]);
           resetArmarPlato();
           setOrderHeader((current) => ({ ...current, notas: '' }));
           markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
@@ -667,6 +703,7 @@ function NewOrderPage({
       showSuccess(`Pedido #${data.pedido.id} registrado: ${data.pedido.items} item(s), ${mesaLabel}, total $${Number(data.pedido.total).toFixed(2)}.`);
 
       setCartItems([]);
+      setServiciosElegidos([]);
       resetArmarPlato();
       setOrderHeader((current) => ({ ...current, notas: '' }));
       markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
@@ -680,6 +717,7 @@ function NewOrderPage({
         queueCurrentOrder(payload);
         showSuccess(`Sin conexion. Pedido guardado en cola (${queuedCount + 1} pendiente(s)).`);
         setCartItems([]);
+        setServiciosElegidos([]);
         resetArmarPlato();
         setOrderHeader((current) => ({ ...current, notas: '' }));
         markClean({ cartItems: [], orderHeader: { ...orderHeader, notas: '' } });
@@ -1143,6 +1181,37 @@ function NewOrderPage({
               )}
             </div>
 
+            {serviciosCatalogo.length > 0 ? (
+              <div style={serviciosBoxStyle}>
+                <span style={labelStyle}>Servicios adicionales</span>
+                <select
+                  value=""
+                  onChange={(event) => { if (event.target.value) agregarServicio(Number(event.target.value)); }}
+                  style={inputStyle(isCompact)}
+                >
+                  <option value="">Agregar un servicio...</option>
+                  {serviciosCatalogo.map((servicio) => (
+                    <option key={servicio.id} value={servicio.id}>{servicio.nombre} — ${Number(servicio.precio).toFixed(2)}</option>
+                  ))}
+                </select>
+                {serviciosElegidos.map((elegido) => {
+                  const servicio = serviciosCatalogo.find((item) => item.id === elegido.servicioId);
+                  if (!servicio) return null;
+                  return (
+                    <div key={elegido.servicioId} style={servicioFilaStyle}>
+                      <span style={{ flex: 1 }}>{servicio.nombre}</span>
+                      <span style={servicioControlesStyle}>
+                        <button type="button" onClick={() => cambiarCantidadServicio(elegido.servicioId, -1)} style={servicioBotonStyle} aria-label="Quitar uno">−</button>
+                        <span style={{ minWidth: 18, textAlign: 'center' }}>{elegido.cantidad}</span>
+                        <button type="button" onClick={() => cambiarCantidadServicio(elegido.servicioId, 1)} style={servicioBotonStyle} aria-label="Agregar uno">+</button>
+                      </span>
+                      <span style={{ minWidth: 58, textAlign: 'right', fontWeight: 700 }}>${(Number(servicio.precio) * elegido.cantidad).toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
             <label style={fieldWrapStyle}>
               <span style={labelStyle}>Notas generales</span>
               <textarea
@@ -1154,6 +1223,12 @@ function NewOrderPage({
               />
             </label>
 
+            {serviciosTotal > 0 ? (
+              <div style={deliveryLineStyle}>
+                <span>Servicios adicionales</span>
+                <span>${serviciosTotal.toFixed(2)}</span>
+              </div>
+            ) : null}
             {deliveryFee > 0 ? (
               <div style={deliveryLineStyle}>
                 <span>{deliveryLabel}</span>
@@ -1202,6 +1277,7 @@ function NewOrderPage({
           subtotal={totalEstimado}
           deliveryFee={deliveryFee}
           deliveryLabel={deliveryLabel}
+          serviciosTotal={serviciosTotal}
           tasaCambio={tasaCambio}
           groupedCartItems={groupedCartItems}
           renderCartLine={renderCartLine}
@@ -1276,6 +1352,7 @@ function CartSummaryModal({
   subtotal,
   deliveryFee = 0,
   deliveryLabel = 'Delivery',
+  serviciosTotal = 0,
   tasaCambio,
   groupedCartItems,
   renderCartLine,
@@ -1335,6 +1412,12 @@ function CartSummaryModal({
         </div>
 
         <div style={cartModalFooterStyle}>
+          {serviciosTotal > 0 ? (
+            <div style={deliveryLineStyle}>
+              <span>Servicios adicionales</span>
+              <span>${serviciosTotal.toFixed(2)}</span>
+            </div>
+          ) : null}
           {deliveryFee > 0 ? (
             <div style={deliveryLineStyle}>
               <span>{deliveryLabel}</span>
@@ -2480,6 +2563,10 @@ const addonPickerOptionPriceStyle = {
   whiteSpace: 'nowrap',
 };
 
+const serviciosBoxStyle = { display: 'grid', gap: 8, padding: 12, borderRadius: 14, border: '1px solid rgba(var(--vg-ink), 0.12)', background: 'rgba(var(--vg-ink), 0.03)' };
+const servicioFilaStyle = { display: 'flex', alignItems: 'center', gap: 8, color: 'var(--vg-text-strong)', fontSize: 13 };
+const servicioControlesStyle = { display: 'inline-flex', alignItems: 'center', gap: 6 };
+const servicioBotonStyle = { width: 26, height: 26, borderRadius: 999, border: '1px solid rgba(var(--vg-ink), 0.16)', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 800, cursor: 'pointer', lineHeight: 1 };
 const deliveryLineStyle = { display: 'flex', justifyContent: 'space-between', gap: 8, color: 'var(--vg-f-d2c3c3)', fontSize: 13 };
 const cartTotalRowStyle = {
   display: 'flex',

@@ -6269,3 +6269,170 @@ class InhabilitarGastoTests(TestCase):
         self.assertEqual(r.status_code, 409)
         self.gasto.refresh_from_db()
         self.assertFalse(self.gasto.inhabilitado)
+
+
+class ServiciosAdicionalesTests(TestCase):
+    """Servicios adicionales: catalogo del administrador/contador, varios por pedido, sin IVA, sin costo (entrada neta)."""
+
+    def setUp(self):
+        from varagrill.models import VGServicioAdicional
+        roles = {n: VGRol.objects.get_or_create(nombre_role=n)[0] for n in ('Administrador', 'Contador', 'Cajera', 'Mesero')}
+        crear = lambda user, rol, ced: VGUsuario.objects.create_user(
+            username=user, password='claveSrv123', cedula=ced, email=f'{user}@varagrill.test', id_role=roles[rol],
+        )
+        self.admin = crear('sv_admin', 'Administrador', '98000001')
+        self.contador = crear('sv_contador', 'Contador', '98000002')
+        self.cajera = crear('sv_cajera', 'Cajera', '98000003')
+        self.mesero = crear('sv_mesero', 'Mesero', '98000004')
+        categoria = VGCategoriaProducto.objects.create(nombre='Platos SV', no_requiere_cocina=True)
+        self.plato = VGProducto.objects.create(nombre='Plato SV', categoria=categoria, precio_venta='10.00', disponible=True)
+        self.efectivo = VGMetodoPago.objects.create(nombre='Efectivo SV', moneda='USD', es_efectivo=True)
+        _set_tasa_actual('100.0000')
+        self.torta = VGServicioAdicional.objects.create(nombre='Torta de cumpleaños', precio=Decimal('15.00'))
+        self.descorche = VGServicioAdicional.objects.create(nombre='Descorche', precio=Decimal('5.50'))
+
+    def post(self, url, payload=None, usuario=None):
+        self.client.force_login(usuario or self.cajera)
+        return self.client.post(url, data=json.dumps(payload or {}), content_type='application/json')
+
+    def crear_pedido(self, servicios=None, usuario=None, **extra):
+        payload = {'tipo_pedido': 'llevar', 'cliente_nombre': 'Cliente SV', 'items': [{'product_id': self.plato.id, 'cantidad': 2}], **extra}
+        if servicios is not None:
+            payload['servicios'] = servicios
+        return self.post('/api/pedidos/', payload, usuario)
+
+    def pedido(self, respuesta):
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        return VGPedido.objects.get(pk=respuesta.json()['pedido']['id'])
+
+    # ---- catalogo
+    def test_solo_administrador_o_contador_crean_y_editan_el_catalogo(self):
+        cuerpo = {'nombre': 'Decoración de mesa', 'precio': '20', 'descripcion': 'Globos y flores'}
+        for usuario in (self.cajera, self.mesero):
+            self.assertEqual(self.post('/api/servicios-adicionales/', cuerpo, usuario).status_code, 401)
+        r = self.post('/api/servicios-adicionales/', cuerpo, self.contador)
+        self.assertEqual(r.status_code, 201, r.content)
+        nuevo = r.json()['servicio']
+        self.assertEqual((nuevo['nombre'], nuevo['precio'], nuevo['activo']), ('Decoración de mesa', '20.00', True))
+        # nombre repetido o precio invalido
+        self.assertEqual(self.post('/api/servicios-adicionales/', {'nombre': 'descorche', 'precio': '1'}, self.admin).status_code, 400)
+        self.assertEqual(self.post('/api/servicios-adicionales/', {'nombre': 'Otro', 'precio': '-3'}, self.admin).status_code, 400)
+        self.assertEqual(self.post('/api/servicios-adicionales/', {'nombre': '', 'precio': '3'}, self.admin).status_code, 400)
+        # editar: solo admin/contador; no se puede con otro rol
+        url = f'/api/servicios-adicionales/{nuevo["id"]}/'
+        self.assertEqual(self.post(url, {'precio': '25'}, self.cajera).status_code, 401)
+        r = self.post(url, {'precio': '25.50', 'activo': False}, self.admin)
+        self.assertEqual((r.json()['servicio']['precio'], r.json()['servicio']['activo']), ('25.50', False))
+
+    def test_cualquier_rol_ve_solo_los_activos_y_el_admin_puede_ver_todos(self):
+        from varagrill.models import VGServicioAdicional
+        VGServicioAdicional.objects.filter(pk=self.descorche.pk).update(activo=False)
+        self.client.force_login(self.mesero)
+        nombres = [s['nombre'] for s in self.client.get('/api/servicios-adicionales/').json()['servicios']]
+        self.assertEqual(nombres, ['Torta de cumpleaños'])
+        self.assertEqual(len(self.client.get('/api/servicios-adicionales/?todos=1').json()['servicios']), 1)  # el mesero no ve inactivos
+        self.client.force_login(self.admin)
+        self.assertEqual(len(self.client.get('/api/servicios-adicionales/?todos=1').json()['servicios']), 2)
+        self.client.logout()
+        self.assertEqual(self.client.get('/api/servicios-adicionales/').status_code, 401)
+
+    # ---- en el pedido
+    def test_un_pedido_lleva_varios_servicios_y_el_mismo_mas_de_una_vez_sumados_al_total_sin_iva(self):
+        pedido = self.pedido(self.crear_pedido(
+            servicios=[{'servicio_id': self.torta.id, 'cantidad': 1}, {'servicio_id': self.descorche.id, 'cantidad': 2},
+                       {'servicio_id': self.descorche.id, 'cantidad': 1}],
+            usuario=self.mesero,   # cualquier rol puede ponerlos
+        ))
+        lineas = {l.nombre: (l.cantidad, l.precio_unitario, l.subtotal) for l in pedido.servicios.all()}
+        self.assertEqual(lineas, {'Torta de cumpleaños': (1, Decimal('15.00'), Decimal('15.00')), 'Descorche': (3, Decimal('5.50'), Decimal('16.50'))})
+        self.assertEqual((pedido.subtotal, pedido.cargo_servicios, pedido.total), (Decimal('20.00'), Decimal('31.50'), Decimal('51.50')))
+
+    def test_servicio_inactivo_inexistente_o_con_cantidad_invalida_se_rechaza(self):
+        from varagrill.models import VGServicioAdicional
+        VGServicioAdicional.objects.filter(pk=self.descorche.pk).update(activo=False)
+        for servicios in ([{'servicio_id': self.descorche.id, 'cantidad': 1}], [{'servicio_id': 99999, 'cantidad': 1}],
+                          [{'servicio_id': self.torta.id, 'cantidad': 0}], [{'servicio_id': self.torta.id, 'cantidad': 500}], 'hola'):
+            self.assertEqual(self.crear_pedido(servicios=servicios).status_code, 400, servicios)
+        self.assertEqual(VGPedido.objects.count(), 0)
+
+    def test_cambiar_el_precio_del_catalogo_no_toca_lo_ya_cobrado(self):
+        pedido = self.pedido(self.crear_pedido(servicios=[{'servicio_id': self.torta.id, 'cantidad': 1}]))
+        self.post(f'/api/servicios-adicionales/{self.torta.id}/', {'precio': '99', 'activo': False}, self.admin)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.cargo_servicios, pedido.total), (Decimal('15.00'), Decimal('35.00')))
+        # al editar el pedido conservando el servicio (ya inactivo y con otro precio) se mantiene el precio original
+        r = self.post(f'/api/pedidos/{pedido.id}/servicios/', {'servicios': [{'servicio_id': self.torta.id, 'cantidad': 2}]})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['pedido']['cargo_servicios'], '30.00')
+
+    def test_agregar_cambiar_y_quitar_servicios_de_un_pedido_ya_creado(self):
+        pedido = self.pedido(self.crear_pedido())
+        url = f'/api/pedidos/{pedido.id}/servicios/'
+        r = self.post(url, {'servicios': [{'servicio_id': self.torta.id, 'cantidad': 1}, {'servicio_id': self.descorche.id, 'cantidad': 2}]}, self.mesero)
+        self.assertEqual((r.status_code, r.json()['pedido']['total']), (200, '46.00'))
+        r = self.post(url, {'servicios': [{'servicio_id': self.descorche.id, 'cantidad': 1}]})
+        self.assertEqual(r.json()['pedido']['total'], '25.50')
+        r = self.post(url, {'servicios': []})
+        self.assertEqual((r.json()['pedido']['total'], r.json()['pedido']['servicios']), ('20.00', []))
+        VGPedido.objects.filter(pk=pedido.pk).update(estado='pagado')
+        self.assertEqual(self.post(url, {'servicios': [{'servicio_id': self.torta.id, 'cantidad': 1}]}).status_code, 409)
+
+    def test_editar_el_pedido_sin_mandar_servicios_conserva_los_que_tiene(self):
+        pedido = self.pedido(self.crear_pedido(servicios=[{'servicio_id': self.torta.id, 'cantidad': 1}]))
+        VGPedido.objects.filter(pk=pedido.pk).update(estado='pendiente')
+        r = self.post(f'/api/pedidos/{pedido.id}/actualizar/', {
+            'tipo_pedido': 'llevar', 'cliente_nombre': 'Cliente SV', 'items': [{'product_id': self.plato.id, 'cantidad': 3}],
+        })
+        self.assertEqual(r.status_code, 200, r.content)
+        pedido.refresh_from_db()
+        self.assertEqual((pedido.subtotal, pedido.cargo_servicios, pedido.total), (Decimal('30.00'), Decimal('15.00'), Decimal('45.00')))
+
+    # ---- cobro, cuenta, nota, ticket y reportes
+    def test_la_cuenta_la_nota_y_el_ticket_traen_los_servicios_y_la_factura_no_les_pone_iva(self):
+        from varagrill.impresion_lpd import _ticket_recibo
+        pedido = self.pedido(self.crear_pedido(servicios=[{'servicio_id': self.torta.id, 'cantidad': 2}]))
+        # cuenta del cliente: los servicios son lineas propias, sin IVA, y suma lo mismo que el pedido
+        r = self.post('/api/prefacturas/', {'pedido_ids': [pedido.id]})
+        self.assertEqual(r.status_code, 201, r.content)
+        prefactura = r.json()['prefactura']
+        lineas = {l['descripcion']: l for l in prefactura['lineas']}
+        self.assertEqual((Decimal(lineas['Torta de cumpleaños']['cantidad']), Decimal(lineas['Torta de cumpleaños']['subtotal'])), (Decimal('2'), Decimal('30.00')))
+        self.assertEqual(Decimal(lineas['Torta de cumpleaños']['porcentaje_iva']), Decimal('0'))
+        self.assertEqual(Decimal(lineas['Torta de cumpleaños']['monto_iva']), Decimal('0'))
+        self.assertEqual(Decimal(prefactura['total']), Decimal('50.00'))
+        # nota de entrega: el cobro incluye los servicios y los lista
+        r = self.post('/api/pedidos/cobro/', {
+            'pedido_ids': [pedido.id], 'metodo_pago_id': self.efectivo.id, 'cliente_numero_documento': '98111222', 'cliente_nombre': 'Cliente SV',
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        nota = r.json()['nota_entrega']
+        self.assertEqual(Decimal(nota['total']), Decimal('50.00'))
+        detalle = self.client.get(f'/api/notas-entrega/{nota["id"]}/').json()['nota_entrega']
+        self.assertEqual((detalle['cargo_servicios'], [(s['nombre'], s['cantidad']) for s in detalle['servicios']]), ('30.00', [('Torta de cumpleaños', 2)]))
+        # ticket: lista los servicios y los suma aparte del subtotal
+        pedido.refresh_from_db()
+        texto = _ticket_recibo([pedido], self.efectivo, 'REF', Decimal('50.00'), Decimal('100'), codigo='X').texto_plano()
+        self.assertIn('SERVICIOS ADICIONALES', texto)
+        self.assertIn('Subtotal: $20.00', texto)
+        self.assertIn('Servicios: $30.00', texto)
+        self.assertIn('TOTAL: $50.00', texto)
+
+    def test_el_descuento_rebaja_el_total_con_los_servicios_y_el_estado_de_resultados_los_cuenta_como_entrada_neta(self):
+        # pedido de 2 platos ($20) + torta ($15) = $35; descuento manual a $28 en el cobro (20 % menos)
+        pedido = self.pedido(self.crear_pedido(servicios=[{'servicio_id': self.torta.id, 'cantidad': 1}]))
+        r = self.post('/api/pedidos/cobro/', {
+            'pedido_ids': [pedido.id], 'metodo_pago_id': self.efectivo.id, 'cliente_numero_documento': '98111222', 'cliente_nombre': 'Cliente SV',
+            'monto_cobrar': '28.00', 'descuento_motivo': 'Cliente frecuente',
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Decimal(r.json()['nota_entrega']['total']), Decimal('28.00'))
+        nota = VGNotaEntrega.objects.get(pk=r.json()['nota_entrega']['id'])
+        VGNotaEntrega.objects.filter(pk=nota.pk).update(estado='pagada', saldo_pendiente=0)
+        self.client.force_login(self.admin)
+        hoy = timezone.localdate().isoformat()
+        data = self.client.get(f'/api/admin/reportes/estado-resultados/?desde={hoy}&hasta={hoy}').json()
+        self.assertEqual(Decimal(data['ventas_total']), Decimal('28.00'))
+        servicios = data['servicios_adicionales']
+        # la torta ($15) se reconoce con el mismo descuento de la nota (28/35 = 80 %): $12.00, sin costo
+        self.assertEqual((servicios['total'], [(i['nombre'], i['cantidad'], i['total']) for i in servicios['items']]),
+                         ('12.00', [('Torta de cumpleaños', 1, '12.00')]))

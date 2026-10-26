@@ -189,13 +189,21 @@ def _agregar_encabezado_empresa(ticket, datos_fiscales, con_telefono=False):
             ticket.centro(f'Tel: {datos_fiscales.telefono}')
 
 
+# Etiqueta del documento del cliente según su tipo (V/E cédula, J/G RIF, P pasaporte).
+ETIQUETAS_DOCUMENTO = {'V': 'Cédula', 'E': 'Cédula', 'J': 'RIF', 'G': 'RIF', 'P': 'Pasaporte'}
+
+
 def _agregar_cliente(ticket, cliente):
     """Cliente y cédula/RIF del documento (no imprime nada si no hay cliente)."""
     if cliente is None:
         return
-    ticket.campo('Cliente:', f'{cliente.nombre} {cliente.apellido}'.strip())
+    nombre = ' '.join(parte for parte in (cliente.nombre, cliente.apellido) if parte and parte.strip())
+    if nombre:
+        ticket.campo('Cliente:', nombre)
     if cliente.numero_documento:
-        ticket.campo('Cédula:', f'{cliente.tipo_documento or "V"}-{cliente.numero_documento}')
+        etiqueta = ETIQUETAS_DOCUMENTO.get(cliente.tipo_documento, 'Documento')
+        prefijo = f'{cliente.tipo_documento}-' if cliente.tipo_documento else ''
+        ticket.campo(f'{etiqueta}:', f'{prefijo}{cliente.numero_documento}')
 
 
 def _producto_label(detalle):
@@ -227,12 +235,8 @@ def _agregar_item_recibo(ticket, detalle, moneda, tasa):
 
 def _ticket_recibo(
     pedidos, metodo_pago, referencia, total, tasa, titulo='RECIBO DE CAJA', codigo=None,
-<<<<<<< HEAD
-    descuento_manual=None, descuento_manual_motivo='', cliente=None,
-=======
     descuento_manual=None, descuento_manual_motivo='',
     moneda=None, cliente=None, total_ambas_monedas=False, fecha=None, datos_fiscales=None,
->>>>>>> c788204403d01403e981cee4e0602327cf0983fd
 ):
     """
     `metodo_pago` puede ser None (la nota de entrega se emite antes de saber con qué paga el cliente: no
@@ -250,37 +254,12 @@ def _ticket_recibo(
     ticket.separador()
     ticket.centro(titulo, negrita=True)
     if codigo:
-<<<<<<< HEAD
-        out += _text(f'Nº {codigo}') + FEED
-    out += ALIGN_LEFT
-    out += _text('-' * LINE_WIDTH) + FEED
-    out += _text(f'Referencia: {referencia}') + FEED
-    out += _text(hora) + FEED
-    if cliente is not None:
-        nombre_cliente = ' '.join(
-            parte for parte in (cliente.nombre, cliente.apellido) if parte.strip()
-        )
-        if nombre_cliente:
-            out += _text(f'Cliente: {nombre_cliente}') + FEED
-        if cliente.numero_documento:
-            etiquetas_documento = {
-                'V': 'Cédula',
-                'E': 'Cédula',
-                'J': 'RIF',
-                'G': 'RIF',
-                'P': 'Pasaporte',
-            }
-            etiqueta_documento = etiquetas_documento.get(cliente.tipo_documento, 'Documento')
-            prefijo_documento = f'{cliente.tipo_documento}-' if cliente.tipo_documento else ''
-            out += _text(f'{etiqueta_documento}: {prefijo_documento}{cliente.numero_documento}') + FEED
-=======
         ticket.centro(f'Nº {codigo}')
     ticket.separador()
     if referencia and not _REFERENCIA_AUTOGENERADA.match(referencia):
         ticket.campo('Referencia:', referencia)
     ticket.campo('Fecha:', hora)
     _agregar_cliente(ticket, cliente)
->>>>>>> c788204403d01403e981cee4e0602327cf0983fd
 
     subtotal_total = 0
     impuesto_total = 0
@@ -390,14 +369,9 @@ def imprimir_nota_entrega_caja(nota, es_reimpresion=False):
             pedidos, None, None, nota.total, tasa,
             titulo=titulo, codigo=nota.codigo,
             descuento_manual=nota.descuento_monto, descuento_manual_motivo=nota.descuento_motivo,
-<<<<<<< HEAD
-            cliente=nota.cliente,
-        )
-=======
             moneda='USD', cliente=nota.cliente, total_ambas_monedas=True, fecha=nota.fecha_emision,
             datos_fiscales=VGDatosFiscalesEmisor.objects.first(),
         ).to_bytes()
->>>>>>> c788204403d01403e981cee4e0602327cf0983fd
         logger.info('Enviando nota de entrega %s a %s (%s bytes)', nota.codigo, destino, len(ticket))
         enviar_trabajo_lpd(
             config.ip, config.puerto, config.cola, ticket,

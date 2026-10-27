@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { limpiarFechaSeleccionada, limpiarRangoSeleccionado } from '../utils/fechaContabilidad';
+import useExchangeRate from '../hooks/useExchangeRate';
 import AdminPanelPage from './AdminPanelPage';
 import ComidaEmpleadosPage from './ComidaEmpleadosPage';
 import ContabilidadPanelPage from './ContabilidadPanelPage';
@@ -408,6 +409,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
     requestAlertPermission,
   } = useKitchenAlerts();
 
+  const tasaCambio = useExchangeRate();
+
   // Después de autenticar, si el navegador soporta notificaciones y el usuario
   // no ha decidido nada todavía (ni a nivel de navegador ni en un intento
   // previo dentro de la app), le preguntamos una sola vez si quiere activarlas.
@@ -535,6 +538,19 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           {liveNotice}
         </div>
       )}
+      {activeView === 'home' && tasaCambio ? (
+        <div style={exchangeRateBadgeStyle} title="Tasa BCV vigente">
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 1l4 4-4 4" />
+              <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+              <path d="M7 23l-4-4 4-4" />
+              <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+            </svg>
+          </span>
+          <span>Bs. {tasaCambio.toFixed(2)}</span>
+        </div>
+      ) : null}
       {isSidebarOpen && isSidebarOverlayMode && (
         <button
           type="button"
@@ -1707,6 +1723,26 @@ const liveNoticeStyle = {
   padding: '12px 14px',
   fontWeight: 700,
   boxShadow: '0 14px 30px rgba(0, 0, 0, calc(0.34 * var(--vg-shadow-k)))',
+};
+
+const exchangeRateBadgeStyle = {
+  position: 'fixed',
+  top: 18,
+  right: 18,
+  zIndex: 22,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 7,
+  borderRadius: 999,
+  border: '1px solid rgba(255, 110, 110, 0.35)',
+  background: 'rgba(30, 12, 12, 0.92)',
+  color: '#ffcccc',
+  padding: '9px 14px',
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: '0.01em',
+  boxShadow: '0 10px 24px rgba(0, 0, 0, 0.3)',
+  backdropFilter: 'blur(6px)',
 };
 
 const notificationPromptBackdropStyle = {

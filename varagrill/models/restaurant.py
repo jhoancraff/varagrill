@@ -748,6 +748,39 @@ class VGNotaCreditoCompra(VGAuditoria):
         return f"NCC-{self.numero:06d} — Compra #{self.compra_id} (${self.monto})"
 
 
+class VGAnulacionCompra(VGAuditoria):
+    """
+    Auditoría OBLIGATORIA de cada factura de compra que se anula (ver compras_anulacion.py): quién, cuándo
+    y por qué, qué advertencias vio y aceptó, cuánto stock se devolvió ingrediente por ingrediente, qué
+    pasó con el dinero ya pagado y qué vínculos de conciliación se deshicieron. El motivo nunca va vacío.
+    """
+    compra = models.ForeignKey(VGCompra, on_delete=models.CASCADE, related_name="anulaciones")
+    motivo = models.TextField()
+    total_compra = models.DecimalField(max_digits=14, decimal_places=6)
+    saldo_pendiente = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    estado_pago = models.CharField(max_length=20, blank=True)
+    # [{ingrediente_id, nombre, unidad, cantidad, stock_antes, stock_despues}]
+    stock_revertido = models.JSONField(default=list, blank=True)
+    abonos_afectados = models.PositiveIntegerField(default=0)
+    # Dólares ya pagados que "vuelven" al banco/caja.
+    monto_usd_afectado = models.DecimalField(max_digits=14, decimal_places=6, default=0)
+    # [{cuenta, metodo, abonos, usd, bs}] — lo que recupera cada cuenta.
+    efecto_cuentas = models.JSONField(default=list, blank=True)
+    # [{codigo, mensaje}] — las advertencias que la persona vio y aceptó.
+    advertencias_aceptadas = models.JSONField(default=list, blank=True)
+    # [{movimiento_id, cuenta, fecha, monto, referencia}] — movimientos del banco que quedaron sin ese vínculo.
+    vinculos_deshechos = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = "vg_anulaciones_compra"
+        verbose_name = "Anulación de compra"
+        verbose_name_plural = "Anulaciones de compra"
+        ordering = ["-fecha_creacion"]
+
+    def __str__(self):
+        return f"Anulación compra #{self.compra_id}: {self.motivo[:40]}"
+
+
 class VGMovimientoInventario(models.Model):
     TIPOS = [
         ("entrada", "Entrada"),

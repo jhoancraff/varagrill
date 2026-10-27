@@ -23,6 +23,7 @@ from .api_views import (
     _serialize_compra,
     _serialize_nota_credito_compra,
 )
+from . import compras_anulacion
 from .auth_helpers import _auth_response, _is_admin_user
 from .gastos_views import _serialize_gasto
 from .models import (
@@ -458,7 +459,7 @@ def cuentas_por_pagar_view(request):
             return _auth_response({'ok': False, 'message': '"Desde" no puede ser posterior a "Hasta".'}, status=400)
 
         compras = (
-            VGCompra.objects.filter(
+            VGCompra.objects.exclude(estado='cancelado').filter(
                 estado_pago='pagada', fecha_actualizacion__date__gte=desde, fecha_actualizacion__date__lte=hasta,
             )
             .order_by('-fecha_actualizacion')
@@ -473,7 +474,7 @@ def cuentas_por_pagar_view(request):
         )
     else:
         compras = (
-            VGCompra.objects.filter(estado_pago__in=['pendiente', 'abonada_parcial'])
+            VGCompra.objects.exclude(estado='cancelado').filter(estado_pago__in=['pendiente', 'abonada_parcial'])
             .order_by('fecha_creacion')
         )
         gastos = (
@@ -542,6 +543,9 @@ def compra_abono_view(request, compra_id):
             compra = VGCompra.objects.select_for_update().get(pk=compra_id)
         except VGCompra.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'La compra no existe.'}, status=404)
+
+        if compra.estado == 'cancelado':
+            return _auth_response({'ok': False, 'message': 'Esta factura esta anulada: no admite abonos.'}, status=409)
 
         if compra.estado_pago == 'pagada':
             return _auth_response({'ok': False, 'message': 'Esta cuenta ya esta saldada.'}, status=409)
@@ -680,6 +684,59 @@ def compra_abono_view(request, compra_id):
 
 
 # ---------------------------------------------------------------------------
+# Anular una factura de compra (el stock vuelve a como estaba)
+# ---------------------------------------------------------------------------
+@csrf_exempt
+def compra_anular_view(request, compra_id):
+    """
+    GET: vista previa — como queda el stock de cada ingrediente, el efecto en las cuentas por lo ya pagado, las
+    advertencias que hay que aceptar y lo que bloquea. No toca nada.
+    POST {motivo, aceptadas: [codigos]}: anula la factura (ver compras_anulacion.py). El motivo es obligatorio y
+    queda guardado en VGAnulacionCompra junto con lo que se aceptó.
+    """
+    if request.method not in ('GET', 'POST'):
+        return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
+
+    if not _is_admin_user(request.user):
+        return _auth_response({'ok': False, 'message': 'Debes iniciar sesion como administrador.'}, status=401)
+
+    try:
+        compra = VGCompra.objects.get(pk=compra_id)
+    except VGCompra.DoesNotExist:
+        return _auth_response({'ok': False, 'message': 'La compra no existe.'}, status=404)
+
+    if request.method == 'GET':
+        vista = compras_anulacion.vista_previa(compra)
+        vista['motivo_minimo'] = compras_anulacion.MOTIVO_MINIMO
+        return _auth_response({'ok': True, **vista})
+
+    try:
+        data = json.loads(request.body.decode('utf-8')) if request.body else {}
+    except json.JSONDecodeError:
+        return _auth_response({'ok': False, 'message': 'Formato JSON invalido.'}, status=400)
+
+    try:
+        registro = compras_anulacion.aplicar(compra_id, data.get('motivo'), data.get('aceptadas'), request.user)
+    except compras_anulacion.AnulacionInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+    except compras_anulacion.AnulacionBloqueada as exc:
+        return _auth_response({'ok': False, 'message': str(exc), 'bloqueos': exc.bloqueos}, status=409)
+    except compras_anulacion.RequiereConfirmacion as exc:
+        return _auth_response({
+            'ok': False, 'requiere_confirmacion': True, 'advertencias': exc.advertencias,
+            'message': 'Acepta las advertencias para continuar.',
+        }, status=409)
+
+    compra = VGCompra.objects.prefetch_related('detalles__ingrediente', 'notas_credito__creado_por').get(pk=compra_id)
+    return _auth_response({
+        'ok': True,
+        'message': 'Factura anulada: el stock volvio a como estaba.',
+        'compra': _serialize_compra(compra, incluir_detalle=True),
+        'auditoria': compras_anulacion.serializar_auditoria(registro),
+    })
+
+
+# ---------------------------------------------------------------------------
 # Notas de credito de proveedor sobre una factura de compra
 # ---------------------------------------------------------------------------
 def _estado_pago_de_compra(compra):
@@ -753,6 +810,9 @@ def compra_nota_credito_view(request, compra_id):
             compra = VGCompra.objects.select_for_update().get(pk=compra_id)
         except VGCompra.DoesNotExist:
             return _auth_response({'ok': False, 'message': 'La compra no existe.'}, status=404)
+
+        if compra.estado == 'cancelado':
+            return _auth_response({'ok': False, 'message': 'Esta factura está anulada: no admite notas de crédito.'}, status=409)
 
         if compra.estado_pago == 'pagada' or compra.saldo_pendiente <= 0:
             return _auth_response({

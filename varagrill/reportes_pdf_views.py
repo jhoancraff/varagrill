@@ -268,7 +268,7 @@ def reporte_cuentas_por_pagar_pdf_view(request):
 
     cuentas = []
     if tipo in ('todos', 'compra'):
-        base = VGCompra.objects.select_related('creado_por').prefetch_related('abonos', 'notas_credito')
+        base = VGCompra.objects.exclude(estado='cancelado').select_related('creado_por').prefetch_related('abonos', 'notas_credito')
         if estado in ('pendientes', 'todos'):
             pendientes = base.filter(estado_pago__in=['pendiente', 'abonada_parcial']).annotate(
                 fecha_cuenta=Coalesce('fecha_factura', TruncDate('fecha_creacion')),

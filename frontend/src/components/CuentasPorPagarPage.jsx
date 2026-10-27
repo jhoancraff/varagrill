@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
+import AnularCompraModal from './AnularCompraModal';
 import BotonDescargarPdf from './BotonDescargarPdf';
 import ReporteNotasCreditoCompra from './ReporteNotasCreditoCompra';
 import { RangoFechas } from './FiltroFechas';
@@ -101,6 +102,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   const [ncMotivo, setNcMotivo] = useState('');
   const [ncNumero, setNcNumero] = useState('');
   const [savingNc, setSavingNc] = useState(false);
+  // Factura de compra que se esta anulando (el stock vuelve a como estaba): abre el modal con las advertencias.
+  const [anulandoCompra, setAnulandoCompra] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [filtroTipo, setFiltroTipo] = useState('todos');
   const [pagina, setPagina] = useState(1);
@@ -641,6 +644,12 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                   </div>
                 ) : null}
 
+                {compraDetalle.tipo === 'compra' ? (
+                  <button type="button" onClick={() => setAnulandoCompra(compraDetalle)} style={anularFacturaButtonStyle}>
+                    Anular factura (el stock vuelve a como estaba)
+                  </button>
+                ) : null}
+
                 <div style={detailTotalsStyle}>
                   <span style={{ fontWeight: 800, color: 'var(--vg-text-strong)' }}>Total: {formatUsdBs(compraDetalle.tipo === 'gasto' ? compraDetalle.monto : compraDetalle.total, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.total_bs)}</span>
                   <span style={{ fontWeight: 800, color: 'var(--vg-f-ffcf7d)' }}>Saldo pendiente: {formatSaldoUsdBs(compraDetalle.saldo_pendiente, compraDetalle.tasa_cambio_referencia ?? tasaCambio, compraDetalle.saldo_pendiente_bs)}</span>
@@ -841,11 +850,28 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       ) : null}
         </>
       ) : null}
+
+      {anulandoCompra ? (
+        <AnularCompraModal
+          compra={anulandoCompra}
+          onClose={() => setAnulandoCompra(null)}
+          onDone={async (mensaje) => {
+            setAnulandoCompra(null);
+            setSelectedCompraId(null);
+            setSelectedTipo(null);
+            setCompraDetalle(null);
+            setFeedbackType('success');
+            setFeedback(mensaje);
+            await fetchCompras();
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
 const ncFormStyle = { display: 'grid', gap: 10, padding: 14, borderRadius: 16, border: '1px solid var(--vg-f-78b4ff-a350)', background: 'rgba(59, 130, 246, 0.07)' };
+const anularFacturaButtonStyle = { border: '1px solid var(--vg-f-ff9191-a300)', borderRadius: 12, padding: '8px 12px', background: 'rgba(255, 98, 98, 0.08)', color: 'var(--vg-f-ffd8d8)', fontWeight: 700, cursor: 'pointer', textAlign: 'left', fontSize: 13 };
 const ncOpenButtonStyle = { border: '1px dashed var(--vg-f-78b4ff-a500)', borderRadius: 14, padding: '10px 14px', background: 'rgba(59, 130, 246, 0.08)', color: 'var(--vg-f-cfe4ff)', fontWeight: 700, cursor: 'pointer', textAlign: 'left' };
 
 function estadoLabel(estado) {

@@ -874,7 +874,7 @@ def disponibilidad_por_cuenta(fecha):
         else:
             saldo_bs_incompleto.add(abono.metodo_pago_id)
 
-    for abono in VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha).select_related('metodo_pago'):
+    for abono in VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha).exclude(compra__estado='cancelado').select_related('metodo_pago'):
         if abono.metodo_pago.moneda != 'VES':
             continue
         tasa = abono.tasa_cambio_referencia or tasa_para_fecha(timezone.localtime(abono.fecha_pago).date())
@@ -920,7 +920,7 @@ def disponibilidad_por_cuenta(fecha):
         VGAbonoGasto.objects.filter(fecha_pago__date__lte=fecha, gasto__inhabilitado=False)
     )
     compras_por_metodo = _totales_por_metodo(
-        VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha)
+        VGAbonoCompra.objects.filter(fecha_pago__date__lte=fecha).exclude(compra__estado='cancelado')
     )
     consignado_acumulado = (
         VGConsignacionCaja.objects
@@ -1234,6 +1234,7 @@ def flujo_bancario_mensual(anio, mes, banco_clave):
     for abono in (
         VGAbonoCompra.objects
         .filter(fecha_pago__date__gte=desde, fecha_pago__date__lte=hasta, metodo_pago_id__in=metodo_ids)
+        .exclude(compra__estado='cancelado')
         .select_related('metodo_pago', 'compra')
     ):
         dia = timezone.localtime(abono.fecha_pago).date()
@@ -1412,6 +1413,7 @@ def detalle_flujo_bancario_dia(fecha, banco_clave, tipo):
         for abono in (
             VGAbonoCompra.objects
             .filter(fecha_pago__date=fecha, metodo_pago_id__in=metodo_ids)
+            .exclude(compra__estado='cancelado')
             .select_related('metodo_pago', 'compra')
         ):
             tasa_abono = abono.tasa_cambio_referencia or tasa_para_fecha(fecha)

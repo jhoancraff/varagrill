@@ -63,6 +63,7 @@ from .auth_helpers import (
     _is_owner_or_contador_user,
     _is_owner_user,
 )
+from . import compras_anulacion
 from .delivery import CargoDeliveryInvalido, aplicar_cargo, resolver_cargo_delivery
 from .servicios_adicionales import ServiciosInvalidos, aplicar_servicios, resolver_servicios, serializar_lineas
 from .impresion_lpd import imprimir_nota_entrega_caja
@@ -4096,6 +4097,8 @@ def _serialize_compra(compra, incluir_detalle=False):
     monto_notas = sum((nota.monto for nota in notas_vigentes), Decimal('0'))
     data['monto_notas_credito'] = str(monto_notas)
     data['total_original'] = str(compra.total + monto_notas)
+    # Factura anulada: quien, cuando y por que (ver compras_anulacion.py).
+    data['anulacion'] = compras_anulacion.ultima_anulacion(compra)
     if incluir_detalle:
         data['notas_credito'] = [_serialize_nota_credito_compra(nota) for nota in compra.notas_credito.all()]
         data['detalles'] = [

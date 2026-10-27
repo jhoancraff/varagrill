@@ -328,6 +328,7 @@ def _cargar_pool(cuenta, desde, hasta, es_credito):
         ))
     for a in (
         VGAbonoCompra.objects.filter(metodo_pago_id__in=ids_sin_efectivo, fecha_pago__date__range=(desde, hasta))
+        .exclude(compra__estado='cancelado')
         .select_related('compra', 'metodo_pago')
     ):
         monto = _bs(a.monto, a.tasa_cambio_referencia)

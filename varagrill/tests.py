@@ -6549,3 +6549,136 @@ class DisponibilidadDolaresATasaActualTests(TestCase):
         self.assertEqual(Decimal(banco['saldo_usd_tasa_actual']), Decimal('-80'))
         self.assertEqual(banco['saldo_disponible_bs'], '-8000.00')
         self.assertEqual(Decimal(data['total_disponible']), Decimal('-180'))       # -80 (Bs) + -100 (USD)
+
+
+class AnularCompraTests(TestCase):
+    """Anular una factura de compra: el stock vuelve a como estaba, con motivo, advertencias y auditoria."""
+
+    def setUp(self):
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='anu_admin', password='claveAnu123', cedula='96000010', email='anu@test.test', id_role=rol,
+        )
+        self.client.force_login(self.admin)
+        _set_tasa_actual('100.0000')
+        self.hoy = timezone.localdate()
+        self.metodo = VGMetodoPago.objects.create(nombre='Transf Anu', moneda='VES', cuenta_bancaria='Banco Anu')
+        # Carbon: tenia 2 kg (2000 g); una factura vieja trae otros 2 kg a $0.002/g y la que se anula trae 10 kg a $0.003/g.
+        self.carbon = VGIngrediente.objects.create(
+            nombre='Carbon', unidad_medida='g', stock_actual=Decimal('2000'), costo_unitario=Decimal('0.002'),
+        )
+        self.compra_vieja = self.cargar('Proveedor viejo', 2000, '0.002', total='4')
+        self.compra = self.cargar('Proveedor Carbon', 10000, '0.003', total='30')
+
+    def cargar(self, proveedor, cantidad, costo, total):
+        """Una factura como la deja admin_compra_borrador_confirmar_view: suma stock, fija costo y mueve el inventario."""
+        from varagrill.models import VGDetalleCompra, VGMovimientoInventario
+        compra = VGCompra.objects.create(
+            proveedor_nombre=proveedor, estado='recibido', total=Decimal(total), saldo_pendiente=Decimal(total),
+            tasa_cambio_referencia=Decimal('100'), creado_por=self.admin,
+        )
+        self.carbon.refresh_from_db()
+        VGDetalleCompra.objects.create(compra=compra, ingrediente=self.carbon, cantidad=Decimal(cantidad), costo_unitario=Decimal(costo))
+        self.carbon.stock_actual += Decimal(cantidad)
+        self.carbon.costo_unitario = Decimal(costo)
+        self.carbon.save()
+        VGMovimientoInventario.objects.create(
+            ingrediente=self.carbon, tipo_movimiento='entrada', cantidad=Decimal(cantidad), compra=compra, creado_por=self.admin,
+        )
+        return compra
+
+    def url(self, compra=None):
+        return f'/api/admin/compras/{(compra or self.compra).id}/anular/'
+
+    def post(self, cuerpo, compra=None):
+        return self.client.post(self.url(compra), data=json.dumps(cuerpo), content_type='application/json')
+
+    def anular(self, compra=None, motivo='Se cargo la factura equivocada'):
+        previa = self.client.get(self.url(compra)).json()
+        return self.post({'motivo': motivo, 'aceptadas': [a['codigo'] for a in previa['advertencias']]}, compra)
+
+    def test_anular_devuelve_el_stock_a_como_estaba(self):
+        from varagrill.models import VGAnulacionCompra, VGMovimientoInventario
+        self.carbon.refresh_from_db()
+        self.assertEqual(self.carbon.stock_actual, Decimal('14000'))    # 2000 + 2000 (vieja) + 10000
+
+        previa = self.client.get(self.url()).json()
+        self.assertEqual(previa['stock'][0]['stock_antes'], '14000.00')
+        self.assertEqual(previa['stock'][0]['stock_despues'], '4000.00')
+        codigos = [a['codigo'] for a in previa['advertencias']]
+        self.assertIn('revierte_stock', codigos)
+        self.assertIn('deuda_cancelada', codigos)
+        self.assertNotIn('restaura_costo', codigos)      # el costo no se toca
+        self.carbon.refresh_from_db()
+        self.assertEqual(self.carbon.stock_actual, Decimal('14000'))    # la vista previa no toca nada
+
+        r = self.anular()
+        self.assertEqual(r.status_code, 200, r.content)
+        self.carbon.refresh_from_db()
+        self.assertEqual(self.carbon.stock_actual, Decimal('4000'))
+        self.assertEqual(self.carbon.costo_unitario, Decimal('0.003000'))   # el costo no se toca
+        self.compra.refresh_from_db()
+        self.assertEqual(self.compra.estado, 'cancelado')
+        mov = VGMovimientoInventario.objects.get(compra=self.compra, tipo_movimiento='salida')
+        self.assertEqual((mov.cantidad, mov.ingrediente_id), (Decimal('10000'), self.carbon.id))
+        registro = VGAnulacionCompra.objects.get(compra=self.compra)
+        self.assertEqual(registro.motivo, 'Se cargo la factura equivocada')
+        self.assertEqual(registro.stock_revertido[0]['stock_despues'], '4000.00')
+        self.assertEqual(registro.creado_por_id, self.admin.id)
+        self.assertEqual(r.json()['compra']['anulacion']['motivo'], 'Se cargo la factura equivocada')
+
+    def test_sin_motivo_o_sin_aceptar_las_advertencias_no_cambia_nada(self):
+        self.assertEqual(self.post({'motivo': 'corto', 'aceptadas': ['revierte_stock']}).status_code, 400)
+        r = self.post({'motivo': 'Se cargo la factura equivocada'})
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(r.json()['requiere_confirmacion'])
+        self.carbon.refresh_from_db()
+        self.compra.refresh_from_db()
+        self.assertEqual((self.carbon.stock_actual, self.compra.estado), (Decimal('14000'), 'recibido'))
+
+    def test_si_ya_se_consumio_queda_negativo_y_lo_advierte(self):
+        self.carbon.stock_actual = Decimal('3000')       # se consumieron 11 kg desde la carga
+        self.carbon.save()
+        previa = self.client.get(self.url()).json()
+        self.assertIn('stock_negativo', [a['codigo'] for a in previa['advertencias']])
+        self.assertEqual(self.post({'motivo': 'Se cargo la factura equivocada', 'aceptadas': ['revierte_stock']}).status_code, 409)
+        self.assertEqual(self.anular().status_code, 200)
+        self.carbon.refresh_from_db()
+        self.assertEqual(self.carbon.stock_actual, Decimal('-7000'))
+
+    def test_una_factura_ya_anulada_no_se_anula_dos_veces_ni_admite_abonos(self):
+        self.assertEqual(self.anular().status_code, 200)
+        self.assertEqual(self.client.get(self.url()).json()['bloqueos'][0]['codigo'], 'ya_anulada')
+        self.assertEqual(self.post({'motivo': 'Se cargo la factura equivocada', 'aceptadas': []}).status_code, 409)
+        self.carbon.refresh_from_db()
+        self.assertEqual(self.carbon.stock_actual, Decimal('4000'))     # no se resta dos veces
+        r = self.client.post(
+            f'/api/admin/compras/{self.compra.id}/abonos/', data=json.dumps({'monto': '5', 'metodo_pago_id': self.metodo.id}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 409)
+
+    def test_los_pagos_ya_hechos_vuelven_al_banco_y_la_factura_sale_de_cuentas_por_pagar(self):
+        from varagrill.models import VGAbonoCompra
+        from varagrill.reportes import disponibilidad_por_cuenta
+
+        def saldo_bs():
+            _cuentas, bancos = disponibilidad_por_cuenta(self.hoy)
+            return next(b for b in bancos if b['nombre'] == 'Banco Anu')['saldo_disponible_bs']
+
+        VGAbonoCompra.objects.create(
+            compra=self.compra, monto=Decimal('10'), metodo_pago=self.metodo, tasa_cambio_referencia=Decimal('100'),
+        )
+        self.assertEqual(saldo_bs(), Decimal('-1000'))
+        ids = [c['id'] for c in self.client.get('/api/cuentas-por-pagar/').json()['compras'] if c['tipo'] == 'compra']
+        self.assertIn(self.compra.id, ids)
+
+        previa = self.client.get(self.url()).json()
+        self.assertIn('devuelve_al_banco', [a['codigo'] for a in previa['advertencias']])
+        self.assertEqual(previa['efecto_cuentas'][0]['cuenta'], 'Banco Anu')
+        self.assertEqual(self.anular().status_code, 200)
+
+        self.assertEqual(saldo_bs(), Decimal('0'))     # el dinero vuelve
+        ids = [c['id'] for c in self.client.get('/api/cuentas-por-pagar/').json()['compras'] if c['tipo'] == 'compra']
+        self.assertNotIn(self.compra.id, ids)
+        self.assertIn(self.compra_vieja.id, ids)

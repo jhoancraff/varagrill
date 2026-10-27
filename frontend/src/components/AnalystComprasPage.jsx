@@ -52,11 +52,12 @@ function AnalystComprasPage({ isMobile, onBack }) {
           {compras.map((compra) => {
             const isExpanded = expandedId === compra.id;
             return (
-              <article key={compra.id} style={cardStyle}>
+              <article key={compra.id} style={{ ...cardStyle, opacity: compra.estado === 'cancelado' ? 0.7 : 1 }}>
                 <button type="button" onClick={() => toggleExpand(compra.id)} style={cardHeaderButtonStyle}>
                   <div style={{ display: 'grid', gap: 2, textAlign: 'left' }}>
                     <span style={{ color: 'var(--vg-text-strong)', fontWeight: 700 }}>
                       Lote #{compra.id} — {compra.proveedor_nombre}
+                      {compra.estado === 'cancelado' ? <span style={anuladaBadgeStyle}>ANULADA</span> : null}
                     </span>
                     <span style={{ color: 'var(--vg-f-d2c4c4)', fontSize: 12 }}>
                       {compra.numero_factura_proveedor ? `Factura ${compra.numero_factura_proveedor} · ` : ''}
@@ -64,11 +65,16 @@ function AnalystComprasPage({ isMobile, onBack }) {
                       Cargado el {new Date(compra.fecha_creacion).toLocaleString('es-VE')} por {compra.creado_por || '—'}
                     </span>
                   </div>
-                  <span style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 700 }}>${compra.total}</span>
+                  <span style={{ color: 'var(--vg-f-ffcf7d)', fontWeight: 700, textDecoration: compra.estado === 'cancelado' ? 'line-through' : 'none' }}>${compra.total}</span>
                 </button>
 
                 {isExpanded ? (
                   <div style={detailWrapStyle}>
+                    {compra.anulacion ? (
+                      <div style={{ color: 'var(--vg-f-ffd8d8)', fontSize: 13 }}>
+                        Anulada el {new Date(compra.anulacion.fecha).toLocaleString('es-VE')} por {compra.anulacion.por || '—'}: {compra.anulacion.motivo}
+                      </div>
+                    ) : null}
                     {(compra.detalles || []).length === 0 ? (
                       <div style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 13 }}>Este lote no tiene ingredientes registrados.</div>
                     ) : (
@@ -90,6 +96,7 @@ function AnalystComprasPage({ isMobile, onBack }) {
   );
 }
 
+const anuladaBadgeStyle = { marginLeft: 8, padding: '1px 7px', borderRadius: 999, border: '1px solid var(--vg-f-ff9191-a300)', background: 'rgba(255, 98, 98, 0.12)', color: 'var(--vg-f-ffd8d8)', fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em' };
 const containerStyle = (isMobile) => ({ display: 'grid', gap: 16, padding: isMobile ? 6 : 10 });
 const backButtonStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999,

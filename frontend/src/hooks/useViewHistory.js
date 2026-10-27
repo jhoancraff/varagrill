@@ -32,14 +32,16 @@ import { consumeSuppressedPopState } from './popStateSuppression';
  * `event.state.__appView` (lo que de verdad guarda el navegador en cada
  * entrada) es la fuente de verdad para QUÉ vista mostrar tras un Atrás — la
  * pila interna (`stackRef`) es solo un cache local para saber "cuál es el
- * padre" y no depender de codificar cada `onBack` a mano. Si un Atrás llega
- * a una vista que no coincide con lo que la pila esperaba como padre
- * inmediato (no debería pasar en uso normal, pero por ejemplo una recarga a
- * mitad de sesión deja la pila en memoria en blanco mientras el navegador
- * sigue con la profundidad de antes), el handler se resincroniza tomando esa
- * vista como única entrada confiable en vez de arrastrar el desfase — un F5
- * ya pierde el estado de React de todos modos, así que no hay más que
- * conservar en ese momento.
+ * padre" y no depender de codificar cada `onBack` a mano. La pila también se
+ * persiste en `sessionStorage` (ver `persistStack`/`loadPersistedStack`) y se
+ * restaura al montar el hook, para que un F5 a mitad de sesión deje al
+ * usuario en la misma vista en vez de volver siempre a `rootView` — sigue
+ * perdiéndose el estado de React de esa vista (datos de formulario, scroll),
+ * pero no la ubicación. Si un Atrás llega a una vista que no coincide con lo
+ * que la pila esperaba como padre inmediato (no debería pasar en uso normal,
+ * pero por ejemplo si `sessionStorage` quedó desactualizado respecto a la
+ * profundidad real de `window.history`), el handler se resincroniza tomando
+ * esa vista como única entrada confiable en vez de arrastrar el desfase.
  *
  * Guardián de cambios sin guardar (ver dirtyGuardRegistry/useUnsavedChangesGuard):
  * tanto goToView como goBackView consultan el registro antes de navegar — si
@@ -53,9 +55,52 @@ import { consumeSuppressedPopState } from './popStateSuppression';
  * sin que la pantalla cambie) y recién si el usuario confirma en el modal se
  * ejecuta el retroceso real.
  */
+const VIEW_STACK_STORAGE_KEY = 'varagrill:viewStack';
+
+function loadPersistedStack() {
+  try {
+    const raw = window.sessionStorage.getItem(VIEW_STACK_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((entry) => typeof entry === 'string')) {
+      return parsed;
+    }
+  } catch (error) {
+    // sessionStorage no disponible (modo privado, cuota) o contenido corrupto — se ignora y arranca en rootView.
+  }
+  return null;
+}
+
+function persistStack(stack) {
+  try {
+    window.sessionStorage.setItem(VIEW_STACK_STORAGE_KEY, JSON.stringify(stack));
+  } catch (error) {
+    // Si sessionStorage falla la navegación sigue funcionando, solo sin persistencia entre recargas.
+  }
+}
+
+// Se llama al cerrar sesión para que el próximo login (del mismo usuario o
+// de otro, en un dispositivo compartido) arranque en rootView en vez de
+// heredar la vista en la que había quedado la sesión anterior.
+export function clearPersistedViewStack() {
+  try {
+    window.sessionStorage.removeItem(VIEW_STACK_STORAGE_KEY);
+  } catch (error) {
+    // nada que limpiar si sessionStorage no está disponible
+  }
+}
+
 export default function useViewHistory(rootView) {
-  const [activeView, setActiveView] = useState(rootView);
-  const stackRef = useRef([rootView]);
+  // Restaura la pila de navegación persistida (ver persistStack más abajo) para
+  // que un F5 a mitad de sesión deje al usuario en la misma vista en vez de
+  // siempre volver a rootView — la limitación de perder el estado de React
+  // (datos de formulario, scroll, etc.) sigue existiendo, pero ya no se pierde
+  // además la ubicación.
+  const stackRef = useRef();
+  if (!stackRef.current) {
+    stackRef.current = loadPersistedStack() || [rootView];
+  }
+  const [activeView, setActiveView] = useState(() => stackRef.current[stackRef.current.length - 1]);
   // true mientras estamos procesando un popstate que nosotros mismos
   // provocamos (con goBackView -> history.back()), para no reprocesarlo de
   // nuevo cuando el evento realmente llega.
@@ -77,13 +122,22 @@ export default function useViewHistory(rootView) {
     // Atrás siguiente sale de Chrome de una, sin haber mostrado nunca Home en
     // el medio. replaceState (no pushState: no debe sumar profundidad) deja
     // esa entrada marcada como la raíz desde el arranque.
-    window.history.replaceState({ __appView: rootView }, '');
+    // Si se restauró una pila de más de una vista, reconstruimos esa misma
+    // profundidad en window.history (en vez de solo marcar la vista restaurada
+    // como raíz) para que el gesto físico de Atrás siga funcionando capa por
+    // capa justo después de un F5.
+    const stack = stackRef.current;
+    window.history.replaceState({ __appView: stack[0] }, '');
+    for (let i = 1; i < stack.length; i += 1) {
+      window.history.pushState({ __appView: stack[i] }, '');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const goToView = useCallback((view) => {
     runWithActiveGuard(() => {
       stackRef.current.push(view);
+      persistStack(stackRef.current);
       window.history.pushState({ __appView: view }, '');
       setActiveView(view);
     });
@@ -99,6 +153,7 @@ export default function useViewHistory(rootView) {
         return;
       }
       stack.pop();
+      persistStack(stack);
       const target = stack[stack.length - 1];
       suppressNextPopStateRef.current = true;
       window.history.back();
@@ -115,6 +170,7 @@ export default function useViewHistory(rootView) {
   const replaceView = useCallback((view) => {
     const stack = stackRef.current;
     stack[stack.length - 1] = view;
+    persistStack(stack);
     window.history.replaceState({ __appView: view }, '');
     setActiveView(view);
   }, []);
@@ -126,13 +182,14 @@ export default function useViewHistory(rootView) {
       const stack = stackRef.current;
       if (stack.length > 1 && stack[stack.length - 2] === targetView) {
         stack.pop();
-        return;
+      } else {
+        // Desfase (típicamente por una recarga a mitad de sesión, ver el
+        // efecto de arriba): confiamos en lo que el navegador dice y
+        // reconstruimos la pila con eso como único dato confiable, en vez de
+        // arrastrar un pop que ya no corresponde a la posición real.
+        stackRef.current = [targetView];
       }
-      // Desfase (típicamente por una recarga a mitad de sesión, ver el efecto
-      // de arriba): confiamos en lo que el navegador dice y reconstruimos la
-      // pila con eso como único dato confiable, en vez de arrastrar un pop
-      // que ya no corresponde a la posición real.
-      stackRef.current = [targetView];
+      persistStack(stackRef.current);
     };
 
     const handlePopState = (event) => {

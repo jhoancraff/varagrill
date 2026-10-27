@@ -3,6 +3,7 @@ import AuthForm from './components/AuthForm';
 import ScreenShell from './components/ScreenShell';
 import SplashScreen from './components/SplashScreen';
 import WelcomeScreen from './components/WelcomeScreen';
+import { clearPersistedViewStack } from './hooks/useViewHistory';
 
 function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -61,6 +62,7 @@ function App() {
           setWelcomeRole('');
           setIsAdmin(false);
           setIsOwner(false);
+          clearPersistedViewStack();
           return;
         }
 
@@ -71,6 +73,7 @@ function App() {
           setWelcomeRole('');
           setIsAdmin(false);
           setIsOwner(false);
+          clearPersistedViewStack();
           return;
         }
 
@@ -187,6 +190,7 @@ function App() {
     setMessage('Sesion cerrada.');
     setPassword('');
     setUsername('');
+    clearPersistedViewStack();
   };
 
   if (showSplash || checkingSession) {

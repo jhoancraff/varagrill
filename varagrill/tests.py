@@ -6054,8 +6054,13 @@ class TicketsCajaEstiloGraficoTests(TestCase):
 
     def test_la_nota_de_cobro_lleva_logo_monto_cobrado_y_saldo(self):
         from types import SimpleNamespace
+        from unittest.mock import MagicMock
         from varagrill.impresion_lpd import _ticket_nota_cobro
-        nota = SimpleNamespace(codigo='00000012', total=Decimal('20.00'), cliente=self._cliente())
+        pedidos_de_la_nota = MagicMock(**{'select_related.return_value.prefetch_related.return_value.all.return_value': []})
+        nota = SimpleNamespace(
+            codigo='00000012', total=Decimal('20.00'), cliente=self._cliente(),
+            tasa_cambio_referencia=Decimal('100'), pedidos=pedidos_de_la_nota,
+        )
         pago = SimpleNamespace(
             id=1, numero_cobro=7, nota_entrega=nota, metodo_pago=SimpleNamespace(nombre='Pago movil', moneda='VES'),
             tasa_cambio_referencia=Decimal('100'), monto=Decimal('5.00'), referencia='ABONO-20261023212109-12',
@@ -6430,6 +6435,49 @@ class ServiciosAdicionalesTests(TestCase):
         self.assertIn('Subtotal: $20.00', texto)
         self.assertIn('Servicios: $30.00', texto)
         self.assertIn('TOTAL: $50.00', texto)
+
+    def test_los_tickets_traen_los_bs_de_cada_producto_y_servicio(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from varagrill.impresion_lpd import _ticket_documento_venta, _ticket_nota_cobro, _ticket_recibo
+        pedido = self.pedido(self.crear_pedido(servicios=[{'servicio_id': self.torta.id, 'cantidad': 2}]))
+        pedido.refresh_from_db()
+
+        # nota de entrega (dolares + bolivares): cada renglon con su Bs debajo; el plato suma $20 y la torta $30
+        texto = _ticket_recibo([pedido], None, None, Decimal('50.00'), Decimal('100'), codigo='X',
+                               moneda='USD', total_ambas_monedas=True).texto_plano()
+        self.assertIn('  $20.00', texto)
+        self.assertIn('  Bs. 2.000,00', texto)
+        self.assertIn('  $30.00', texto)
+        self.assertIn('  Bs. 3.000,00', texto)
+        # sin ambas monedas (recibo en una sola moneda) no se agregan Bs por linea
+        sin = _ticket_recibo([pedido], self.efectivo, 'REF', Decimal('50.00'), Decimal('100'), codigo='X').texto_plano()
+        self.assertNotIn('  Bs. 2.000,00', sin)
+
+        # nota de cobro: lista lo que se cobra, cada producto en $ y en Bs, aunque el abono sea en dolares
+        pedidos = MagicMock(**{'select_related.return_value.prefetch_related.return_value.all.return_value': [pedido]})
+        nota = SimpleNamespace(codigo='00000012', total=Decimal('50.00'), cliente=None, tasa_cambio_referencia=Decimal('100'), pedidos=pedidos)
+        pago = SimpleNamespace(
+            id=1, numero_cobro=7, nota_entrega=nota, metodo_pago=SimpleNamespace(nombre='Zelle', moneda='USD'),
+            tasa_cambio_referencia=Decimal('100'), monto=Decimal('50.00'), referencia=None, saldo_posterior=Decimal('0'),
+            fecha_pago=timezone.now(), creado_por=None,
+        )
+        texto = _ticket_nota_cobro(pago).texto_plano()
+        self.assertIn('DETALLE DE LA NOTA', texto)
+        self.assertIn('  Bs. 2.000,00', texto)
+        self.assertIn('  Bs. 3.000,00', texto)
+        self.assertIn('MONTO COBRADO: $50.00', texto)
+
+        # cuenta del cliente: el Bs va en su propia linea bajo el monto; los renglones de $0 no llevan Bs
+        lineas = [
+            SimpleNamespace(cantidad=Decimal('2'), descripcion='Pork Belly', subtotal=Decimal('10.00'), precio_unitario=Decimal('5.00')),
+            SimpleNamespace(cantidad=Decimal('1'), descripcion='Guarnicion', subtotal=Decimal('0'), precio_unitario=Decimal('0')),
+        ]
+        ticket = _ticket_documento_venta('CUENTA', 'PF-1', None, lineas, Decimal('10'), Decimal('0'), Decimal('10'), 'USD',
+                                         Decimal('100'), None, mostrar_iva=False, mostrar_ambas_monedas=True)
+        texto = ticket.texto_plano()
+        self.assertEqual(texto.count('  Bs. 1.000,00'), 1)
+        self.assertNotIn('  Bs. 0,00', texto)
 
     def test_el_descuento_rebaja_el_total_con_los_servicios_y_el_estado_de_resultados_los_cuenta_como_entrada_neta(self):
         # pedido de 2 platos ($20) + torta ($15) = $35; descuento manual a $28 en el cobro (20 % menos)

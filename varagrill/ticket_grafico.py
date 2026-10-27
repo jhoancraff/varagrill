@@ -136,9 +136,12 @@ class Ticket:
         """Texto a la izquierda y monto a la derecha."""
         self.ops.append(('fila', str(izquierda), str(derecha), negrita, grande))
 
-    def item(self, texto, monto=None):
-        """Renglón de un producto: nombre a la izquierda y su monto a la derecha."""
-        self.ops.append(('item', str(texto), None if monto is None else str(monto)))
+    def item(self, texto, monto=None, bs=None):
+        """
+        Renglón de un producto: nombre a la izquierda y su monto a la derecha. Con `bs`, el monto en
+        bolívares va debajo del monto en dólares, alineado a la derecha y más pequeño.
+        """
+        self.ops.append(('item', str(texto), None if monto is None else str(monto), None if bs is None else str(bs)))
 
     def detalle(self, texto):
         """Línea secundaria de un renglón (nota, opción, adicional), más pequeña."""
@@ -179,6 +182,8 @@ class Ticket:
                 agregar(op[1], envolver=True)
                 if op[2] is not None:
                     agregar(f'  {op[2]}')
+                if op[3] is not None:
+                    agregar(f'  {op[3]}')
             elif tipo == 'detalle':
                 agregar(op[1], envolver=True)
             elif tipo == 'total_dual':
@@ -350,7 +355,14 @@ class Ticket:
             fuente = _fuente(t_titulo if grande else t_texto, es_negrita or grande)
             return franja_fila(izquierda, derecha, fuente)
         if tipo == 'item':
-            return franja_fila(op[1], op[2] or '', normal)
+            franja = franja_fila(op[1], op[2] or '', normal)
+            if op[3] is None:
+                return franja
+            segunda = franja_texto([op[3]], pequena, 'der', interlineado=2)
+            conjunto = Image.new('L', (ancho, franja.height + segunda.height), 255)
+            conjunto.paste(franja, (0, 0))
+            conjunto.paste(segunda, (0, franja.height))
+            return conjunto
         if tipo == 'detalle':
             return self._detalle(op[1], pequena, ancho, util)
         if tipo == 'total_dual':

@@ -143,7 +143,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Saldo por cuenta — al {fecha}</div>
             {data.tasa_bcv ? (
-              <div style={{ fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $</div>
+              <div style={{ fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>Tasa BCV usada: Bs. {formatMonto(data.tasa_bcv)} / $ — en las cuentas en bolívares, los dólares son los Bs reales entre esta tasa.</div>
             ) : (
               <div style={{ fontSize: 12, color: 'var(--vg-f-ffcf85)' }}>No hay tasa BCV registrada para esta fecha; las cuentas en bolívares no muestran conversión.</div>
             )}
@@ -156,7 +156,7 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
 
             <div style={cuentasGridStyle(isMobile)}>
               {bancos.map((banco) => (
-                <article key={banco.nombre} style={cuentaCardStyle(Number(banco.saldo_disponible) < 0)}>
+                <article key={banco.nombre} style={cuentaCardStyle(Number(banco.saldo_usd_tasa_actual) < 0)}>
                   <div style={cuentaHeaderStyle}>
                     <div style={cuentaNombreStyle}>
                       {banco.nombre}
@@ -164,14 +164,14 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                       {banco.moneda_mixta ? <span style={inactivaBadgeStyle}>Monedas mixtas</span> : null}
                     </div>
                   </div>
-                  <div style={cuentaSaldoStyle(Number(banco.saldo_disponible) < 0)}>
+                  <div style={cuentaSaldoStyle(Number(banco.saldo_usd_tasa_actual) < 0)}>
                     {banco.moneda === 'VES' ? (
                       <>
                         Bs. {banco.saldo_disponible_bs !== null ? formatMonto(banco.saldo_disponible_bs) : '—'}
-                        <span style={secondaryAmountStyle}> (${formatMonto(banco.saldo_disponible)})</span>
+                        <span style={secondaryAmountStyle}> (${formatMonto(banco.saldo_usd_tasa_actual)})</span>
                       </>
                     ) : (
-                      <>${formatMonto(banco.saldo_disponible)}</>
+                      <>${formatMonto(banco.saldo_usd_tasa_actual)}</>
                     )}
                   </div>
                   {banco.tiene_punto_venta ? (
@@ -244,8 +244,11 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
                     <div style={cellStyle}>${formatMonto(cuenta.compras_acumuladas)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.transferencias_salientes_acumuladas)}</div>
                     <div style={cellStyle}>${formatMonto(cuenta.consignado_acumulado)}</div>
-                    <div style={{ ...cellStyle, fontWeight: 800, color: Number(cuenta.saldo_disponible) < 0 ? 'var(--vg-f-ff9d9d)' : 'var(--vg-f-8fffb0)' }}>
-                      ${formatMonto(cuenta.saldo_disponible)}
+                    <div style={{ ...cellStyle, fontWeight: 800, color: Number(cuenta.saldo_usd_tasa_actual) < 0 ? 'var(--vg-f-ff9d9d)' : 'var(--vg-f-8fffb0)' }}>
+                      ${formatMonto(cuenta.saldo_usd_tasa_actual)}
+                      {cuenta.saldo_disponible_bs !== null && cuenta.saldo_disponible_bs !== undefined ? (
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--vg-f-c8bbbb)' }}>Bs. {formatMonto(cuenta.saldo_disponible_bs)}</div>
+                      ) : null}
                     </div>
                     <div style={cellStyle}>{cuenta.es_punto_venta ? `$${formatMonto(cuenta.por_acreditar_usd)}` : '—'}</div>
                   </Fragment>

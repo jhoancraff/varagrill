@@ -1840,6 +1840,20 @@ class CierreCajaPOSApiTests(LotesPOSBase):
         self.assertEqual(data['pos']['por_acreditar_usd'], '100.000000')
         self.assertEqual(data['pos']['acreditado_hoy_usd'], '0')
         self.assertEqual(Decimal(data['pos']['disponibilidad_real_usd']), Decimal('0'))
+        # los puntos tambien en bolivares, exactos (100 $ a tasa 100 = Bs 10.000,00)
+        self.assertEqual((Decimal(data['pos']['cobrado_dia_bs']), Decimal(data['pos']['por_acreditar_bs'])), (Decimal('10000.00'), Decimal('10000.00')))
+        self.assertEqual(Decimal(data['pos']['acreditado_hoy_bs']), Decimal('0'))
+
+    def test_el_bloque_pos_suma_en_bolivares_lo_que_vale_cada_cobro_y_no_convierte_el_total(self):
+        # tres cobros de $33,333333 a tasa 877,4321: cada uno vale Bs 29.247,74 (redondeado por cobro); el total es la
+        # suma de lo cobrado (Bs 87.743,22), no 99,999999 x tasa (Bs 87.743,21)
+        for _ in range(3):
+            self.pago('33.333333', tasa='877.4321')
+        self.client.force_login(self.admin)
+        data = self.client.get(f'/api/admin/reportes/cuadre-caja/?fecha={self.hoy.isoformat()}').json()
+        self.assertEqual(Decimal(data['pos']['cobrado_dia_bs']), Decimal('87743.22'))
+        self.assertEqual(Decimal(data['pos']['por_acreditar_bs']), Decimal('87743.22'))
+        self.assertEqual(pos_por_cobrar_transitorio(self.hoy)['total_bs'], Decimal('87743.22'))
 
     def test_endpoint_lotes_cierra_y_acredita_con_un_clic(self):
         lote = self.pago('100').lote_pos
@@ -6436,3 +6450,54 @@ class ServiciosAdicionalesTests(TestCase):
         # la torta ($15) se reconoce con el mismo descuento de la nota (28/35 = 80 %): $12.00, sin costo
         self.assertEqual((servicios['total'], [(i['nombre'], i['cantidad'], i['total']) for i in servicios['items']]),
                          ('12.00', [('Torta de cumpleaños', 1, '12.00')]))
+
+
+class DisponibilidadDolaresATasaActualTests(TestCase):
+    """Cuentas en Bs: los dolares son los Bs reales entre la tasa de hoy, no la suma historica de dolares."""
+
+    def setUp(self):
+        from varagrill.models import VGAbonoGasto, VGCategoriaGasto, VGGasto
+        _set_tasa_actual('100.0000')
+        self.hoy = timezone.localdate()
+        self.bs = VGMetodoPago.objects.create(nombre='Transf Tasa', moneda='VES', cuenta_bancaria='Banco Tasa')
+        self.usd = VGMetodoPago.objects.create(nombre='Zelle Tasa', moneda='USD', cuenta_bancaria='Banco Zelle')
+        cat = VGCategoriaGasto.objects.get_or_create(nombre='Servicios')[0]
+        # gasto de $100 pagado en Bs a tasa 80 = Bs 8.000 que salieron; hoy la tasa es 100
+        gasto = VGGasto.objects.create(
+            categoria=cat, descripcion='Luz', monto=Decimal('100'), saldo_pendiente=0,
+            estado_pago='pagado', fecha_gasto=self.hoy, tasa_cambio_referencia=Decimal('80'),
+        )
+        for metodo in (self.bs, self.usd):
+            VGAbonoGasto.objects.create(
+                gasto=gasto, monto=Decimal('100'), metodo_pago=metodo,
+                tasa_cambio_referencia=Decimal('80') if metodo.moneda == 'VES' else None,
+            )
+
+    def banco(self, nombre):
+        from varagrill.reportes import disponibilidad_por_cuenta
+        _cuentas, bancos = disponibilidad_por_cuenta(self.hoy)
+        return next(b for b in bancos if b['nombre'] == nombre)
+
+    def test_cuenta_en_bs_convierte_los_bs_reales_con_la_tasa_de_hoy(self):
+        banco = self.banco('Banco Tasa')
+        self.assertEqual(banco['saldo_disponible_bs'], Decimal('-8000'))
+        self.assertEqual(banco['saldo_disponible'], Decimal('-100.000000'))      # historico, sin tocar
+        self.assertEqual(banco['saldo_usd_tasa_actual'], Decimal('-80'))          # -8000 Bs / 100
+        self.assertEqual(banco['diferencia_cambiaria_usd'], Decimal('20'))
+
+    def test_cuenta_en_usd_no_cambia(self):
+        banco = self.banco('Banco Zelle')
+        self.assertEqual(banco['saldo_usd_tasa_actual'], banco['saldo_disponible'])
+        self.assertEqual(banco['diferencia_cambiaria_usd'], Decimal('0'))
+
+    def test_reporte_expone_los_dolares_a_tasa_actual_y_el_total(self):
+        admin_rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        admin = VGUsuario.objects.create_superuser(
+            username='disp_admin', password='claveDisp123', cedula='96000002', email='disp@test.test', id_role=admin_rol,
+        )
+        self.client.force_login(admin)
+        data = self.client.get(f'/api/admin/reportes/disponibilidad-cuentas/?fecha={self.hoy.isoformat()}').json()
+        banco = next(b for b in data['bancos'] if b['nombre'] == 'Banco Tasa')
+        self.assertEqual(Decimal(banco['saldo_usd_tasa_actual']), Decimal('-80'))
+        self.assertEqual(banco['saldo_disponible_bs'], '-8000.00')
+        self.assertEqual(Decimal(data['total_disponible']), Decimal('-180'))       # -80 (Bs) + -100 (USD)

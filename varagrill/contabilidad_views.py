@@ -560,18 +560,21 @@ def _bloque_pos_cuadre(fecha, disponibilidad_total):
     if not (hay_metodos or lotes_dia or abiertos):
         return None
     transitorio = pos_por_cobrar_transitorio(fecha)
-    acreditado_hoy_usd = sum(
-        (lote.monto_bruto_usd for lote in VGLotePOS.objects.filter(estado='acreditado', fecha_abono_real=fecha)),
-        Decimal('0'),
-    )
+    lotes_acreditados_hoy = list(VGLotePOS.objects.filter(estado='acreditado', fecha_abono_real=fecha))
+    acreditado_hoy_usd = sum((lote.monto_bruto_usd for lote in lotes_acreditados_hoy), Decimal('0'))
+    acreditado_hoy_bs = sum((lote.monto_bruto_sistema_bs for lote in lotes_acreditados_hoy), Decimal('0.00'))
     ids_dia = {lote.id for lote in lotes_dia}
     return {
         'hay_metodos_pos': hay_metodos,
         'lotes_dia': [_serialize_lote(lote) for lote in lotes_dia],
         'lotes_abiertos_anteriores': [_serialize_lote(lote) for lote in abiertos if lote.id not in ids_dia],
         'cobrado_dia_usd': str(sum((lote.monto_bruto_usd for lote in lotes_dia), Decimal('0'))),
+        # En bolivares (lo que de verdad cobra el punto): suma exacta de lo que cada cobro valia en Bs.
+        'cobrado_dia_bs': str(sum((lote.monto_bruto_sistema_bs for lote in lotes_dia), Decimal('0.00'))),
         'acreditado_hoy_usd': str(acreditado_hoy_usd),
+        'acreditado_hoy_bs': str(acreditado_hoy_bs),
         'por_acreditar_usd': str(transitorio['total_usd']),
+        'por_acreditar_bs': str(transitorio['total_bs']),
         'disponibilidad_real_usd': str(disponibilidad_total),
     }
 
@@ -688,7 +691,7 @@ def reporte_cuadre_caja_view(request):
         correcciones_pago = _ultimas_correcciones_por_registro('pago', [item.id for item in pagos_dia])
         correcciones_ingreso = _ultimas_correcciones_por_registro('ingreso_extra', [item.id for item in ingresos_extra_dia])
         cuentas_disp, _bancos_disp = disponibilidad_por_cuenta(fecha)
-        disponibilidad_real = sum((cuenta['saldo_disponible'] for cuenta in cuentas_disp), Decimal('0'))
+        disponibilidad_real = sum((cuenta['saldo_usd_tasa_actual'] for cuenta in cuentas_disp), Decimal('0'))
 
         return _auth_response({
             'ok': True,
@@ -1308,12 +1311,14 @@ def _serialize_campos_pos(fila):
 def _serialize_transitorio(transitorio):
     return {
         'total_usd': str(transitorio['total_usd']),
+        'total_bs': str(transitorio['total_bs']),
         'por_banco': [
             {
                 'banco': item['banco'],
                 'lotes_abiertos': item['lotes_abiertos'],
                 'lotes_cerrados': item['lotes_cerrados'],
                 'monto_usd': str(item['monto_usd']),
+                'monto_bs': str(item['monto_bs']),
             }
             for item in transitorio['por_banco']
         ],
@@ -1363,6 +1368,8 @@ def reporte_disponibilidad_cuentas_view(request):
             'transferencias_salientes_acumuladas': str(cuenta['transferencias_salientes_acumuladas']),
             'consignado_acumulado': str(cuenta['consignado_acumulado']),
             'saldo_disponible': str(cuenta['saldo_disponible']),
+            'saldo_usd_tasa_actual': str(cuenta['saldo_usd_tasa_actual']),
+            'diferencia_cambiaria_usd': str(cuenta['diferencia_cambiaria_usd']),
             'saldo_disponible_bs': str(cuenta['saldo_disponible_bs'].quantize(Decimal('0.01'))) if cuenta['saldo_disponible_bs'] is not None else None,
             **_serialize_campos_pos(cuenta),
         }
@@ -1381,6 +1388,8 @@ def reporte_disponibilidad_cuentas_view(request):
                 'transferencias_entrantes_acumuladas': str(banco['transferencias_entrantes_acumuladas']),
                 'transferencias_salientes_acumuladas': str(banco['transferencias_salientes_acumuladas']),
                 'saldo_disponible': str(banco['saldo_disponible']),
+                'saldo_usd_tasa_actual': str(banco['saldo_usd_tasa_actual']),
+                'diferencia_cambiaria_usd': str(banco['diferencia_cambiaria_usd']),
                 'saldo_disponible_bs': str(banco['saldo_disponible_bs'].quantize(Decimal('0.01'))) if banco['saldo_disponible_bs'] is not None else None,
                 'tiene_punto_venta': banco['tiene_punto_venta'],
                 **_serialize_campos_pos(banco),
@@ -1388,7 +1397,7 @@ def reporte_disponibilidad_cuentas_view(request):
             }
             for banco in bancos
         ],
-        'total_disponible': str(sum((cuenta['saldo_disponible'] for cuenta in cuentas), Decimal('0'))),
+        'total_disponible': str(sum((cuenta['saldo_usd_tasa_actual'] for cuenta in cuentas), Decimal('0'))),
         'total_por_acreditar': str(sum((cuenta['por_acreditar_usd'] for cuenta in cuentas), Decimal('0'))),
         'pos_por_cobrar': _serialize_transitorio(pos_por_cobrar_transitorio(fecha)),
     })

@@ -115,7 +115,7 @@ function LotesPOSPage({ isMobile, onBack }) {
 
   const cerrarLote = (lote) => ejecutar(
     { action: 'cerrar_lote', lote_id: lote.id },
-    `¿Cerrar ${lote.codigo} por $${formatMonto(lote.monto_usd)}? Se imprimirá el detalle de cada cobro para compararlo con el cierre del punto, y los próximos cobros de ${lote.metodo_pago_nombre} abrirán un lote nuevo.`,
+    `¿Cerrar ${lote.codigo} por Bs ${formatMonto(lote.monto_bs)}? Se imprimirá el detalle de cada cobro para compararlo con el cierre del punto, y los próximos cobros de ${lote.metodo_pago_nombre} abrirán un lote nuevo.`,
   );
 
   // Reimprime en la impresora de caja el detalle del lote (un renglon por cobro, con su nota de entrega).
@@ -138,7 +138,7 @@ function LotesPOSPage({ isMobile, onBack }) {
 
   const acreditarLote = (lote) => ejecutar(
     { action: 'acreditar_lote', lote_id: lote.id },
-    `¿El ${lote.codigo} ya cayó en el banco? Se sumarán $${formatMonto(lote.monto_usd)} (Bs ${formatMonto(lote.monto_bs)}) al saldo de ${lote.metodo_pago_nombre}.`,
+    `¿El ${lote.codigo} ya cayó en el banco? Se sumarán Bs ${formatMonto(lote.monto_bs)} ($${formatMonto(lote.monto_usd)}) al saldo de ${lote.metodo_pago_nombre}.`,
   );
 
   return (
@@ -205,8 +205,8 @@ function LotesPOSPage({ isMobile, onBack }) {
                   <div style={cellStyle}>{formatFecha(lote.fecha_operacion)}</div>
                   <div style={cellStyle}>{lote.num_movimientos ?? lote.num_pagos}</div>
                   <div style={cellStyle}>
-                    ${formatMonto(lote.monto_usd)}
-                    <span style={mutedStyle}>Bs {formatMonto(lote.monto_bs)}</span>
+                    <strong>Bs {formatMonto(lote.monto_bs)}</strong>
+                    <span style={mutedStyle}>${formatMonto(lote.monto_usd)}</span>
                   </div>
                   <div style={cellStyle}>
                     <span style={{ ...badgeStyle, ...(ESTADO_LOTE_ESTILO[lote.estado] || {}) }}>{lote.estado_label}</span>
@@ -416,7 +416,7 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
           {lote.metodo_pago_nombre}{lote.cuenta_bancaria ? ` · ${lote.cuenta_bancaria}` : ''} · operado el {formatFecha(lote.fecha_operacion)} · {lote.num_movimientos ?? lote.num_pagos} movimiento(s)
         </div>
         <div style={{ color: 'var(--vg-text-strong)', fontWeight: 800, fontSize: 20 }}>
-          ${formatMonto(lote.monto_usd)} <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 14, fontWeight: 600 }}>· Bs {formatMonto(lote.monto_bs)}</span>
+          Bs {formatMonto(lote.monto_bs)} <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 14, fontWeight: 600 }}>· ${formatMonto(lote.monto_usd)}</span>
         </div>
 
         {modo === 'detalle' ? (
@@ -436,7 +436,7 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
                   >
                     <span>{pago.origen} · {formatFechaHora(pago.fecha_pago)}{pago.referencia ? ` · ${pago.referencia}` : ''}</span>
                     <span>
-                      {pago.monto_bs ? `Bs ${formatMonto(pago.monto_bs)} · ` : ''}${formatMonto(pago.monto_usd)}
+                      {pago.monto_bs ? <strong>{`Bs ${formatMonto(pago.monto_bs)}`}</strong> : null}{pago.monto_bs ? ' · ' : ''}${formatMonto(pago.monto_usd)}
                       {esAdmin && lote.estado === 'cerrado' && pago.estado !== 'anulado' ? (
                         <button
                           type="button"
@@ -466,7 +466,7 @@ function LoteModal({ modo, lote: loteInicial, onClose, onDone, onPrintLote, onPr
                       {ingreso.nota_entrega_codigo ? ` · Nota ${ingreso.nota_entrega_codigo}` : ''}
                       {ingreso.descripcion ? ` · ${ingreso.descripcion}` : ''}
                     </span>
-                    <span>{ingreso.monto_bs ? `Bs ${formatMonto(ingreso.monto_bs)} · ` : ''}${formatMonto(ingreso.monto_usd)}</span>
+                    <span>{ingreso.monto_bs ? <strong>{`Bs ${formatMonto(ingreso.monto_bs)}`}</strong> : null}{ingreso.monto_bs ? ' · ' : ''}${formatMonto(ingreso.monto_usd)}</span>
                   </div>
                 ))}
               </div>

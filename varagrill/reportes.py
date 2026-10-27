@@ -688,22 +688,26 @@ def pos_por_cobrar_transitorio(fecha):
     """
     items = {}
     total = Decimal('0')
+    total_bs = Decimal('0.00')
     for lote in lotes_pos_por_acreditar(fecha):
         metodo = lote.metodo_pago
         clave = metodo.cuenta_bancaria or f'__metodo_{metodo.id}'
         item = items.setdefault(clave, {
             'banco': metodo.cuenta_bancaria or metodo.nombre,
-            'lotes_abiertos': 0, 'lotes_cerrados': 0, 'monto_usd': Decimal('0'),
+            'lotes_abiertos': 0, 'lotes_cerrados': 0, 'monto_usd': Decimal('0'), 'monto_bs': Decimal('0.00'),
         })
         if lote.estado == 'abierto':
             item['lotes_abiertos'] += 1
         else:
             item['lotes_cerrados'] += 1
         item['monto_usd'] += lote.monto_bruto_usd
+        item['monto_bs'] += lote.monto_bruto_sistema_bs
         total += lote.monto_bruto_usd
+        total_bs += lote.monto_bruto_sistema_bs
     return {
         'fecha': fecha,
         'total_usd': total,
+        'total_bs': total_bs,
         'por_banco': sorted(items.values(), key=lambda item: item['banco']),
     }
 
@@ -789,6 +793,14 @@ def disponibilidad_por_cuenta(fecha):
     `por_acreditar_usd`, con el desglose de lotes. Un cobro de metodo POS sin lote
     (historico previo a marcar el metodo como POS) sigue contando como siempre
     hasta que se agrupe en lotes.
+
+    `saldo_disponible` es el saldo en dolares con el valor historico de cada
+    movimiento (cada uno a su propia tasa). Para las cuentas en bolivares eso no
+    es "cuantos dolares hay hoy": los Bs reales se devalúan o revalúan con la
+    tasa. Por eso cada fila trae ademas `saldo_usd_tasa_actual` (los Bs reales
+    de la cuenta entre la tasa de `fecha`) y `diferencia_cambiaria_usd` (cuanto
+    cambia respecto al valor historico). Las cuentas en USD no cambian, y una
+    cuenta en Bs sin tasa o con movimientos sin tasa conserva el valor historico.
 
     Devuelve (cuentas, bancos): `cuentas` es la lista de siempre, una fila por
     metodo de pago; `bancos` agrupa esas mismas filas por VGMetodoPago.cuenta_bancaria
@@ -934,6 +946,8 @@ def disponibilidad_por_cuenta(fecha):
         )
     }
 
+    tasa_actual = tasa_para_fecha(fecha)
+
     resultado = []
     for metodo in metodos:
         ingresos = ingresos_por_metodo.get(metodo.id) or Decimal('0')
@@ -948,6 +962,17 @@ def disponibilidad_por_cuenta(fecha):
             # Metodo POS: los cobros con lote ya se excluyeron arriba; lo disponible
             # es el neto de los lotes que el banco ya acredito.
             ingresos += fila_pos['acreditado_usd']
+        saldo_historico = (
+            ingresos + ingresos_extra + transferencias_entrantes
+            - gastos - compras - transferencias_salientes - consignado
+        )
+        saldo_bs = (
+            None if metodo.id in saldo_bs_incompleto
+            else saldo_bs_por_metodo.get(metodo.id, Decimal('0'))
+        ) if metodo.moneda == 'VES' else None
+        saldo_actual = (
+            saldo_bs / tasa_actual if saldo_bs is not None and tasa_actual else saldo_historico
+        )
         resultado.append({
             'id': metodo.id,
             'nombre': metodo.nombre,
@@ -962,14 +987,10 @@ def disponibilidad_por_cuenta(fecha):
             'compras_acumuladas': compras,
             'transferencias_salientes_acumuladas': transferencias_salientes,
             'consignado_acumulado': consignado,
-            'saldo_disponible': (
-                ingresos + ingresos_extra + transferencias_entrantes
-                - gastos - compras - transferencias_salientes - consignado
-            ),
-            'saldo_disponible_bs': (
-                None if metodo.id in saldo_bs_incompleto
-                else saldo_bs_por_metodo.get(metodo.id, Decimal('0'))
-            ) if metodo.moneda == 'VES' else None,
+            'saldo_disponible': saldo_historico,
+            'saldo_disponible_bs': saldo_bs,
+            'saldo_usd_tasa_actual': saldo_actual,
+            'diferencia_cambiaria_usd': saldo_actual - saldo_historico,
             'es_punto_venta': metodo.es_punto_venta,
             **(fila_pos_a_cuenta(fila_pos) if fila_pos is not None else fila_pos_a_cuenta(None)),
         })
@@ -995,6 +1016,8 @@ def disponibilidad_por_cuenta(fecha):
                 'transferencias_salientes_acumuladas': Decimal('0'),
                 'consignado_acumulado': Decimal('0'),
                 'saldo_disponible': Decimal('0'),
+                'saldo_usd_tasa_actual': Decimal('0'),
+                'diferencia_cambiaria_usd': Decimal('0'),
                 'saldo_disponible_bs': Decimal('0') if cuenta['moneda'] == 'VES' else None,
                 **{campo: Decimal('0') for campo in CAMPOS_POS_SUMABLES},
                 'lotes_por_acreditar': [],
@@ -1011,6 +1034,8 @@ def disponibilidad_por_cuenta(fecha):
         banco['transferencias_salientes_acumuladas'] += cuenta['transferencias_salientes_acumuladas']
         banco['consignado_acumulado'] += cuenta['consignado_acumulado']
         banco['saldo_disponible'] += cuenta['saldo_disponible']
+        banco['saldo_usd_tasa_actual'] += cuenta['saldo_usd_tasa_actual']
+        banco['diferencia_cambiaria_usd'] += cuenta['diferencia_cambiaria_usd']
         for campo in CAMPOS_POS_SUMABLES:
             banco[campo] += cuenta[campo]
         banco['lotes_por_acreditar'].extend(cuenta['lotes_por_acreditar'])

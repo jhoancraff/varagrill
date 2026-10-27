@@ -168,12 +168,13 @@ function CierreCajaPage({ isMobile, onBack }) {
               <div style={resumenGridStyle(isMobile)}>
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Cobrado hoy por punto de venta</div>
-                  <div style={tileValueStyle}>${formatMonto(pos.cobrado_dia_usd)}</div>
+                  <div style={tileValueStyle}>Bs {formatMonto(pos.cobrado_dia_bs)}</div>
+                  <div style={tileHintStyle}>${formatMonto(pos.cobrado_dia_usd)}</div>
                 </div>
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Por acreditar (en lotes)</div>
-                  <div style={{ ...tileValueStyle, color: 'var(--vg-f-ffe3a3)' }}>${formatMonto(pos.por_acreditar_usd)}</div>
-                  <div style={tileHintStyle}>Se suma a la cuenta al acreditar el lote</div>
+                  <div style={{ ...tileValueStyle, color: 'var(--vg-f-ffe3a3)' }}>Bs {formatMonto(pos.por_acreditar_bs)}</div>
+                  <div style={tileHintStyle}>${formatMonto(pos.por_acreditar_usd)} · se suma a la cuenta al acreditar el lote</div>
                 </div>
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Disponibilidad real</div>
@@ -182,7 +183,8 @@ function CierreCajaPage({ isMobile, onBack }) {
                 </div>
                 <div style={tileStyle}>
                   <div style={tileLabelStyle}>Acreditado hoy</div>
-                  <div style={tileValueStyle}>${formatMonto(pos.acreditado_hoy_usd)}</div>
+                  <div style={tileValueStyle}>Bs {formatMonto(pos.acreditado_hoy_bs)}</div>
+                  <div style={tileHintStyle}>${formatMonto(pos.acreditado_hoy_usd)}</div>
                 </div>
               </div>
 
@@ -200,7 +202,7 @@ function CierreCajaPage({ isMobile, onBack }) {
                       </div>
                       <div style={loteDatosStyle}>
                         <span>{lote.num_pagos} cobro(s)</span>
-                        <span>${formatMonto(lote.monto_usd)} · Bs {formatMonto(lote.monto_bs)}</span>
+                        <span><strong>Bs {formatMonto(lote.monto_bs)}</strong> · ${formatMonto(lote.monto_usd)}</span>
                       </div>
                       {lote.num_pagos > 0 ? (
                         <button type="button" disabled={saving} onClick={() => handleCerrarLote(lote)} style={secondaryButtonStyle}>
@@ -224,7 +226,7 @@ function CierreCajaPage({ isMobile, onBack }) {
                         <span style={{ ...badgeStyle, ...(ESTADO_LOTE_ESTILO[lote.estado] || {}) }}>{lote.estado_label}</span>
                       </div>
                       <div style={loteDatosStyle}>
-                        <span>${formatMonto(lote.monto_usd)} · Bs {formatMonto(lote.monto_bs)}</span>
+                        <span><strong>Bs {formatMonto(lote.monto_bs)}</strong> · ${formatMonto(lote.monto_usd)}</span>
                         {lote.estado === 'acreditado' ? <span>Acreditado {formatFechaConDia(lote.fecha_abono)}</span> : <span style={{ color: 'var(--vg-f-ffe3a3)' }}>Por acreditar</span>}
                       </div>
                     </article>

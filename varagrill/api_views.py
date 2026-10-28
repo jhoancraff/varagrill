@@ -2770,15 +2770,28 @@ def admin_catalog_view(request):
 
         unidad = str(data.get('unidad', '')).strip() or 'unidad'
         proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
-        stock_actual = data.get('stock_actual', ingredient.stock_actual)
         stock_minimo = data.get('stock_minimo', ingredient.stock_minimo)
         costo_unitario = data.get('costo_unitario', ingredient.costo_unitario)
         contenido_envase = data.get('contenido_envase', ingredient.contenido_envase)
         peso_real = data.get('peso_real', ingredient.peso_real)
         precio_compra = data.get('precio_compra', ingredient.precio_compra)
 
+        # El stock NO se modifica desde la edicion del ingrediente: solo desde "Ajuste de inventario"
+        # (queda en el historial de movimientos, con el cierre mensual). Si llega un stock distinto al actual
+        # se rechaza; el stock tampoco se vuelve a escribir al guardar, asi un guardado no pisa lo que
+        # cambio una venta o un ajuste mientras la pantalla estaba abierta.
+        if data.get('stock_actual') not in (None, ''):
+            try:
+                stock_enviado = Decimal(str(data.get('stock_actual')))
+            except InvalidOperation:
+                return _auth_response({'ok': False, 'message': 'Los valores numéricos del ingrediente son inválidos.'}, status=400)
+            if stock_enviado != Decimal(str(ingredient.stock_actual)):
+                return _auth_response({
+                    'ok': False,
+                    'message': 'El stock no se puede modificar desde aquí: hazlo desde "Ajuste de inventario".',
+                }, status=400)
+
         try:
-            stock_actual_value = Decimal(str(stock_actual or 0))
             stock_minimo_value = Decimal(str(stock_minimo or 0))
             costo_unitario_value = Decimal(str(costo_unitario or 0))
         except InvalidOperation:
@@ -2858,7 +2871,6 @@ def admin_catalog_view(request):
         ingredient.nombre = nombre
         ingredient.unidad_medida = unidad
         ingredient.ultimo_proveedor = proveedor
-        ingredient.stock_actual = stock_actual_value
         ingredient.stock_minimo = stock_minimo_value
         ingredient.costo_unitario = costo_unitario_value
         ingredient.contenido_envase = contenido_envase_value
@@ -2868,7 +2880,7 @@ def admin_catalog_view(request):
         ingredient.rendimiento_ingrediente_crudo = rendimiento_ingrediente_crudo_value
         ingredient.actualizado_por = request.user
         ingredient.save(update_fields=[
-            'nombre', 'unidad_medida', 'ultimo_proveedor', 'stock_actual', 'stock_minimo', 'costo_unitario',
+            'nombre', 'unidad_medida', 'ultimo_proveedor', 'stock_minimo', 'costo_unitario',
             'contenido_envase', 'peso_real', 'precio_compra', 'ingrediente_crudo_equivalente', 'rendimiento_ingrediente_crudo',
             'actualizado_por', 'fecha_actualizacion',
         ])

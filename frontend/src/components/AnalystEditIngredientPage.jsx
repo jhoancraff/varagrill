@@ -106,7 +106,6 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           id: form.id,
           nombre: form.nombre,
           unidad: form.unidad,
-          stock_actual: form.stock_actual,
           stock_minimo: form.stock_minimo,
           costo_unitario: form.costo_unitario,
           contenido_envase: form.contenido_envase || null,
@@ -150,7 +149,13 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
                   ))}
                 </select>
               </label>
-              <label style={fieldStyle}><span style={labelStyle}>Stock actual</span><input type="number" step="0.001" value={form.stock_actual} onChange={(e) => handleChange('stock_actual', e.target.value)} style={inputStyle} /></label>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>Stock actual</span>
+                <input type="number" value={form.stock_actual} readOnly disabled style={{ ...inputStyle, opacity: 0.65, cursor: 'not-allowed' }} />
+                <span style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12 }}>
+                  El stock no se modifica aquí: usa Inventario → Ajuste de inventario.
+                </span>
+              </label>
               <label style={fieldStyle}><span style={labelStyle}>Stock minimo</span><input type="number" step="0.001" value={form.stock_minimo} onChange={(e) => handleChange('stock_minimo', e.target.value)} style={inputStyle} /></label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>Costo unitario{costoUnitarioCalculado !== null ? ' (calculado)' : ''}</span>

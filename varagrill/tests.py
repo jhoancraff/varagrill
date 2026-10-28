@@ -534,6 +534,35 @@ class AdminCatalogApiTests(TestCase):
         ingredient.refresh_from_db()
         self.assertIsNone(ingredient.contenido_envase)
 
+    def _editar_ingrediente(self, ingredient, **extra):
+        cuerpo = {'tipo': 'actualizar_ingrediente', 'id': ingredient.id, 'nombre': ingredient.nombre, 'unidad': 'g', **extra}
+        return self.client.post('/api/admin/catalogo/', data=json.dumps(cuerpo), content_type='application/json')
+
+    def test_editar_un_ingrediente_no_permite_cambiar_el_stock(self):
+        ingredient = VGIngrediente.objects.create(nombre='Carbon stock', unidad_medida='g', stock_actual='2000', costo_unitario='0.01')
+
+        response = self._editar_ingrediente(ingredient, stock_actual='5000')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Ajuste de inventario', response.json()['message'])
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.stock_actual, Decimal('2000'))
+
+        # otros campos siguen editandose, y mandar el mismo stock que ya hay no es un cambio
+        response = self._editar_ingrediente(ingredient, stock_actual='2000', stock_minimo='300')
+        self.assertEqual(response.status_code, 200, response.content)
+        ingredient.refresh_from_db()
+        self.assertEqual((ingredient.stock_actual, ingredient.stock_minimo), (Decimal('2000'), Decimal('300')))
+
+    def test_guardar_la_edicion_no_pisa_el_stock_que_cambio_mientras_tanto(self):
+        ingredient = VGIngrediente.objects.create(nombre='Pollo stock', unidad_medida='g', stock_actual='2000', costo_unitario='0.01')
+        # una venta o un ajuste baja el stock mientras la pantalla de edicion estaba abierta
+        VGIngrediente.objects.filter(pk=ingredient.pk).update(stock_actual=Decimal('1500'))
+
+        response = self._editar_ingrediente(ingredient, stock_minimo='100')    # la pantalla ya no manda el stock
+        self.assertEqual(response.status_code, 200, response.content)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.stock_actual, Decimal('1500'))
+
     def test_ingreso_administrativo_no_desincroniza_costo_unitario_existente(self):
         """
         Ver _costo_unitario_por_compra vs. la división simple: reponer stock desde

@@ -2512,8 +2512,13 @@ def _costo_unitario_por_compra(precio_total, cantidad, ingrediente):
     rinde 85% por envase cuesta lo mismo por gramo útil que una de 1000g (ver
     VGIngrediente.contenido_envase/peso_real). Sin esos dos datos, se divide por la
     cantidad comprada tal cual, igual que antes de que existiera este ajuste.
+
+    Un ingrediente medido por "unidad" (una lata, una botella) NUNCA se ajusta por merma: su contenido
+    de envase / peso real describen el contenido de UNA unidad (ej. 355 ml, 1 lata), no un rendimiento
+    — dividir por peso_real / contenido_envase multiplicaba el costo por ese contenido (20 latas por $25
+    daban $443.75 la lata en vez de $1.25). Es el mismo criterio de la importacion por Excel.
     """
-    if ingrediente.contenido_envase and ingrediente.peso_real:
+    if ingrediente.unidad_medida != 'unidad' and ingrediente.contenido_envase and ingrediente.peso_real:
         cantidad_utilizable = cantidad * (ingrediente.peso_real / ingrediente.contenido_envase)
     else:
         cantidad_utilizable = cantidad

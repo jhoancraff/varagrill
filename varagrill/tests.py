@@ -6711,3 +6711,77 @@ class AnularCompraTests(TestCase):
         ids = [c['id'] for c in self.client.get('/api/cuentas-por-pagar/').json()['compras'] if c['tipo'] == 'compra']
         self.assertNotIn(self.compra.id, ids)
         self.assertIn(self.compra_vieja.id, ids)
+
+
+class LoteActualizaCostoIngredienteTests(TestCase):
+    """Cargar un lote manual cambia el costo que ven los reportes y las recetas, no solo el costo guardado."""
+
+    def setUp(self):
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='lote_admin', password='claveLote123', cedula='96000030', email='lote@test.test', id_role=rol,
+        )
+        self.client.force_login(self.admin)
+        _set_tasa_actual('100.0000')
+
+    def post(self, url, cuerpo):
+        return self.client.post(url, data=json.dumps(cuerpo), content_type='application/json')
+
+    def cargar_lote(self, lineas, total='100'):
+        for linea in lineas:
+            r = self.post('/api/admin/compras/borrador/agregar/', linea)
+            self.assertEqual(r.status_code, 201, r.content)
+        r = self.post('/api/admin/compras/borrador/confirmar/', {'proveedor_nombre': 'Proveedor lote', 'total_a_pagar': total})
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def costo_en_reportes(self, ingrediente):
+        from varagrill.api_views import _costo_unitario_efectivo
+        ingrediente.refresh_from_db()
+        return _costo_unitario_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
+
+    def test_con_envase_y_peso_real_el_costo_de_los_reportes_sigue_a_la_compra(self):
+        # envase de 1000 g que rinde 850 g utiles, comprado antes a $10 el envase
+        carne = VGIngrediente.objects.create(
+            nombre='Carne lote', unidad_medida='g', stock_actual=Decimal('0'), costo_unitario=Decimal('0.011765'),
+            contenido_envase=Decimal('1000'), peso_real=Decimal('850'), precio_compra=Decimal('10'),
+        )
+        self.assertEqual(self.costo_en_reportes(carne), Decimal('0.011765'))
+
+        # ahora 5000 g por $60: 4250 g utiles -> $0.014118 el gramo util
+        self.cargar_lote([{'ingrediente_id': carne.id, 'cantidad': '5000', 'precio_total': '60'}])
+        carne.refresh_from_db()
+        self.assertEqual(carne.costo_unitario, Decimal('0.014118'))
+        self.assertEqual(carne.precio_compra, Decimal('12.00'))        # $12 por cada envase de 1000 g
+        self.assertEqual(carne.stock_actual, Decimal('5000'))
+        # los reportes y recetas usan precio_compra / peso_real: ya NO siguen en el costo viejo
+        self.assertEqual(self.costo_en_reportes(carne), Decimal('0.014118'))
+
+    def test_un_ingrediente_por_unidad_no_se_ajusta_por_el_contenido_del_envase(self):
+        # La Polar Light: se mide por unidad (lata), con el envase cargado como 355 ml y peso real 1.
+        lata = VGIngrediente.objects.create(
+            nombre='Polar lata lote', unidad_medida='unidad', stock_actual=Decimal('41'), costo_unitario=Decimal('1'),
+            contenido_envase=Decimal('355'), peso_real=Decimal('1'), precio_compra=Decimal('1'),
+        )
+        self.cargar_lote([{'ingrediente_id': lata.id, 'cantidad': '20', 'precio_total': '25'}], total='25')
+        lata.refresh_from_db()
+        self.assertEqual(lata.costo_unitario, Decimal('1.250000'))       # 25 / 20 latas, no 443.75
+        self.assertEqual(lata.precio_compra, Decimal('1.25'))
+        self.assertEqual(self.costo_en_reportes(lata), Decimal('1.250000'))
+        self.assertEqual(lata.stock_actual, Decimal('61'))
+
+    def test_un_ingrediente_nuevo_sin_peso_real_usa_precio_entre_cantidad(self):
+        self.cargar_lote([{'nombre': 'Aji nuevo lote', 'unidad': 'g', 'cantidad': '2000', 'precio_total': '10'}])
+        aji = VGIngrediente.objects.get(nombre='Aji nuevo lote')
+        self.assertEqual(aji.costo_unitario, Decimal('0.005000'))
+        self.assertIsNone(aji.precio_compra)            # no se inventan envase ni peso que nadie cargo
+        self.assertEqual(self.costo_en_reportes(aji), Decimal('0.005000'))
+
+    def test_el_mismo_ingrediente_en_dos_lineas_suma_las_dos_y_deja_el_costo_de_la_ultima(self):
+        sal = VGIngrediente.objects.create(nombre='Sal lote', unidad_medida='g', stock_actual=Decimal('100'), costo_unitario=Decimal('0.001'))
+        self.cargar_lote([
+            {'ingrediente_id': sal.id, 'cantidad': '1000', 'precio_total': '2'},
+            {'ingrediente_id': sal.id, 'cantidad': '500', 'precio_total': '3'},
+        ])
+        sal.refresh_from_db()
+        self.assertEqual(sal.stock_actual, Decimal('1600'))             # 100 + 1000 + 500
+        self.assertEqual(sal.costo_unitario, Decimal('0.006000'))       # la ultima linea: 3 / 500

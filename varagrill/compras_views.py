@@ -375,14 +375,24 @@ def admin_compra_borrador_confirmar_view(request):
             actualizado_por=request.user,
         )
 
-        for detalle in borrador.detalles.select_related('ingrediente'):
-            ingrediente = detalle.ingrediente
+        for detalle in borrador.detalles.all():
+            # Se relee y bloquea el ingrediente en cada linea: si el mismo ingrediente viene en dos lineas del
+            # lote, la segunda parte del stock y del costo que dejo la primera (no de una copia vieja).
+            ingrediente = VGIngrediente.objects.select_for_update().get(pk=detalle.ingrediente_id)
             costo_unitario = _costo_unitario_por_compra(detalle.precio_total, detalle.cantidad, ingrediente)
             ingrediente.stock_actual = Decimal(str(ingrediente.stock_actual)) + detalle.cantidad
             ingrediente.costo_unitario = costo_unitario
             ingrediente.ultimo_proveedor = proveedor_nombre
             ingrediente.actualizado_por = request.user
-            ingrediente.save(update_fields=['stock_actual', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion'])
+            campos = ['stock_actual', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion']
+            if ingrediente.contenido_envase and ingrediente.peso_real:
+                # Los reportes de costos y las recetas toman precio_compra / peso_real cuando el ingrediente los
+                # tiene cargados (ver _costo_unitario_efectivo) e ignoran costo_unitario. Para que esta compra
+                # cambie de verdad el costo, el precio del envase se deja en lo que esta factura implica:
+                # costo por unidad util x peso real (= precio pagado por cada envase de contenido_envase).
+                ingrediente.precio_compra = (costo_unitario * ingrediente.peso_real).quantize(Decimal('0.01'))
+                campos.append('precio_compra')
+            ingrediente.save(update_fields=campos)
 
             VGDetalleCompra.objects.create(
                 compra=compra, ingrediente=ingrediente, cantidad=detalle.cantidad, costo_unitario=costo_unitario,

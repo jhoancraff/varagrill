@@ -781,6 +781,43 @@ class VGAnulacionCompra(VGAuditoria):
         return f"Anulación compra #{self.compra_id}: {self.motivo[:40]}"
 
 
+class VGHistorialCostoIngrediente(VGAuditoria):
+    """
+    Cada vez que cambia el costo de un ingrediente (el que ven los reportes y las recetas, ver
+    api_views._costo_unitario_efectivo) queda una fila: costo anterior y nuevo, de donde vino el cambio y
+    quien lo hizo (ver costos_historial.py, que lo registra desde una senal de VGIngrediente, asi que cubre
+    cualquier via: lote manual, Excel, edicion del ingrediente...). Si la variacion supera el umbral de
+    VGConfiguracionCosteo.alerta_variacion_costo_pct la fila es una ALERTA que alguien debe revisar: es la
+    forma de notar a tiempo un precio mal cargado antes de que dane el costo de las recetas.
+    """
+    ingrediente = models.ForeignKey(VGIngrediente, on_delete=models.CASCADE, related_name="historial_costos")
+    costo_anterior = models.DecimalField(max_digits=16, decimal_places=6)
+    costo_nuevo = models.DecimalField(max_digits=16, decimal_places=6)
+    # (nuevo - anterior) / anterior x 100; null cuando no habia costo anterior (ingrediente nuevo).
+    variacion_pct = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    origen = models.CharField(max_length=80, blank=True)
+    compra = models.ForeignKey(
+        VGCompra, on_delete=models.SET_NULL, null=True, blank=True, related_name="historial_costos",
+    )
+    es_alerta = models.BooleanField(default=False)
+    revisada = models.BooleanField(default=False)
+    revisada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="costos_revisados",
+    )
+    fecha_revision = models.DateTimeField(null=True, blank=True)
+    nota_revision = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        db_table = "vg_historial_costos_ingrediente"
+        verbose_name = "Cambio de costo de ingrediente"
+        verbose_name_plural = "Cambios de costo de ingredientes"
+        ordering = ["-fecha_creacion", "-id"]
+        indexes = [models.Index(fields=["es_alerta", "revisada"])]
+
+    def __str__(self):
+        return f"{self.ingrediente_id}: {self.costo_anterior} -> {self.costo_nuevo}"
+
+
 class VGMovimientoInventario(models.Model):
     TIPOS = [
         ("entrada", "Entrada"),
@@ -1494,6 +1531,13 @@ class VGConfiguracionCosteo(VGAuditoria):
     margen_ganancia_defecto_pct = models.DecimalField(
         max_digits=6, decimal_places=2, default=Decimal('50'),
         help_text="Porcentaje de ganancia sugerido por defecto para productos nuevos que no definen su propio margen.",
+    )
+    alerta_variacion_costo_pct = models.DecimalField(
+        max_digits=6, decimal_places=2, default=Decimal('30'),
+        help_text=(
+            "Si el costo de un ingrediente sube o baja mas que este porcentaje respecto al anterior, el cambio se "
+            "marca como alerta de precio para que alguien lo revise (ver VGHistorialCostoIngrediente)."
+        ),
     )
 
     class Meta:

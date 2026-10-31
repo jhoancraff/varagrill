@@ -368,7 +368,14 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                       <>
                         <div key={`name-${detalle.id}`} style={cellPrimaryStyle}>{detalle.ingrediente_nombre}</div>
                         <div key={`qty-${detalle.id}`} style={cellStyle}>{detalle.cantidad} {detalle.unidad_medida}</div>
-                        <div key={`cost-${detalle.id}`} style={cellStyle}>${detalle.costo_unitario}</div>
+                        <div key={`cost-${detalle.id}`} style={cellStyle}>
+                          ${detalle.costo_final ?? detalle.costo_unitario}
+                          {detalle.variacion_pct !== null && detalle.variacion_pct !== undefined && Number(detalle.costo_actual) > 0 ? (
+                            <div style={{ fontSize: 11.5, fontWeight: detalle.alerta_variacion ? 800 : 500, color: detalle.alerta_variacion ? 'var(--vg-f-ff9d9d)' : 'var(--vg-f-c8bbbb)' }}>
+                              {detalle.alerta_variacion ? '⚠ ' : ''}hoy ${detalle.costo_actual} ({Number(detalle.variacion_pct) > 0 ? '+' : ''}{Number(detalle.variacion_pct).toLocaleString('es-VE', { maximumFractionDigits: 2 })} %)
+                            </div>
+                          ) : null}
+                        </div>
                         <div key={`total-${detalle.id}`} style={cellStyle}>
                           ${Number(detalle.precio_total).toFixed(2)}
                           {detalle.precio_total_bs ? (

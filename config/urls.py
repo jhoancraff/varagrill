@@ -151,6 +151,7 @@ from varagrill.movimientos_inventario_views import (
     reporte_movimiento_inventario_detalle_view,
     reporte_movimiento_inventario_view,
 )
+from varagrill.alertas_costos_views import alerta_costo_revisar_view, alertas_costos_view
 from varagrill.gastos_views import (
     admin_categorias_gasto_view,
     admin_gastos_view,
@@ -248,6 +249,8 @@ urlpatterns = [
         name='admin-comida-empleados-anular',
     ),
     path('api/admin/configuracion-costeo/', admin_configuracion_costeo_view, name='admin-configuracion-costeo'),
+    path('api/admin/alertas-costos/', alertas_costos_view, name='admin-alertas-costos'),
+    path('api/admin/alertas-costos/<int:alerta_id>/revisar/', alerta_costo_revisar_view, name='admin-alerta-costo-revisar'),
     path('api/admin/promociones/', admin_promotions_view, name='admin-promotions'),
     path('api/admin/recomendaciones-chef/', admin_chef_recommendations_view, name='admin-chef-recommendations'),
     path('api/admin/reportes/cuadre-caja/', reporte_cuadre_caja_view, name='admin-reporte-cuadre-caja'),

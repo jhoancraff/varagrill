@@ -6785,3 +6785,127 @@ class LoteActualizaCostoIngredienteTests(TestCase):
         sal.refresh_from_db()
         self.assertEqual(sal.stock_actual, Decimal('1600'))             # 100 + 1000 + 500
         self.assertEqual(sal.costo_unitario, Decimal('0.006000'))       # la ultima linea: 3 / 500
+
+
+class AlertasCostosIngredientesTests(TestCase):
+    """Cada cambio de costo de un ingrediente queda en el historial y, si pasa el umbral, genera una alerta."""
+
+    def setUp(self):
+        from varagrill.models import VGConfiguracionCosteo
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='alc_admin', password='claveAlc123', cedula='96000040', email='alc@test.test', id_role=rol,
+        )
+        self.client.force_login(self.admin)
+        _set_tasa_actual('100.0000')
+        config = VGConfiguracionCosteo.obtener_config()
+        config.alerta_variacion_costo_pct = Decimal('30')
+        config.save()
+        self.pollo = VGIngrediente.objects.create(
+            nombre='Pollo alerta', unidad_medida='g', stock_actual=Decimal('1000'), costo_unitario=Decimal('0.004'),
+        )
+        categoria = VGCategoriaProducto.objects.create(nombre='Platos alerta')
+        self.plato = VGProducto.objects.create(nombre='Churrasco alerta', categoria=categoria, precio_venta=Decimal('13'))
+        VGRecetaProducto.objects.create(producto=self.plato, ingrediente=self.pollo, cantidad_requerida=Decimal('300'))
+
+    def post(self, url, cuerpo):
+        return self.client.post(url, data=json.dumps(cuerpo), content_type='application/json')
+
+    def historial(self, ingrediente=None):
+        from varagrill.models import VGHistorialCostoIngrediente
+        return list(VGHistorialCostoIngrediente.objects.filter(ingrediente=ingrediente or self.pollo).order_by('id'))
+
+    def editar_costo(self, costo):
+        r = self.post('/api/admin/catalogo/', {
+            'tipo': 'actualizar_ingrediente', 'id': self.pollo.id, 'nombre': self.pollo.nombre, 'unidad': 'g', 'costo_unitario': costo,
+        })
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_un_ingrediente_nuevo_deja_su_primer_costo_sin_alerta(self):
+        filas = self.historial()
+        self.assertEqual(len(filas), 1)
+        self.assertEqual((filas[0].costo_anterior, filas[0].costo_nuevo, filas[0].es_alerta), (Decimal('0'), Decimal('0.004000'), False))
+        self.assertIsNone(filas[0].variacion_pct)
+        # un ingrediente creado sin costo no deja nada
+        vacio = VGIngrediente.objects.create(nombre='Agua alerta', unidad_medida='ml', costo_unitario=Decimal('0'))
+        self.assertEqual(self.historial(vacio), [])
+
+    def test_un_cambio_grande_por_edicion_es_alerta_y_uno_chico_solo_historial(self):
+        self.editar_costo('0.005')                    # +25 %: bajo el umbral de 30
+        self.editar_costo('0.0125')                   # +150 %
+        _inicial, chico, grande = self.historial()
+        self.assertEqual((chico.variacion_pct, chico.es_alerta, chico.origen), (Decimal('25.00'), False, 'Edición del ingrediente'))
+        self.assertEqual((grande.variacion_pct, grande.es_alerta, grande.revisada), (Decimal('150.00'), True, False))
+        self.assertEqual(grande.creado_por_id, self.admin.id)
+        self.assertEqual(grande.costo_anterior, Decimal('0.005000'))
+
+    def test_una_baja_fuerte_tambien_es_alerta_y_el_mismo_costo_no_deja_fila(self):
+        self.editar_costo('0.004')                    # igual: no hay cambio
+        self.assertEqual(len(self.historial()), 1)
+        self.editar_costo('0.001')                    # -75 %
+        self.assertEqual((self.historial()[-1].variacion_pct, self.historial()[-1].es_alerta), (Decimal('-75.00'), True))
+
+    def test_guardar_solo_el_stock_no_registra_ni_consulta_el_costo(self):
+        self.pollo.stock_actual = Decimal('500')
+        with self.assertNumQueries(1):
+            self.pollo.save(update_fields=['stock_actual'])
+        self.assertEqual(len(self.historial()), 1)
+
+    def test_el_lote_manual_queda_con_su_origen_y_su_compra(self):
+        r = self.post('/api/admin/compras/borrador/agregar/', {'ingrediente_id': self.pollo.id, 'cantidad': '1000', 'precio_total': '40'})
+        self.assertEqual(r.status_code, 201, r.content)
+        r = self.post('/api/admin/compras/borrador/confirmar/', {'proveedor_nombre': 'Proveedor alerta', 'total_a_pagar': '40'})
+        self.assertEqual(r.status_code, 201, r.content)
+        fila = self.historial()[-1]
+        self.assertEqual((fila.origen, fila.costo_nuevo, fila.es_alerta), ('Carga de lote manual', Decimal('0.040000'), True))     # x10
+        self.assertEqual(fila.compra_id, r.json()['compra']['id'])
+
+    def test_el_borrador_avisa_antes_de_confirmar(self):
+        r = self.post('/api/admin/compras/borrador/agregar/', {'ingrediente_id': self.pollo.id, 'cantidad': '1000', 'precio_total': '40'})
+        linea = r.json()['borrador']['detalles'][0]
+        self.assertEqual((linea['costo_actual'], linea['costo_final'], linea['variacion_pct'], linea['alerta_variacion']),
+                         ('0.004000', '0.040000', '900.00', True))
+        r = self.post('/api/admin/compras/borrador/agregar/', {'ingrediente_id': self.pollo.id, 'cantidad': '1000', 'precio_total': '4.2'})
+        self.assertFalse(r.json()['borrador']['detalles'][1]['alerta_variacion'])             # +5 %
+
+    def test_la_lista_de_alertas_trae_las_recetas_afectadas_y_se_puede_revisar(self):
+        from varagrill.models import VGPreparacion, VGRecetaPreparacion
+        # un plato que usa el pollo a traves de una subreceta tambien se ve afectado
+        sub = VGPreparacion.objects.create(nombre='Marinado alerta', rendimiento_cantidad='1000', rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=sub, ingrediente=self.pollo, cantidad_requerida='500')
+        indirecto = VGProducto.objects.create(
+            nombre='Plato con marinado alerta', categoria=self.plato.categoria, precio_venta=Decimal('9'), subreceta_vinculada=sub,
+        )
+        self.editar_costo('0.04')                     # x10
+        datos = self.client.get('/api/admin/alertas-costos/').json()
+        self.assertEqual((datos['ok'], datos['umbral_pct'], datos['pendientes'], len(datos['items'])), (True, '30.00', 1, 1))
+        alerta = datos['items'][0]
+        self.assertEqual((alerta['ingrediente']['nombre'], alerta['costo_anterior'], alerta['costo_nuevo']), ('Pollo alerta', '0.004000', '0.040000'))
+        recetas = {r['nombre']: (r['costo_antes'], r['costo_despues']) for r in alerta['recetas_afectadas']}
+        self.assertEqual(recetas['Churrasco alerta'], ('1.20', '12.00'))                      # 300 g
+        self.assertIn('Plato con marinado alerta', recetas)                                    # por la subreceta
+        self.assertNotIn('Recetas', [r['nombre'] for r in alerta['recetas_afectadas']])
+
+        r = self.post(f'/api/admin/alertas-costos/{alerta["id"]}/revisar/', {'nota': 'Era un error, ya lo corregi'})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.json()['pendientes'], r.json()['alerta']['revisada'], r.json()['alerta']['nota_revision']), (0, True, 'Era un error, ya lo corregi'))
+        self.assertEqual(self.post(f'/api/admin/alertas-costos/{alerta["id"]}/revisar/', {}).status_code, 409)
+        self.assertEqual(self.client.get('/api/admin/alertas-costos/').json()['items'], [])
+        self.assertEqual(len(self.client.get('/api/admin/alertas-costos/?estado=revisadas').json()['items']), 1)
+        historial = self.client.get(f'/api/admin/alertas-costos/?vista=historial&ingrediente_id={self.pollo.id}').json()['items']
+        self.assertEqual(len(historial), 2)                                                    # alta + el cambio
+
+    def test_solo_un_administrador_ve_las_alertas(self):
+        cajera_rol, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        cajera = VGUsuario.objects.create_user(username='alc_cajera', password='claveCaj123', cedula='96000041', email='alcc@test.test', id_role=cajera_rol)
+        self.client.force_login(cajera)
+        self.assertEqual(self.client.get('/api/admin/alertas-costos/').status_code, 401)
+
+    def test_el_umbral_se_configura(self):
+        self.assertEqual(self.client.get('/api/admin/configuracion-costeo/').json()['alerta_variacion_costo_pct'], '30.00')
+        r = self.post('/api/admin/configuracion-costeo/', {'rendimiento_receta_pct': '0', 'margen_ganancia_defecto_pct': '50', 'alerta_variacion_costo_pct': '10'})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.editar_costo('0.0045')                   # +12.5 %: ahora si pasa el umbral de 10
+        self.assertTrue(self.historial()[-1].es_alerta)
+        self.assertEqual(self.post('/api/admin/configuracion-costeo/', {'rendimiento_receta_pct': '0', 'margen_ganancia_defecto_pct': '50', 'alerta_variacion_costo_pct': '-5'}).status_code, 400)

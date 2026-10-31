@@ -5,6 +5,7 @@ import useToast from '../hooks/useToast';
 function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
   const [rendimiento, setRendimiento] = useState('0');
   const [margenDefecto, setMargenDefecto] = useState('50');
+  const [umbralAlerta, setUmbralAlerta] = useState('30');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
@@ -20,6 +21,7 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
         }
         setRendimiento(data.rendimiento_receta_pct);
         setMargenDefecto(data.margen_ganancia_defecto_pct);
+        setUmbralAlerta(data.alerta_variacion_costo_pct ?? '30');
       } catch (error) {
         showError(error.message || 'No se pudo cargar la configuración de costeo.');
       } finally {
@@ -41,6 +43,7 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
         body: JSON.stringify({
           rendimiento_receta_pct: rendimiento,
           margen_ganancia_defecto_pct: margenDefecto,
+          alerta_variacion_costo_pct: umbralAlerta,
         }),
       });
       const data = await response.json();
@@ -49,6 +52,7 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
       }
       setRendimiento(data.rendimiento_receta_pct);
       setMargenDefecto(data.margen_ganancia_defecto_pct);
+      setUmbralAlerta(data.alerta_variacion_costo_pct ?? umbralAlerta);
       showSuccess(data.message || 'Configuración guardada.');
     } catch (error) {
       showError(error.message || 'No se pudo guardar la configuración.');
@@ -99,6 +103,23 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
               style={inputStyle}
               required
             />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>% de variación de costo para la alerta de precios</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={umbralAlerta}
+              onChange={(event) => setUmbralAlerta(event.target.value)}
+              style={inputStyle}
+              required
+            />
+            <p style={hintStyle}>
+              Si el costo de un ingrediente sube o baja más que este porcentaje respecto al anterior, queda una alerta en
+              Inventario → Alertas de precios y el lote manual marca la línea antes de confirmar. Usa 0 para desactivarlas.
+            </p>
           </label>
 
           <button type="submit" disabled={saving} style={saveButtonStyle}>

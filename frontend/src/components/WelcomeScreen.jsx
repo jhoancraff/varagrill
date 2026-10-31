@@ -54,6 +54,7 @@ import ChefRecommendationsPage from './ChefRecommendationsPage';
 import CheckoutPage from './CheckoutPage';
 import AnalystComprasBorradorPage from './AnalystComprasBorradorPage';
 import AnalystAjusteInventarioPage from './AnalystAjusteInventarioPage';
+import AnalystAlertasCostosPage from './AnalystAlertasCostosPage';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import CuentasPorPagarPage from './CuentasPorPagarPage';
 import AnalystGastosPage from './AnalystGastosPage';
@@ -1410,6 +1411,13 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onViewInventory={() => goToView('admin-ingredients-inventory')}
             onAdjustInventory={() => goToView('admin-ingredients-ajuste')}
             onViewMovements={() => goToView('admin-ingredients-movimientos')}
+            onViewAlerts={() => goToView('admin-alertas-costos')}
+          />
+        ) : activeView === 'admin-alertas-costos' ? (
+          <AnalystAlertasCostosPage
+            isMobile={isMobile}
+            onBack={goBackView}
+            onEditIngredient={(ingredientId) => goToView(`admin-ingredients-edit:${ingredientId}`)}
           />
         ) : activeView === 'admin-ingredients-movimientos' ? (
           <AnalystMovimientoInventarioPage

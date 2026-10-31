@@ -24,6 +24,7 @@ from .api_views import (
     _serialize_nota_credito_compra,
 )
 from . import compras_anulacion
+from .costos_historial import costo_efectivo, origen_costo, supera_umbral, umbral_alerta, variacion_pct
 from .auth_helpers import _auth_response, _is_admin_user
 from .gastos_views import _serialize_gasto
 from .models import (
@@ -54,8 +55,19 @@ def _get_borrador_abierto():
     return VGCompraBorrador.objects.filter(estado='abierto').order_by('-fecha_creacion').first()
 
 
-def _serialize_detalle_borrador(detalle):
+def _serialize_detalle_borrador(detalle, umbral=None):
+    # Vista previa del costo que quedara al confirmar (mismo calculo que la confirmacion, con la merma si el
+    # ingrediente tiene envase y peso real) frente al costo que tiene hoy: si cambia mas que el umbral de
+    # alertas, la linea sale marcada para revisarla ANTES de confirmar (ver costos_historial.py).
+    ingrediente = detalle.ingrediente
+    costo_actual = costo_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
+    costo_final = _costo_unitario_por_compra(detalle.precio_total, detalle.cantidad, ingrediente)
+    variacion = variacion_pct(costo_actual, costo_final) if detalle.cantidad else None
     return {
+        'costo_actual': str(costo_actual.quantize(Decimal('0.000001'))),
+        'costo_final': str(costo_final),
+        'variacion_pct': str(variacion) if variacion is not None else None,
+        'alerta_variacion': bool(detalle.cantidad) and supera_umbral(variacion, umbral),
         'id': detalle.id,
         'ingrediente_id': detalle.ingrediente_id,
         'ingrediente_nombre': detalle.ingrediente.nombre,
@@ -76,9 +88,11 @@ def _serialize_borrador(borrador):
         return {'id': None, 'detalles': [], 'total': '0'}
     detalles = list(borrador.detalles.select_related('ingrediente').order_by('fecha_creacion'))
     total = sum((detalle.precio_total for detalle in detalles), Decimal('0'))
+    umbral = umbral_alerta()
     return {
         'id': borrador.id,
-        'detalles': [_serialize_detalle_borrador(detalle) for detalle in detalles],
+        'umbral_alerta_pct': str(umbral),
+        'detalles': [_serialize_detalle_borrador(detalle, umbral) for detalle in detalles],
         'total': str(total),
     }
 
@@ -392,7 +406,8 @@ def admin_compra_borrador_confirmar_view(request):
                 # costo por unidad util x peso real (= precio pagado por cada envase de contenido_envase).
                 ingrediente.precio_compra = (costo_unitario * ingrediente.peso_real).quantize(Decimal('0.01'))
                 campos.append('precio_compra')
-            ingrediente.save(update_fields=campos)
+            with origen_costo('Carga de lote manual', compra=compra):
+                ingrediente.save(update_fields=campos)
 
             VGDetalleCompra.objects.create(
                 compra=compra, ingrediente=ingrediente, cantidad=detalle.cantidad, costo_unitario=costo_unitario,

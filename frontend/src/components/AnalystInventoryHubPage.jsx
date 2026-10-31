@@ -1,12 +1,26 @@
+import { useEffect, useState } from 'react';
+
 const options = [
   { id: 'create', title: 'Crear ingredientes' },
   { id: 'view', title: 'Ver inventario actual' },
   { id: 'adjust', title: 'Ajuste de inventario' },
   { id: 'movements', title: 'Ver movimiento de inventario' },
+  { id: 'alerts', title: 'Alertas de precios' },
 ];
 
-function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory, onAdjustInventory, onViewMovements }) {
-  const handlers = { create: onCreate, view: onViewInventory, adjust: onAdjustInventory, movements: onViewMovements };
+function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory, onAdjustInventory, onViewMovements, onViewAlerts }) {
+  const handlers = { create: onCreate, view: onViewInventory, adjust: onAdjustInventory, movements: onViewMovements, alerts: onViewAlerts };
+  const [alertasPendientes, setAlertasPendientes] = useState(0);
+
+  // Cuantas alertas de precio esperan revision, para que se noten desde el menu sin abrir la pantalla.
+  useEffect(() => {
+    let cancelado = false;
+    fetch('/api/admin/alertas-costos/?limite=1', { credentials: 'include', cache: 'no-store' })
+      .then((respuesta) => respuesta.json().catch(() => ({})))
+      .then((json) => { if (!cancelado && json.ok) setAlertasPendientes(Number(json.pendientes) || 0); })
+      .catch(() => {});
+    return () => { cancelado = true; };
+  }, []);
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -26,7 +40,12 @@ function AnalystInventoryHubPage({ isMobile, onBack, onCreate, onViewInventory, 
             onClick={handlers[option.id]}
             style={cardButtonStyle}
           >
-            <div style={cardTitleStyle}>{option.title}</div>
+            <div style={cardTitleStyle}>
+              {option.title}
+              {option.id === 'alerts' && alertasPendientes > 0 ? (
+                <span style={{ marginLeft: 10, padding: '2px 9px', borderRadius: 999, background: '#d81d1d', color: '#fff', fontSize: 13, fontWeight: 800 }}>{alertasPendientes}</span>
+              ) : null}
+            </div>
             <span style={cardLinkStyle}>Continuar</span>
           </button>
         ))}

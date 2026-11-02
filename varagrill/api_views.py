@@ -63,7 +63,7 @@ from .auth_helpers import (
     _is_owner_or_contador_user,
     _is_owner_user,
 )
-from . import compras_anulacion
+from . import compras_anulacion, fechas_registro
 from .costos_historial import con_origen
 from .delivery import CargoDeliveryInvalido, aplicar_cargo, resolver_cargo_delivery
 from .servicios_adicionales import ServiciosInvalidos, aplicar_servicios, resolver_servicios, serializar_lineas
@@ -3144,13 +3144,12 @@ def admin_catalog_view(request):
         unidad = str(data.get('unidad', '')).strip() or 'unidad'
         proveedor = str(data.get('proveedor', '')).strip() or 'Sin proveedor'
         numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
-        fecha_factura_raw = str(data.get('fecha_factura', '') or '').strip()
-        fecha_factura = None
-        if fecha_factura_raw:
-            try:
-                fecha_factura = date.fromisoformat(fecha_factura_raw)
-            except ValueError:
-                return _auth_response({'ok': False, 'message': 'La fecha de la factura no es valida.'}, status=400)
+        # Dia en que de verdad se hizo la compra (hoy por defecto, nunca futuro); el momento exacto del
+        # registro queda aparte en fecha_compra/fecha_creacion.
+        try:
+            fecha_factura = fechas_registro.parse_fecha_real(data.get('fecha_factura'), 'fecha de la factura')
+        except fechas_registro.FechaInvalida as exc:
+            return _auth_response({'ok': False, 'message': str(exc)}, status=400)
         cantidad = data.get('cantidad', 0)
         stock_minimo = data.get('stock_minimo', 0)
         precio_total = data.get('precio_total', 0)
@@ -3575,7 +3574,7 @@ def _importar_ingredientes(
             compra = VGCompra.objects.create(
                 proveedor_nombre=proveedor_nombre or 'Sin proveedor',
                 numero_factura_proveedor=numero_factura_proveedor,
-                fecha_factura=fecha_factura,
+                fecha_factura=fecha_factura or timezone.localdate(),
                 estado='recibido',
                 tasa_cambio_referencia=tasa_cambio_para_registro(),
                 creado_por=operator,
@@ -3809,13 +3808,12 @@ def admin_ingredientes_import_view(request):
 
         proveedor_nombre = str(data.get('proveedor_nombre', '') or '').strip()
         numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
-        fecha_factura_raw = str(data.get('fecha_factura', '') or '').strip()
-        fecha_factura = None
-        if fecha_factura_raw:
-            try:
-                fecha_factura = date.fromisoformat(fecha_factura_raw)
-            except ValueError:
-                return _auth_response({'ok': False, 'message': 'La fecha de la factura no es valida.'}, status=400)
+        # Dia en que de verdad se hizo la compra (hoy por defecto, nunca futuro); el momento exacto del
+        # registro queda aparte en fecha_compra/fecha_creacion.
+        try:
+            fecha_factura = fechas_registro.parse_fecha_real(data.get('fecha_factura'), 'fecha de la factura')
+        except fechas_registro.FechaInvalida as exc:
+            return _auth_response({'ok': False, 'message': str(exc)}, status=400)
 
         # El total ya no se calcula sumando líneas (ver el docstring de
         # _importar_ingredientes): el analista tiene que escribir a mano lo que dice
@@ -4007,6 +4005,7 @@ def _serialize_abono_compra(abono):
         'metodo_pago_id': abono.metodo_pago_id,
         'referencia': abono.referencia,
         'fecha_pago': abono.fecha_pago.isoformat(),
+        'fecha_abono': abono.fecha_abono.isoformat(),
         'tasa_cambio_referencia': str(abono.tasa_cambio_referencia) if abono.tasa_cambio_referencia is not None else None,
         'tasa_manual': abono.tasa_manual,
         'monto_bs': (

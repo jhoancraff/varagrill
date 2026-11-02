@@ -208,7 +208,7 @@ def evaluar(compra):
         })
 
     if any(e['es_efectivo'] for e in efecto) and any(
-        timezone.localtime(a.fecha_pago).date() < hoy for a in abonos if a.metodo_pago.es_efectivo
+        a.fecha_abono < hoy for a in abonos if a.metodo_pago.es_efectivo
     ):
         advertencias.append({
             'codigo': 'caja_de_otro_dia',

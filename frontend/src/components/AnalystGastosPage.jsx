@@ -3,6 +3,7 @@ import Toast from './Toast';
 import UnsavedChangesModal from './UnsavedChangesModal';
 import useToast from '../hooks/useToast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useConfirmacionesFecha, { postConAdvertencias } from '../hooks/useConfirmacionesFecha';
 
 function todayIso() {
   const now = new Date();
@@ -29,6 +30,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante, onVerReporte })
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
+  const { confirmarFecha, confirmarAdvertencias, modales } = useConfirmacionesFecha();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
   const [showCategorias, setShowCategorias] = useState(false);
@@ -90,25 +92,28 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante, onVerReporte })
       showError('No hay metodos de pago activos configurados.'); return;
     }
 
+    // Si la fecha no es la de hoy (ej. se les olvido cargarlo ayer) se pide confirmar que fue ese dia.
+    if (!(await confirmarFecha(form.fecha_gasto, 'gasto'))) {
+      return;
+    }
+
     setSaving(true);
     try {
-      const response = await fetch('/api/admin/gastos/', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          categoria_id: form.categoria_id,
-          descripcion: form.descripcion,
-          monto: tieneMonto ? form.monto : undefined,
-          monto_bs: tieneMontoBs ? form.monto_bs : undefined,
-          fecha_gasto: form.fecha_gasto,
-          proveedor_nombre: form.proveedor_nombre,
-          numero_comprobante: form.numero_comprobante,
-          pagado_de_una_vez: form.pagado,
-          metodo_pago_id: form.pagado ? metodoPagoId : undefined,
-        }),
-      });
-      const data = await response.json();
+      const resultado = await postConAdvertencias('/api/admin/gastos/', {
+        categoria_id: form.categoria_id,
+        descripcion: form.descripcion,
+        monto: tieneMonto ? form.monto : undefined,
+        monto_bs: tieneMontoBs ? form.monto_bs : undefined,
+        fecha_gasto: form.fecha_gasto,
+        proveedor_nombre: form.proveedor_nombre,
+        numero_comprobante: form.numero_comprobante,
+        pagado_de_una_vez: form.pagado,
+        metodo_pago_id: form.pagado ? metodoPagoId : undefined,
+      }, confirmarAdvertencias);
+      if (resultado.cancelado) {
+        return;
+      }
+      const { response, data } = resultado;
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo registrar el gasto.');
       }
@@ -191,6 +196,7 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante, onVerReporte })
 
       <Toast toast={toast} onClose={hideToast} />
       <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
+      {modales}
 
       <section style={panelStyle}>
         <div style={sectionTitleStyle}>Registrar gasto</div>
@@ -232,7 +238,10 @@ function AnalystGastosPage({ isMobile, onBack, onVerComprobante, onVerReporte })
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Fecha del gasto</span>
-            <input type="date" value={form.fecha_gasto} onChange={(e) => setForm((c) => ({ ...c, fecha_gasto: e.target.value }))} style={inputStyle} />
+            <input type="date" value={form.fecha_gasto} max={todayIso()} onChange={(e) => setForm((c) => ({ ...c, fecha_gasto: e.target.value }))} style={inputStyle} required />
+            <span style={{ color: 'var(--vg-f-a89999)', fontSize: 12 }}>
+              El día en que ocurrió (y en que se pagó, si lo registras pagado). Si lo cargas tarde, elige esa fecha.
+            </span>
           </label>
 
           <label style={fieldStyle}>

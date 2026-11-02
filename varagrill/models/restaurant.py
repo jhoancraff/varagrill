@@ -5,7 +5,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.db import models
 
-from .base import VGAuditoria
+from .base import VGAuditoria, hoy_local
 from .contabilidad import VGMetodoPago
 
 
@@ -555,6 +555,9 @@ class VGCompra(VGAuditoria):
         max_length=100, blank=True,
         help_text="Número de la factura física del proveedor, para poder rastrear de dónde vino este lote.",
     )
+    # Dia en que de verdad se hizo la compra (lo elige quien la registra; se corrige con auditoria
+    # desde correcciones_fecha_views.py). Siempre viene con valor al registrar; null solo en datos
+    # muy viejos. El momento exacto del registro es fecha_compra/fecha_creacion (automaticos).
     fecha_factura = models.DateField(
         null=True, blank=True,
         help_text="Fecha real de la factura del proveedor (puede ser distinta a cuándo se cargó al sistema).",
@@ -690,7 +693,11 @@ class VGAbonoCompra(models.Model):
         VGMetodoPago, on_delete=models.PROTECT, related_name="abonos_compra",
     )
     referencia = models.CharField(max_length=100, blank=True)
+    # Momento EXACTO en que se registro el abono en el sistema (automatico, no se edita).
     fecha_pago = models.DateTimeField(auto_now_add=True)
+    # Dia en que de verdad se pago (lo elige quien lo registra); es la fecha que usan la caja, el
+    # banco y la conciliacion. Ver VGAbonoGasto.fecha_abono.
+    fecha_abono = models.DateField(default=hoy_local)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )

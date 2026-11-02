@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 
-from .base import VGAuditoria
+from .base import VGAuditoria, hoy_local
 
 
 # ---------------------------------------------------------------------------
@@ -1259,7 +1259,12 @@ class VGAbonoGasto(models.Model):
     monto = models.DecimalField(max_digits=14, decimal_places=6)
     metodo_pago = models.ForeignKey(VGMetodoPago, on_delete=models.PROTECT, related_name="abonos_gasto")
     referencia = models.CharField(max_length=100, blank=True)
+    # Momento EXACTO en que se registro el abono en el sistema (automatico, no se edita).
     fecha_pago = models.DateTimeField(auto_now_add=True)
+    # Dia en que de verdad se pago (lo elige quien lo registra, puede ser anterior a hoy si se
+    # le olvido cargarlo). ESTA es la fecha que usan la caja, el banco y la conciliacion, no
+    # fecha_pago. Se corrige con auditoria desde correcciones_fecha_views.py.
+    fecha_abono = models.DateField(default=hoy_local)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
     )
@@ -1305,6 +1310,45 @@ class VGCorreccionGasto(VGAuditoria):
 
     def __str__(self):
         return f"Corrección gasto #{self.gasto_id}: {self.motivo[:40]}"
+
+
+class VGCorreccionFecha(VGAuditoria):
+    """
+    Auditoría de cada vez que se corrige la FECHA de un abono (de gasto o de compra) o de una compra
+    ya registrados (ver correcciones_fecha_views.py). Guarda quién, cuándo y por qué, la fecha que
+    tenía y la nueva, y qué advertencias vio y aceptó (ej. que ese día ya tenía la caja cerrada).
+    `objeto_id` apunta al abono o a la compra sin FK porque son tablas distintas; `gasto`/`compra`
+    sí son FK para poder abrir el historial desde el documento. La fecha del gasto en sí se sigue
+    corrigiendo desde el reporte de gastos (VGCorreccionGasto).
+    """
+    TIPOS = [
+        ("abono_gasto", "Abono de gasto"),
+        ("abono_compra", "Abono de compra"),
+        ("compra", "Compra"),
+    ]
+    tipo = models.CharField(max_length=15, choices=TIPOS)
+    objeto_id = models.PositiveIntegerField()
+    gasto = models.ForeignKey(
+        "varagrill.VGGasto", on_delete=models.PROTECT, null=True, blank=True, related_name="correcciones_fecha",
+    )
+    compra = models.ForeignKey(
+        "varagrill.VGCompra", on_delete=models.PROTECT, null=True, blank=True, related_name="correcciones_fecha",
+    )
+    descripcion = models.CharField(max_length=255, help_text="Texto legible de lo que se corrigió, para el historial.")
+    fecha_anterior = models.DateField()
+    fecha_nueva = models.DateField()
+    motivo = models.CharField(max_length=255)
+    advertencias_aceptadas = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = "vg_correcciones_fecha"
+        verbose_name = "Corrección de fecha"
+        verbose_name_plural = "Correcciones de fecha"
+        ordering = ["-fecha_creacion", "-id"]
+        indexes = [models.Index(fields=["tipo", "objeto_id"], name="idx_corrfecha_tipo_obj")]
+
+    def __str__(self):
+        return f"Corrección de fecha ({self.get_tipo_display()} #{self.objeto_id}): {self.fecha_anterior} → {self.fecha_nueva}"
 
 
 class VGInhabilitacionGasto(VGAuditoria):

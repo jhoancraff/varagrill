@@ -55,6 +55,7 @@ import CheckoutPage from './CheckoutPage';
 import AnalystComprasBorradorPage from './AnalystComprasBorradorPage';
 import AnalystAjusteInventarioPage from './AnalystAjusteInventarioPage';
 import AnalystAjusteInventarioHojaPage from './AnalystAjusteInventarioHojaPage';
+import AnalystCorreccionesFechaPage from './AnalystCorreccionesFechaPage';
 import AnalystAlertasCostosPage from './AnalystAlertasCostosPage';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import CuentasPorPagarPage from './CuentasPorPagarPage';
@@ -1171,6 +1172,11 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             isMobile={isMobile}
             onBack={goBackView}
             onVerComprobante={(tipo, documentoId, abonoId) => goToView(`comprobante-pago:${tipo}:${documentoId}:${abonoId}`)}
+          />
+        ) : activeView === 'correcciones-fecha' ? (
+          <AnalystCorreccionesFechaPage
+            isMobile={isMobile}
+            onBack={goBackView}
           />
         ) : activeView === 'gastos-operativos' ? (
           <AnalystGastosPage

@@ -23,7 +23,7 @@ from .api_views import (
     _serialize_compra,
     _serialize_nota_credito_compra,
 )
-from . import compras_anulacion
+from . import compras_anulacion, fechas_registro
 from .costos_historial import costo_efectivo, origen_costo, supera_umbral, umbral_alerta, variacion_pct
 from .auth_helpers import _auth_response, _is_admin_user
 from .gastos_views import _serialize_gasto
@@ -335,6 +335,12 @@ def admin_compra_borrador_confirmar_view(request):
     if not proveedor_nombre:
         return _auth_response({'ok': False, 'message': 'El proveedor es obligatorio para confirmar la carga.'}, status=400)
     numero_factura_proveedor = str(data.get('numero_factura_proveedor', '') or '').strip()
+    # Dia en que de verdad se hizo la compra (hoy por defecto, nunca futuro); el momento exacto del
+    # registro queda aparte en fecha_compra/fecha_creacion.
+    try:
+        fecha_factura = fechas_registro.parse_fecha_real(data.get('fecha_factura'), 'fecha de la factura')
+    except fechas_registro.FechaInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
 
     # El total a pagar YA NO se calcula solo (nunca se asume la suma de las
     # líneas): el analista tiene que escribirlo a mano, en dólares o en
@@ -383,6 +389,7 @@ def admin_compra_borrador_confirmar_view(request):
         compra = VGCompra.objects.create(
             proveedor_nombre=proveedor_nombre,
             numero_factura_proveedor=numero_factura_proveedor,
+            fecha_factura=fecha_factura,
             estado='recibido',
             tasa_cambio_referencia=tasa_cambio_para_registro(data.get('tasa_cambio_referencia')),
             creado_por=request.user,
@@ -550,6 +557,17 @@ def compra_abono_view(request, compra_id):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # Dia en que de verdad se pago (hoy por defecto); el momento exacto del registro queda aparte.
+    try:
+        fecha_abono = fechas_registro.parse_fecha_real(data.get('fecha_abono'), 'fecha del pago')
+        fechas_registro.exigir_aceptadas(
+            fechas_registro.advertencias_dias_cerrados([fecha_abono], metodo_pago), data.get('aceptadas'),
+        )
+    except fechas_registro.FechaInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+    except fechas_registro.RequiereConfirmacion as exc:
+        return fechas_registro.respuesta_confirmacion(exc)
+
     # Tasa propia de quien paga (opcional): los proveedores cobran a tasas distintas a la
     # de la factura/BCV y lo que importa es que los Bs registrados sean los que de verdad
     # salieron del banco. Con ella, los Bs del abono son monto * esta tasa y la deuda en
@@ -639,6 +657,7 @@ def compra_abono_view(request, compra_id):
             referencia=referencia,
             tasa_cambio_referencia=tasa_abono,
             tasa_manual=tasa_manual is not None,
+            fecha_abono=fecha_abono,
             creado_por=request.user,
         )
 

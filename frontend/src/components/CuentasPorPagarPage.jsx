@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import useConfirmacionesFecha, { postConAdvertencias } from '../hooks/useConfirmacionesFecha';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs, formatBsRaw } from '../utils/currency';
 import { consumirAperturaCuentasPorPagarPagadas } from '../utils/fechaContabilidad';
+import { formatearFecha, hoyIso } from '../utils/fechas';
 import AnularCompraModal from './AnularCompraModal';
 import BotonDescargarPdf from './BotonDescargarPdf';
 import ReporteNotasCreditoCompra from './ReporteNotasCreditoCompra';
@@ -91,7 +93,10 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
   // Nº de la transferencia / pago móvil con el que se pagó: se guarda en VGAbonoCompra.referencia
   // (y VGAbonoGasto.referencia), que es lo que la conciliación bancaria cruza con el extracto.
   const [referenciaAbono, setReferenciaAbono] = useState('');
+  // Dia en que de verdad se pago (hoy por defecto); el sistema guarda aparte el momento exacto del registro.
+  const [fechaAbono, setFechaAbono] = useState(hoyIso());
   const [savingAbono, setSavingAbono] = useState(false);
+  const { confirmarFecha, confirmarAdvertencias, modales } = useConfirmacionesFecha();
   const [feedback, setFeedback] = useState('');
   const [feedbackType, setFeedbackType] = useState('success');
   const [ultimoAbonoId, setUltimoAbonoId] = useState(null);
@@ -220,6 +225,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
     setMonedaAbono('USD');
     setTasaAbono('');
     setReferenciaAbono('');
+    setFechaAbono(hoyIso());
     setSelectedCompraId(compra.id);
     setSelectedTipo(compra.tipo);
     fetchCompraDetalle(compra.id, compra.tipo);
@@ -264,6 +270,11 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       return;
     }
 
+    // Si la fecha del pago no es hoy (ej. se les olvido cargarlo ayer) se pide confirmar que fue ese dia.
+    if (!(await confirmarFecha(fechaAbono, 'pago'))) {
+      return;
+    }
+
     setSavingAbono(true);
     setFeedback('');
     setUltimoAbonoId(null);
@@ -271,19 +282,18 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       ? `/api/admin/gastos/${selectedCompraId}/abonos/`
       : `/api/admin/compras/${selectedCompraId}/abonos/`;
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          ...(monedaAbono === 'VES' ? { monto_bs: montoAbono } : { monto: montoAbono }),
-          // Solo si la tasa se cambio a mano: asi un abono normal sigue usando la tasa habitual.
-          ...(tasaAbonoManual ? { tasa_cambio: tasaAbono } : {}),
-          metodo_pago_id: metodoPagoId,
-          referencia: referenciaAbono.trim(),
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
+      const resultado = await postConAdvertencias(url, {
+        ...(monedaAbono === 'VES' ? { monto_bs: montoAbono } : { monto: montoAbono }),
+        // Solo si la tasa se cambio a mano: asi un abono normal sigue usando la tasa habitual.
+        ...(tasaAbonoManual ? { tasa_cambio: tasaAbono } : {}),
+        metodo_pago_id: metodoPagoId,
+        referencia: referenciaAbono.trim(),
+        fecha_abono: fechaAbono,
+      }, confirmarAdvertencias);
+      if (resultado.cancelado) {
+        return;
+      }
+      const { response, data } = resultado;
       if (!response.ok || !data.ok) {
         setFeedbackType('error');
         setFeedback(data.message || 'No se pudo registrar el abono.');
@@ -297,6 +307,7 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       setMontoAbono('');
       setTasaAbono('');
       setReferenciaAbono('');
+    setFechaAbono(hoyIso());
       await fetchCompras();
     } catch (requestError) {
       setFeedbackType('error');
@@ -666,7 +677,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                     {compraDetalle.abonos.map((abono) => (
                       <div key={abono.id} style={lineaRowStyle}>
                         <span>
-                          {abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}
+                          {abono.metodo_pago} — pagado el {abono.fecha_abono ? formatearFecha(abono.fecha_abono) : new Date(abono.fecha_pago).toLocaleDateString('es-VE')}
+                          {' '}· registrado {new Date(abono.fecha_pago).toLocaleString('es-VE')}
                           {abono.referencia ? ` · Ref. ${abono.referencia}` : ''}
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -836,6 +848,19 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
                       onChange={(event) => setReferenciaAbono(event.target.value)}
                       style={inputStyle}
                     />
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      <label style={{ color: 'var(--vg-f-c8bbbb)', fontSize: 12.5 }}>
+                        Fecha del pago — el día en que de verdad pagaste (cámbiala si lo cargas con atraso)
+                      </label>
+                      <input
+                        type="date"
+                        value={fechaAbono}
+                        max={hoyIso()}
+                        onChange={(event) => setFechaAbono(event.target.value || hoyIso())}
+                        style={inputStyle}
+                        required
+                      />
+                    </div>
                     <button type="submit" style={primaryButtonStyle} disabled={savingAbono}>
                       {savingAbono ? 'Registrando...' : 'Registrar abono'}
                     </button>
@@ -850,6 +875,8 @@ function CuentasPorPagarPage({ isMobile, onBack, onVerComprobante }) {
       ) : null}
         </>
       ) : null}
+
+      {modales}
 
       {anulandoCompra ? (
         <AnularCompraModal

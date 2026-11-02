@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from 'react';
 import ConfirmModal from './ConfirmModal';
 import Toast from './Toast';
 import useToast from '../hooks/useToast';
+import useConfirmacionesFecha from '../hooks/useConfirmacionesFecha';
+import { hoyIso } from '../utils/fechas';
 
 const ACCION_LABELS = {
   nuevo: { label: 'Nuevo', color: 'var(--vg-f-8ff0b8)', background: 'rgba(80, 200, 130, 0.18)' },
@@ -13,7 +15,8 @@ const ACCION_LABELS = {
 
 const SELECTABLE_ACCIONES = new Set(['nuevo', 'actualizar']);
 
-const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '', fecha_factura: '' };
+// fecha_factura: el dia en que de verdad se hizo la compra (hoy por defecto; se puede cambiar si se cargo con atraso).
+const nuevoLote = () => ({ proveedor_nombre: '', numero_factura_proveedor: '', fecha_factura: hoyIso() });
 
 function toNumeroOrNull(value) {
   if (value === '' || value === null || value === undefined) {
@@ -40,7 +43,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const fileInputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [rows, setRows] = useState(null);
-  const [lote, setLote] = useState(emptyLote);
+  const [lote, setLote] = useState(nuevoLote);
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
@@ -140,7 +143,9 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     setRows((current) => current.map((row) => (row.fila === fila ? { ...row, ...changes } : row)));
   };
 
-  const handleConfirmClick = () => {
+  const { confirmarFecha, modales } = useConfirmacionesFecha();
+
+  const handleConfirmClick = async () => {
     const items = (rows || []).filter((row) => row.selected);
     if (items.length === 0) {
       showError('Marca al menos una fila para importar.');
@@ -150,6 +155,15 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
     if (!montoFacturaValido) {
       hideToast();
       showMontoError('Debes agregar un monto para la factura (usa 0 si es una cortesía sin costo).');
+      return;
+    }
+
+    if (!lote.fecha_factura) {
+      showError('Elige la fecha de la compra.');
+      return;
+    }
+    // Si la fecha no es hoy (ej. se les olvido cargar una compra de ayer) se pide confirmar que fue ese dia.
+    if (!(await confirmarFecha(lote.fecha_factura, 'compra'))) {
       return;
     }
 
@@ -216,6 +230,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      {modales}
       <Toast toast={montoToast} onClose={hideMontoToast} position="top-left" />
 
       <section style={panelStyle}>
@@ -236,8 +251,12 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
           <input
             type="date"
             value={lote.fecha_factura}
+            max={hoyIso()}
             onChange={(event) => setLote((current) => ({ ...current, fecha_factura: event.target.value }))}
             style={editInputStyle}
+            title="Fecha de la compra"
+            aria-label="Fecha de la compra"
+            required
           />
         </div>
 

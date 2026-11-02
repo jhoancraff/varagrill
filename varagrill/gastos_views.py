@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.views.decorators.csrf import csrf_exempt
 
-from . import gastos_inhabilitacion
+from . import fechas_registro, gastos_inhabilitacion
 from .auth_helpers import _auth_response, _is_admin_user
 from .models import VGAbonoGasto, VGCategoriaGasto, VGCorreccionGasto, VGGasto, VGInhabilitacionGasto, VGMetodoPago
 from .tasa_cambio import obtener_tasa_actual, tasa_cambio_para_registro
@@ -38,6 +38,7 @@ def _serialize_abono_gasto(abono):
         'metodo_pago_id': abono.metodo_pago_id,
         'referencia': abono.referencia,
         'fecha_pago': abono.fecha_pago.isoformat(),
+        'fecha_abono': abono.fecha_abono.isoformat(),
         'tasa_cambio_referencia': str(abono.tasa_cambio_referencia) if abono.tasa_cambio_referencia is not None else None,
         'tasa_manual': abono.tasa_manual,
         'monto_bs': (
@@ -186,6 +187,7 @@ def _serialize_gasto(gasto, incluir_detalle=False, ultima_correccion=None, tasa_
 
 def _registrar_abono_gasto(
     gasto, monto, metodo_pago, referencia, operator, tasa_cambio_referencia=None, tasa_manual=False,
+    fecha_abono=None,
 ):
     """
     Aplica un abono a un gasto: crea el VGAbonoGasto y deja saldo_pendiente/estado_pago
@@ -193,11 +195,14 @@ def _registrar_abono_gasto(
     admin_gastos_view al crear un gasto ya pagado (abono por el monto completo en el mismo
     paso). El caller es responsable de validar monto > 0 y monto <= gasto.saldo_pendiente
     antes de llamar esta funcion, y de envolverla en una transaccion.
+
+    `fecha_abono` es el dia en que de verdad se pago (ver fechas_registro.py); sin ella, hoy.
     """
     abono = VGAbonoGasto.objects.create(
         gasto=gasto, monto=monto, metodo_pago=metodo_pago, referencia=referencia, creado_por=operator,
         tasa_cambio_referencia=tasa_cambio_referencia if tasa_cambio_referencia is not None else tasa_cambio_para_registro(),
         tasa_manual=tasa_manual,
+        **({'fecha_abono': fecha_abono} if fecha_abono else {}),
     )
     # 6 decimales, no 2 (ver el comentario en VGGasto.saldo_pendiente) —
     # nunca negativo. TOLERANCIA_CIERRE_ABONO perdona un residuo minusculo
@@ -394,7 +399,13 @@ def admin_gastos_view(request):
         if monto <= 0:
             return _auth_response({'ok': False, 'message': 'El monto debe ser mayor a cero.'}, status=400)
 
-    fecha_gasto = _parse_fecha(data.get('fecha_gasto'), default=date.today())
+    # La fecha en que de verdad ocurrio el gasto (puede ser anterior a hoy si se olvido cargarlo); el
+    # momento exacto del registro queda aparte en fecha_creacion. Un gasto registrado ya pagado se
+    # paga ese mismo dia: su abono toma esta misma fecha.
+    try:
+        fecha_gasto = fechas_registro.parse_fecha_real(data.get('fecha_gasto'), 'fecha del gasto')
+    except fechas_registro.FechaInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
 
     pagado_de_una_vez = bool(data.get('pagado_de_una_vez'))
     metodo_pago = None
@@ -403,6 +414,12 @@ def admin_gastos_view(request):
             metodo_pago = VGMetodoPago.objects.get(pk=int(data.get('metodo_pago_id')), activo=True)
         except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
             return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
+        try:
+            fechas_registro.exigir_aceptadas(
+                fechas_registro.advertencias_dias_cerrados([fecha_gasto], metodo_pago), data.get('aceptadas'),
+            )
+        except fechas_registro.RequiereConfirmacion as exc:
+            return fechas_registro.respuesta_confirmacion(exc)
 
     with transaction.atomic():
         gasto = VGGasto.objects.create(
@@ -425,7 +442,7 @@ def admin_gastos_view(request):
             actualizado_por=request.user,
         )
         if pagado_de_una_vez:
-            _registrar_abono_gasto(gasto, monto, metodo_pago, '', request.user)
+            _registrar_abono_gasto(gasto, monto, metodo_pago, '', request.user, fecha_abono=fecha_gasto)
 
     return _auth_response({
         'ok': True,
@@ -556,6 +573,11 @@ def gasto_detail_view(request, gasto_id):
             if fecha_nueva != gasto.fecha_gasto:
                 correccion_kwargs['fecha_gasto_anterior'] = gasto.fecha_gasto
                 correccion_kwargs['fecha_gasto_nueva'] = fecha_nueva
+                # Los pagos que se hicieron "ese mismo dia" (el gasto registrado ya pagado) se
+                # corrigen junto con el gasto: la caja y el banco los cuentan por la fecha del
+                # abono. Los pagos hechos otro dia no se tocan (se corrigen aparte, con su propia
+                # auditoria, en la seccion de correccion de fechas).
+                gasto.abonos.filter(fecha_abono=gasto.fecha_gasto).update(fecha_abono=fecha_nueva)
                 gasto.fecha_gasto = fecha_nueva
                 gasto_update_fields.append('fecha_gasto')
                 cambios.append('la fecha')
@@ -651,6 +673,17 @@ def gasto_abono_view(request, gasto_id):
     except (TypeError, ValueError, VGMetodoPago.DoesNotExist):
         return _auth_response({'ok': False, 'message': 'El metodo de pago es invalido.'}, status=400)
 
+    # Dia en que de verdad se pago (hoy por defecto); el momento exacto del registro queda aparte.
+    try:
+        fecha_abono = fechas_registro.parse_fecha_real(data.get('fecha_abono'), 'fecha del pago')
+        fechas_registro.exigir_aceptadas(
+            fechas_registro.advertencias_dias_cerrados([fecha_abono], metodo_pago), data.get('aceptadas'),
+        )
+    except fechas_registro.FechaInvalida as exc:
+        return _auth_response({'ok': False, 'message': str(exc)}, status=400)
+    except fechas_registro.RequiereConfirmacion as exc:
+        return fechas_registro.respuesta_confirmacion(exc)
+
     with transaction.atomic():
         try:
             gasto = VGGasto.objects.select_for_update().get(pk=gasto_id)
@@ -716,7 +749,7 @@ def gasto_abono_view(request, gasto_id):
         referencia = str(data.get('referencia', '') or '').strip()
         abono = _registrar_abono_gasto(
             gasto, monto, metodo_pago, referencia, request.user,
-            tasa_cambio_referencia=tasa_abono, tasa_manual=tasa_manual is not None,
+            tasa_cambio_referencia=tasa_abono, tasa_manual=tasa_manual is not None, fecha_abono=fecha_abono,
         )
 
     return _auth_response({

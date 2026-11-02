@@ -1,5 +1,11 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
+
+
+def hoy_local():
+    """Fecha de hoy en la zona horaria del negocio (default de los campos de fecha real elegida)."""
+    return timezone.localdate()
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,8 @@ from django.utils import timezone
 from unittest.mock import MagicMock, patch
 
 from varagrill.models import (
+    VGAbonoCompra,
+    VGAbonoGasto,
     VGCategoriaGasto,
     VGCategoriaProducto,
     VGCliente,
@@ -5314,7 +5316,7 @@ class ConciliacionBancariaMotorTests(TestCase):
             fecha_gasto=date(2026, 10, dia), tasa_cambio_referencia=Decimal('100'),
         )
         a = self.M.AbonoGasto.objects.create(gasto=g, monto=g.monto, metodo_pago=self.pm, tasa_cambio_referencia=Decimal('100'))
-        self.M.AbonoGasto.objects.filter(pk=a.pk).update(fecha_pago=self.dt(dia))
+        self.M.AbonoGasto.objects.filter(pk=a.pk).update(fecha_pago=self.dt(dia), fecha_abono=self.dt(dia).date())
         return g, a
 
     def conciliar(self, desde=1, hasta=31):
@@ -5397,7 +5399,7 @@ class ConciliacionBancariaMotorTests(TestCase):
     def test_debito_sin_referencia_se_sugiere_por_monto_y_nombre_del_proveedor(self):
         c = self.M.Compra.objects.create(proveedor_nombre='Despacho Alfredo', estado='recibido', total=Decimal('80'), saldo_pendiente=0)
         a = self.M.AbonoCompra.objects.create(compra=c, monto=Decimal('80'), metodo_pago=self.pm, tasa_cambio_referencia=Decimal('100'))
-        self.M.AbonoCompra.objects.filter(pk=a.pk).update(fecha_pago=self.dt(5))
+        self.M.AbonoCompra.objects.filter(pk=a.pk).update(fecha_pago=self.dt(5), fecha_abono=self.dt(5).date())
         m = self.mov('debito', '8000.00', ref='555', desc='TRF VZLA V030067809 X', obs='Despacho alfredo')
         self.assertEqual(self.conciliar()['por_revisar'], 1)
         v = m.vinculos.get()
@@ -5468,7 +5470,7 @@ class ConciliacionBancariaMotorTests(TestCase):
         a = self.M.AbonoCompra.objects.create(
             compra=c, monto=c.total, metodo_pago=self.pm, referencia=referencia, tasa_cambio_referencia=Decimal('100'),
         )
-        self.M.AbonoCompra.objects.filter(pk=a.pk).update(fecha_pago=self.dt(dia))
+        self.M.AbonoCompra.objects.filter(pk=a.pk).update(fecha_pago=self.dt(dia), fecha_abono=self.dt(dia).date())
         return c, a
 
     def test_una_transferencia_que_paga_una_compra_y_un_gasto_con_la_misma_referencia_se_concilia_sola(self):
@@ -5693,9 +5695,9 @@ class ConciliacionBancariaViewsTests(TestCase):
             categoria=VGCategoriaGasto.objects.get_or_create(nombre='Servicios')[0], descripcion='Hielo', monto=D('0.40'),
             saldo_pendiente=0, estado_pago='pagado', fecha_gasto=date(2026, 10, 1), tasa_cambio_referencia=tasa,
         )
-        ag = VGAbonoGasto.objects.create(gasto=g, monto=g.monto, metodo_pago=metodo, tasa_cambio_referencia=tasa)
+        ag = VGAbonoGasto.objects.create(gasto=g, monto=g.monto, metodo_pago=metodo, tasa_cambio_referencia=tasa, fecha_abono=date(2026, 10, 1))
         c = VGCompra.objects.create(proveedor_nombre='Prov', estado='recibido', total=D('0.60'), saldo_pendiente=0)
-        ac = VGAbonoCompra.objects.create(compra=c, monto=c.total, metodo_pago=metodo, tasa_cambio_referencia=tasa)
+        ac = VGAbonoCompra.objects.create(compra=c, monto=c.total, metodo_pago=metodo, tasa_cambio_referencia=tasa, fecha_abono=date(2026, 10, 1))
         self.client.force_login(self.admin)
         url = self.BASE + f'movimientos/{debito.id}/accion/'
         r = self.client.post(url, data=json.dumps({'accion': 'elegir', 'registros': 'basura'}), content_type='application/json')
@@ -7077,3 +7079,292 @@ class AjusteInventarioHojasTests(TestCase):
         self.assertEqual(self.client.get(self.BASE).status_code, 401)
         self.assertEqual(self.client.get(f"{self.BASE}{hoja['id']}/").status_code, 401)
         self.assertEqual(self.post('crear/', {}).status_code, 401)
+
+
+
+class FechasRealesTests(TestCase):
+    """
+    Fecha real elegida al registrar un gasto, una compra o un abono (fechas_registro.py) y su correccion con
+    auditoria (correcciones_fecha_views.py): el momento exacto del registro no cambia, pero la caja, el banco y
+    la conciliacion cuentan la fecha elegida.
+    """
+
+    def setUp(self):
+        from varagrill.models import VGCategoriaGasto
+        rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_rol, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='fr_admin', password='claveFr123', cedula='96000050', email='fr@test.test', id_role=rol,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='fr_cajera', password='claveFr123', cedula='96000051', email='frc@test.test', id_role=cajera_rol,
+        )
+        self.client.force_login(self.admin)
+        _set_tasa_actual('100.0000')
+        self.hoy = timezone.localdate()
+        self.ayer = self.hoy - timedelta(days=1)
+        self.anteayer = self.hoy - timedelta(days=2)
+        self.efectivo = VGMetodoPago.objects.create(nombre='Efectivo FR', moneda='USD', es_efectivo=True)
+        self.banco = VGMetodoPago.objects.create(nombre='Pago movil FR', moneda='VES', cuenta_bancaria='Banco FR')
+        self.categoria = VGCategoriaGasto.objects.create(nombre='Servicios FR')
+
+    def post(self, url, cuerpo):
+        return self.client.post(url, data=json.dumps(cuerpo), content_type='application/json')
+
+    def crear_gasto(self, fecha=None, pagado=True, metodo=None, monto='40', **extra):
+        cuerpo = {
+            'categoria_id': self.categoria.id, 'descripcion': 'Luz FR', 'monto': monto,
+            'pagado_de_una_vez': pagado, **extra,
+        }
+        if fecha is not None:
+            cuerpo['fecha_gasto'] = fecha.isoformat()
+        if pagado:
+            cuerpo['metodo_pago_id'] = (metodo or self.efectivo).id
+        return self.post('/api/admin/gastos/', cuerpo)
+
+    def crear_compra(self, total='100'):
+        compra = VGCompra.objects.create(
+            proveedor_nombre='Proveedor FR', estado='recibido', total=Decimal(total), saldo_pendiente=Decimal(total),
+            tasa_cambio_referencia=Decimal('100.0000'), fecha_factura=self.ayer,
+        )
+        return compra
+
+    def test_un_gasto_pagado_cargado_hoy_con_fecha_de_ayer_cuenta_en_la_caja_de_ayer(self):
+        from varagrill.reportes import gastos_efectivo_dia
+        r = self.crear_gasto(fecha=self.ayer)
+        self.assertEqual(r.status_code, 201, r.content)
+        abono = VGAbonoGasto.objects.get()
+        self.assertEqual(abono.fecha_abono, self.ayer)
+        # el momento exacto del registro sigue siendo ahora
+        self.assertEqual(timezone.localtime(abono.fecha_pago).date(), self.hoy)
+        self.assertEqual(r.json()['gasto']['abonos'][0]['fecha_abono'], self.ayer.isoformat())
+        self.assertEqual(gastos_efectivo_dia(self.ayer), Decimal('40'))
+        self.assertEqual(gastos_efectivo_dia(self.hoy), Decimal('0'))
+
+    def test_sin_fecha_el_gasto_y_su_pago_son_de_hoy(self):
+        r = self.crear_gasto()
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(VGGasto.objects.get().fecha_gasto, self.hoy)
+        self.assertEqual(VGAbonoGasto.objects.get().fecha_abono, self.hoy)
+
+    def test_una_fecha_futura_o_invalida_se_rechaza(self):
+        manana = self.hoy + timedelta(days=1)
+        self.assertEqual(self.crear_gasto(fecha=manana).status_code, 400)
+        self.assertEqual(self.crear_gasto(fecha_gasto='no-es-fecha').status_code, 400)
+        self.assertFalse(VGGasto.objects.exists())
+
+    def test_abono_posterior_de_un_gasto_pendiente_lleva_su_propia_fecha(self):
+        self.crear_gasto(fecha=self.anteayer, pagado=False)
+        gasto = VGGasto.objects.get()
+        url = f'/api/admin/gastos/{gasto.id}/abonos/'
+        r = self.post(url, {'monto': '10', 'metodo_pago_id': self.efectivo.id, 'fecha_abono': self.ayer.isoformat()})
+        self.assertEqual(r.status_code, 201, r.content)
+        r = self.post(url, {'monto': '5', 'metodo_pago_id': self.efectivo.id})  # sin fecha: hoy
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(sorted(a.fecha_abono for a in gasto.abonos.all()), [self.ayer, self.hoy])
+        manana = (self.hoy + timedelta(days=1)).isoformat()
+        r = self.post(url, {'monto': '5', 'metodo_pago_id': self.efectivo.id, 'fecha_abono': manana})
+        self.assertEqual(r.status_code, 400)
+
+    def test_pagar_en_efectivo_en_un_dia_con_la_caja_cerrada_pide_confirmacion(self):
+        from varagrill.models import VGCierreCaja
+        VGCierreCaja.objects.create(fecha=self.ayer)
+        r = self.crear_gasto(fecha=self.ayer)
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertTrue(r.json()['requiere_confirmacion'])
+        codigos = [a['codigo'] for a in r.json()['advertencias']]
+        self.assertEqual(codigos, [f'caja_cerrada_{self.ayer.isoformat()}'])
+        self.assertFalse(VGGasto.objects.exists())
+        r = self.crear_gasto(fecha=self.ayer, aceptadas=codigos)
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_pagar_a_una_cuenta_con_conciliacion_cerrada_pide_confirmacion(self):
+        from varagrill.models import VGCierreConciliacion
+        VGCierreConciliacion.objects.create(cuenta_bancaria='Banco FR', fecha=self.ayer, estado='vigente')
+        r = self.crear_gasto(fecha=self.ayer, metodo=self.banco)
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertEqual([a['codigo'] for a in r.json()['advertencias']], [f'conciliacion_cerrada_{self.ayer.isoformat()}'])
+
+    def test_abono_de_compra_con_fecha_elegida(self):
+        compra = self.crear_compra()
+        r = self.post(
+            f'/api/admin/compras/{compra.id}/abonos/',
+            {'monto': '30', 'metodo_pago_id': self.efectivo.id, 'fecha_abono': self.ayer.isoformat()},
+        )
+        self.assertEqual(r.status_code, 201, r.content)
+        abono = VGAbonoCompra.objects.get()
+        self.assertEqual(abono.fecha_abono, self.ayer)
+        self.assertEqual(r.json()['abono']['fecha_abono'], self.ayer.isoformat())
+
+    def test_el_flujo_bancario_agrupa_los_pagos_por_su_fecha_real(self):
+        from varagrill.reportes import _bancos_seleccionables, detalle_flujo_bancario_dia
+        gasto = self.crear_gasto(fecha=self.ayer, metodo=self.banco, monto='25')
+        self.assertEqual(gasto.status_code, 201, gasto.content)
+        compra = self.crear_compra()
+        r = self.post(f'/api/admin/compras/{compra.id}/abonos/', {
+            'monto': '10', 'metodo_pago_id': self.banco.id, 'fecha_abono': self.anteayer.isoformat(),
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        clave = next(b['clave'] for b in _bancos_seleccionables() if b['nombre'] == 'Banco FR')
+
+        def salidas(dia):
+            return [m['tipo_registro'] for m in detalle_flujo_bancario_dia(dia, clave, 'salida')]
+
+        # ambos se cargaron hoy, pero salieron del banco en la fecha que se eligio
+        self.assertEqual(salidas(self.ayer), ['abono_gasto'])
+        self.assertEqual(salidas(self.anteayer), ['abono_compra'])
+        self.assertEqual(salidas(self.hoy), [])
+
+    def test_confirmar_el_borrador_de_compra_usa_la_fecha_elegida(self):
+        ingrediente = VGIngrediente.objects.create(nombre='Harina FR', unidad_medida='g', stock_actual=Decimal('0'), costo_unitario=Decimal('0.01'))
+        r = self.post('/api/admin/compras/borrador/agregar/', {'ingrediente_id': ingrediente.id, 'cantidad': '100', 'precio_total': '10'})
+        self.assertEqual(r.status_code, 201, r.content)
+        r = self.post('/api/admin/compras/borrador/confirmar/', {
+            'proveedor_nombre': 'Proveedor FR', 'total_a_pagar': '10', 'fecha_factura': self.ayer.isoformat(),
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(VGCompra.objects.get().fecha_factura, self.ayer)
+
+    def test_una_compra_sin_fecha_queda_con_la_de_hoy_y_una_futura_se_rechaza(self):
+        ingrediente = VGIngrediente.objects.create(nombre='Sal FR', unidad_medida='g', stock_actual=Decimal('0'), costo_unitario=Decimal('0.01'))
+        self.post('/api/admin/compras/borrador/agregar/', {'ingrediente_id': ingrediente.id, 'cantidad': '100', 'precio_total': '10'})
+        manana = (self.hoy + timedelta(days=1)).isoformat()
+        r = self.post('/api/admin/compras/borrador/confirmar/', {'proveedor_nombre': 'P', 'total_a_pagar': '10', 'fecha_factura': manana})
+        self.assertEqual(r.status_code, 400)
+        r = self.post('/api/admin/compras/borrador/confirmar/', {'proveedor_nombre': 'P', 'total_a_pagar': '10'})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(VGCompra.objects.get().fecha_factura, self.hoy)
+
+    def test_corregir_la_fecha_del_gasto_mueve_su_pago_del_mismo_dia(self):
+        self.crear_gasto(fecha=self.ayer)
+        gasto = VGGasto.objects.get()
+        r = self.post(f'/api/admin/gastos/{gasto.id}/', {'action': 'editar', 'fecha_gasto': self.anteayer.isoformat(), 'motivo': 'Fecha equivocada'})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(VGAbonoGasto.objects.get().fecha_abono, self.anteayer)
+
+    # ---- seccion "Corregir fechas" ---------------------------------------------------------------------------
+    URL = '/api/admin/correcciones-fecha/'
+
+    def corregir(self, tipo, objeto_id, fecha, motivo='Se registro con la fecha equivocada', **extra):
+        return self.post(self.URL, {'tipo': tipo, 'objeto_id': objeto_id, 'fecha_nueva': fecha.isoformat(), 'motivo': motivo, **extra})
+
+    def corregir_ok(self, tipo, objeto_id, fecha, **extra):
+        # Igual que la interfaz: si el servidor pide confirmar advertencias, las acepta y reenvia.
+        r = self.corregir(tipo, objeto_id, fecha, **extra)
+        if r.status_code == 409 and r.json().get('requiere_confirmacion'):
+            r = self.corregir(tipo, objeto_id, fecha, aceptadas=[a['codigo'] for a in r.json()['advertencias']], **extra)
+        return r
+
+    def test_corregir_la_fecha_de_un_abono_de_gasto_con_auditoria(self):
+        from varagrill.models import VGCorreccionFecha
+        self.crear_gasto(fecha=self.hoy)
+        abono = VGAbonoGasto.objects.get()
+        momento = abono.fecha_pago
+        r = self.corregir_ok('abono_gasto', abono.id, self.ayer)
+        self.assertEqual(r.status_code, 200, r.content)
+        abono.refresh_from_db()
+        self.assertEqual(abono.fecha_abono, self.ayer)
+        self.assertEqual(abono.fecha_pago, momento)  # el momento exacto del registro no se toca
+        correccion = VGCorreccionFecha.objects.get()
+        self.assertEqual((correccion.tipo, correccion.objeto_id, correccion.fecha_anterior, correccion.fecha_nueva), ('abono_gasto', abono.id, self.hoy, self.ayer))
+        self.assertEqual((correccion.motivo, correccion.creado_por_id, correccion.gasto_id), ('Se registro con la fecha equivocada', self.admin.id, abono.gasto_id))
+        from varagrill.reportes import gastos_efectivo_dia
+        self.assertEqual((gastos_efectivo_dia(self.ayer), gastos_efectivo_dia(self.hoy)), (Decimal('40'), Decimal('0')))
+
+    def test_corregir_exige_motivo_fecha_valida_y_distinta(self):
+        self.crear_gasto(fecha=self.hoy)
+        abono = VGAbonoGasto.objects.get()
+        self.assertEqual(self.corregir('abono_gasto', abono.id, self.ayer, motivo='corto').status_code, 400)
+        self.assertEqual(self.corregir('abono_gasto', abono.id, self.hoy).status_code, 400)
+        self.assertEqual(self.corregir('abono_gasto', abono.id, self.hoy + timedelta(days=1)).status_code, 400)
+        self.assertEqual(self.post(self.URL, {'tipo': 'abono_gasto', 'objeto_id': abono.id, 'motivo': 'Motivo suficiente'}).status_code, 400)
+        self.assertEqual(self.post(self.URL, {'tipo': 'otra', 'objeto_id': 1, 'fecha_nueva': self.ayer.isoformat(), 'motivo': 'Motivo suficiente'}).status_code, 400)
+        self.assertEqual(self.corregir('abono_gasto', 999999, self.ayer).status_code, 404)
+        abono.refresh_from_db()
+        self.assertEqual(abono.fecha_abono, self.hoy)
+
+    def test_corregir_a_un_dia_con_caja_cerrada_exige_aceptar_la_advertencia(self):
+        from varagrill.models import VGCierreCaja, VGCorreccionFecha
+        self.crear_gasto(fecha=self.hoy)
+        abono = VGAbonoGasto.objects.get()
+        VGCierreCaja.objects.create(fecha=self.ayer)
+        r = self.corregir('abono_gasto', abono.id, self.ayer)
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertTrue(r.json()['requiere_confirmacion'])
+        codigos = [a['codigo'] for a in r.json()['advertencias']]
+        self.assertIn(f'caja_cerrada_{self.ayer.isoformat()}', codigos)
+        abono.refresh_from_db()
+        self.assertEqual(abono.fecha_abono, self.hoy)
+        self.assertFalse(VGCorreccionFecha.objects.exists())
+        r = self.corregir('abono_gasto', abono.id, self.ayer, aceptadas=codigos)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(VGCorreccionFecha.objects.get().advertencias_aceptadas, codigos)
+
+    def test_corregir_avisa_si_cambia_de_mes_o_queda_antes_del_gasto(self):
+        self.crear_gasto(fecha=self.hoy)
+        abono = VGAbonoGasto.objects.get()
+        anterior = self.hoy - timedelta(days=45)
+        r = self.corregir('abono_gasto', abono.id, anterior)
+        self.assertEqual(r.status_code, 409)
+        codigos = {a['codigo'] for a in r.json()['advertencias']}
+        self.assertEqual(codigos, {'cambia_periodo', 'pago_antes_del_documento'})
+
+    def test_corregir_la_fecha_de_un_abono_de_compra_y_de_la_compra(self):
+        compra = self.crear_compra()
+        self.post(f'/api/admin/compras/{compra.id}/abonos/', {'monto': '30', 'metodo_pago_id': self.efectivo.id})
+        abono = VGAbonoCompra.objects.get()
+        r = self.corregir_ok('abono_compra', abono.id, self.ayer)
+        self.assertEqual(r.status_code, 200, r.content)
+        abono.refresh_from_db()
+        self.assertEqual(abono.fecha_abono, self.ayer)
+        # la compra: la nueva fecha queda despues del primer pago -> advierte
+        r = self.corregir('compra', compra.id, self.hoy)
+        self.assertEqual(r.status_code, 409, r.content)
+        self.assertIn('compra_despues_de_pagos', [a['codigo'] for a in r.json()['advertencias']])
+        r = self.corregir_ok('compra', compra.id, self.anteayer)
+        self.assertEqual(r.status_code, 200, r.content)
+        compra.refresh_from_db()
+        self.assertEqual(compra.fecha_factura, self.anteayer)
+
+    def test_no_se_corrige_un_pago_de_un_gasto_inhabilitado_ni_de_una_compra_anulada(self):
+        self.crear_gasto(fecha=self.hoy)
+        abono = VGAbonoGasto.objects.get()
+        VGGasto.objects.update(inhabilitado=True)
+        self.assertEqual(self.corregir('abono_gasto', abono.id, self.ayer).status_code, 409)
+        compra = self.crear_compra()
+        self.post(f'/api/admin/compras/{compra.id}/abonos/', {'monto': '30', 'metodo_pago_id': self.efectivo.id})
+        VGCompra.objects.update(estado='cancelado')
+        self.assertEqual(self.corregir('abono_compra', VGAbonoCompra.objects.get().id, self.ayer).status_code, 409)
+        self.assertEqual(self.corregir('compra', compra.id, self.anteayer).status_code, 409)
+
+    def test_el_listado_y_el_historial(self):
+        self.crear_gasto(fecha=self.ayer)
+        compra = self.crear_compra()
+        self.post(f'/api/admin/compras/{compra.id}/abonos/', {'monto': '30', 'metodo_pago_id': self.efectivo.id})
+        desde = self.anteayer.isoformat()
+
+        def listar(**params):
+            return self.client.get(self.URL, {'desde': desde, 'hasta': self.hoy.isoformat(), **params}).json()
+
+        gastos = listar(tipo='abono_gasto')
+        self.assertEqual([i['fecha'] for i in gastos['items']], [self.ayer.isoformat()])
+        self.assertTrue(gastos['items'][0]['editable'])
+        self.assertEqual(len(listar(tipo='abono_gasto', q='luz')['items']), 1)
+        self.assertEqual(len(listar(tipo='abono_gasto', q='nada')['items']), 0)
+        self.assertEqual(len(listar(tipo='abono_compra')['items']), 1)
+        self.assertEqual(len(listar(tipo='compra')['items']), 1)
+        self.assertEqual(listar(tipo='historial')['items'], [])
+        self.corregir_ok('abono_gasto', VGAbonoGasto.objects.get().id, self.anteayer)
+        historial = listar(tipo='historial')['items']
+        self.assertEqual(len(historial), 1)
+        self.assertEqual((historial[0]['fecha_anterior'], historial[0]['fecha_nueva']), (self.ayer.isoformat(), self.anteayer.isoformat()))
+        self.assertEqual(listar(tipo='abono_gasto')['items'][0]['correcciones'], 1)
+        self.assertEqual(self.client.get(self.URL, {'tipo': 'otra'}).status_code, 400)
+        self.assertEqual(self.client.get(self.URL, {'desde': 'x'}).status_code, 400)
+
+    def test_solo_un_administrador(self):
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.assertEqual(self.corregir('abono_gasto', 1, self.ayer).status_code, 401)
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.put(self.URL).status_code, 405)

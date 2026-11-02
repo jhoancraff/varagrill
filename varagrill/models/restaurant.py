@@ -923,11 +923,14 @@ class VGCierreInventario(VGAuditoria):
 
 class VGAjusteInventario(VGAuditoria):
     """
-    Cabecera de una nota de ajuste de inventario — el `id` de este registro ES
-    el "numero de nota" que ve el analista. `estado='confirmado'` no significa
-    que el ajuste este cerrado a mas ediciones dentro del mismo mes: solo
-    indica que ya tiene al menos una linea aplicada al stock (ver
-    VGDetalleAjusteInventario.aplicado) — el ajuste sigue disponible para
+    Cabecera de una "hoja" de ajuste de inventario — el `id` de este registro ES
+    el "numero de nota" que ve el analista. Cada hoja agrupa los ajustes de una
+    misma tarea (ej. "Conteo cocina"); un mismo dia puede tener varias. El
+    `titulo` es opcional: sin el, la pantalla muestra "Ajuste #id".
+
+    `estado='confirmado'` no significa que la hoja este cerrada a mas ediciones:
+    solo indica que ya tiene al menos una linea aplicada al stock (ver
+    VGDetalleAjusteInventario.aplicado) — la hoja sigue disponible para
     agregarle mas lineas despues, hasta que se cierre el mes completo (ver
     VGCierreInventario).
     """
@@ -935,6 +938,7 @@ class VGAjusteInventario(VGAuditoria):
     estado = models.CharField(max_length=20, choices=ESTADOS, default="abierto")
     anio = models.PositiveIntegerField()
     mes = models.PositiveSmallIntegerField()
+    titulo = models.CharField(max_length=120, blank=True)
     notas = models.TextField(blank=True)
 
     class Meta:

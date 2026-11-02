@@ -1,220 +1,87 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ConfirmModal from './ConfirmModal';
+import { RangoFechas, toIso, todayIso } from './FiltroFechas';
 import Toast from './Toast';
-import UnsavedChangesModal from './UnsavedChangesModal';
 import useToast from '../hooks/useToast';
-import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import { badgeEstadoStyle, estadoHoja, formatFechaHora, nombreHoja, nombreMes } from '../utils/ajusteInventario';
 
-const emptyItemForm = { nombre: '', ingrediente_id: '', tipo: 'suma', cantidad: '', motivo: '' };
-
-const MESES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
-
-function nombreMes(mes) {
-  return MESES[(mes || 1) - 1] || '';
+function primerDiaDelMesIso() {
+  const hoy = new Date();
+  return toIso(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
 }
 
-function AnalystAjusteInventarioPage({ isMobile, onBack }) {
-  const [inventory, setInventory] = useState([]);
-  const [estado, setEstado] = useState({ anio: null, mes: null, mes_cerrado: false, ajuste: null, historico: [] });
+// Lista de hojas de ajuste de inventario: cada hoja agrupa los ajustes de una tarea (un mismo dia puede tener
+// varias) y se busca por fecha, numero, titulo o ingrediente. "Nueva hoja" crea una y la abre; tocar una abre
+// su detalle (AnalystAjusteInventarioHojaPage, ruta 'admin-ingredients-ajuste:<id>' en WelcomeScreen). Aqui
+// tambien vive el cierre mensual, que deja de solo lectura todas las hojas del mes.
+function AnalystAjusteInventarioPage({ isMobile, onBack, onOpenHoja }) {
+  const [desde, setDesde] = useState(primerDiaDelMesIso());
+  const [hasta, setHasta] = useState(todayIso());
+  const [busqueda, setBusqueda] = useState('');
+  const [busquedaAplicada, setBusquedaAplicada] = useState('');
+  const [estado, setEstado] = useState({ anio: null, mes: null, mes_cerrado: false, hojas: [] });
   const [loading, setLoading] = useState(true);
-  const [itemForm, setItemForm] = useState(emptyItemForm);
-  const [isNameFocused, setIsNameFocused] = useState(false);
-  const [addingItem, setAddingItem] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [editValue, setEditValue] = useState('');
-  const [savingEdit, setSavingEdit] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [discarding, setDiscarding] = useState(false);
+  const [error, setError] = useState('');
+  const [titulo, setTitulo] = useState('');
+  const [creando, setCreando] = useState(false);
   const [cierreModalOpen, setCierreModalOpen] = useState(false);
   const [cerrandoMes, setCerrandoMes] = useState(false);
+  const peticionRef = useRef(0);
   const { toast, showSuccess, showError, hideToast } = useToast();
-  // Lo unico que se perderia al salir sin guardar es la fila a medio llenar
-  // (itemForm) — cada linea ya agregada al ajuste queda persistida en el
-  // servidor de inmediato, igual que en el borrador de compras.
-  const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard({ itemForm });
+
+  // Espera a que se deje de escribir para no pedir la lista en cada tecla.
+  useEffect(() => {
+    const timer = setTimeout(() => setBusquedaAplicada(busqueda.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [busqueda]);
+
+  const cargar = useCallback(async () => {
+    const numeroPeticion = peticionRef.current + 1;
+    peticionRef.current = numeroPeticion;
+    setLoading(true);
+    setError('');
+    try {
+      const params = new URLSearchParams({ desde, hasta });
+      if (busquedaAplicada) params.set('q', busquedaAplicada);
+      const response = await fetch(`/api/admin/inventario/ajuste/?${params.toString()}`, { credentials: 'include', cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (numeroPeticion !== peticionRef.current) return;
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || 'No se pudieron cargar las hojas de ajuste.');
+      }
+      setEstado(data);
+    } catch (requestError) {
+      if (numeroPeticion !== peticionRef.current) return;
+      setError(requestError.message || 'No se pudieron cargar las hojas de ajuste.');
+    } finally {
+      if (numeroPeticion === peticionRef.current) setLoading(false);
+    }
+  }, [desde, hasta, busquedaAplicada]);
 
   useEffect(() => {
-    const loadAll = async () => {
-      setLoading(true);
-      try {
-        const [catalogoRes, ajusteRes] = await Promise.all([
-          fetch('/api/admin/catalogo/', { credentials: 'include', cache: 'no-store' }),
-          fetch('/api/admin/inventario/ajuste/', { credentials: 'include', cache: 'no-store' }),
-        ]);
-        const catalogoData = await catalogoRes.json();
-        const ajusteData = await ajusteRes.json();
-        if (catalogoRes.ok && catalogoData.ok) {
-          setInventory(Array.isArray(catalogoData.inventory) ? catalogoData.inventory : []);
-        }
-        if (ajusteRes.ok && ajusteData.ok) {
-          setEstado(ajusteData);
-        } else {
-          showError(ajusteData.message || 'No se pudo cargar el ajuste de inventario.');
-        }
-      } catch (error) {
-        showError('No se pudo cargar la informacion inicial.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    cargar();
+  }, [cargar]);
 
-  const nameQuery = itemForm.nombre.trim().toLowerCase();
-
-  const nameMatches = useMemo(() => {
-    if (!nameQuery) return [];
-    return inventory.filter((item) => (item.nombre || '').toLowerCase().includes(nameQuery)).slice(0, 6);
-  }, [inventory, nameQuery]);
-
-  const handleNombreChange = (value) => {
-    // Cambiar el texto invalida la seleccion anterior — este modulo solo
-    // trabaja con ingredientes que ya existen en el catalogo, no crea nuevos.
-    setItemForm((current) => ({ ...current, nombre: value, ingrediente_id: '' }));
-  };
-
-  const handleSelectExisting = (item) => {
-    setItemForm((current) => ({ ...current, nombre: item.nombre, ingrediente_id: item.id }));
-    setIsNameFocused(false);
-  };
-
-  const mesCerrado = !!estado.mes_cerrado;
-  const ajuste = estado.ajuste;
-  const detalles = useMemo(() => (ajuste && Array.isArray(ajuste.detalles) ? ajuste.detalles : []), [ajuste]);
-  const hasItems = detalles.length > 0;
-  const tieneAplicadas = detalles.some((detalle) => detalle.aplicado);
-
-  const handleAddItem = async (event) => {
+  const handleCrear = async (event) => {
     event.preventDefault();
-    if (!itemForm.ingrediente_id) {
-      showError('Selecciona un ingrediente existente del catálogo.');
-      return;
-    }
-
-    setAddingItem(true);
+    setCreando(true);
     try {
-      const response = await fetch('/api/admin/inventario/ajuste/agregar/', {
+      const response = await fetch('/api/admin/inventario/ajuste/crear/', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ingrediente_id: itemForm.ingrediente_id,
-          tipo: itemForm.tipo,
-          cantidad: itemForm.cantidad,
-          motivo: itemForm.motivo,
-        }),
+        body: JSON.stringify({ titulo }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo agregar la línea al ajuste.');
+        throw new Error(data.message || 'No se pudo crear la hoja.');
       }
-      setEstado((current) => ({ ...current, ajuste: data.ajuste }));
-      setItemForm(emptyItemForm);
-      markClean({ itemForm: emptyItemForm });
-    } catch (error) {
-      showError(error.message || 'No se pudo agregar la línea al ajuste.');
+      setTitulo('');
+      onOpenHoja(data.ajuste.id);
+    } catch (requestError) {
+      showError(requestError.message || 'No se pudo crear la hoja.');
     } finally {
-      setAddingItem(false);
-    }
-  };
-
-  const handleRemoveItem = async (detalleId) => {
-    if (!window.confirm('¿Deseas quitar esta línea del ajuste?')) {
-      return;
-    }
-    try {
-      const response = await fetch('/api/admin/inventario/ajuste/quitar/', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ detalle_id: detalleId }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo quitar esa línea.');
-      }
-      setEstado((current) => ({ ...current, ajuste: data.ajuste }));
-    } catch (error) {
-      showError(error.message || 'No se pudo quitar esa línea.');
-    }
-  };
-
-  const handleStartEdit = (detalle) => {
-    setEditingId(detalle.id);
-    setEditValue(detalle.cantidad);
-  };
-
-  const handleCancelEdit = () => {
-    setEditingId(null);
-    setEditValue('');
-  };
-
-  const handleSaveEdit = async (detalleId) => {
-    setSavingEdit(true);
-    try {
-      const response = await fetch('/api/admin/inventario/ajuste/editar/', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ detalle_id: detalleId, cantidad: editValue }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo actualizar esa línea.');
-      }
-      setEstado((current) => ({ ...current, ajuste: data.ajuste }));
-      setEditingId(null);
-      setEditValue('');
-    } catch (error) {
-      showError(error.message || 'No se pudo actualizar esa línea.');
-    } finally {
-      setSavingEdit(false);
-    }
-  };
-
-  const handleGuardar = async () => {
-    setSaving(true);
-    try {
-      const response = await fetch('/api/admin/inventario/ajuste/guardar/', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo guardar el ajuste.');
-      }
-      setEstado((current) => ({ ...current, ajuste: data.ajuste }));
-      showSuccess(data.message || 'Ajuste guardado.');
-    } catch (error) {
-      showError(error.message || 'No se pudo guardar el ajuste.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDiscard = async () => {
-    if (!window.confirm('¿Deseas descartar todo el ajuste? Se perderán las líneas agregadas.')) {
-      return;
-    }
-    setDiscarding(true);
-    try {
-      const response = await fetch('/api/admin/inventario/ajuste/descartar/', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'No se pudo descartar el ajuste.');
-      }
-      setEstado((current) => ({ ...current, ajuste: data.ajuste }));
-    } catch (error) {
-      showError(error.message || 'No se pudo descartar el ajuste.');
-    } finally {
-      setDiscarding(false);
+      setCreando(false);
     }
   };
 
@@ -227,229 +94,137 @@ function AnalystAjusteInventarioPage({ isMobile, onBack }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo cerrar el mes.');
       }
       setCierreModalOpen(false);
-      setEstado((current) => ({ ...current, mes_cerrado: true }));
       showSuccess(data.message || 'Mes cerrado.');
-    } catch (error) {
-      showError(error.message || 'No se pudo cerrar el mes.');
+      cargar();
+    } catch (requestError) {
+      setCierreModalOpen(false);
+      showError(requestError.message || 'No se pudo cerrar el mes.');
     } finally {
       setCerrandoMes(false);
     }
   };
 
+  const mesCerrado = !!estado.mes_cerrado;
+  const hojas = estado.hojas || [];
+
   return (
     <section style={containerStyle(isMobile)}>
-      <button type="button" onClick={() => guard(onBack)} style={backButtonStyle}>
-        ← Volver
+      <button type="button" onClick={onBack} style={backButtonStyle}>
+        ← Volver a Inventario
       </button>
 
       <div>
         <h2 style={titleStyle(isMobile)}>Ajuste de inventario</h2>
-        {estado.mes ? (
-          <p style={subtitleStyle}>Mes en curso: {nombreMes(estado.mes)} de {estado.anio}</p>
-        ) : null}
+        <p style={subtitleStyle}>
+          Cada hoja agrupa los ajustes de una tarea (un conteo, una merma...). Se arma como borrador y recién afecta el
+          stock cuando la confirmas. Un mismo día puede tener varias hojas.
+          {estado.mes ? ` Mes en curso: ${nombreMes(estado.mes)} de ${estado.anio}.` : ''}
+        </p>
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
-      <UnsavedChangesModal open={isConfirmOpen} onConfirm={confirmLeave} onCancel={cancelLeave} />
 
-      {loading ? (
-        <div style={emptyStyle}>Cargando...</div>
-      ) : mesCerrado ? (
-        <section style={panelStyle}>
-          <div style={sectionTitleStyle}>Mes cerrado</div>
-          <p style={{ color: 'var(--vg-f-d2c3c3)', margin: 0 }}>
-            El mes de {nombreMes(estado.mes)} ya fue cerrado, no se pueden hacer más ajustes.
+      <section style={panelStyle}>
+        <div style={sectionTitleStyle}>Nueva hoja</div>
+        {mesCerrado ? (
+          <p style={{ ...hintStyle, fontSize: 13 }}>
+            El mes de {nombreMes(estado.mes)} ya fue cerrado, no se pueden crear más hojas de ajuste.
           </p>
-        </section>
-      ) : (
-        <>
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>Agregar línea</div>
-            <form onSubmit={handleAddItem} style={itemFormStyle(isMobile)}>
-              <div style={{ ...fieldStyle, position: 'relative' }}>
-                <span style={labelStyle}>Ingrediente</span>
-                <input
-                  value={itemForm.nombre}
-                  onChange={(e) => handleNombreChange(e.target.value)}
-                  onFocus={() => setIsNameFocused(true)}
-                  onBlur={() => setTimeout(() => setIsNameFocused(false), 150)}
-                  placeholder="Busca un ingrediente..."
-                  style={inputStyle}
-                  autoComplete="off"
-                />
-                {isNameFocused && nameQuery && nameMatches.length > 0 ? (
-                  <div style={suggestionsPanelStyle}>
-                    {nameMatches.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => handleSelectExisting(item)}
-                        style={suggestionRowStyle}
-                      >
-                        <span style={{ color: 'var(--vg-text-strong)', fontWeight: 600 }}>{item.nombre}</span>
-                        <span style={{ color: 'var(--vg-f-e8bcbc)', fontSize: 12 }}>{item.unidad_medida || ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {nameQuery && !itemForm.ingrediente_id ? (
-                  <div style={hintStyle}>Selecciona un ingrediente de la lista.</div>
-                ) : null}
-              </div>
-
-              <label style={fieldStyle}>
-                <span style={labelStyle}>Tipo</span>
-                <select
-                  value={itemForm.tipo}
-                  onChange={(e) => setItemForm((c) => ({ ...c, tipo: e.target.value }))}
-                  style={inputStyle}
-                >
-                  <option value="suma">Suma al stock</option>
-                  <option value="resta">Resta al stock</option>
-                </select>
-              </label>
-
-              <label style={fieldStyle}>
-                <span style={labelStyle}>Cantidad</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={itemForm.cantidad}
-                  onChange={(e) => setItemForm((c) => ({ ...c, cantidad: e.target.value }))}
-                  style={inputStyle}
-                  required
-                />
-              </label>
-
-              <label style={fieldStyle}>
-                <span style={labelStyle}>Motivo (opcional)</span>
-                <input
-                  value={itemForm.motivo}
-                  onChange={(e) => setItemForm((c) => ({ ...c, motivo: e.target.value }))}
-                  style={inputStyle}
-                  placeholder="Ejemplo: conteo físico, merma..."
-                />
-              </label>
-
-              <button type="submit" style={primaryButtonStyle} disabled={addingItem}>
-                {addingItem ? 'Agregando...' : 'Agregar línea'}
-              </button>
-            </form>
-          </section>
-
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>
-              Líneas del ajuste {ajuste ? `#${ajuste.id}` : ''} {hasItems ? `(${detalles.length})` : ''}
-            </div>
-            {!hasItems ? (
-              <div style={emptyStyle}>Todavía no has agregado ninguna línea.</div>
-            ) : (
-              <div style={tableWrapStyle}>
-                <div style={tableStyle}>
-                  <div style={headStyle}>Ingrediente</div>
-                  <div style={headStyle}>Tipo</div>
-                  <div style={headStyle}>Cantidad</div>
-                  <div style={headStyle}>Motivo</div>
-                  <div style={headStyle}>Estado</div>
-                  <div style={headStyle}></div>
-                  {detalles.map((detalle) => (
-                    <>
-                      <div key={`name-${detalle.id}`} style={cellPrimaryStyle}>{detalle.ingrediente_nombre}</div>
-                      <div key={`tipo-${detalle.id}`} style={cellStyle}>{detalle.tipo === 'suma' ? 'Suma' : 'Resta'}</div>
-                      <div key={`cant-${detalle.id}`} style={cellStyle}>
-                        {editingId === detalle.id ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            style={{ ...inputStyle, padding: '4px 6px', fontSize: 12, width: 90 }}
-                            autoFocus
-                          />
-                        ) : (
-                          `${detalle.cantidad} ${detalle.unidad_medida}`
-                        )}
-                      </div>
-                      <div key={`motivo-${detalle.id}`} style={cellStyle}>{detalle.motivo || '—'}</div>
-                      <div key={`badge-${detalle.id}`} style={cellStyle}>
-                        <span style={badgeStyle(detalle.aplicado)}>{detalle.aplicado ? 'Aplicada' : 'Pendiente'}</span>
-                      </div>
-                      <div key={`actions-${detalle.id}`} style={{ ...cellStyle, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {editingId === detalle.id ? (
-                          <>
-                            <button type="button" onClick={() => handleSaveEdit(detalle.id)} style={smallActionButtonStyle} disabled={savingEdit}>
-                              {savingEdit ? '...' : 'Guardar'}
-                            </button>
-                            <button type="button" onClick={handleCancelEdit} style={smallSecondaryButtonStyle} disabled={savingEdit}>Cancelar</button>
-                          </>
-                        ) : (
-                          <button type="button" onClick={() => handleStartEdit(detalle)} style={smallSecondaryButtonStyle}>Editar</button>
-                        )}
-                        <button type="button" onClick={() => handleRemoveItem(detalle.id)} style={dangerButtonStyle}>Quitar</button>
-                      </div>
-                    </>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {hasItems ? (
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" onClick={handleGuardar} style={primaryButtonStyle} disabled={saving}>
-                  {saving ? 'Guardando...' : 'Guardar ajuste'}
-                </button>
-                {!tieneAplicadas ? (
-                  <button type="button" onClick={handleDiscard} style={secondaryButtonStyle} disabled={discarding}>
-                    {discarding ? 'Descartando...' : 'Descartar ajuste'}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </section>
-
-          {estado.historico && estado.historico.length > 0 ? (
-            <section style={panelStyle}>
-              <div style={sectionTitleStyle}>Histórico del mes</div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                {estado.historico.map((item) => (
-                  <div key={item.id} style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 13 }}>
-                    Ajuste #{item.id} — {item.total_lineas} línea(s) — {new Date(item.fecha_creacion).toLocaleString()}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          <section style={panelStyle}>
-            <div style={sectionTitleStyle}>Cierre mensual</div>
-            <p style={hintStyle}>
-              Cerrar el mes bloquea crear o editar ajustes de {nombreMes(estado.mes)} — el histórico queda de solo lectura.
-            </p>
-            <button type="button" onClick={() => setCierreModalOpen(true)} style={dangerButtonStyle}>
-              Cerrar mes
+        ) : (
+          <form onSubmit={handleCrear} style={nuevaHojaStyle(isMobile)}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Título (opcional)</span>
+              <input
+                value={titulo}
+                onChange={(event) => setTitulo(event.target.value)}
+                maxLength={120}
+                placeholder="Ejemplo: Conteo cocina, Merma pork belly..."
+                style={inputStyle}
+              />
+            </label>
+            <button type="submit" style={primaryButtonStyle} disabled={creando}>
+              {creando ? 'Creando...' : 'Crear hoja'}
             </button>
-          </section>
+          </form>
+        )}
+      </section>
 
-          <ConfirmModal
-            open={cierreModalOpen}
-            title="Cerrar mes"
-            message={`Vas a cerrar el mes de ${nombreMes(estado.mes)} de ${estado.anio}. Ya no podrás crear ni editar ajustes de este mes. ¿Confirmas?`}
-            confirmLabel="Sí, cerrar mes"
-            cancelLabel="Cancelar"
-            onConfirm={handleCerrarMes}
-            onCancel={() => setCierreModalOpen(false)}
-            busy={cerrandoMes}
-          />
-        </>
-      )}
+      <RangoFechas
+        desde={desde}
+        hasta={hasta}
+        onChange={(rango) => {
+          setDesde(rango.desde);
+          setHasta(rango.hasta);
+        }}
+      />
+
+      <input
+        type="text"
+        value={busqueda}
+        onChange={(event) => setBusqueda(event.target.value)}
+        placeholder="Buscar por número, título o ingrediente..."
+        style={inputStyle}
+        aria-label="Buscar hoja de ajuste"
+      />
+
+      {loading ? <div style={emptyStyle}>Cargando hojas...</div> : null}
+      {!loading && error ? <div style={noticeStyle}>{error}</div> : null}
+
+      {!loading && !error ? (
+        hojas.length === 0 ? (
+          <div style={emptyStyle}>No hay hojas de ajuste para este filtro.</div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={resumenStyle}>
+              <strong>{hojas.length}</strong> {hojas.length === 1 ? 'hoja' : 'hojas'}
+            </div>
+            {hojas.map((hoja) => {
+              const estadoDeHoja = estadoHoja(hoja);
+              return (
+                <button key={hoja.id} type="button" onClick={() => onOpenHoja(hoja.id)} style={hojaRowStyle}>
+                  <span style={{ display: 'grid', gap: 4, textAlign: 'left' }}>
+                    <span style={{ color: 'var(--vg-text-strong)', fontWeight: 700, fontSize: 15 }}>{nombreHoja(hoja)}</span>
+                    <span style={{ color: 'var(--vg-f-d2c3c3)', fontSize: 12.5 }}>
+                      {formatFechaHora(hoja.fecha_creacion)} · {hoja.total_lineas} {hoja.total_lineas === 1 ? 'línea' : 'líneas'}
+                      {hoja.lineas_pendientes > 0 && hoja.estado === 'confirmado' ? ` (${hoja.lineas_pendientes} sin guardar)` : ''}
+                    </span>
+                  </span>
+                  <span style={badgeEstadoStyle(estadoDeHoja.clave)}>{estadoDeHoja.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )
+      ) : null}
+
+      {!mesCerrado && estado.mes ? (
+        <section style={panelStyle}>
+          <div style={sectionTitleStyle}>Cierre mensual</div>
+          <p style={hintStyle}>
+            Cerrar el mes bloquea crear o editar hojas de {nombreMes(estado.mes)} — todas quedan de solo lectura. Antes de
+            cerrar, confirma o quita las líneas pendientes de cada hoja.
+          </p>
+          <button type="button" onClick={() => setCierreModalOpen(true)} style={dangerButtonStyle}>
+            Cerrar mes
+          </button>
+        </section>
+      ) : null}
+
+      <ConfirmModal
+        open={cierreModalOpen}
+        title="Cerrar mes"
+        message={`Vas a cerrar el mes de ${nombreMes(estado.mes)} de ${estado.anio}. Ya no podrás crear ni editar hojas de ajuste de este mes. ¿Confirmas?`}
+        confirmLabel="Sí, cerrar mes"
+        cancelLabel="Cancelar"
+        onConfirm={handleCerrarMes}
+        onCancel={() => setCierreModalOpen(false)}
+        busy={cerrandoMes}
+      />
     </section>
   );
 }
@@ -461,37 +236,18 @@ const subtitleStyle = { margin: '8px 0 0', color: 'var(--vg-f-d2c3c3)', lineHeig
 const panelStyle = { display: 'grid', gap: 14, padding: 18, borderRadius: 20, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)' };
 const sectionTitleStyle = { color: 'var(--vg-text-strong)', fontSize: 17, fontWeight: 700 };
 const emptyStyle = { minHeight: 60, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
+const noticeStyle = { padding: '12px 14px', borderRadius: 12, border: '1px solid var(--vg-f-ff7e7e-a400)', background: 'rgba(145,33,33,0.25)', color: 'var(--vg-f-ffd3d3)' };
+const resumenStyle = { color: 'var(--vg-f-d2c3c3)', fontSize: 13 };
 
-const itemFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr 1fr 1.4fr auto', gap: 10, alignItems: 'end' });
+const nuevaHojaStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr auto', gap: 10, alignItems: 'end' });
 const fieldStyle = { display: 'grid', gap: 6 };
 const labelStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 12.5, fontWeight: 700 };
 const inputStyle = { width: '100%', boxSizing: 'border-box', borderRadius: 10, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-161010)', padding: '9px 10px', color: 'var(--vg-text-strong)', fontSize: 13 };
 const hintStyle = { margin: 0, color: 'var(--vg-f-a89999)', fontSize: 12 };
 
-const suggestionsPanelStyle = { position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, zIndex: 5, borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.14)', background: 'var(--vg-s-0a0808-a980)', boxShadow: '0 12px 30px rgba(0, 0, 0, calc(0.4 * var(--vg-shadow-k)))', padding: 8, display: 'grid', gap: 4, maxHeight: 220, overflowY: 'auto' };
-const suggestionRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 10, padding: '8px 10px', background: 'rgba(var(--vg-ink), 0.04)', cursor: 'pointer', textAlign: 'left' };
-
-const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.2fr) 90px 130px minmax(140px,1.4fr) 100px minmax(160px,auto)', gap: '10px 12px', alignItems: 'center', minWidth: 860 };
-const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.1)' };
-const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
-const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };
-
-const badgeStyle = (aplicado) => ({
-  display: 'inline-block',
-  padding: '3px 10px',
-  borderRadius: 999,
-  fontSize: 11.5,
-  fontWeight: 800,
-  background: aplicado ? 'rgba(52, 211, 153, 0.18)' : 'rgba(255, 205, 86, 0.18)',
-  color: aplicado ? 'var(--vg-f-34d399)' : 'var(--vg-f-ffcd56)',
-  border: `1px solid ${aplicado ? 'var(--vg-f-34d399-a400)' : 'var(--vg-f-ffcd56-a400)'}`,
-});
+const hojaRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%', boxSizing: 'border-box', padding: '14px 16px', borderRadius: 16, border: '1px solid rgba(var(--vg-ink), 0.1)', background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)', cursor: 'pointer' };
 
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.25)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer', fontSize: 12, width: 'fit-content' };
-const smallActionButtonStyle = { border: 'none', borderRadius: 999, padding: '6px 12px', background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)', color: '#04140a', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
-const smallSecondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '6px 12px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
 export default AnalystAjusteInventarioPage;

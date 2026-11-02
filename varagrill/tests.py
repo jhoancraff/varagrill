@@ -7368,3 +7368,54 @@ class FechasRealesTests(TestCase):
         self.assertEqual(self.corregir('abono_gasto', 1, self.ayer).status_code, 401)
         self.client.force_login(self.admin)
         self.assertEqual(self.client.put(self.URL).status_code, 405)
+
+
+
+class AlertaCuentasPorCobrarTests(TestCase):
+    """La tarjeta "Cuentas por cobrar" de Contabilidad avisa solo de lo que sigue en estado pendiente."""
+
+    URL = '/api/cuentas-por-cobrar/'
+
+    def setUp(self):
+        admin_rol, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_rol, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        mesero_rol, _ = VGRol.objects.get_or_create(nombre_role='Mesero')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='ac_admin', password='claveAc123', cedula='96000060', email='ac@test.test', id_role=admin_rol,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='ac_cajera', password='claveAc123', cedula='96000061', email='acc@test.test', id_role=cajera_rol,
+        )
+        self.mesero = VGUsuario.objects.create_user(
+            username='ac_mesero', password='claveAc123', cedula='96000062', email='acm@test.test', id_role=mesero_rol,
+        )
+        self.metodo = VGMetodoPago.objects.create(nombre='Efectivo AC', moneda='USD', es_efectivo=True)
+
+    def nota(self, estado, saldo='10'):
+        return VGNotaEntrega.objects.create(
+            metodo_pago=self.metodo, total=Decimal('10'), saldo_pendiente=Decimal(saldo), estado=estado,
+            tasa_cambio_referencia=Decimal('100.0000'),
+        )
+
+    def test_cuenta_solo_las_notas_pendientes_de_pago(self):
+        self.nota('pendiente_pago')
+        self.nota('pendiente_pago')
+        self.nota('abonada_parcial', saldo='4')   # ya tiene un cobro en curso
+        self.nota('pagada', saldo='0')
+        self.nota('anulada', saldo='0')
+        self.client.force_login(self.admin)
+        data = self.client.get(self.URL).json()
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['notas_entrega_pendientes'], 2)
+
+    def test_sin_notas_pendientes_el_conteo_es_cero(self):
+        self.nota('pagada', saldo='0')
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get(self.URL).json()['notas_entrega_pendientes'], 0)
+
+    def test_la_cajera_tambien_lo_ve_y_un_mesero_no(self):
+        self.nota('pendiente_pago')
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).json()['notas_entrega_pendientes'], 1)
+        self.client.force_login(self.mesero)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)

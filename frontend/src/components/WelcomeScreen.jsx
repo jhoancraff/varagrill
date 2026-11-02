@@ -54,6 +54,7 @@ import ChefRecommendationsPage from './ChefRecommendationsPage';
 import CheckoutPage from './CheckoutPage';
 import AnalystComprasBorradorPage from './AnalystComprasBorradorPage';
 import AnalystAjusteInventarioPage from './AnalystAjusteInventarioPage';
+import AnalystAjusteInventarioHojaPage from './AnalystAjusteInventarioHojaPage';
 import AnalystAlertasCostosPage from './AnalystAlertasCostosPage';
 import CuentasPorCobrarPage from './CuentasPorCobrarPage';
 import CuentasPorPagarPage from './CuentasPorPagarPage';
@@ -1427,6 +1428,13 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
         ) : activeView === 'admin-ingredients-ajuste' ? (
           <AnalystAjusteInventarioPage
             isMobile={isMobile}
+            onBack={goBackView}
+            onOpenHoja={(ajusteId) => goToView(`admin-ingredients-ajuste:${ajusteId}`)}
+          />
+        ) : activeView.startsWith('admin-ingredients-ajuste:') ? (
+          <AnalystAjusteInventarioHojaPage
+            isMobile={isMobile}
+            ajusteId={activeView.split(':')[1] || ''}
             onBack={goBackView}
           />
         ) : activeView === 'admin-ingredients-create' ? (

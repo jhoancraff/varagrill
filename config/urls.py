@@ -82,8 +82,11 @@ from varagrill.reportes_pdf_views import (
     reporte_inventario_pdf_view,
 )
 from varagrill.ajustes_inventario_views import (
+    admin_ajuste_inventario_actualizar_view,
     admin_ajuste_inventario_agregar_view,
+    admin_ajuste_inventario_crear_view,
     admin_ajuste_inventario_descartar_view,
+    admin_ajuste_inventario_detalle_view,
     admin_ajuste_inventario_editar_view,
     admin_ajuste_inventario_guardar_view,
     admin_ajuste_inventario_quitar_view,
@@ -222,7 +225,10 @@ urlpatterns = [
     path('api/admin/compras/borrador/descartar/', admin_compra_borrador_descartar_view, name='admin-compra-borrador-descartar'),
     path('api/admin/compras/borrador/confirmar/', admin_compra_borrador_confirmar_view, name='admin-compra-borrador-confirmar'),
     path('api/admin/inventario/ajuste/', admin_ajuste_inventario_view, name='admin-ajuste-inventario'),
-    path('api/admin/inventario/ajuste/agregar/', admin_ajuste_inventario_agregar_view, name='admin-ajuste-inventario-agregar'),
+    path('api/admin/inventario/ajuste/crear/', admin_ajuste_inventario_crear_view, name='admin-ajuste-inventario-crear'),
+    path('api/admin/inventario/ajuste/actualizar/', admin_ajuste_inventario_actualizar_view, name='admin-ajuste-inventario-actualizar'),
+    path('api/admin/inventario/ajuste/<int:ajuste_id>/', admin_ajuste_inventario_detalle_view, name='admin-ajuste-inventario-detalle'),
+    path('api/admin/inventario/ajuste/agregar/',admin_ajuste_inventario_agregar_view, name='admin-ajuste-inventario-agregar'),
     path('api/admin/inventario/ajuste/editar/', admin_ajuste_inventario_editar_view, name='admin-ajuste-inventario-editar'),
     path('api/admin/inventario/ajuste/quitar/', admin_ajuste_inventario_quitar_view, name='admin-ajuste-inventario-quitar'),
     path('api/admin/inventario/ajuste/guardar/', admin_ajuste_inventario_guardar_view, name='admin-ajuste-inventario-guardar'),

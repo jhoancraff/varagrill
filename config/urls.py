@@ -155,6 +155,7 @@ from varagrill.movimientos_inventario_views import (
     reporte_movimiento_inventario_view,
 )
 from varagrill.alertas_costos_views import alerta_costo_revisar_view, alertas_costos_view
+from varagrill.correcciones_fecha_views import admin_correcciones_fecha_view
 from varagrill.gastos_views import (
     admin_categorias_gasto_view,
     admin_gastos_view,
@@ -235,6 +236,7 @@ urlpatterns = [
     path('api/admin/inventario/ajuste/descartar/', admin_ajuste_inventario_descartar_view, name='admin-ajuste-inventario-descartar'),
     path('api/admin/inventario/cierre/', admin_cierre_inventario_view, name='admin-cierre-inventario'),
     path('api/cuentas-por-pagar/', cuentas_por_pagar_view, name='cuentas-por-pagar'),
+    path('api/admin/correcciones-fecha/', admin_correcciones_fecha_view, name='admin-correcciones-fecha'),
     path('api/admin/gastos/', admin_gastos_view, name='admin-gastos'),
     path('api/admin/gastos/<int:gasto_id>/', gasto_detail_view, name='admin-gasto-detail'),
     path('api/admin/gastos/<int:gasto_id>/abonos/', gasto_abono_view, name='admin-gasto-abono'),

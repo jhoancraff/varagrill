@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import Toast from './Toast';
+import useConfirmacionesFecha, { postConAdvertencias } from '../hooks/useConfirmacionesFecha';
 import useExchangeRate from '../hooks/useExchangeRate';
 import useToast from '../hooks/useToast';
 import { formatBs, formatBsRaw } from '../utils/currency';
@@ -83,6 +84,8 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
   const [abonandoId, setAbonandoId] = useState(null);
   const [montoAbono, setMontoAbono] = useState('');
   const [metodoAbono, setMetodoAbono] = useState('');
+  const [fechaAbono, setFechaAbono] = useState(todayIso());
+  const { confirmarFecha, confirmarAdvertencias, modales } = useConfirmacionesFecha();
   const [savingAbono, setSavingAbono] = useState(false);
 
   const [verAbonosId, setVerAbonosId] = useState(null);
@@ -190,6 +193,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
     setAbonandoId(gasto.id === abonandoId ? null : gasto.id);
     setMontoAbono('');
     setMetodoAbono('');
+    setFechaAbono(todayIso());
   };
 
   const handleRegistrarAbono = async (event, gastoId) => {
@@ -198,15 +202,21 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
     if (!metodoPagoId) {
       showError('No hay metodos de pago activos configurados.'); return;
     }
+    // Si la fecha del pago no es hoy (ej. se les olvido cargarlo ayer) se pide confirmar que fue ese dia.
+    if (!(await confirmarFecha(fechaAbono, 'pago'))) {
+      return;
+    }
     setSavingAbono(true);
     try {
-      const response = await fetch(`/api/admin/gastos/${gastoId}/abonos/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ monto: montoAbono, metodo_pago_id: metodoPagoId }),
-      });
-      const data = await response.json();
+      const resultado = await postConAdvertencias(
+        `/api/admin/gastos/${gastoId}/abonos/`,
+        { monto: montoAbono, metodo_pago_id: metodoPagoId, fecha_abono: fechaAbono },
+        confirmarAdvertencias,
+      );
+      if (resultado.cancelado) {
+        return;
+      }
+      const { response, data } = resultado;
       if (!response.ok || !data.ok) {
         throw new Error(data.message || 'No se pudo registrar el abono.');
       }
@@ -370,6 +380,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
       </div>
 
       <Toast toast={toast} onClose={hideToast} />
+      {modales}
 
       <section style={panelStyle}>
         <div style={filtrosRowStyle(isMobile)}>
@@ -496,6 +507,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                               <option key={m.id} value={m.id}>{m.nombre}</option>
                             ))}
                           </select>
+                          <input type="date" value={fechaAbono} max={todayIso()} onChange={(e) => setFechaAbono(e.target.value || todayIso())} style={inputStyle} title="Fecha del pago" aria-label="Fecha del pago" required />
                           <button type="submit" style={primaryButtonStyle} disabled={savingAbono}>
                             {savingAbono ? 'Registrando...' : 'Registrar abono'}
                           </button>
@@ -507,7 +519,7 @@ function ReporteGastosPage({ isMobile, onBack, onVerComprobante }) {
                         {loadingAbonosDetalle ? <div style={{ fontSize: 12, color: 'var(--vg-f-c8bbbb)' }}>Cargando abonos...</div> : null}
                         {!loadingAbonosDetalle && abonosDetalle.map((abono) => (
                           <div key={abono.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--vg-f-e8dede)' }}>
-                            <span>{abono.metodo_pago} — {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
+                            <span>{abono.metodo_pago} — pagado el {abono.fecha_abono ? abono.fecha_abono.split('-').reverse().join('/') : new Date(abono.fecha_pago).toLocaleDateString('es-VE')} · registrado {new Date(abono.fecha_pago).toLocaleString('es-VE')}</span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               {formatUsdBs(abono.monto, tasaDeRegistro(abono, tasaCambio))}
                               {onVerComprobante ? (
@@ -720,7 +732,7 @@ const countBadgeStyle = (badge) => ({
   fontSize: 11, fontWeight: 800, letterSpacing: '0.02em', textTransform: 'uppercase',
   color: badge ? badge.color : 'var(--vg-text-strong)', background: badge ? badge.background : 'rgba(var(--vg-ink), 0.08)',
 });
-const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr auto', gap: 8, padding: '10px 0' });
+const abonoFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr auto', gap: 8, padding: '10px 0' });
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '8px 14px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 

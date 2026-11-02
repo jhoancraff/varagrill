@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import useExchangeRate from '../hooks/useExchangeRate';
 import { formatBs } from '../utils/currency';
+import { formatearFecha } from '../utils/fechas';
 
 function formatUsdBs(amount, tasa) {
   const usd = `$${Number(amount).toFixed(2)}`;
@@ -95,7 +96,15 @@ function ComprobantePagoPage({ isMobile, onBack, tipo, documentoId, abonoId }) {
           </div>
 
           <div style={voucherGridStyle}>
-            <div><span style={voucherLabelStyle}>Fecha de pago</span><div>{new Date(abono.fecha_pago).toLocaleString('es-VE')}</div></div>
+            <div>
+              <span style={voucherLabelStyle}>Fecha de pago</span>
+              {abono.fecha_abono ? (
+                <>
+                  <div>{formatearFecha(abono.fecha_abono)}</div>
+                  <div style={{ fontSize: 11.5, color: '#666' }}>Registrado el {new Date(abono.fecha_pago).toLocaleString('es-VE')}</div>
+                </>
+              ) : <div>{new Date(abono.fecha_pago).toLocaleString('es-VE')}</div>}
+            </div>
             <div><span style={voucherLabelStyle}>Pagado a</span><div>{pagadoA || 'N/A'}</div></div>
             <div style={{ gridColumn: '1 / -1' }}><span style={voucherLabelStyle}>Concepto</span><div>{concepto}</div></div>
             <div><span style={voucherLabelStyle}>Método de pago</span><div>{abono.metodo_pago}</div></div>

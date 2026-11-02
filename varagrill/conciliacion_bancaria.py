@@ -309,7 +309,7 @@ def _cargar_pool(cuenta, desde, hasta, es_credito):
     # se registra con el metodo de punto de venta).
     for a in (
         VGAbonoGasto.objects.filter(
-            metodo_pago_id__in=ids_sin_efectivo, fecha_pago__date__range=(desde, hasta), gasto__inhabilitado=False,
+            metodo_pago_id__in=ids_sin_efectivo, fecha_abono__range=(desde, hasta), gasto__inhabilitado=False,
         )
         .select_related('gasto__categoria', 'metodo_pago')
     ):
@@ -321,13 +321,13 @@ def _cargar_pool(cuenta, desde, hasta, es_credito):
         g = a.gasto
         etiqueta = f'Gasto: {g.descripcion}' + (f' ({g.proveedor_nombre})' if g.proveedor_nombre else '')
         candidatos.append(Candidato(
-            'abono_gasto', a.id, _fecha_local(a.fecha_pago), monto,
+            'abono_gasto', a.id, a.fecha_abono, monto,
             _referencia_bancaria(a.referencia) or _referencia_bancaria(g.numero_comprobante),
             etiqueta, texto=f'{g.descripcion} {g.proveedor_nombre}', fechas_alt=(g.fecha_gasto,),
             extra={'gasto_id': g.id, 'referencia_original': g.numero_comprobante, 'metodo': a.metodo_pago.nombre},
         ))
     for a in (
-        VGAbonoCompra.objects.filter(metodo_pago_id__in=ids_sin_efectivo, fecha_pago__date__range=(desde, hasta))
+        VGAbonoCompra.objects.filter(metodo_pago_id__in=ids_sin_efectivo, fecha_abono__range=(desde, hasta))
         .exclude(compra__estado='cancelado')
         .select_related('compra', 'metodo_pago')
     ):
@@ -337,7 +337,7 @@ def _cargar_pool(cuenta, desde, hasta, es_credito):
         c = a.compra
         alt = tuple(f for f in (c.fecha_compra, c.fecha_factura) if f)
         candidatos.append(Candidato(
-            'abono_compra', a.id, _fecha_local(a.fecha_pago), monto, _referencia_bancaria(a.referencia),
+            'abono_compra', a.id, a.fecha_abono, monto, _referencia_bancaria(a.referencia),
             f'Compra: {c.proveedor_nombre}' + (f' · factura {c.numero_factura_proveedor}' if c.numero_factura_proveedor else ''),
             texto=f'{c.proveedor_nombre} {c.numero_factura_proveedor}', fechas_alt=alt,
             extra={'compra_id': c.id, 'referencia_original': a.referencia, 'metodo': a.metodo_pago.nombre},

@@ -4,9 +4,12 @@ import Toast from './Toast';
 import UnsavedChangesModal from './UnsavedChangesModal';
 import useToast from '../hooks/useToast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
+import useConfirmacionesFecha from '../hooks/useConfirmacionesFecha';
+import { formatearFecha, hoyIso } from '../utils/fechas';
 
 const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
-const emptyLote = { proveedor_nombre: '', numero_factura_proveedor: '', total_a_pagar: '' };
+// fecha_factura: el dia en que de verdad se hizo la compra (hoy por defecto; se puede cambiar si se cargo con atraso).
+const nuevoLote = () => ({ proveedor_nombre: '', numero_factura_proveedor: '', total_a_pagar: '', fecha_factura: hoyIso() });
 
 function toNumeroOrNull(value) {
   if (value === '' || value === null || value === undefined) {
@@ -24,7 +27,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [monedaItem, setMonedaItem] = useState('USD');
   const [isNameFocused, setIsNameFocused] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
-  const [lote, setLote] = useState(emptyLote);
+  const [lote, setLote] = useState(nuevoLote);
   const [monedaTotal, setMonedaTotal] = useState('USD');
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -36,6 +39,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   // para que no se confunda con los demás avisos (arriba a la derecha).
   const { toast: montoToast, showError: showMontoError, hideToast: hideMontoToast } = useToast();
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const { confirmarFecha, modales } = useConfirmacionesFecha();
   const [summary, setSummary] = useState(null);
   // El borrador en sí ya queda guardado en el servidor apenas se agrega cada
   // ingrediente (ver el docstring de arriba) — lo único que se perdería si el
@@ -205,7 +209,7 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const totalAPagarNum = toNumeroOrNull(totalAPagarTrim);
   const totalAPagarValido = totalAPagarTrim !== '' && totalAPagarNum !== null && totalAPagarNum >= 0;
 
-  const handleConfirmClick = (event) => {
+  const handleConfirmClick = async (event) => {
     event.preventDefault();
     if (!lote.proveedor_nombre.trim()) {
       showError('El proveedor es obligatorio para confirmar la carga.');
@@ -214,6 +218,14 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
     if (!totalAPagarValido) {
       hideToast();
       showMontoError('Debes agregar un monto para el total a pagar (usa 0 si es una cortesía sin costo).');
+      return;
+    }
+    if (!lote.fecha_factura) {
+      showError('Elige la fecha de la compra.');
+      return;
+    }
+    // Si la fecha no es hoy (ej. se les olvido cargar una compra de ayer) se pide confirmar que fue ese dia.
+    if (!(await confirmarFecha(lote.fecha_factura, 'compra'))) {
       return;
     }
     setConfirmModalOpen(true);
@@ -239,9 +251,9 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
       setConfirmModalOpen(false);
       setSummary(data.compra);
       setBorrador({ id: null, detalles: [], total: '0' });
-      setLote(emptyLote);
+      setLote(nuevoLote());
       setMonedaTotal('USD');
-      markClean({ itemForm, lote: emptyLote });
+      markClean({ itemForm, lote: nuevoLote() });
       showSuccess(data.message || 'Carga confirmada.');
     } catch (error) {
       showError(error.message || 'No se pudo confirmar la carga.');
@@ -438,6 +450,17 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
                   style={inputStyle}
                   placeholder="Numero de factura (opcional)"
                 />
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Fecha de la compra</span>
+                  <input
+                    type="date"
+                    value={lote.fecha_factura}
+                    max={hoyIso()}
+                    onChange={(event) => setLote((c) => ({ ...c, fecha_factura: event.target.value }))}
+                    style={inputStyle}
+                    required
+                  />
+                </label>
                 <button type="submit" style={primaryButtonStyle} disabled={confirming}>
                   {confirming ? 'Confirmando...' : 'Confirmar y generar cuenta por pagar'}
                 </button>
@@ -466,11 +489,13 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
             </section>
           ) : null}
 
+          {modales}
+
           <ConfirmModal
             open={confirmModalOpen}
             title="Confirmar carga"
             message={
-              `Vas a registrar este lote por ${monedaTotal === 'VES' ? 'Bs' : '$'} `
+              `Vas a registrar este lote del ${formatearFecha(lote.fecha_factura)} por ${monedaTotal === 'VES' ? 'Bs' : '$'} `
               + `${totalAPagarNum !== null ? totalAPagarNum.toFixed(2) : totalAPagarTrim} como la deuda con el `
               + 'proveedor (cuenta por pagar). ¿Confirmas que es correcto?'
             }
@@ -527,7 +552,7 @@ const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800
 const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
 const cellPrimaryStyle = { ...cellStyle, fontWeight: 700 };
 
-const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr auto', gap: 10 });
+const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr 1fr auto', gap: 10, alignItems: 'end' });
 
 const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 16px', background: 'linear-gradient(90deg, #bf1f1f 0%, var(--vg-accent-primary) 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };

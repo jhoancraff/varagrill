@@ -180,7 +180,7 @@ def evaluar(gasto, accion='inhabilitar'):
             'detalle': [],
         })
 
-    if any(e['es_efectivo'] for e in efecto) and any(timezone.localtime(a.fecha_pago).date() < hoy for a in abonos if a.metodo_pago.es_efectivo):
+    if any(e['es_efectivo'] for e in efecto) and any(a.fecha_abono < hoy for a in abonos if a.metodo_pago.es_efectivo):
         advertencias.append({
             'codigo': 'caja_de_otro_dia',
             'mensaje': 'Se pagó en efectivo en un día anterior: cambia el efectivo esperado de caja de ese día.',

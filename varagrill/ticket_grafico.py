@@ -111,6 +111,34 @@ def _logo():
     return Image.open(LOGO_PATH).convert('L')
 
 
+def imagen_a_raster(imagen, inicio=b''):
+    """
+    ESC/POS raster (GS v 0, en franjas) de una imagen 'L' de ancho múltiplo de 8, seguido de avance de papel
+    y corte. `inicio` son los bytes que van ANTES de la imagen (ej. el reset de la impresora; las comandas
+    mandan ahí el pitido).
+    """
+    from PIL import Image
+
+    ancho, alto = imagen.size
+    # Umbral duro (texto limpio): lo oscuro pasa a 255 y en el modo '1' de
+    # Pillow un pixel 255 es el bit 1, que en ESC/POS es un punto negro.
+    bits = imagen.point(lambda valor: 255 if valor < UMBRAL_NEGRO else 0).convert('1', dither=Image.Dither.NONE)
+    ancho_bytes = ancho // 8
+    out = bytearray()
+    out += inicio
+    for desde in range(0, alto, FILAS_POR_FRANJA):
+        hasta = min(desde + FILAS_POR_FRANJA, alto)
+        franja = bits.crop((0, desde, ancho, hasta)).tobytes()
+        filas = hasta - desde
+        out += GS + b'v0' + b'\x00'
+        out += ancho_bytes.to_bytes(2, 'little') + filas.to_bytes(2, 'little')
+        out += franja
+    out += ALIGN_LEFT
+    out += FEED + FEED + FEED + FEED
+    out += CUT
+    return bytes(out)
+
+
 class Ticket:
     """Lista de operaciones de un ticket; ver el docstring del módulo."""
 
@@ -226,27 +254,7 @@ class Ticket:
         return lienzo
 
     def to_raster_bytes(self):
-        from PIL import Image
-
-        imagen = self.to_image()
-        ancho, alto = imagen.size
-        # Umbral duro (texto limpio): lo oscuro pasa a 255 y en el modo '1' de
-        # Pillow un pixel 255 es el bit 1, que en ESC/POS es un punto negro.
-        bits = imagen.point(lambda valor: 255 if valor < UMBRAL_NEGRO else 0).convert('1', dither=Image.Dither.NONE)
-        ancho_bytes = ancho // 8
-        out = bytearray()
-        out += INIT + ALIGN_CENTER
-        for inicio in range(0, alto, FILAS_POR_FRANJA):
-            fin = min(inicio + FILAS_POR_FRANJA, alto)
-            franja = bits.crop((0, inicio, ancho, fin)).tobytes()
-            filas = fin - inicio
-            out += GS + b'v0' + b'\x00'
-            out += ancho_bytes.to_bytes(2, 'little') + filas.to_bytes(2, 'little')
-            out += franja
-        out += ALIGN_LEFT
-        out += FEED + FEED + FEED + FEED
-        out += CUT
-        return bytes(out)
+        return imagen_a_raster(self.to_image(), inicio=INIT + ALIGN_CENTER)
 
     def to_bytes(self):
         """Gráfico si se puede; si algo falla (Pillow, fuentes) cae al texto de siempre."""

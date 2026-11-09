@@ -281,7 +281,7 @@ def _cantidad_item(item):
     return item['detalle'].cantidad or 1
 
 
-def _consolidar_items(items):
+def _consolidar_grupos(items):
     """
     Agrupa ítems consolidables idénticos (mismo producto y misma personalización) y los
     combina en una sola línea "Nx nombre" — así si el mismo pedido pide 1, 2, 3 o 4
@@ -289,7 +289,9 @@ def _consolidar_items(items):
     armados distintos, la comanda de esa estación imprime un solo renglón consolidado en
     vez de repetirlo una vez por cada aparición. Si solo hay una fila para ese producto,
     se imprime igual que siempre (con su cantidad/peso propio, sin forzar el prefijo "1x").
-    Devuelve la lista de renders (bytes), en el orden en que cada producto apareció primero.
+    Devuelve una lista de {'item', 'cantidad' (el total consolidado, o None si no se repite)},
+    en el orden en que cada producto apareció primero. La usan el ticket de texto
+    (_consolidar_items) y el gráfico (_bloques_comanda), para que ambos digan lo mismo.
     """
     grupos = {}
     orden = []
@@ -301,21 +303,27 @@ def _consolidar_items(items):
         grupos[clave]['cantidad_total'] += _cantidad_item(item)
         grupos[clave]['num_filas'] += 1
 
-    renders = []
+    resultado = []
     for clave in orden:
         grupo = grupos[clave]
-        item = grupo['item']
         hay_repeticion = grupo['num_filas'] > 1
+        resultado.append({'item': grupo['item'], 'cantidad': grupo['cantidad_total'] if hay_repeticion else None})
+    return resultado
+
+
+def _consolidar_items(items):
+    """Renders de texto (bytes) de los ítems consolidados, ver _consolidar_grupos."""
+    renders = []
+    for grupo in _consolidar_grupos(items):
+        item = grupo['item']
         if item['tipo'] == 'acompanante':
-            cantidad = grupo['cantidad_total'] if hay_repeticion else 1
-            renders.append(_render_acompanante(item['opcion'], cantidad))
+            renders.append(_render_acompanante(item['opcion'], grupo['cantidad'] if grupo['cantidad'] is not None else 1))
         else:
-            cantidad_override = grupo['cantidad_total'] if hay_repeticion else None
-            renders.append(_render_detalle_principal(item['detalle'], cantidad_override=cantidad_override))
+            renders.append(_render_detalle_principal(item['detalle'], cantidad_override=grupo['cantidad']))
     return renders
 
 
-def _build_ticket_bytes(pedido, categorias, items):
+def _build_ticket_texto_bytes(pedido, categorias, items):
     mesa_label = f'Mesa {pedido.mesa.numero}' if pedido.mesa else 'Sin mesa'
     hora = pedido.fecha_creacion.strftime('%d/%m %H:%M')
     # Un mismo ticket puede combinar varias categorías cuando comparten impresora
@@ -404,7 +412,7 @@ def _render_linea_reducida(detalle):
     return bytes(out)
 
 
-def _build_ticket_secundario_bytes(pedido, categoria, detalles):
+def _build_ticket_secundario_texto_bytes(pedido, categoria, detalles):
     """
     Ticket reducido para la impresora secundaria de `categoria`: mismo encabezado que el
     ticket normal, pero el cuerpo son solo las líneas principales de esta categoría (sin
@@ -451,6 +459,131 @@ def _build_ticket_secundario_bytes(pedido, categoria, detalles):
     out += FEED + FEED + FEED + FEED
     out += CUT
     return bytes(out)
+
+
+# ---------------------------------------------------------------------------
+# Comanda gráfica (ver comanda_grafica.py): misma información que el ticket de texto, dibujada
+# como imagen. Si algo falla al dibujar, se imprime el ticket de texto de siempre.
+# ---------------------------------------------------------------------------
+def _comanda_grafica_activa():
+    from django.conf import settings
+    return bool(getattr(settings, 'COMANDA_GRAFICA', True))
+
+
+def _ancho_comanda():
+    from django.conf import settings
+    ancho = int(getattr(settings, 'COMANDA_ANCHO_PUNTOS', 576) or 576)
+    return max(8, ancho - ancho % 8)
+
+
+def _linea_comanda(item, cantidad=None):
+    """Línea de la comanda gráfica de un ítem (ver _render_detalle_principal / _render_acompanante)."""
+    if item['tipo'] == 'acompanante':
+        return {
+            'cantidad': f'{cantidad if cantidad is not None else 1}x',
+            'nombre': item['opcion'].producto.nombre,
+            'nota': '', 'opciones': [], 'adicionales': [],
+        }
+    detalle = item['detalle']
+    opciones = []
+    for opcion in detalle.opciones.all():
+        if opcion.producto_id:
+            continue  # los acompañantes de grupo dinámico salen en la comanda de SU categoría
+        preparacion = getattr(opcion, 'preparacion', None)
+        opciones.append(f"{opcion.grupo_nombre}: {getattr(preparacion, 'nombre', None) or 'Opción eliminada'}")
+    adicionales = []
+    for adicional in detalle.adicionales.all():
+        preparacion = getattr(adicional, 'preparacion', None)
+        adicionales.append(f"{adicional.cantidad}x {getattr(preparacion, 'nombre', None) or 'Adicional eliminado'}")
+    return {
+        'cantidad': f'{cantidad}x' if cantidad is not None else _cantidad_label(detalle),
+        'nombre': _detalle_nombre(detalle),
+        'nota': detalle.notas or '',
+        'opciones': opciones,
+        'adicionales': adicionales,
+    }
+
+
+def _bloques_comanda(items):
+    """Platos armados (con su barra "PLATO N - CATEGORÍA") y, al final, un solo bloque con todo lo consolidado."""
+    platos, consolidables = _split_items_para_ticket(items)
+    bloques = []
+    for grupo_id, plato_items in platos:
+        etiqueta = _plato_categoria_label(plato_items)
+        bloques.append({
+            'plato': f'PLATO {grupo_id} - {etiqueta}' if etiqueta else f'PLATO {grupo_id}',
+            'lineas': [_linea_comanda(item) for item in plato_items],
+        })
+    lineas = [_linea_comanda(grupo['item'], grupo['cantidad']) for grupo in _consolidar_grupos(consolidables)]
+    if lineas:
+        bloques.append({'plato': None, 'lineas': lineas})
+    return bloques
+
+
+def _datos_comanda(pedido, estacion, bloques):
+    tipo = _tipo_pedido_label(pedido.tipo_pedido)
+    cliente = pedido.cliente.nombre if pedido.cliente else 'Consumidor Final'
+    datos = {
+        'estacion': estacion,
+        'pedido': pedido.id,
+        'hora': pedido.fecha_creacion.strftime('%d/%m %H:%M'),
+        'cliente': cliente,
+        'mesero': pedido.usuario.username,
+        'bloques': bloques,
+        'nota_pedido': pedido.notas or '',
+    }
+    if pedido.mesa:
+        datos['titulo'] = f'MESA {pedido.mesa.numero}'
+        datos['tipo'] = tipo.upper() if tipo != 'Local' else ''
+    elif tipo != 'Local':
+        # Delivery / para llevar no tienen mesa: lo que ubica al cocinero es el tipo y a quién va.
+        datos['titulo'] = tipo.upper()
+        datos['cliente_grande'] = cliente
+        datos['cliente'] = ''
+    else:
+        datos['titulo'] = 'SIN MESA'
+    return datos
+
+
+def _comanda_a_bytes(datos):
+    """Comanda dibujada, lista para enviar: pitido de llegada, imagen en franjas, avance y corte."""
+    from .comanda_grafica import dibujar_comanda
+    from .ticket_grafico import imagen_a_raster
+
+    imagen = dibujar_comanda(datos, ancho=_ancho_comanda())
+    # El pitido va ANTES de la imagen (ver CASH_DRAWER_KICK / BUZZER_ALT): la cocina lo oye al instante.
+    return imagen_a_raster(imagen, inicio=INIT + KANJI_OFF + ESC_POS_WCP1252 + CASH_DRAWER_KICK + BUZZER_ALT)
+
+
+def _build_ticket_bytes(pedido, categorias, items):
+    """Comanda de una impresora: gráfica si se puede; si algo falla (Pillow, fuentes) cae al texto de siempre."""
+    if _comanda_grafica_activa():
+        try:
+            estacion = ' / '.join(sorted(c.nombre.upper() for c in categorias))
+            return _comanda_a_bytes(_datos_comanda(pedido, estacion, _bloques_comanda(items)))
+        except Exception:
+            logger.exception('No se pudo dibujar la comanda del pedido %s; se imprime en texto.', pedido.id)
+    return _build_ticket_texto_bytes(pedido, categorias, items)
+
+
+def _build_ticket_secundario_bytes(pedido, categoria, detalles):
+    """Copia reducida para la impresora secundaria de `categoria`: gráfica si se puede, si no texto."""
+    if _comanda_grafica_activa():
+        try:
+            bloques = []
+            for detalle in detalles:
+                linea = {
+                    'cantidad': _cantidad_label(detalle), 'nombre': detalle.producto.nombre,
+                    'nota': detalle.notas or '', 'opciones': [], 'adicionales': [],
+                }
+                bloques.append({
+                    'plato': f'PLATO {detalle.grupo_armado} - {categoria.nombre.upper()}' if detalle.grupo_armado else None,
+                    'lineas': [linea],
+                })
+            return _comanda_a_bytes(_datos_comanda(pedido, categoria.nombre.upper(), bloques))
+        except Exception:
+            logger.exception('No se pudo dibujar la comanda secundaria del pedido %s; se imprime en texto.', pedido.id)
+    return _build_ticket_secundario_texto_bytes(pedido, categoria, detalles)
 
 
 def _motivo_fallo_impresion(exc):

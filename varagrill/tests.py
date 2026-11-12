@@ -572,6 +572,7 @@ class AdminCatalogApiTests(TestCase):
         Ver _costo_unitario_por_compra vs. la división simple: reponer stock desde
         "Ingreso administrativo" (tipo='inventario') sobre un ingrediente que ya tiene su
         trío completo debe respetar la merma, no pisarlo con precio_total/cantidad.
+        (Solo la pantalla de compras por lote dejó de descontar merma; esto sigue igual.)
         """
         ingredient = VGIngrediente.objects.create(
             nombre='Punta trasera QA',
@@ -6744,21 +6745,38 @@ class LoteActualizaCostoIngredienteTests(TestCase):
         return _costo_unitario_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
 
     def test_con_envase_y_peso_real_el_costo_de_los_reportes_sigue_a_la_compra(self):
-        # envase de 1000 g que rinde 850 g utiles, comprado antes a $10 el envase
+        # envase de 1000 g con peso real 850, comprado antes a $10 el envase
         carne = VGIngrediente.objects.create(
             nombre='Carne lote', unidad_medida='g', stock_actual=Decimal('0'), costo_unitario=Decimal('0.011765'),
             contenido_envase=Decimal('1000'), peso_real=Decimal('850'), precio_compra=Decimal('10'),
         )
         self.assertEqual(self.costo_en_reportes(carne), Decimal('0.011765'))
 
-        # ahora 5000 g por $60: 4250 g utiles -> $0.014118 el gramo util
+        # ahora 5000 g por $60: la factura dice $0.012 el gramo, sin descontar la merma del peso real
         self.cargar_lote([{'ingrediente_id': carne.id, 'cantidad': '5000', 'precio_total': '60'}])
         carne.refresh_from_db()
-        self.assertEqual(carne.costo_unitario, Decimal('0.014118'))
-        self.assertEqual(carne.precio_compra, Decimal('12.00'))        # $12 por cada envase de 1000 g
+        self.assertEqual(carne.costo_unitario, Decimal('0.012000'))
+        self.assertEqual(carne.precio_compra, Decimal('10.20'))        # 0.012 x peso real 850
         self.assertEqual(carne.stock_actual, Decimal('5000'))
-        # los reportes y recetas usan precio_compra / peso_real: ya NO siguen en el costo viejo
-        self.assertEqual(self.costo_en_reportes(carne), Decimal('0.014118'))
+        # los reportes y recetas usan precio_compra / peso_real: siguen el costo de la factura, no el viejo
+        self.assertEqual(self.costo_en_reportes(carne), Decimal('0.012000'))
+
+    def test_la_merma_del_peso_real_no_infla_las_lineas_de_la_compra_ni_el_costo_del_producto(self):
+        # Pork Belly (compra 207): se carga el peso sin merma (la merma vive en la subreceta). Con peso real 600 de
+        # un envase de 1000 g, el costo de la compra salia a 17.50/kg y las lineas sumaban $914.20 en vez de $548.52.
+        pork = VGIngrediente.objects.create(
+            nombre='Pork Belly merma lote', unidad_medida='g', stock_actual=Decimal('0'), costo_unitario=Decimal('0.0115'),
+            contenido_envase=Decimal('1000'), peso_real=Decimal('600'), precio_compra=Decimal('6.90'),
+        )
+        self.cargar_lote([{'ingrediente_id': pork.id, 'cantidad': '52240', 'precio_total': '548.52'}], total='548.52')
+        pork.refresh_from_db()
+        self.assertEqual(pork.costo_unitario, Decimal('0.010500'))               # $10.50 el kilo, como la factura
+        self.assertEqual(self.costo_en_reportes(pork), Decimal('0.010500'))      # el producto dice lo mismo
+        self.assertEqual(pork.peso_real, Decimal('600'))                         # el dato del ingrediente no se toca
+        from varagrill.models import VGDetalleCompra
+        linea = VGDetalleCompra.objects.get(ingrediente=pork)
+        self.assertEqual(linea.costo_unitario, Decimal('0.010500'))
+        self.assertEqual(linea.subtotal, Decimal('548.520000'))                  # la linea suma lo que cobra el proveedor
 
     def test_un_ingrediente_por_unidad_no_se_ajusta_por_el_contenido_del_envase(self):
         # La Polar Light: se mide por unidad (lata), con el envase cargado como 355 ml y peso real 1.

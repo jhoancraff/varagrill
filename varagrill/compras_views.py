@@ -17,7 +17,6 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import (
-    _costo_unitario_por_compra,
     _finalizar_estado_pago_compra,
     _serialize_abono_compra,
     _serialize_compra,
@@ -53,6 +52,32 @@ TOLERANCIA_CIERRE_ABONO = Decimal('0.01')
 
 def _get_borrador_abierto():
     return VGCompraBorrador.objects.filter(estado='abierto').order_by('-fecha_creacion').first()
+
+
+def _costo_unitario_por_compra(precio_total, cantidad, ingrediente=None):
+    """
+    Costo por unidad de una línea de la pantalla de compras: precio pagado ÷ cantidad cargada, tal cual (lo que dice
+    la factura). La cantidad que se carga es el peso sin merma; la merma, cuando existe, ya vive en la subreceta
+    (ej. "Pork belly cocina": 1400 g crudos rinden 1000 g), así que NO se descuenta por el "Peso real" del ingrediente
+    (eso contaba la merma dos veces: 10.50/kg de la factura salía a 17.50/kg en el producto).
+
+    Solo aplica a esta pantalla. El ingreso administrativo y la importación por Excel siguen usando el cálculo con
+    merma de api_views._costo_unitario_por_compra. `ingrediente` se acepta pero no se usa.
+    """
+    if not cantidad:
+        return Decimal('0')
+    return (precio_total / cantidad).quantize(Decimal('0.000001'))
+
+
+def _precio_envase_de_compra(costo_unitario, ingrediente):
+    """
+    precio_compra que deja el costo efectivo de los reportes y recetas (precio_compra ÷ peso_real, ver
+    _costo_unitario_efectivo) igual al costo de la compra recién cargada. None si el ingrediente no tiene
+    contenido_envase y peso_real: sin ellos el costo efectivo es costo_unitario y no hace falta tocar nada.
+    """
+    if ingrediente.contenido_envase and ingrediente.peso_real:
+        return (costo_unitario * ingrediente.peso_real).quantize(Decimal('0.01'))
+    return None
 
 
 def _serialize_detalle_borrador(detalle, umbral=None):
@@ -406,12 +431,14 @@ def admin_compra_borrador_confirmar_view(request):
             ingrediente.ultimo_proveedor = proveedor_nombre
             ingrediente.actualizado_por = request.user
             campos = ['stock_actual', 'costo_unitario', 'ultimo_proveedor', 'actualizado_por', 'fecha_actualizacion']
-            if ingrediente.contenido_envase and ingrediente.peso_real:
+            precio_envase = _precio_envase_de_compra(costo_unitario, ingrediente)
+            if precio_envase is not None:
                 # Los reportes de costos y las recetas toman precio_compra / peso_real cuando el ingrediente los
                 # tiene cargados (ver _costo_unitario_efectivo) e ignoran costo_unitario. Para que esta compra
-                # cambie de verdad el costo, el precio del envase se deja en lo que esta factura implica:
-                # costo por unidad util x peso real (= precio pagado por cada envase de contenido_envase).
-                ingrediente.precio_compra = (costo_unitario * ingrediente.peso_real).quantize(Decimal('0.01'))
+                # cambie de verdad el costo, el precio del envase se deja en lo que hace que ese cociente sea
+                # el costo de la factura (el costo de la compra ya no se ajusta por merma, ver
+                # _costo_unitario_por_compra).
+                ingrediente.precio_compra = precio_envase
                 campos.append('precio_compra')
             with origen_costo('Carga de lote manual', compra=compra):
                 ingrediente.save(update_fields=campos)

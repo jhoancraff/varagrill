@@ -3419,6 +3419,33 @@ class ReporteGastosPdfTests(TestCase):
         self.assertEqual(bloque['total_bs'], Decimal('8000.00'))
         self.assertEqual(bloque['total_usd'], Decimal('15.00'))
 
+    def test_cada_fila_trae_su_monto_en_dolares_y_la_columna_suma_el_total(self):
+        from datetime import date
+        from unittest import mock
+        from varagrill.pdf_reportes.gastos import COLUMNAS_BLOQUE, generar_pdf_gastos
+        gastos = [
+            # Cargado en bolivares: Bs 20.000 a la tasa del dia en que se registro (800) = $25
+            {'id': 1, 'categoria_nombre': 'Servicios', 'descripcion': 'Internet', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 5),
+             'monto': '25.000000', 'total_bs': '20000.00', 'moneda_origen': 'VES', 'tasa_cambio_referencia': '800.0000'},
+            # Otro en bolivares con otra tasa: Bs 9.000 a 900 = $10
+            {'id': 2, 'categoria_nombre': 'Servicios', 'descripcion': 'Aseo', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 9),
+             'monto': '10.000000', 'total_bs': '9000.00', 'moneda_origen': 'VES', 'tasa_cambio_referencia': '900.0000'},
+            # Cargado en dolares
+            {'id': 3, 'categoria_nombre': 'Servicios', 'descripcion': 'Software', 'estado_pago': 'pagado', 'fecha_gasto': date(2026, 9, 12),
+             'monto': '5.000000', 'total_bs': '4000.00', 'moneda_origen': 'USD', 'tasa_cambio_referencia': '800.0000'},
+        ]
+        with mock.patch('varagrill.pdf_reportes.gastos.generar_pdf_reporte', return_value=b'%PDF-falso') as generar:
+            generar_pdf_gastos(gastos, date(2026, 9, 1), date(2026, 9, 30))
+        seccion = generar.call_args.kwargs['secciones'][0]
+        self.assertEqual([c.etiqueta for c in seccion.columnas], ['Descripción del gasto', 'Monto (Bs)', 'Monto ($)', 'Tasa (Bs/$)', 'Fecha'])
+        self.assertAlmostEqual(sum(c.ancho for c in COLUMNAS_BLOQUE), 1)
+        self.assertEqual([fila[2] for fila in seccion.filas], ['25,00', '10,00', '5,00'])
+        # Monto Bs / Tasa da el monto en dolares de la fila
+        self.assertEqual(seccion.filas[0][1:4], ['20.000,00', '25,00', '800,0000'])
+        self.assertEqual(seccion.filas[1][1:4], ['9.000,00', '10,00', '900,0000'])
+        self.assertEqual(seccion.fila_total[:3], ['Total Servicios', 'Bs. 33.000,00', '$ 40,00'])
+        self.assertEqual(len(seccion.fila_total), len(seccion.columnas))
+
 
 class TasaCuentaPrefacturaTests(TestCase):
     """

@@ -2,7 +2,9 @@
 PDF de gastos por rango de fechas, agrupado por categoria.
 
 Cada categoria es un bloque (Nomina, Servicios...) con las columnas Descripcion, Monto (Bs),
-Tasa y Fecha, y al final del bloque el total en bolivares y en dolares. Al final del reporte
+Monto ($), Tasa y Fecha, y al final del bloque el total en bolivares y en dolares. Monto ($) es
+lo que costo el gasto en dolares: en uno cargado en bolivares es sus Bs entre la tasa del dia en
+que se registro; en uno cargado en dolares, el monto original. La suma de la columna es el total $. Al final del reporte
 va el resumen con el total de cada categoria y el total general.
 
 Recibe los gastos ya serializados por gastos_views._serialize_gasto (los mismos numeros que
@@ -14,10 +16,11 @@ from decimal import ROUND_HALF_UP, Decimal
 from .base import Columna, Seccion, formatear_numero, generar_pdf_reporte
 
 COLUMNAS_BLOQUE = [
-    Columna('Descripción del gasto', 0.44),
-    Columna('Monto (Bs)', 0.22, 'derecha'),
-    Columna('Tasa (Bs/$)', 0.16, 'derecha'),
-    Columna('Fecha', 0.18, 'centro'),
+    Columna('Descripción del gasto', 0.36),
+    Columna('Monto (Bs)', 0.20, 'derecha'),
+    Columna('Monto ($)', 0.14, 'derecha'),
+    Columna('Tasa (Bs/$)', 0.14, 'derecha'),
+    Columna('Fecha', 0.16, 'centro'),
 ]
 
 COLUMNAS_RESUMEN = [
@@ -88,6 +91,7 @@ def armar_bloques_gastos(gastos):
             filas.append({
                 'descripcion': gasto['descripcion'] + ETIQUETA_ESTADO.get(gasto.get('estado_pago'), ''),
                 'monto_bs': monto_bs,
+                'monto_usd': _decimal(gasto.get('monto')),
                 'tasa': tasa,
                 'fecha': _fecha(gasto['fecha_gasto']),
             })
@@ -124,6 +128,7 @@ def generar_pdf_gastos(gastos, desde, hasta, generado_en=None):
                 [
                     fila['descripcion'],
                     formatear_numero(fila['monto_bs']) if fila['monto_bs'] is not None else 'Sin tasa',
+                    formatear_numero(fila['monto_usd']) if fila['monto_usd'] is not None else '—',
                     formatear_numero(fila['tasa'], 4, 4) if fila['tasa'] else '—',
                     fila['fecha'].strftime('%d/%m/%Y'),
                 ]
@@ -133,6 +138,7 @@ def generar_pdf_gastos(gastos, desde, hasta, generado_en=None):
                 f'Total {bloque["categoria"]}',
                 f'Bs. {formatear_numero(bloque["total_bs"])}',
                 f'$ {formatear_numero(bloque["total_usd"])}',
+                '',
                 '',
             ],
         ))

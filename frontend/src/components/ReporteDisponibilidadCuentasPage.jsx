@@ -84,6 +84,9 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
   const bancos = data?.bancos || [];
   const hayPuntoVenta = bancos.some((banco) => banco.tiene_punto_venta);
   const transitorio = data?.pos_por_cobrar || null;
+  // Total en dólares de todas las cuentas: los bancos en bolívares ya vienen convertidos a la tasa del día
+  // (saldo_usd_tasa_actual), y se suma con las cuentas en dólares y el efectivo.
+  const totalGlobal = Number(data?.total_disponible || 0);
 
   return (
     <section style={containerStyle(isMobile)}>
@@ -140,6 +143,17 @@ function ReporteDisponibilidadCuentasPage({ isMobile, onBack, onNavigate }) {
 
       {!loading && !error && data ? (
         <>
+          <section style={totalGlobalPanelStyle(totalGlobal < 0)}>
+            <div style={totalGlobalLabelStyle}>Disponibilidad global en dólares — al {fecha}</div>
+            <div style={totalGlobalMontoStyle(totalGlobal < 0)}>${formatMonto(totalGlobal)}</div>
+            <div style={{ fontSize: 12, color: data.tasa_bcv ? 'var(--vg-f-c8bbbb)' : 'var(--vg-f-ffcf85)' }}>
+              {data.tasa_bcv
+                ? `Bancos en bolívares a la tasa del día (Bs. ${formatMonto(data.tasa_bcv)} / $) + cuentas en dólares + efectivo.`
+                : 'No hay tasa BCV registrada para esta fecha; los bolívares se cuentan con su valor histórico en dólares.'}
+              {Number(data.total_por_acreditar) > 0 ? ` No incluye $${formatMonto(data.total_por_acreditar)} por acreditar de los puntos de venta.` : ''}
+            </div>
+          </section>
+
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Saldo por cuenta — al {fecha}</div>
             {data.tasa_bcv ? (
@@ -315,6 +329,13 @@ const porAcreditarBoxStyle = { display: 'grid', gap: 2, padding: '8px 10px', bor
 const transitorioTableStyle = { display: 'grid', gridTemplateColumns: 'minmax(140px,1.2fr) repeat(3, minmax(110px,0.8fr))', minWidth: 520, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
 const verLotesLinkStyle = { border: 'none', background: 'none', color: 'var(--vg-f-ff9d9d)', fontSize: 13, fontWeight: 700, cursor: 'pointer', padding: 0, textAlign: 'left', width: 'fit-content' };
 const tableWrapStyle = { overflowX: 'auto' };
+const totalGlobalPanelStyle = (negativo) => ({
+  display: 'grid', gap: 6, padding: '16px 20px', borderRadius: 20,
+  border: negativo ? '1px solid var(--vg-f-ff9191-a300)' : '1px solid rgba(var(--vg-ink), 0.1)',
+  background: 'linear-gradient(180deg, var(--vg-bg-card) 0%, var(--vg-s-080808-a980) 100%)',
+});
+const totalGlobalLabelStyle = { color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
+const totalGlobalMontoStyle = (negativo) => ({ fontSize: 34, fontWeight: 800, color: negativo ? 'var(--vg-f-ff9d9d)' : 'var(--vg-f-8fffb0)' });
 const tableStyle = { display: 'grid', gridTemplateColumns: 'minmax(160px,1.1fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(110px,0.7fr) minmax(100px,0.7fr) minmax(100px,0.7fr) minmax(140px,0.9fr) minmax(120px,0.8fr)', minWidth: 1300, border: '1px solid rgba(var(--vg-ink), 0.08)', borderRadius: 14, overflow: 'hidden' };
 const headStyle = { padding: '12px 14px', background: 'rgba(var(--vg-ink), 0.06)', color: 'var(--vg-f-ffb0b0)', fontSize: 12, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 800 };
 const cellStyle = { padding: '14px', borderTop: '1px solid rgba(var(--vg-ink), 0.08)', color: 'var(--vg-f-f2e6e6)', display: 'grid', alignContent: 'center' };

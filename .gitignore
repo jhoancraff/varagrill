@@ -36,3 +36,5 @@ frontend/.env.*
 #code review
 REVIEW_FEEDBACK.md
 .agent_status
+
+.docs/

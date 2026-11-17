@@ -252,6 +252,47 @@ class VGCategoriaIngrediente(VGAuditoria):
         return self.nombre
 
 
+class VGEjecucionAlertaStock(models.Model):
+    """
+    Un registro por dia de la alerta diaria de stock minimo por Telegram (ver alertas_stock.ejecutar).
+
+    El comando alertas_stock_minimo se revisa cada hora, pero solo envia si hoy todavia no hay un registro
+    'enviado' o 'sin_alertas': asi sale una sola vez al dia, se reintenta cada hora si fallo y, si el servidor
+    estuvo apagado, se pone al dia en cuanto vuelve. Tambien deja constancia de que dia corrio y como le fue.
+    """
+    ENVIADO = "enviado"
+    SIN_ALERTAS = "sin_alertas"
+    FALLIDO = "fallido"
+    PENDIENTE = "pendiente"
+    ESTADOS = [
+        (PENDIENTE, "Pendiente"),
+        (ENVIADO, "Enviado"),
+        (SIN_ALERTAS, "Sin ingredientes en su mínimo"),
+        (FALLIDO, "Fallido"),
+    ]
+    fecha = models.DateField(unique=True, help_text="Día (hora de Venezuela) al que corresponde el aviso.")
+    estado = models.CharField(max_length=12, choices=ESTADOS, default=PENDIENTE)
+    cantidad_ingredientes = models.PositiveIntegerField(default=0)
+    intentos = models.PositiveIntegerField(default=0)
+    ultimo_error = models.TextField(blank=True)
+    chats_enviados = models.TextField(
+        blank=True,
+        help_text="Chats de Telegram que ya recibieron el aviso de hoy (separados por coma): al reintentar solo se manda a los que faltan.",
+    )
+    completado_en = models.DateTimeField(null=True, blank=True)
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vg_ejecuciones_alerta_stock"
+        verbose_name = "Ejecución de la alerta de stock mínimo"
+        verbose_name_plural = "Ejecuciones de la alerta de stock mínimo"
+        ordering = ["-fecha"]
+
+    def __str__(self):
+        return f"Alerta de stock {self.fecha}: {self.get_estado_display()}"
+
+
 class VGIngrediente(VGAuditoria):
     # Solo estas tres: el negocio ya no maneja kilos ni litros, todo se carga
     # directo en gramos/mililitros/unidad (ej. 100 kg de carne se registra

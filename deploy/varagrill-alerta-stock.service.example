@@ -1,0 +1,18 @@
+# Alerta diaria de stock minimo por Telegram. La lanza varagrill-alerta-stock.timer cada hora.
+# Instalar:
+#   sudo cp deploy/varagrill-alerta-stock.service.example /etc/systemd/system/varagrill-alerta-stock.service
+#   sudo cp deploy/varagrill-alerta-stock.timer.example   /etc/systemd/system/varagrill-alerta-stock.timer
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now varagrill-alerta-stock.timer
+[Unit]
+Description=Varagrill - alerta diaria de stock minimo por Telegram
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=mariadb
+Group=mariadb
+WorkingDirectory=/home/mariadb/app
+EnvironmentFile=/home/mariadb/app/.env
+ExecStart=/home/mariadb/app/venv/bin/python manage.py alertas_stock_minimo

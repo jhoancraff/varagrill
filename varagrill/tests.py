@@ -7640,3 +7640,185 @@ class CategoriasInventarioTests(TestCase):
         ])
         self.assertEqual([f['categoria'] for f in filas], ['Carnes', ''])
         self.assertEqual(total, Decimal('9.00'))
+
+
+class AlertaStockMinimoTests(TestCase):
+    """Alerta diaria de stock minimo por Telegram: que ingredientes entran, una vez al dia, reintentos y servidor apagado."""
+
+    TOKEN = '123:SECRETO'
+
+    def setUp(self):
+        import os
+        from unittest import mock
+        from varagrill.models import VGIngrediente
+        patcher = mock.patch.dict(os.environ, {
+            'TELEGRAM_BOT_TOKEN': self.TOKEN, 'TELEGRAM_CHAT_IDS': '111,222', 'TELEGRAM_ALERTA_STOCK_HORA': '8',
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.pollo = VGIngrediente.objects.create(
+            nombre='Pollo AST', unidad_medida='g', stock_actual='800', stock_minimo='2000', costo_unitario='0.01',
+        )
+        self.enviados = []
+
+    def _enviar(self, token, chat, texto):
+        self.enviados.append((chat, texto))
+
+    def _a(self, dia, hora, minuto=0):
+        return timezone.make_aware(datetime(2026, 11, dia, hora, minuto))
+
+    def test_solo_entran_los_que_tienen_minimo_definido_y_estan_en_el_o_por_debajo(self):
+        from varagrill import alertas_stock
+        from varagrill.models import VGIngrediente
+        VGIngrediente.objects.create(nombre='Sal AST', unidad_medida='g', stock_actual='500', stock_minimo='500', costo_unitario='0.002')
+        VGIngrediente.objects.create(nombre='Arroz AST', unidad_medida='g', stock_actual='900', stock_minimo='500', costo_unitario='0.002')
+        VGIngrediente.objects.create(nombre='Sin minimo AST', unidad_medida='g', stock_actual='0', stock_minimo='0', costo_unitario='0.002')
+        VGIngrediente.objects.create(nombre='Negativo AST', unidad_medida='unidad', stock_actual='-1', stock_minimo='5', costo_unitario='1')
+        VGIngrediente.objects.create(id=285, nombre='Oculto AST', unidad_medida='g', stock_actual='1', stock_minimo='9', costo_unitario='1')
+        nombres = [i['nombre'] for i in alertas_stock.ingredientes_en_minimo()]
+        self.assertEqual(nombres, ['Negativo AST', 'Pollo AST', 'Sal AST'])
+
+    def test_el_mensaje_trae_cada_ingrediente_con_su_stock_y_su_minimo(self):
+        from varagrill import alertas_stock
+        texto = alertas_stock.armar_mensaje(alertas_stock.ingredientes_en_minimo(), date(2026, 11, 17))
+        self.assertIn('17/11/2026', texto)
+        self.assertIn('1 ingrediente en su mínimo', texto)
+        self.assertIn('• Pollo AST: 800 g (mínimo 2.000 g)', texto)
+        self.assertNotIn('No hay registro del aviso de ayer', texto)
+
+    def test_se_envia_una_sola_vez_al_dia_a_todos_los_chats_y_queda_registrado(self):
+        from varagrill import alertas_stock
+        from varagrill.models import VGEjecucionAlertaStock
+        r = alertas_stock.ejecutar(ahora=self._a(17, 9), enviar=self._enviar)
+        self.assertEqual(r['resultado'], 'enviado')
+        self.assertEqual([c for c, _ in self.enviados], ['111', '222'])
+        # Las corridas de las horas siguientes no repiten el aviso.
+        for hora in (10, 11, 23):
+            self.assertEqual(alertas_stock.ejecutar(ahora=self._a(17, hora), enviar=self._enviar)['resultado'], 'ya_enviado')
+        self.assertEqual(len(self.enviados), 2)
+        registro = VGEjecucionAlertaStock.objects.get(fecha=date(2026, 11, 17))
+        self.assertEqual((registro.estado, registro.intentos, registro.cantidad_ingredientes), ('enviado', 1, 1))
+        self.assertIsNotNone(registro.completado_en)
+        # Al dia siguiente toca de nuevo, aunque el ingrediente siga igual.
+        self.assertEqual(alertas_stock.ejecutar(ahora=self._a(18, 9), enviar=self._enviar)['resultado'], 'enviado')
+        self.assertEqual(len(self.enviados), 4)
+
+    def test_antes_de_la_hora_de_inicio_no_envia_ni_registra(self):
+        from varagrill import alertas_stock
+        from varagrill.models import VGEjecucionAlertaStock
+        r = alertas_stock.ejecutar(ahora=self._a(17, 7, 59), enviar=self._enviar)
+        self.assertEqual(r['resultado'], 'fuera_de_horario')
+        self.assertEqual(self.enviados, [])
+        self.assertFalse(VGEjecucionAlertaStock.objects.exists())
+
+    def test_servidor_apagado_se_pone_al_dia_en_la_primera_corrida_del_dia(self):
+        from varagrill import alertas_stock
+        # Nadie corrio de 8 a 15 h (servidor apagado): la primera corrida al prenderlo lo envia.
+        r = alertas_stock.ejecutar(ahora=self._a(17, 15, 2), enviar=self._enviar)
+        self.assertEqual(r['resultado'], 'enviado')
+        self.assertEqual(len(self.enviados), 2)
+
+    def test_si_falla_se_registra_el_error_sin_el_token_y_se_reintenta_en_la_hora_siguiente(self):
+        from varagrill import alertas_stock
+        from varagrill.models import VGEjecucionAlertaStock
+
+        def caido(token, chat, texto):
+            raise RuntimeError(f'sin internet https://api.telegram.org/bot{token}/sendMessage')
+
+        r = alertas_stock.ejecutar(ahora=self._a(17, 9), enviar=caido)
+        self.assertEqual(r['resultado'], 'fallido')
+        registro = VGEjecucionAlertaStock.objects.get(fecha=date(2026, 11, 17))
+        self.assertEqual((registro.estado, registro.intentos), ('fallido', 1))
+        self.assertIn('sin internet', registro.ultimo_error)
+        self.assertNotIn('SECRETO', registro.ultimo_error)
+
+        r = alertas_stock.ejecutar(ahora=self._a(17, 10), enviar=self._enviar)
+        self.assertEqual(r['resultado'], 'enviado')
+        registro.refresh_from_db()
+        self.assertEqual((registro.estado, registro.intentos, registro.ultimo_error), ('enviado', 2, ''))
+
+    def test_si_un_chat_falla_al_reintentar_solo_se_manda_a_los_que_faltan(self):
+        from varagrill import alertas_stock
+
+        def solo_111(token, chat, texto):
+            if chat == '222':
+                raise RuntimeError('chat no encontrado')
+            self.enviados.append((chat, texto))
+
+        self.assertEqual(alertas_stock.ejecutar(ahora=self._a(17, 9), enviar=solo_111)['resultado'], 'fallido')
+        self.assertEqual([c for c, _ in self.enviados], ['111'])
+        self.assertEqual(alertas_stock.ejecutar(ahora=self._a(17, 10), enviar=self._enviar)['resultado'], 'enviado')
+        # El 111 no recibe el aviso por segunda vez.
+        self.assertEqual([c for c, _ in self.enviados], ['111', '222'])
+
+    def test_sin_ingredientes_en_su_minimo_no_manda_nada_pero_deja_el_dia_registrado(self):
+        from varagrill import alertas_stock
+        from varagrill.models import VGEjecucionAlertaStock
+        self.pollo.stock_actual = '5000'
+        self.pollo.save()
+        self.assertEqual(alertas_stock.ejecutar(ahora=self._a(17, 9), enviar=self._enviar)['resultado'], 'sin_alertas')
+        self.assertEqual(alertas_stock.ejecutar(ahora=self._a(17, 10), enviar=self._enviar)['resultado'], 'ya_enviado')
+        self.assertEqual(self.enviados, [])
+        self.assertEqual(VGEjecucionAlertaStock.objects.get(fecha=date(2026, 11, 17)).estado, 'sin_alertas')
+
+    def test_sin_configurar_telegram_queda_como_fallido_con_el_motivo(self):
+        import os
+        from unittest import mock
+        from varagrill import alertas_stock
+        with mock.patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_CHAT_IDS': ''}):
+            r = alertas_stock.ejecutar(ahora=self._a(17, 9), enviar=self._enviar)
+        self.assertEqual(r['resultado'], 'fallido')
+        self.assertIn('no está configurado', r['error'])
+        self.assertEqual(self.enviados, [])
+
+    def test_avisa_si_falta_el_registro_de_ayer(self):
+        from varagrill import alertas_stock
+        alertas_stock.ejecutar(ahora=self._a(14, 9), enviar=self._enviar)
+        self.enviados.clear()
+        # El servidor estuvo apagado del 15 al 16: el aviso del 17 lo menciona.
+        alertas_stock.ejecutar(ahora=self._a(17, 9), enviar=self._enviar)
+        self.assertIn('No hay registro del aviso de ayer', self.enviados[0][1])
+        self.enviados.clear()
+        # Al dia siguiente ya hay registro de ayer: sin la nota.
+        alertas_stock.ejecutar(ahora=self._a(18, 9), enviar=self._enviar)
+        self.assertNotIn('No hay registro del aviso de ayer', self.enviados[0][1])
+
+    def test_un_mensaje_largo_se_parte_para_el_limite_de_telegram(self):
+        from varagrill.telegram_alertas import partir_mensaje
+        texto = '\n'.join(f'• Ingrediente numero {i}: 10 g (mínimo 20 g)' for i in range(300))
+        partes = partir_mensaje(texto, limite=500)
+        self.assertGreater(len(partes), 1)
+        self.assertTrue(all(len(p) <= 500 for p in partes))
+        self.assertEqual('\n'.join(partes), texto)
+
+    def test_el_comando_envia_por_telegram_y_estado_muestra_el_dia(self):
+        import io
+        from django.core.management import call_command
+        from unittest import mock
+        from varagrill.models import VGEjecucionAlertaStock
+        respuesta = mock.Mock(ok=True)
+        with mock.patch('varagrill.telegram_alertas.requests.post', return_value=respuesta) as post, \
+                mock.patch('varagrill.alertas_stock.timezone.now', return_value=self._a(17, 9)):
+            salida = io.StringIO()
+            call_command('alertas_stock_minimo', stdout=salida)
+        self.assertEqual(post.call_count, 2)
+        self.assertIn('Aviso enviado', salida.getvalue())
+        self.assertEqual(post.call_args.kwargs['json']['chat_id'], '222')
+        self.assertIn('Pollo AST', post.call_args.kwargs['json']['text'])
+        salida = io.StringIO()
+        call_command('alertas_stock_minimo', '--estado', stdout=salida)
+        self.assertIn('Enviado', salida.getvalue())
+        self.assertEqual(VGEjecucionAlertaStock.objects.count(), 1)
+
+    def test_el_comando_falla_con_error_cuando_telegram_rechaza_el_envio(self):
+        import io
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from unittest import mock
+        respuesta = mock.Mock(ok=False, status_code=401, text='Unauthorized')
+        respuesta.json.return_value = {'description': 'Unauthorized'}
+        with mock.patch('varagrill.telegram_alertas.requests.post', return_value=respuesta), \
+                mock.patch('varagrill.alertas_stock.timezone.now', return_value=self._a(17, 9)):
+            with self.assertRaises(CommandError) as ctx:
+                call_command('alertas_stock_minimo', stdout=io.StringIO())
+        self.assertIn('Unauthorized', str(ctx.exception))

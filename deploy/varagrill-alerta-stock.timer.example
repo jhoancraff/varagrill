@@ -1,0 +1,19 @@
+# Revisa la alerta de stock minimo cada hora. El comando decide solo si hay algo que enviar: manda el
+# resumen una sola vez al dia (a partir de TELEGRAM_ALERTA_STOCK_HORA) y reintenta cada hora si fallo.
+#   Persistent=true  -> si el servidor estaba apagado a la hora de una corrida, se ejecuta al encenderlo.
+#   OnBootSec=3min   -> ademas revisa unos minutos despues de cada arranque.
+# Ver el resultado:
+#   systemctl list-timers varagrill-alerta-stock.timer
+#   journalctl -u varagrill-alerta-stock.service -n 30 --no-pager
+#   /home/mariadb/app/venv/bin/python /home/mariadb/app/manage.py alertas_stock_minimo --estado
+[Unit]
+Description=Varagrill - revisar cada hora la alerta de stock minimo
+
+[Timer]
+OnCalendar=hourly
+OnBootSec=3min
+Persistent=true
+Unit=varagrill-alerta-stock.service
+
+[Install]
+WantedBy=timers.target

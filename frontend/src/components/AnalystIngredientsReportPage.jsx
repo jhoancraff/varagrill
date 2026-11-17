@@ -6,22 +6,29 @@ import Pagination from './Pagination';
 import Toast from './Toast';
 import useToast from '../hooks/useToast';
 import descargarPdf from '../utils/descargarPdf';
+import { guardarFiltroInventario, leerFiltroInventario } from '../utils/filtroInventario';
 
 const PAGE_SIZE = 50;
 
 function AnalystIngredientsReportPage({ isMobile, onBack, onEdit, onImport, onCargaPorLote, onCategorias, onMovimientos }) {
+  // El filtro se recuerda al entrar a Modificar y volver (ver utils/filtroInventario.js).
+  const [filtroInicial] = useState(leerFiltroInventario);
   const [items, setItems] = useState([]);
   const [categorias, setCategorias] = useState([]);
   // '' = todas, 'sin' = sin categoría, o el id de la categoría.
-  const [filtroCategoria, setFiltroCategoria] = useState('');
+  const [filtroCategoria, setFiltroCategoria] = useState(filtroInicial.categoria);
   const [seleccion, setSeleccion] = useState(() => new Set());
   const [categoriaLote, setCategoriaLote] = useState('');
   const [confirmarLote, setConfirmarLote] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(filtroInicial.busqueda);
   const [saving, setSaving] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(filtroInicial.pagina);
+
+  useEffect(() => {
+    guardarFiltroInventario({ categoria: filtroCategoria, busqueda: search, pagina: page });
+  }, [filtroCategoria, search, page]);
 
   const loadData = async () => {
     setLoading(true);

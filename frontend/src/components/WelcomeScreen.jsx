@@ -32,6 +32,7 @@ import AnalystIngredientsCreateReportPage from './AnalystIngredientsCreateReport
 import AnalystIngredientsImportPage from './AnalystIngredientsImportPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
 import AnalystInventoryCategoriesPage from './AnalystInventoryCategoriesPage';
+import { limpiarFiltroInventario } from '../utils/filtroInventario';
 import AnalystInventoryHubPage from './AnalystInventoryHubPage';
 import AnalystMesasPage from './AnalystMesasPage';
 import AnalystNewChefRecommendationPage from './AnalystNewChefRecommendationPage';
@@ -1416,7 +1417,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             isMobile={isMobile}
             onBack={goBackView}
             onCreate={() => goToView('admin-ingredients-create')}
-            onViewInventory={() => goToView('admin-ingredients-inventory')}
+            onViewInventory={() => { limpiarFiltroInventario(); goToView('admin-ingredients-inventory'); }}
             onAdjustInventory={() => goToView('admin-ingredients-ajuste')}
             onViewMovements={() => goToView('admin-ingredients-movimientos')}
             onViewAlerts={() => goToView('admin-alertas-costos')}
@@ -1426,7 +1427,7 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
           <AnalystInventoryCategoriesPage
             isMobile={isMobile}
             onBack={goBackView}
-            onViewInventory={() => goToView('admin-ingredients-inventory')}
+            onViewInventory={() => { limpiarFiltroInventario(); goToView('admin-ingredients-inventory'); }}
           />
         ) : activeView === 'admin-alertas-costos' ? (
           <AnalystAlertasCostosPage

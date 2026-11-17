@@ -15,6 +15,7 @@ const emptyForm = {
   ingrediente_crudo_equivalente_id: '',
   rendimiento_ingrediente_crudo: '',
   proveedor: '',
+  categoria_id: '',
 };
 
 const unidadOptions = [
@@ -28,6 +29,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
   const [saving, setSaving] = useState(false);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const [inventory, setInventory] = useState([]);
+  const [categorias, setCategorias] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [isNameFocused, setIsNameFocused] = useState(false);
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
@@ -45,6 +47,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
           throw new Error(data.message || 'No se pudo cargar el inventario actual.');
         }
         setInventory(Array.isArray(data.inventory) ? data.inventory : []);
+        setCategorias(Array.isArray(data.categorias_inventario) ? data.categorias_inventario : []);
       } catch (error) {
         // Si falla la carga del inventario, igual se puede crear el ingrediente sin el buscador.
       } finally {
@@ -121,6 +124,7 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
           ingrediente_crudo_equivalente_id: form.ingrediente_crudo_equivalente_id || '',
           rendimiento_ingrediente_crudo: form.rendimiento_ingrediente_crudo || '',
           proveedor: form.proveedor,
+          categoria_id: form.categoria_id || '',
         }),
       });
       const data = await response.json();
@@ -202,6 +206,17 @@ function AnalystNewIngredientPage({ isMobile, onBack, onEditExisting }) {
           <label style={fieldStyle}><span style={labelStyle}>Stock inicial</span><input type="number" step="0.001" value={form.stock_actual} onChange={(e) => handleChange('stock_actual', e.target.value)} style={inputStyle} /></label>
           <label style={fieldStyle}><span style={labelStyle}>Stock minimo</span><input type="number" step="0.001" value={form.stock_minimo} onChange={(e) => handleChange('stock_minimo', e.target.value)} style={inputStyle} /></label>
           <label style={fieldStyle}><span style={labelStyle}>Proveedor</span><input value={form.proveedor} onChange={(e) => handleChange('proveedor', e.target.value)} style={inputStyle} /></label>
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Categoría</span>
+            <select value={form.categoria_id} onChange={(e) => handleChange('categoria_id', e.target.value)} style={inputStyle}>
+              <option value="">Sin categoría</option>
+              {categorias
+                .filter((categoria) => categoria.activo || String(categoria.id) === String(form.categoria_id))
+                .map((categoria) => (
+                  <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+                ))}
+            </select>
+          </label>
           <label style={fieldStyle}>
             <span style={labelStyle}>Contenido del envase *</span>
             <input type="number" step="0.01" required value={form.contenido_envase} onChange={(e) => handleChange('contenido_envase', e.target.value)} style={inputStyle} placeholder="Ej: 1000 (una bolsa de 1kg)" />

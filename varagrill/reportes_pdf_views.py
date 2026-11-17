@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.text import slugify
 
 from .api_views import (
     HIDDEN_INGREDIENT_IDS, _costo_unitario_efectivo, _serialize_compra, armar_margen_ganancia_detallado,
@@ -22,7 +23,10 @@ from .conciliacion_bancaria_views import _cuenta_valida, _etiquetas_origenes, _r
 from .contabilidad_views import MAX_DIAS_RANGO_CUADRE_CAJA, _parse_rango_o_fecha_reporte
 from .facturacion_views import _serialize_nota_entrega
 from .gastos_views import _parse_fecha, _serialize_gasto
-from .models import VGCompra, VGConciliacionMovimiento, VGGasto, VGIngrediente, VGMovimientoBancario, VGNotaEntrega
+from .models import (
+    VGCategoriaIngrediente, VGCompra, VGConciliacionMovimiento, VGGasto, VGIngrediente, VGMovimientoBancario,
+    VGNotaEntrega,
+)
 from .pdf_reportes import (
     generar_pdf_conciliacion_bancaria, generar_pdf_cuentas_por_cobrar, generar_pdf_cuentas_por_pagar, generar_pdf_facturado, generar_pdf_gastos,
     generar_pdf_inventario, generar_pdf_margen_por_plato,
@@ -74,18 +78,41 @@ def reporte_inventario_pdf_view(request):
     (stock x costo) y stock actual. Usa el mismo costo "efectivo" y la misma lista (sin
     los ingredientes ocultos) que "Ver inventario actual", asi el PDF coincide con la pantalla.
     """
+    consulta = VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS)
+
+    # categoria_id: vacio = todo el inventario (por bloques de categoria), 'sin' = los que no tienen
+    # categoria, o el id de una categoria de inventario.
+    categoria_raw = str(request.GET.get('categoria_id') or '').strip().lower()
+    categoria_nombre = None
+    nombre_archivo = 'inventario-actual'
+    if categoria_raw == 'sin':
+        consulta = consulta.filter(categoria__isnull=True)
+        categoria_nombre = 'Sin categoría'
+        nombre_archivo = 'inventario-sin-categoria'
+    elif categoria_raw:
+        try:
+            categoria = VGCategoriaIngrediente.objects.get(pk=int(categoria_raw))
+        except (TypeError, ValueError, VGCategoriaIngrediente.DoesNotExist):
+            return _auth_response({'ok': False, 'message': 'La categoría de inventario no existe.'}, status=400)
+        consulta = consulta.filter(categoria=categoria)
+        categoria_nombre = categoria.nombre
+        nombre_archivo = f'inventario-{slugify(categoria.nombre) or categoria.pk}'
+
     ingredientes = list(
-        VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS).values(
+        consulta.values(
             'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario', 'peso_real', 'precio_compra',
+            'categoria__nombre',
         )
     )
     for ingrediente in ingredientes:
         ingrediente['costo_unitario'] = _costo_unitario_efectivo(
             ingrediente['costo_unitario'], ingrediente['precio_compra'], ingrediente['peso_real'],
         )
+        ingrediente['categoria_nombre'] = ingrediente.pop('categoria__nombre') or ''
 
     ahora = timezone.localtime()
-    return responder_pdf(generar_pdf_inventario(ingredientes, generado_en=ahora), 'inventario-actual', ahora)
+    pdf = generar_pdf_inventario(ingredientes, generado_en=ahora, categoria_nombre=categoria_nombre)
+    return responder_pdf(pdf, nombre_archivo, ahora)
 
 
 @pdf_solo_admin

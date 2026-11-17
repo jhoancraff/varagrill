@@ -7464,3 +7464,179 @@ class AlertaCuentasPorCobrarTests(TestCase):
         self.assertEqual(self.client.get(self.URL).json()['notas_entrega_pendientes'], 1)
         self.client.force_login(self.mesero)
         self.assertEqual(self.client.get(self.URL).status_code, 401)
+
+
+class CategoriasInventarioTests(TestCase):
+    """Categorias del inventario: crear/renombrar, clasificar ingredientes y filtrar/imprimir por categoria."""
+
+    CATEGORIAS = '/api/admin/categorias-inventario/'
+    CATALOGO = '/api/admin/catalogo/'
+    PDF = '/api/admin/reportes/inventario-pdf/'
+
+    def setUp(self):
+        from varagrill.models import VGIngrediente
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='cat_admin', password='claveAdmin123', cedula='95000031',
+            email='cat_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='cat_cajera', password='claveCajera123', cedula='95000032',
+            email='cat_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.client.force_login(self.admin)
+        self.sal = VGIngrediente.objects.create(nombre='Sal CAT', unidad_medida='g', stock_actual='1000', costo_unitario='0.002')
+        self.pollo = VGIngrediente.objects.create(nombre='Pollo CAT', unidad_medida='g', stock_actual='5000', costo_unitario='0.008')
+        self.bolsa = VGIngrediente.objects.create(nombre='Bolsa CAT', unidad_medida='unidad', stock_actual='200', costo_unitario='0.05')
+
+    def _post(self, url, cuerpo):
+        return self.client.post(url, data=json.dumps(cuerpo), content_type='application/json')
+
+    def _crear(self, nombre):
+        r = self._post(self.CATEGORIAS, {'action': 'create', 'nombre': nombre})
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()['categoria']['id']
+
+    def test_crear_renombrar_y_desactivar_una_categoria(self):
+        condimentos = self._crear('Condimentos')
+        # Nombre vacio o repetido (sin importar mayusculas) se rechaza.
+        self.assertEqual(self._post(self.CATEGORIAS, {'action': 'create', 'nombre': '  '}).status_code, 400)
+        self.assertEqual(self._post(self.CATEGORIAS, {'action': 'create', 'nombre': 'condimentos'}).status_code, 400)
+
+        carnes = self._crear('Carnes')
+        # Renombrar a un nombre que ya existe: rechazado; a uno libre: ok.
+        r = self._post(self.CATEGORIAS, {'action': 'update', 'id': carnes, 'nombre': 'Condimentos'})
+        self.assertEqual(r.status_code, 400)
+        r = self._post(self.CATEGORIAS, {'action': 'update', 'id': carnes, 'nombre': 'Carnes y pollo'})
+        self.assertEqual(r.status_code, 200, r.content)
+        r = self._post(self.CATEGORIAS, {'action': 'update', 'id': condimentos, 'activo': False})
+        self.assertEqual(r.status_code, 200)
+
+        listado = self.client.get(self.CATEGORIAS).json()
+        por_nombre = {c['nombre']: c for c in listado['categorias']}
+        self.assertEqual(set(por_nombre), {'Condimentos', 'Carnes y pollo'})
+        self.assertFalse(por_nombre['Condimentos']['activo'])
+        self.assertEqual(listado['sin_categoria'], 3)
+
+    def test_solo_administradores_gestionan_categorias(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(self.CATEGORIAS).status_code, 401)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.CATEGORIAS).status_code, 401)
+        self.assertEqual(self._post(self.CATEGORIAS, {'action': 'create', 'nombre': 'X'}).status_code, 401)
+
+    def test_clasificar_ingredientes_uno_a_uno_y_en_lote(self):
+        from varagrill.models import VGIngrediente
+        condimentos = self._crear('Condimentos')
+        empaques = self._crear('Bolsas y cajas')
+
+        # Editar un ingrediente: sin la clave categoria_id queda como estaba; con ella cambia o se limpia.
+        base = {'tipo': 'actualizar_ingrediente', 'id': self.sal.id, 'nombre': 'Sal CAT', 'unidad': 'g'}
+        r = self._post(self.CATALOGO, {**base, 'categoria_id': condimentos})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.sal.refresh_from_db()
+        self.assertEqual(self.sal.categoria_id, condimentos)
+        r = self._post(self.CATALOGO, base)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.sal.refresh_from_db()
+        self.assertEqual(self.sal.categoria_id, condimentos)
+        r = self._post(self.CATALOGO, {**base, 'categoria_id': ''})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.sal.refresh_from_db()
+        self.assertIsNone(self.sal.categoria_id)
+        self.assertEqual(self._post(self.CATALOGO, {**base, 'categoria_id': 99999}).status_code, 400)
+
+        # En lote: varios a la vez, y una categoria desactivada no se puede asignar.
+        r = self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [self.sal.id, self.bolsa.id], 'categoria_id': empaques})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()['actualizados'], 2)
+        self.assertEqual(VGIngrediente.objects.filter(categoria_id=empaques).count(), 2)
+        self.assertEqual(self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [], 'categoria_id': empaques}).status_code, 400)
+        self._post(self.CATEGORIAS, {'action': 'update', 'id': condimentos, 'activo': False})
+        r = self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [self.pollo.id], 'categoria_id': condimentos})
+        self.assertEqual(r.status_code, 400)
+        # Dejarlos sin categoria.
+        r = self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [self.sal.id], 'categoria_id': ''})
+        self.assertEqual(r.status_code, 200)
+        self.sal.refresh_from_db()
+        self.assertIsNone(self.sal.categoria_id)
+
+    def test_el_catalogo_trae_la_categoria_de_cada_ingrediente(self):
+        carnes = self._crear('Carnes')
+        self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [self.pollo.id], 'categoria_id': carnes})
+        data = self.client.get(self.CATALOGO).json()
+        por_nombre = {item['nombre']: item for item in data['inventory']}
+        self.assertEqual(por_nombre['Pollo CAT']['categoria'], carnes)
+        self.assertEqual(por_nombre['Pollo CAT']['categoria_nombre'], 'Carnes')
+        self.assertEqual(por_nombre['Sal CAT']['categoria_nombre'], '')
+        self.assertIn('Carnes', [c['nombre'] for c in data['categorias_inventario']])
+
+    def test_crear_ingrediente_con_categoria(self):
+        from varagrill.models import VGIngrediente
+        cajas = self._crear('Cajas')
+        r = self._post(self.CATALOGO, {
+            'tipo': 'crear_ingrediente', 'nombre': 'Caja pizza CAT', 'unidad': 'unidad',
+            'contenido_envase': '50', 'peso_real': '50', 'precio_compra': '25', 'categoria_id': cajas,
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(VGIngrediente.objects.get(nombre='Caja pizza CAT').categoria_id, cajas)
+
+    def test_el_pdf_se_filtra_e_imprime_por_categoria(self):
+        from unittest import mock
+        carnes = self._crear('Carnes')
+        empaques = self._crear('Empaques')
+        self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [self.pollo.id], 'categoria_id': carnes})
+        self._post(self.CATALOGO, {'tipo': 'asignar_categoria', 'ids': [self.bolsa.id], 'categoria_id': empaques})
+
+        def pedir(**params):
+            consulta = '&'.join(f'{k}={v}' for k, v in params.items())
+            with mock.patch('varagrill.reportes_pdf_views.generar_pdf_inventario', return_value=b'%PDF-falso') as generar:
+                r = self.client.get(f'{self.PDF}?{consulta}')
+            return r, generar
+
+        r, generar = pedir(categoria_id=carnes)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([i['nombre'] for i in generar.call_args.args[0]], ['Pollo CAT'])
+        self.assertEqual(generar.call_args.kwargs['categoria_nombre'], 'Carnes')
+        self.assertIn('inventario-carnes-', r['Content-Disposition'])
+
+        r, generar = pedir(categoria_id='sin')
+        self.assertEqual([i['nombre'] for i in generar.call_args.args[0]], ['Sal CAT'])
+        self.assertEqual(generar.call_args.kwargs['categoria_nombre'], 'Sin categoría')
+        self.assertIn('inventario-sin-categoria-', r['Content-Disposition'])
+
+        r, generar = pedir()
+        self.assertEqual(len(generar.call_args.args[0]), 3)
+        self.assertIsNone(generar.call_args.kwargs['categoria_nombre'])
+
+        self.assertEqual(self.client.get(f'{self.PDF}?categoria_id=99999').status_code, 400)
+
+        # Sin filtro y con categorias: un PDF real por bloques; con filtro, tabla de esa categoria.
+        for url in (self.PDF, f'{self.PDF}?categoria_id={carnes}', f'{self.PDF}?categoria_id=sin'):
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_el_catalogo_y_las_categorias_no_exigen_token_csrf(self):
+        # El frontend de estas pantallas no manda X-CSRFToken: ambas vistas son csrf_exempt, como el
+        # resto del panel. El cliente de pruebas normal no hace este chequeo, por eso se fuerza aca.
+        from django.test import Client
+        cliente = Client(enforce_csrf_checks=True)
+        cliente.force_login(self.admin)
+        cuerpo = json.dumps({'tipo': 'asignar_categoria', 'ids': [self.sal.id], 'categoria_id': ''})
+        r = cliente.post(self.CATALOGO, data=cuerpo, content_type='application/json')
+        self.assertEqual(r.status_code, 200, r.content)
+        r = cliente.post(self.CATEGORIAS, data=json.dumps({'action': 'create', 'nombre': 'Sin token'}),
+                         content_type='application/json')
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_el_pdf_por_bloques_agrupa_con_subtotales(self):
+        from varagrill.pdf_reportes import armar_filas_inventario
+        filas, total = armar_filas_inventario([
+            {'nombre': 'Pollo', 'unidad_medida': 'g', 'stock_actual': Decimal('1000'), 'costo_unitario': Decimal('0.008'),
+             'categoria_nombre': 'Carnes'},
+            {'nombre': 'Sal', 'unidad_medida': 'g', 'stock_actual': Decimal('500'), 'costo_unitario': Decimal('0.002')},
+        ])
+        self.assertEqual([f['categoria'] for f in filas], ['Carnes', ''])
+        self.assertEqual(total, Decimal('9.00'))

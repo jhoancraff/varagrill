@@ -17,6 +17,7 @@ const emptyForm = {
   ingrediente_crudo_equivalente_id: '',
   rendimiento_ingrediente_crudo: '',
   proveedor: '',
+  categoria_id: '',
 };
 
 const unidadOptions = [
@@ -30,6 +31,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [inventory, setInventory] = useState([]);
+  const [categorias, setCategorias] = useState([]);
   const { toast, showSuccess, showError, hideToast } = useToast();
   const { guard, isConfirmOpen, confirmLeave, cancelLeave, markClean } = useUnsavedChangesGuard(form);
 
@@ -52,6 +54,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           throw new Error('El ingrediente seleccionado no existe.');
         }
         setInventory(items);
+        setCategorias(Array.isArray(data.categorias_inventario) ? data.categorias_inventario : []);
 
         const loadedForm = {
           id: item.id,
@@ -66,6 +69,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           ingrediente_crudo_equivalente_id: item.ingrediente_crudo_equivalente ?? '',
           rendimiento_ingrediente_crudo: item.rendimiento_ingrediente_crudo ?? '',
           proveedor: item.ultimo_proveedor || '',
+          categoria_id: item.categoria ?? '',
         };
         setForm(loadedForm);
         markClean(loadedForm);
@@ -114,6 +118,7 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
           ingrediente_crudo_equivalente_id: form.ingrediente_crudo_equivalente_id || null,
           rendimiento_ingrediente_crudo: form.rendimiento_ingrediente_crudo || null,
           proveedor: form.proveedor,
+          categoria_id: form.categoria_id || '',
         }),
       });
       const data = await response.json();
@@ -168,6 +173,17 @@ function AnalystEditIngredientPage({ isMobile, ingredientId, onBack }) {
                 />
               </label>
               <label style={fieldStyle}><span style={labelStyle}>Proveedor</span><input value={form.proveedor} onChange={(e) => handleChange('proveedor', e.target.value)} style={inputStyle} /></label>
+              <label style={fieldStyle}>
+            <span style={labelStyle}>Categoría</span>
+            <select value={form.categoria_id} onChange={(e) => handleChange('categoria_id', e.target.value)} style={inputStyle}>
+              <option value="">Sin categoría</option>
+              {categorias
+                .filter((categoria) => categoria.activo || String(categoria.id) === String(form.categoria_id))
+                .map((categoria) => (
+                  <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+                ))}
+            </select>
+          </label>
               <label style={fieldStyle}>
                 <span style={labelStyle}>Contenido del envase</span>
                 <input type="number" step="0.01" value={form.contenido_envase} onChange={(e) => handleChange('contenido_envase', e.target.value)} style={inputStyle} placeholder="Ej: 1000 (una bolsa de 1kg)" />

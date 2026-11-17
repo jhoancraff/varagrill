@@ -31,6 +31,7 @@ import AnalystIngredientsBulkCreatePage from './AnalystIngredientsBulkCreatePage
 import AnalystIngredientsCreateReportPage from './AnalystIngredientsCreateReportPage';
 import AnalystIngredientsImportPage from './AnalystIngredientsImportPage';
 import AnalystIngredientsReportPage from './AnalystIngredientsReportPage';
+import AnalystInventoryCategoriesPage from './AnalystInventoryCategoriesPage';
 import AnalystInventoryHubPage from './AnalystInventoryHubPage';
 import AnalystMesasPage from './AnalystMesasPage';
 import AnalystNewChefRecommendationPage from './AnalystNewChefRecommendationPage';
@@ -1419,6 +1420,13 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onAdjustInventory={() => goToView('admin-ingredients-ajuste')}
             onViewMovements={() => goToView('admin-ingredients-movimientos')}
             onViewAlerts={() => goToView('admin-alertas-costos')}
+            onCategories={() => goToView('admin-ingredients-categories')}
+          />
+        ) : activeView === 'admin-ingredients-categories' ? (
+          <AnalystInventoryCategoriesPage
+            isMobile={isMobile}
+            onBack={goBackView}
+            onViewInventory={() => goToView('admin-ingredients-inventory')}
           />
         ) : activeView === 'admin-alertas-costos' ? (
           <AnalystAlertasCostosPage
@@ -1457,6 +1465,8 @@ function WelcomeScreen({ name, role, isAdmin, isOwner, onBack }) {
             onEdit={(ingredientId) => goToView(`admin-ingredients-edit:${ingredientId}`)}
             onImport={() => goToView('admin-ingredients-import')}
             onCargaPorLote={() => goToView('admin-ingredients-compras-borrador')}
+            onCategorias={() => goToView('admin-ingredients-categories')}
+            onMovimientos={() => goToView('admin-ingredients-movimientos')}
           />
         ) : activeView === 'admin-ingredients-compras-borrador' ? (
           <AnalystComprasBorradorPage

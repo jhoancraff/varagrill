@@ -66,6 +66,7 @@ from varagrill.api_views import (
     reporte_margen_productos_view,
     tasa_cambio_view,
 )
+from varagrill.categorias_inventario_views import admin_categorias_inventario_view
 from varagrill.delivery_views import pedido_cargo_delivery_view, zonas_delivery_view
 from varagrill.servicios_adicionales_views import (
     pedido_servicios_view,
@@ -243,6 +244,7 @@ urlpatterns = [
     path('api/admin/gastos/<int:gasto_id>/inhabilitar/', gasto_inhabilitar_view, name='admin-gasto-inhabilitar'),
     path('api/admin/categorias-gasto/', admin_categorias_gasto_view, name='admin-categorias-gasto'),
     path('api/admin/categorias/', admin_categorias_view, name='admin-categorias'),
+    path('api/admin/categorias-inventario/', admin_categorias_inventario_view, name='admin-categorias-inventario'),
     path('api/admin/impresora-caja/', admin_impresora_caja_view, name='admin-impresora-caja'),
     path('api/admin/recetas/', admin_recipes_view, name='admin-recipes'),
     path('api/admin/comida-empleados/', comida_empleados_view, name='admin-comida-empleados'),

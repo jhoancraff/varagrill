@@ -228,6 +228,30 @@ class VGProducto(VGAuditoria):
 # ---------------------------------------------------------------------------
 # Inventario
 # ---------------------------------------------------------------------------
+class VGCategoriaIngrediente(VGAuditoria):
+    """
+    Categoría del inventario (Condimentos, Carnes, Granos, Bolsas, Cajas...) para
+    agrupar los ingredientes/insumos, filtrar el inventario y imprimirlo por
+    categoría. No confundir con VGCategoriaProducto, que clasifica lo que se
+    VENDE (platos y bebidas) y define las impresoras de cocina.
+
+    Se crean y renombran desde "Categorías de inventario"; desactivarla la quita
+    de los selectores sin perder la clasificación de los ingredientes que ya la
+    tienen.
+    """
+    nombre = models.CharField(max_length=80, unique=True)
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "vg_categorias_ingrediente"
+        verbose_name = "Categoría de inventario"
+        verbose_name_plural = "Categorías de inventario"
+        ordering = ["nombre"]
+
+    def __str__(self):
+        return self.nombre
+
+
 class VGIngrediente(VGAuditoria):
     # Solo estas tres: el negocio ya no maneja kilos ni litros, todo se carga
     # directo en gramos/mililitros/unidad (ej. 100 kg de carne se registra
@@ -239,6 +263,10 @@ class VGIngrediente(VGAuditoria):
         ("unidad", "Unidad"),
     ]
     nombre = models.CharField(max_length=150)
+    categoria = models.ForeignKey(
+        VGCategoriaIngrediente, on_delete=models.SET_NULL, null=True, blank=True, related_name="ingredientes",
+        help_text="Categoría del inventario (Condimentos, Carnes, Bolsas...). Vacío = sin categoría.",
+    )
     unidad_medida = models.CharField(max_length=10, choices=UNIDADES)
     stock_actual = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     stock_minimo = models.DecimalField(max_digits=10, decimal_places=2, default=0)

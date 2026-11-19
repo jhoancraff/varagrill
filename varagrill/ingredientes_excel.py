@@ -45,8 +45,8 @@ HEADER_ALIASES = {
     'contenido del envase': 'contenido_envase',
     'contenido envase': 'contenido_envase',
     'peso real': 'peso_real',
-    'precio de compra': 'precio_compra',
-    'precio compra': 'precio_compra',
+    # "Precio de compra" ya no es columna del Excel: se calcula a partir de "Precio total" (ver
+    # api_views._trio_desde_precio_total). Si un archivo viejo la trae, se ignora.
 }
 
 
@@ -194,7 +194,6 @@ def parse_ingredientes_workbook(file_obj):
             precio_total_raw = row_cells.get(columns.get('precio_total', -1), '')
             contenido_envase_raw = row_cells.get(columns.get('contenido_envase', -1), '')
             peso_real_raw = row_cells.get(columns.get('peso_real', -1), '')
-            precio_compra_raw = row_cells.get(columns.get('precio_compra', -1), '')
             parsed_rows.append({
                 'fila': idx + 1,
                 'nombre': nombre,
@@ -203,7 +202,6 @@ def parse_ingredientes_workbook(file_obj):
                 'precio_total': str(precio_total_raw or '').strip(),
                 'contenido_envase': str(contenido_envase_raw or '').strip(),
                 'peso_real': str(peso_real_raw or '').strip(),
-                'precio_compra': str(precio_compra_raw or '').strip(),
             })
 
         return parsed_rows
@@ -233,8 +231,8 @@ def parse_decimal_opcional(raw_valor, etiqueta):
     """
     Devuelve (Decimal, None) o (None, mensaje_error). Una celda vacía se distingue de un
     0 explícito: vacía significa "no se cargó este dato en esta fila" (no se toca), 0
-    significa "se sabe y es cero/gratis". Usado para precio_total, contenido_envase,
-    peso_real y precio_compra — todas columnas opcionales por fila.
+    significa "se sabe y es cero/gratis". Usado para precio_total, contenido_envase y
+    peso_real — todas columnas opcionales por fila.
     """
     text = str(raw_valor or '').strip().replace(',', '.')
     if not text:

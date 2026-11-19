@@ -629,11 +629,12 @@ class ImportarIngredientesExcelTests(TestCase):
         self.assertEqual(len(resumen['errores']), 1)
         self.assertFalse(VGIngrediente.objects.filter(nombre='Chorizo').exists())
 
-    def test_importar_ingrediente_nuevo_con_trio_crea_y_deriva_costo(self):
+    def test_importar_ingrediente_nuevo_con_total_crea_y_deriva_costo(self):
+        # 5000 g por $22.500 en envases de 1000 g -> 5 envases -> precio de compra $4.500 por envase.
         resumen = _importar_ingredientes(
             [{
-                'nombre': 'Chorizo', 'unidad': 'g', 'cantidad': '5000',
-                'contenido_envase': '1000', 'peso_real': '1000', 'precio_compra': '4500',
+                'nombre': 'Chorizo', 'unidad': 'g', 'cantidad': '5000', 'precio_total': '22500',
+                'contenido_envase': '1000', 'peso_real': '1000',
             }],
             self.admin,
         )
@@ -644,31 +645,247 @@ class ImportarIngredientesExcelTests(TestCase):
         self.assertEqual(ingredient.precio_compra, Decimal('4500.00'))
         self.assertEqual(ingredient.costo_unitario, Decimal('4.500000'))
 
-    def test_importar_ingrediente_existente_actualiza_precio_sin_tocar_stock(self):
-        ingredient = VGIngrediente.objects.create(
-            nombre='Papeleta', unidad_medida='g', stock_actual='5000', costo_unitario='0.01',
-        )
-        movimientos_antes = VGMovimientoInventario.objects.filter(ingrediente=ingredient).count()
-
+    def test_precio_de_compra_se_calcula_con_total_peso_neto_y_cantidad(self):
+        # 5000 g por $25 en envases de 1000 g (aprovechables 900 g): 5 envases -> $5 el envase.
         resumen = _importar_ingredientes(
             [{
-                'nombre': 'Papeleta', 'unidad': 'g', 'cantidad': '',
-                'contenido_envase': '1000', 'peso_real': '950', 'precio_compra': '950',
+                'nombre': 'Harina', 'unidad': 'g', 'cantidad': '5000', 'precio_total': '25',
+                'contenido_envase': '1000', 'peso_real': '900',
             }],
+            self.admin,
+        )
+        self.assertEqual(resumen['errores'], [])
+        ingredient = VGIngrediente.objects.get(nombre='Harina')
+        self.assertEqual(ingredient.contenido_envase, Decimal('1000'))
+        self.assertEqual(ingredient.peso_real, Decimal('900'))
+        self.assertEqual(ingredient.precio_compra, Decimal('5.00'))
+        # Costo por gramo aprovechable = 5 / 900 (la convencion del Excel: descuenta la merma).
+        self.assertEqual(ingredient.costo_unitario, Decimal('0.005556'))
+        # La linea de la factura queda con lo que se pago de verdad por gramo comprado: 25 / 5000.
+        detalle = VGDetalleCompra.objects.get(ingrediente=ingredient)
+        self.assertEqual(detalle.costo_unitario, Decimal('0.005000'))
+
+    def test_precio_de_compra_de_un_ingrediente_por_unidad_es_el_precio_de_una_unidad(self):
+        # 24 latas por $26: cada lata $1.083333; el precio de compra guarda $1.08 (2 decimales) pero el costo es exacto.
+        resumen = _importar_ingredientes(
+            [{
+                'nombre': 'Lata de refresco', 'unidad': 'unidad', 'cantidad': '24', 'precio_total': '26',
+                'contenido_envase': '355', 'peso_real': '355',
+            }],
+            self.admin,
+        )
+        self.assertEqual(resumen['errores'], [])
+        ingredient = VGIngrediente.objects.get(nombre='Lata de refresco')
+        self.assertEqual(ingredient.precio_compra, Decimal('1.08'))
+        self.assertEqual(ingredient.costo_unitario, Decimal('1.083333'))
+        self.assertEqual(VGDetalleCompra.objects.get(ingrediente=ingredient).costo_unitario, Decimal('1.083333'))
+
+    def test_existente_con_pesos_guardados_solo_necesita_cantidad_y_total(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Papeleta', unidad_medida='g', stock_actual='100', costo_unitario='0.008889',
+            contenido_envase='1000', peso_real='900', precio_compra='8.00',
+        )
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Papeleta', 'unidad': 'g', 'cantidad': '2000', 'precio_total': '20'}],
             self.admin,
         )
         self.assertEqual(resumen['errores'], [])
         self.assertEqual(resumen['actualizados'], 1)
         ingredient.refresh_from_db()
-        self.assertEqual(ingredient.stock_actual, Decimal('5000'))
+        self.assertEqual(ingredient.stock_actual, Decimal('2100'))
         self.assertEqual(ingredient.contenido_envase, Decimal('1000'))
-        self.assertEqual(ingredient.peso_real, Decimal('950'))
-        self.assertEqual(ingredient.precio_compra, Decimal('950.00'))
-        self.assertEqual(ingredient.costo_unitario, Decimal('1.000000'))
-        self.assertEqual(
-            VGMovimientoInventario.objects.filter(ingrediente=ingredient).count(),
-            movimientos_antes,
+        self.assertEqual(ingredient.peso_real, Decimal('900'))
+        # 2000 g por $20 -> 2 envases de 1000 g -> $10 el envase (el de antes era $8: sube el costo de reportes).
+        self.assertEqual(ingredient.precio_compra, Decimal('10.00'))
+        self.assertEqual(ingredient.costo_unitario, Decimal('0.011111'))
+
+    def test_existente_sin_pesos_y_solo_total_costea_con_total_entre_cantidad(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Sal', unidad_medida='g', stock_actual='0', costo_unitario='0.001',
         )
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Sal', 'unidad': 'g', 'cantidad': '1000', 'precio_total': '2'}],
+            self.admin,
+        )
+        self.assertEqual(resumen['errores'], [])
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.costo_unitario, Decimal('0.002000'))
+        self.assertIsNone(ingredient.precio_compra)
+
+    def test_pesos_sin_precio_total_da_error_y_no_toca_nada(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Cilantro', unidad_medida='g', stock_actual='500', costo_unitario='0.02',
+        )
+        resumen = _importar_ingredientes(
+            [{'nombre': 'Cilantro', 'unidad': 'g', 'cantidad': '1000', 'contenido_envase': '1000', 'peso_real': '900'}],
+            self.admin,
+        )
+        self.assertEqual(resumen['actualizados'], 0)
+        self.assertEqual(len(resumen['errores']), 1)
+        self.assertIn('precio total', resumen['errores'][0])
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.stock_actual, Decimal('500'))
+        self.assertIsNone(ingredient.peso_real)
+
+    def test_el_precio_de_compra_que_llegue_en_el_item_se_ignora(self):
+        _importar_ingredientes(
+            [{
+                'nombre': 'Aceite', 'unidad': 'ml', 'cantidad': '4000', 'precio_total': '12',
+                'contenido_envase': '1000', 'peso_real': '1000', 'precio_compra': '9999',
+            }],
+            self.admin,
+        )
+        self.assertEqual(VGIngrediente.objects.get(nombre='Aceite').precio_compra, Decimal('3.00'))
+
+    def test_sin_cantidad_no_se_calcula_ni_se_toca_el_costeo(self):
+        ingredient = VGIngrediente.objects.create(
+            nombre='Orégano', unidad_medida='g', stock_actual='500', costo_unitario='0.02',
+            contenido_envase='500', peso_real='450', precio_compra='5.00',
+        )
+        resumen = _importar_ingredientes(
+            [{
+                'nombre': 'Orégano', 'unidad': 'g', 'cantidad': '', 'precio_total': '20',
+                'contenido_envase': '1000', 'peso_real': '900',
+            }],
+            self.admin,
+        )
+        self.assertEqual(resumen['actualizados'], 0)
+        self.assertEqual(resumen['ignorados'], 1)
+        ingredient.refresh_from_db()
+        self.assertEqual(ingredient.precio_compra, Decimal('5.00'))
+        self.assertEqual(ingredient.contenido_envase, Decimal('500'))
+
+    def test_preview_calcula_el_precio_de_compra_con_los_pesos_de_la_fila(self):
+        resultado = _preview_ingrediente_row({
+            'fila': 2, 'nombre': 'Harina', 'unidad': 'g', 'cantidad': '5000', 'precio_total': '25',
+            'contenido_envase': '1000', 'peso_real': '900',
+        })
+        self.assertEqual(resultado['accion'], 'nuevo')
+        self.assertEqual(resultado['precio_compra'], '5.00')
+
+    def test_preview_calcula_el_precio_de_compra_con_los_pesos_guardados_del_ingrediente(self):
+        VGIngrediente.objects.create(
+            nombre='Papeleta', unidad_medida='g', stock_actual='100', costo_unitario='0.008889',
+            contenido_envase='1000', peso_real='900', precio_compra='8.00',
+        )
+        resultado = _preview_ingrediente_row({
+            'fila': 2, 'nombre': 'Papeleta', 'unidad': 'g', 'cantidad': '2000', 'precio_total': '20',
+            'contenido_envase': '', 'peso_real': '',
+        })
+        self.assertEqual(resultado['accion'], 'actualizar')
+        self.assertEqual(resultado['precio_compra'], '10.00')
+        self.assertEqual(resultado['contenido_envase'], '1000.00')
+        self.assertEqual(resultado['precio_compra_actual'], '8.00')
+
+    def test_la_plantilla_trae_precio_total_y_no_precio_de_compra(self):
+        from pathlib import Path
+        from varagrill.ingredientes_excel import parse_ingredientes_workbook
+        ruta = Path(__file__).resolve().parent.parent / 'frontend' / 'public' / 'plantilla_ingredientes.xlsx'
+        with open(ruta, 'rb') as archivo:
+            filas = parse_ingredientes_workbook(archivo)
+        self.assertEqual(len(filas), 1)
+        fila = filas[0]
+        self.assertNotIn('precio_compra', fila)
+        self.assertEqual((fila['cantidad'], fila['precio_total'], fila['contenido_envase'], fila['peso_real']), ('20000', '170', '1000', '900'))
+        # El ejemplo de la plantilla da $8,50 por envase de 1000 g: 20 envases por $170.
+        resultado = _preview_ingrediente_row({**fila, 'nombre': 'Tomate nuevo'})
+        self.assertEqual(resultado['accion'], 'nuevo')
+        self.assertEqual(resultado['precio_compra'], '8.50')
+
+    def _papeleta(self):
+        # Costo efectivo de hoy: 8 / 900 = 0.008889 por gramo aprovechable.
+        return VGIngrediente.objects.create(
+            nombre='Papeleta', unidad_medida='g', stock_actual='100', costo_unitario='0.008889',
+            contenido_envase='1000', peso_real='900', precio_compra='8.00',
+        )
+
+    def _fila_papeleta(self, precio_total):
+        return {
+            'fila': 2, 'nombre': 'Papeleta', 'unidad': 'g', 'cantidad': '2000', 'precio_total': precio_total,
+            'contenido_envase': '', 'peso_real': '',
+        }
+
+    def test_preview_muestra_el_costo_nuevo_y_la_variacion_sin_pasar_el_umbral(self):
+        from varagrill.models import VGConfiguracionCosteo
+        config = VGConfiguracionCosteo.obtener_config()
+        config.alerta_variacion_costo_pct = Decimal('30')
+        config.save()
+        self._papeleta()
+        # 2000 g por $20 -> envase $10 -> 10 / 900 = 0.011111: sube 25%, por debajo del 30%.
+        resultado = _preview_ingrediente_row(self._fila_papeleta('20'))
+        self.assertEqual(resultado['costo_actual'], '0.008889')
+        self.assertEqual(resultado['costo_nuevo'], '0.011111')
+        self.assertEqual(resultado['variacion_pct'], '25.00')
+        self.assertFalse(resultado['alerta_variacion'])
+
+    def test_preview_marca_la_alerta_cuando_el_costo_sube_mas_que_el_umbral_configurado(self):
+        from varagrill.models import VGConfiguracionCosteo
+        config = VGConfiguracionCosteo.obtener_config()
+        config.alerta_variacion_costo_pct = Decimal('30')
+        config.save()
+        self._papeleta()
+        # 2000 g por $30 -> envase $15 -> 15 / 900 = 0.016667: sube 87.5%.
+        resultado = _preview_ingrediente_row(self._fila_papeleta('30'))
+        self.assertEqual(resultado['costo_nuevo'], '0.016667')
+        self.assertEqual(resultado['variacion_pct'], '87.50')
+        self.assertTrue(resultado['alerta_variacion'])
+        # Con el umbral en 100% esa misma subida ya no es alerta.
+        self.assertFalse(_preview_ingrediente_row(self._fila_papeleta('30'), umbral=Decimal('100'))['alerta_variacion'])
+
+    def test_preview_tambien_marca_una_baja_fuerte_del_costo(self):
+        self._papeleta()
+        # 2000 g por $8 -> envase $4 -> 4 / 900 = 0.004444: baja 50% (el costo se compara ya redondeado a 6 decimales,
+        # igual que lo guarda y lo mide la alerta de precio: 0.004444 contra 0.008889).
+        resultado = _preview_ingrediente_row(self._fila_papeleta('8'), umbral=Decimal('30'))
+        self.assertEqual(resultado['variacion_pct'], '-50.01')
+        self.assertTrue(resultado['alerta_variacion'])
+
+    def test_preview_de_ingrediente_nuevo_muestra_el_costo_pero_no_hay_con_que_compararlo(self):
+        resultado = _preview_ingrediente_row({
+            'fila': 2, 'nombre': 'Harina', 'unidad': 'g', 'cantidad': '5000', 'precio_total': '25',
+            'contenido_envase': '1000', 'peso_real': '900',
+        }, umbral=Decimal('30'))
+        self.assertEqual(resultado['costo_nuevo'], '0.005556')
+        self.assertIsNone(resultado['costo_actual'])
+        self.assertIsNone(resultado['variacion_pct'])
+        self.assertFalse(resultado['alerta_variacion'])
+
+    def test_preview_sin_precio_total_no_cambia_el_costo(self):
+        self._papeleta()
+        resultado = _preview_ingrediente_row(self._fila_papeleta(''), umbral=Decimal('30'))
+        self.assertIsNone(resultado['costo_nuevo'])
+        self.assertIsNone(resultado['variacion_pct'])
+        self.assertFalse(resultado['alerta_variacion'])
+
+    def test_preview_sin_pesos_guardados_costea_con_total_entre_cantidad(self):
+        VGIngrediente.objects.create(nombre='Sal', unidad_medida='g', stock_actual='0', costo_unitario='0.001')
+        resultado = _preview_ingrediente_row({
+            'fila': 2, 'nombre': 'Sal', 'unidad': 'g', 'cantidad': '1000', 'precio_total': '2',
+            'contenido_envase': '', 'peso_real': '',
+        }, umbral=Decimal('30'))
+        self.assertEqual(resultado['costo_nuevo'], '0.002000')
+        self.assertEqual(resultado['variacion_pct'], '100.00')
+        self.assertTrue(resultado['alerta_variacion'])
+
+    def test_la_vista_de_preview_devuelve_el_umbral_configurado(self):
+        import io
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from pathlib import Path
+        from varagrill.models import VGConfiguracionCosteo
+        config = VGConfiguracionCosteo.obtener_config()
+        config.alerta_variacion_costo_pct = Decimal('25')
+        config.save()
+        ruta = Path(__file__).resolve().parent.parent / 'frontend' / 'public' / 'plantilla_ingredientes.xlsx'
+        self.client.force_login(self.admin)
+        respuesta = self.client.post(
+            '/api/admin/catalogo/importar/',
+            {'action': 'preview', 'archivo': SimpleUploadedFile('plantilla.xlsx', ruta.read_bytes())},
+            HTTP_HOST='localhost',
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        datos = respuesta.json()
+        self.assertEqual(Decimal(datos['umbral_alerta_pct']), Decimal('25'))
+        self.assertEqual(datos['filas'][0]['costo_nuevo'], '0.009444')
 
     def test_importar_ingrediente_existente_trio_parcial_da_error(self):
         ingredient = VGIngrediente.objects.create(

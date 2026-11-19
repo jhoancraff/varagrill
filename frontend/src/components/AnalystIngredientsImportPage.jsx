@@ -4,6 +4,7 @@ import Toast from './Toast';
 import useToast from '../hooks/useToast';
 import useConfirmacionesFecha from '../hooks/useConfirmacionesFecha';
 import { hoyIso } from '../utils/fechas';
+import { calcularCostoNuevo, calcularPrecioCompra, formatearCosto } from '../utils/precioCompra';
 
 const ACCION_LABELS = {
   nuevo: { label: 'Nuevo', color: 'var(--vg-f-8ff0b8)', background: 'rgba(80, 200, 130, 0.18)' },
@@ -43,6 +44,8 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   const fileInputRef = useRef(null);
   const [file, setFile] = useState(null);
   const [rows, setRows] = useState(null);
+  // % de variacion del costo (de la configuracion de costeo) a partir del cual se marca la alerta de precio.
+  const [umbralAlerta, setUmbralAlerta] = useState('');
   const [lote, setLote] = useState(nuevoLote);
   const [previewing, setPreviewing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -62,6 +65,11 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
   // pagarla con ese mismo monto en bolívares no deja ningún residuo.
   const [montoFacturaMoneda, setMontoFacturaMoneda] = useState('USD');
   const [montoFactura, setMontoFactura] = useState('');
+
+  const filasConAlerta = useMemo(
+    () => (rows || []).filter((row) => row.selected && calcularCostoNuevo(row, umbralAlerta).alerta).length,
+    [rows, umbralAlerta],
+  );
 
   const counts = useMemo(() => {
     if (!rows) {
@@ -123,12 +131,12 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
         throw new Error(data.message || 'No se pudo leer el archivo.');
       }
 
+      setUmbralAlerta(data.umbral_alerta_pct || '');
       setRows((data.filas || []).map((row) => ({
         ...row,
         precio_total: row.precio_total || '',
         contenido_envase: row.contenido_envase || '',
         peso_real: row.peso_real || '',
-        precio_compra: row.precio_compra || '',
         selected: SELECTABLE_ACCIONES.has(row.accion),
       })));
       setSummary(null);
@@ -175,7 +183,7 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
       .filter((row) => row.selected)
       .map((row) => ({
         nombre: row.nombre, unidad: row.unidad, cantidad: row.cantidad, precio_total: row.precio_total,
-        contenido_envase: row.contenido_envase, peso_real: row.peso_real, precio_compra: row.precio_compra,
+        contenido_envase: row.contenido_envase, peso_real: row.peso_real,
       }));
 
     setConfirming(true);
@@ -292,6 +300,14 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                   {count} {ACCION_LABELS[accion]?.label || accion}
                 </span>
               ))}
+              {filasConAlerta > 0 ? (
+                <span
+                  style={countBadgeStyle({ color: 'var(--vg-f-ffd9a0)', background: 'rgba(255, 176, 59, 0.18)' })}
+                  title={`Filas seleccionadas cuyo costo cambia ${Number(umbralAlerta)}% o más`}
+                >
+                  ⚠ {filasConAlerta} con variación de costo ≥ {Number(umbralAlerta)}%
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -301,16 +317,19 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
               <div style={headStyle}>Ingrediente</div>
               <div style={headStyle}>Unidad</div>
               <div style={headStyle}>Cantidad</div>
-              <div style={headStyle}>Precio total</div>
+              <div style={headStyle}>Precio total pagado</div>
               <div style={headStyle}>Peso neto</div>
               <div style={headStyle}>Peso real</div>
-              <div style={headStyle}>Precio compra</div>
+              <div style={headStyle} title="Precio de un envase: precio total × peso neto ÷ cantidad (para ingredientes por unidad: precio total ÷ cantidad)">Precio compra (calculado)</div>
+              <div style={headStyle} title="Costo por g, ml o unidad que quedaría en reportes y recetas, comparado con el de hoy">Costo unitario nuevo</div>
               <div style={headStyle}>Estado</div>
               <div style={headStyle}>Detalle</div>
 
               {rows.map((row) => {
                 const badge = ACCION_LABELS[row.accion] || ACCION_LABELS.error;
                 const canSelect = SELECTABLE_ACCIONES.has(row.accion);
+                const precioCompra = calcularPrecioCompra(row);
+                const costo = calcularCostoNuevo(row, umbralAlerta);
                 return (
                   <>
                     <div key={`sel-${row.fila}`} style={cellStyle}>
@@ -373,12 +392,39 @@ function AnalystIngredientsImportPage({ isMobile, onBack }) {
                       />
                     </div>
                     <div key={`precio-compra-${row.fila}`} style={cellStyle}>
-                      <input
-                        value={row.precio_compra || ''}
-                        onChange={(event) => updateRow(row.fila, { precio_compra: event.target.value })}
-                        style={editInputStyle}
-                        placeholder="Opcional"
-                      />
+                      <span
+                        style={{ fontWeight: 700, color: precioCompra ? 'var(--vg-f-8fffb0)' : 'var(--vg-f-a89999)' }}
+                        title="Se calcula con el precio total, el peso neto y la cantidad"
+                      >
+                        {precioCompra || '—'}
+                      </span>
+                    </div>
+                    <div key={`costo-${row.fila}`} style={cellStyle}>
+                      {costo.costoNuevo === null ? (
+                        <span style={{ color: 'var(--vg-f-a89999)' }}>—</span>
+                      ) : (
+                        <div style={{ display: 'grid', gap: 2 }}>
+                          <span style={{ fontWeight: 700 }}>${formatearCosto(costo.costoNuevo)}</span>
+                          {costo.costoActual === null || costo.variacion === null ? (
+                            <span style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>
+                              {row.ingrediente_id ? 'sin costo anterior' : 'ingrediente nuevo'}
+                            </span>
+                          ) : (
+                            <>
+                              <span style={{ fontSize: 11, color: 'var(--vg-f-a89999)' }}>antes ${formatearCosto(costo.costoActual)}</span>
+                              <span
+                                style={costo.alerta ? variacionAlertaStyle : variacionNormalStyle(costo.variacion)}
+                                title={costo.alerta
+                                  ? `El costo cambia ${costo.variacion}%: supera el ${Number(umbralAlerta)}% configurado en el costeo y quedaría como alerta de precio`
+                                  : `El costo cambia ${costo.variacion}% (el umbral de alerta es ${Number(umbralAlerta)}%)`}
+                              >
+                                {costo.variacion > 0 ? '▲' : costo.variacion < 0 ? '▼' : ''} {costo.variacion > 0 ? '+' : ''}{costo.variacion}%
+                                {costo.alerta ? ` · supera ${Number(umbralAlerta)}%` : ''}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div key={`state-${row.fila}`} style={cellStyle}>
                       <span style={countBadgeStyle(badge)}>{badge.label}</span>
@@ -513,7 +559,9 @@ const countBadgeStyle = (badge) => ({
 const loteFormStyle = (isMobile) => ({ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1.4fr 1fr', gap: 10 });
 
 const tableWrapStyle = { overflowX: 'auto' };
-const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 100px 90px 100px 100px 100px 110px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 1320 };
+const tableStyle = { display: 'grid', gridTemplateColumns: '34px minmax(160px, 1.4fr) 100px 90px 100px 100px 100px 110px 150px 110px minmax(160px, 1.4fr)', gap: '10px 12px', alignItems: 'center', minWidth: 1480 };
+const variacionAlertaStyle = { fontSize: 11, fontWeight: 800, color: '#ffb3b3', background: 'rgba(255, 92, 92, 0.18)', borderRadius: 8, padding: '2px 6px', width: 'fit-content' };
+const variacionNormalStyle = (variacion) => ({ fontSize: 11, fontWeight: 700, color: variacion > 0 ? 'var(--vg-f-ffd9a0)' : 'var(--vg-f-8fffb0)' });
 const headStyle = { color: 'var(--vg-f-f0b4b4)', fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.1)' };
 const cellStyle = { color: 'var(--vg-text-strong)', fontSize: 13, padding: '6px 2px', borderBottom: '1px solid rgba(var(--vg-ink), 0.06)' };
 const cellPrimaryStyle = { ...cellStyle };

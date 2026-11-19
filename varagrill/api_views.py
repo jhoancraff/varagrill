@@ -65,7 +65,7 @@ from .auth_helpers import (
     _is_owner_user,
 )
 from . import compras_anulacion, fechas_registro
-from .costos_historial import con_origen
+from .costos_historial import con_origen, costo_efectivo, supera_umbral, umbral_alerta, variacion_pct
 from .delivery import CargoDeliveryInvalido, aplicar_cargo, resolver_cargo_delivery
 from .servicios_adicionales import ServiciosInvalidos, aplicar_servicios, resolver_servicios, serializar_lineas
 from .impresion_lpd import imprimir_nota_entrega_caja
@@ -3463,14 +3463,22 @@ def admin_catalog_view(request):
 MAX_INGREDIENTES_IMPORT_SIZE_BYTES = 5 * 1024 * 1024
 
 
-def _parse_trio_envase_peso_precio(row):
+def _trio_desde_precio_total(row, cantidad, precio_total, ingrediente=None):
     """
-    Parsea las 3 columnas opcionales del Excel "peso neto"/"peso real"/"precio de
-    compra" (ver ingredientes_excel.HEADER_ALIASES) de un `row`/`item` ya extraído.
-    Devuelve (trio, error):
-    - los 3 vacíos -> ({}, None): la fila no toca estos datos.
-    - los 3 presentes y válidos -> ({'contenido_envase':D,'peso_real':D,'precio_compra':D}, None)
-    - cualquier combinación parcial, o algún valor fuera de rango -> (None, mensaje_error)
+    Arma el trio peso neto / peso real / precio de compra de una fila del Excel. El Excel ya NO trae el precio
+    de compra: se calcula a partir de lo que se pago en total (`precio_total`) por la `cantidad` recibida.
+
+    El precio de compra es el precio de UN envase (el de "Peso neto"):
+        precio de compra = precio total x peso neto / cantidad       (g y ml)
+        precio de compra = precio total / cantidad                   (unidad: ya es el precio de una unidad)
+    Ej.: 5000 g por $25 en envases de 1000 g -> 5 envases -> precio de compra $5.
+
+    Los pesos salen de la fila (los dos juntos) o, si la fila no los trae, de los que el ingrediente ya tiene
+    guardados. Devuelve (trio, error):
+    - ({}, None): esta fila no toca el costeo (sin pesos, sin cantidad positiva o sin precio total).
+    - ({'contenido_envase', 'peso_real', 'precio_compra', 'costo_nominal'}, None): `costo_nominal` es el costo
+      exacto por unidad comprada (precio total / cantidad), sin el redondeo a centavos del precio de compra.
+    - (None, mensaje): peso neto o peso real sueltos, valores fuera de rango, o pesos sin precio total.
     """
     contenido_envase, error = parse_decimal_opcional(row.get('contenido_envase'), 'peso neto')
     if error:
@@ -3478,24 +3486,57 @@ def _parse_trio_envase_peso_precio(row):
     peso_real, error = parse_decimal_opcional(row.get('peso_real'), 'peso real')
     if error:
         return None, error
-    precio_compra, error = parse_decimal_opcional(row.get('precio_compra'), 'precio de compra')
-    if error:
-        return None, error
 
-    valores = (contenido_envase, peso_real, precio_compra)
-    if all(valor is None for valor in valores):
+    if (contenido_envase is None) != (peso_real is None):
+        return None, 'El peso neto y el peso real van juntos: completá los dos o dejá los dos vacíos.'
+
+    pesos_de_la_fila = contenido_envase is not None
+    if not pesos_de_la_fila and ingrediente is not None and ingrediente.contenido_envase and ingrediente.peso_real:
+        contenido_envase, peso_real = ingrediente.contenido_envase, ingrediente.peso_real
+    if contenido_envase is None:
         return {}, None
-    if any(valor is None for valor in valores):
-        return None, 'El peso neto, el peso real y el precio de compra van juntos: completá los tres o dejá los tres vacíos.'
+
+    if cantidad is None or cantidad <= 0:
+        return {}, None
+    if precio_total is None:
+        if pesos_de_la_fila:
+            return None, 'Con el peso neto y el peso real hace falta el precio total pagado para calcular el precio de compra.'
+        return {}, None
+
+    unidad = ingrediente.unidad_medida if ingrediente is not None else normalize_unidad(row.get('unidad'))
+    costo_nominal = (precio_total / cantidad).quantize(Decimal('0.000001'))
+    precio_envase = costo_nominal if unidad == 'unidad' else precio_total * contenido_envase / cantidad
+    precio_compra = precio_envase.quantize(Decimal('0.01'))
 
     error_rango = _validar_envase_peso_precio(contenido_envase, peso_real, precio_compra)
     if error_rango:
         return None, error_rango
 
-    return {'contenido_envase': contenido_envase, 'peso_real': peso_real, 'precio_compra': precio_compra}, None
+    return {
+        'contenido_envase': contenido_envase, 'peso_real': peso_real,
+        'precio_compra': precio_compra, 'costo_nominal': costo_nominal,
+    }, None
 
 
-def _preview_ingrediente_row(row):
+def _costo_efectivo_tras_la_carga(ingrediente, trio, cantidad, precio_total, unidad):
+    """
+    Costo (el EFECTIVO, el que usan reportes y recetas y el que mide la alerta de precio, ver costos_historial.py)
+    que tendria el ingrediente despues de aplicar la fila: mismo criterio que _importar_ingredientes. None si la
+    fila no cambia el costo (sin precio total, sin cantidad positiva...).
+    """
+    if trio:
+        if unidad == 'unidad':
+            costo_unitario = trio['costo_nominal']
+        else:
+            costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
+        return costo_efectivo(costo_unitario, trio['precio_compra'], trio['peso_real'])
+    if ingrediente is not None and cantidad is not None and cantidad > 0 and precio_total is not None:
+        costo_unitario = _costo_unitario_por_compra(precio_total, cantidad, ingrediente)
+        return costo_efectivo(costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
+    return None
+
+
+def _preview_ingrediente_row(row, umbral=None):
     """
     Clasifica una fila ya parseada del Excel (ver ingredientes_excel.parse_ingredientes_workbook)
     contra el inventario actual, sin tocar la base de datos — es lo que ve el analista en la
@@ -3505,14 +3546,20 @@ def _preview_ingrediente_row(row):
     entrega/recuento recibido), no el valor final — si el ingrediente tiene -5 y la fila trae
     10, el stock queda en 5, no en 10. `stock_nuevo` en el resultado es justamente ese preview
     (stock_actual + cantidad) para que el analista lo vea antes de confirmar.
+
+    Tambien devuelve el costo unitario que quedaria (`costo_nuevo`), el que tiene hoy (`costo_actual`, solo si el
+    ingrediente existe), cuanto cambia (`variacion_pct`) y si ese cambio pasa el umbral de alerta de precio
+    configurado en el costeo (`alerta_variacion`): el mismo criterio con el que, al confirmar, el cambio quedaria
+    marcado en "Alertas de precios". `umbral` se pasa desde la vista para no consultarlo una vez por fila.
     """
     nombre = row['nombre']
     unidad_normalizada = normalize_unidad(row['unidad'])
     cantidad, error_cantidad = parse_cantidad(row['cantidad'])
     precio_total, error_precio = parse_precio_total(row.get('precio_total'))
-    trio, error_trio = _parse_trio_envase_peso_precio(row)
     ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+    trio, error_trio = _trio_desde_precio_total(row, cantidad, precio_total, ingrediente)
 
+    # El precio de compra no viene del Excel: se calcula con el total pagado (ver _trio_desde_precio_total).
     resultado = {
         'fila': row['fila'],
         'nombre': nombre,
@@ -3521,7 +3568,7 @@ def _preview_ingrediente_row(row):
         'precio_total': str(precio_total) if precio_total is not None else (row.get('precio_total') or ''),
         'contenido_envase': str(trio['contenido_envase']) if trio else (row.get('contenido_envase') or ''),
         'peso_real': str(trio['peso_real']) if trio else (row.get('peso_real') or ''),
-        'precio_compra': str(trio['precio_compra']) if trio else (row.get('precio_compra') or ''),
+        'precio_compra': str(trio['precio_compra']) if trio else '',
         'ingrediente_id': ingrediente.id if ingrediente else None,
         'stock_actual': str(ingrediente.stock_actual) if ingrediente else None,
         'unidad_actual': ingrediente.unidad_medida if ingrediente else None,
@@ -3529,6 +3576,19 @@ def _preview_ingrediente_row(row):
         'peso_real_actual': str(ingrediente.peso_real) if ingrediente and ingrediente.peso_real is not None else None,
         'precio_compra_actual': str(ingrediente.precio_compra) if ingrediente and ingrediente.precio_compra is not None else None,
     }
+
+    if not (error_precio or error_cantidad or error_trio):
+        unidad_final = ingrediente.unidad_medida if ingrediente else unidad_normalizada
+        costo_nuevo = _costo_efectivo_tras_la_carga(ingrediente, trio, cantidad, precio_total, unidad_final)
+        costo_actual = (
+            costo_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
+            if ingrediente else None
+        )
+        variacion = variacion_pct(costo_actual, costo_nuevo) if costo_nuevo is not None and costo_actual is not None else None
+        resultado['costo_nuevo'] = str(costo_nuevo.quantize(Decimal('0.000001'))) if costo_nuevo is not None else None
+        resultado['costo_actual'] = str(costo_actual.quantize(Decimal('0.000001'))) if costo_actual is not None else None
+        resultado['variacion_pct'] = str(variacion) if variacion is not None else None
+        resultado['alerta_variacion'] = supera_umbral(variacion, umbral)
 
     if error_precio:
         resultado['accion'] = 'error'
@@ -3549,7 +3609,7 @@ def _preview_ingrediente_row(row):
             if cambia_stock:
                 partes.append('el stock')
             if trio:
-                partes.append('el peso neto, el peso real y el precio de compra')
+                partes.append('el peso neto, el peso real y el precio de compra (calculado con el precio total)')
             resultado['mensaje'] = 'Va a actualizar ' + ' y '.join(partes) + '.'
         else:
             # cambia_stock y trio son ambos False acá, y cambia_stock=False solo
@@ -3565,7 +3625,7 @@ def _preview_ingrediente_row(row):
         resultado['mensaje'] = 'Ingrediente nuevo: falta una unidad válida (g, ml o unidad).'
     elif not trio:
         resultado['accion'] = 'error'
-        resultado['mensaje'] = 'Ingrediente nuevo: faltan el peso neto, el peso real y el precio de compra para calcular el costo.'
+        resultado['mensaje'] = 'Ingrediente nuevo: faltan el peso neto, el peso real y el precio total para calcular el costo.'
     else:
         resultado['accion'] = 'nuevo'
         resultado['mensaje'] = ''
@@ -3584,9 +3644,8 @@ def _importar_ingredientes(
     cantidad como delta; si no existe se crea con ese stock inicial y se registra un
     movimiento de 'entrada'. Cantidad vacía o en 0 se ignora para ingredientes NUEVOS —
     mismo criterio que sync_inventario_pesaje (management command). Para un ingrediente
-    EXISTENTE, en cambio, una fila puede traer solo peso neto/peso real/precio de compra
-    (ver _parse_trio_envase_peso_precio) sin tocar el stock — sirve para refrescar el
-    costeo sin hacer un reconteo físico.
+    EXISTENTE, el costo sale de "precio total" y "cantidad" (ver _trio_desde_precio_total):
+    el precio de compra del envase ya no viene del Excel, se calcula.
 
     "Cantidad" es siempre lo que esta carga SUMA (una entrega recibida), nunca el valor
     final del stock — si el ingrediente tiene -5 y la fila trae 10, el stock queda en 5,
@@ -3600,7 +3659,7 @@ def _importar_ingredientes(
     (el "lote") para todo el archivo, con un VGDetalleCompra por cada fila que aumentó
     stock. El costo de esa línea (VGDetalleCompra.costo_unitario, y por lo tanto el costeo
     del ingrediente y de las recetas que lo usan) SIEMPRE se calcula por unidad NOMINAL
-    comprada (precio_compra/contenido_envase, o precio_total/delta si no hay trío) — nunca
+    comprada (precio_total/cantidad, el mismo costo exacto del que sale el precio de compra) — nunca
     con ingrediente.costo_unitario, que cuando hay trío se calcula por unidad ÚTIL
     (precio_compra/peso_real, con la merma descontada) para costear recetas; usar ese costo
     de receta para facturar infla el monto a pagar cada vez que peso_real < contenido_envase.
@@ -3657,12 +3716,14 @@ def _importar_ingredientes(
                 errores.append(f'{nombre}: {error_precio}')
                 continue
 
-            trio, error_trio = _parse_trio_envase_peso_precio(item)
+            ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
+
+            # El precio de compra se calcula aqui con el precio total (lo que llegue en `precio_compra` del
+            # item se ignora): ver _trio_desde_precio_total.
+            trio, error_trio = _trio_desde_precio_total(item, cantidad, precio_total, ingrediente)
             if error_trio:
                 errores.append(f'{nombre}: {error_trio}')
                 continue
-
-            ingrediente = VGIngrediente.objects.filter(nombre__iexact=nombre).first()
 
             if ingrediente is not None:
                 stock_anterior = ingrediente.stock_actual
@@ -3699,11 +3760,11 @@ def _importar_ingredientes(
                     ingrediente.peso_real = trio['peso_real']
                     ingrediente.precio_compra = trio['precio_compra']
                     if ingrediente.unidad_medida == 'unidad':
-                        ingrediente.costo_unitario = trio['precio_compra']
-                        costo_linea_factura = trio['precio_compra']
+                        ingrediente.costo_unitario = trio['costo_nominal']
+                        costo_linea_factura = trio['costo_nominal']
                     else:
                         ingrediente.costo_unitario = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
-                        costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
+                        costo_linea_factura = trio['costo_nominal']
                     update_fields += ['contenido_envase', 'peso_real', 'precio_compra', 'costo_unitario']
                 elif delta > 0 and precio_total is not None:
                     ingrediente.costo_unitario = _costo_unitario_por_compra(precio_total, delta, ingrediente)
@@ -3745,18 +3806,18 @@ def _importar_ingredientes(
                     errores.append(f'{nombre}: falta una unidad válida (g, ml o unidad) para crearlo.')
                     continue
                 if not trio:
-                    errores.append(f'{nombre}: faltan el peso neto, el peso real y el precio de compra para crearlo.')
+                    errores.append(f'{nombre}: faltan el peso neto, el peso real y el precio total para crearlo.')
                     continue
                 # Ver el comentario equivalente arriba (ingrediente existente con trío):
                 # para "unidad" el precio de compra ya es por unidad exacta, sin dividir
                 # entre el peso neto/peso real (que ahí no representa lo mismo que
                 # `cantidad` — ver el caso reportado del agua con envase en ml).
                 if unidad_normalizada == 'unidad':
-                    costo_inicial = trio['precio_compra']
-                    costo_linea_factura = trio['precio_compra']
+                    costo_inicial = trio['costo_nominal']
+                    costo_linea_factura = trio['costo_nominal']
                 else:
                     costo_inicial = _costo_unitario_desde_precio(trio['precio_compra'], trio['peso_real'])
-                    costo_linea_factura = _costo_unitario_desde_precio(trio['precio_compra'], trio['contenido_envase'])
+                    costo_linea_factura = trio['costo_nominal']
                 nuevo = VGIngrediente.objects.create(
                     nombre=nombre,
                     unidad_medida=unidad_normalizada,
@@ -3858,7 +3919,12 @@ def admin_ingredientes_import_view(request):
         if not filas:
             return _auth_response({'ok': False, 'message': 'El archivo no tiene filas de ingredientes para importar.'}, status=400)
 
-        return _auth_response({'ok': True, 'filas': [_preview_ingrediente_row(row) for row in filas]})
+        umbral = umbral_alerta()
+        return _auth_response({
+            'ok': True,
+            'umbral_alerta_pct': str(umbral),
+            'filas': [_preview_ingrediente_row(row, umbral) for row in filas],
+        })
 
     if action == 'confirm':
         items = data.get('items')

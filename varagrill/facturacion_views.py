@@ -20,10 +20,12 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import (
     BILLABLE_ORDER_STATES,
+    _aplicar_merma_a_necesidades,
     _compute_pedido_ingredient_needs,
     _compute_preparation_cost_map,
     _load_preparation_structure,
     _snapshot_costo_venta_detalles,
+    _texto_merma,
 )
 from .auth_helpers import _auth_response, _is_admin_user, _is_cajera_user, _is_owner_or_contador_user
 from .delivery import texto_cargo
@@ -314,6 +316,7 @@ def _emitir_factura(pedidos, cliente, request_user, pre_factura=None, porcentaje
         _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_map, unit_cost_cache)
 
         needs = _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation)
+        needs, merma_por_ingrediente = _aplicar_merma_a_necesidades(needs)
         if needs:
             ingredients_by_id = {
                 ingredient.id: ingredient
@@ -329,7 +332,10 @@ def _emitir_factura(pedidos, cliente, request_user, pre_factura=None, porcentaje
                     ingrediente=ingredient,
                     tipo_movimiento='salida',
                     cantidad=cantidad,
-                    motivo=f'Venta — Factura #{factura.numero_factura} (Pedido #{pedido.id})',
+                    motivo=(
+                        f'Venta — Factura #{factura.numero_factura} (Pedido #{pedido.id})'
+                        f'{_texto_merma(merma_por_ingrediente.get(ingrediente_id), ingredient.unidad_medida)}'
+                    ),
                     id_referencia=pedido.id,
                     creado_por=request_user,
                 )

@@ -600,6 +600,52 @@ def _buscar_fila_racion_acompanante(grupo_id, producto_id, peso_gramos):
     return min(filas, key=lambda fila: abs(fila.peso_tramo - peso_gramos))
 
 
+def _factor_merma_de(ingrediente, ignorar_interruptor=False):
+    """
+    Cuanto hay que descontar del inventario por cada unidad de receta de `ingrediente`: contenido del envase /
+    peso real (ej. envase de 1000 g y peso real de 500 g -> 2: una receta de 500 g descuenta 1000 g). Vale 1 si el
+    ingrediente no descuenta merma (VGIngrediente.descuenta_merma apagado), se mide por "unidad" o no tiene merma
+    (peso real vacio o no menor al envase). `ignorar_interruptor` da el factor teorico aunque este apagado.
+    """
+    contenido, real = ingrediente.contenido_envase, ingrediente.peso_real
+    if not ignorar_interruptor and not ingrediente.descuenta_merma:
+        return Decimal('1')
+    if ingrediente.unidad_medida == 'unidad' or not contenido or not real or not (0 < real < contenido):
+        return Decimal('1')
+    return Decimal(contenido) / Decimal(real)
+
+
+def _aplicar_merma_a_necesidades(needs):
+    """
+    Ajusta lo que hay que descontar al vender (`needs`, en la cantidad de la receta = gramos aprovechables) a lo que
+    de verdad se consume del inventario, para los ingredientes con VGIngrediente.descuenta_merma encendido.
+    Devuelve (necesidades_ajustadas, merma_por_ingrediente), donde merma es la parte extra que se descuenta
+    (ej. receta de 500 g con factor 2 -> se descuentan 1000 g, merma 500 g). Los costos NO se tocan: el costo por
+    gramo aprovechable ya incluye la merma, asi que cantidad de receta x costo sigue siendo el costo del plato.
+    """
+    if not needs:
+        return needs, {}
+    ajustadas = dict(needs)
+    merma = {}
+    candidatos = VGIngrediente.objects.filter(id__in=list(needs), descuenta_merma=True).exclude(unidad_medida='unidad')
+    for ingrediente in candidatos:
+        factor = _factor_merma_de(ingrediente)
+        base = needs[ingrediente.id]
+        if factor <= 1 or base <= 0:
+            continue
+        ajustadas[ingrediente.id] = base * factor
+        merma[ingrediente.id] = base * factor - base
+    return ajustadas, merma
+
+
+def _texto_merma(merma, unidad):
+    """' (incluye 500 g de merma)' para el motivo del movimiento de inventario, o '' si no hubo merma."""
+    if not merma or merma <= 0:
+        return ''
+    cantidad = merma.quantize(Decimal('0.01')).normalize()
+    return f' (incluye {cantidad:f} {unidad} de merma)'
+
+
 def _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation):
     """
     Cuánto de cada VGIngrediente hay que descontar del inventario al cobrar `pedido`: recorre
@@ -7002,6 +7048,7 @@ def pedidos_cobro_view(request):
             _snapshot_costo_venta_detalles(pedido, ingredient_costs, preparation_cost_map, unit_cost_cache)
 
             needs = _compute_pedido_ingredient_needs(pedido, components_by_preparation, yields_by_preparation)
+            needs, merma_por_ingrediente = _aplicar_merma_a_necesidades(needs)
             if needs:
                 ingredients_by_id = {
                     ingredient.id: ingredient
@@ -7017,7 +7064,7 @@ def pedidos_cobro_view(request):
                         ingrediente=ingredient,
                         tipo_movimiento='salida',
                         cantidad=cantidad,
-                        motivo=f'Venta — Pedido #{pedido.id}',
+                        motivo=f'Venta — Pedido #{pedido.id}{_texto_merma(merma_por_ingrediente.get(ingrediente_id), ingredient.unidad_medida)}',
                         id_referencia=pedido.id,
                         creado_por=request.user,
                     )

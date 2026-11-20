@@ -17,6 +17,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .api_views import (
+    _factor_merma_de,
     _finalizar_estado_pago_compra,
     _serialize_abono_compra,
     _serialize_compra,
@@ -76,6 +77,11 @@ def _precio_envase_de_compra(costo_unitario, ingrediente):
     contenido_envase y peso_real: sin ellos el costo efectivo es costo_unitario y no hace falta tocar nada.
     """
     if ingrediente.contenido_envase and ingrediente.peso_real:
+        if _factor_merma_de(ingrediente) > 1:
+            # Con el descuento de merma encendido el inventario ya baja lo que se pierde, asi que el costo tambien
+            # la lleva: el costo por gramo aprovechable es costo / (peso real / envase), o sea precio del ENVASE
+            # (costo x contenido) / peso real. Igual que la importacion por Excel.
+            return (costo_unitario * ingrediente.contenido_envase).quantize(Decimal('0.01'))
         return (costo_unitario * ingrediente.peso_real).quantize(Decimal('0.01'))
     return None
 
@@ -86,7 +92,9 @@ def _serialize_detalle_borrador(detalle, umbral=None):
     # alertas, la linea sale marcada para revisarla ANTES de confirmar (ver costos_historial.py).
     ingrediente = detalle.ingrediente
     costo_actual = costo_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
-    costo_final = _costo_unitario_por_compra(detalle.precio_total, detalle.cantidad, ingrediente)
+    # Con el descuento de merma encendido, el costo que quedaria en reportes y recetas lleva la merma (ver
+    # _precio_envase_de_compra), asi se compara con el costo de hoy en las mismas condiciones.
+    costo_final = _costo_unitario_por_compra(detalle.precio_total, detalle.cantidad, ingrediente) * _factor_merma_de(ingrediente)
     variacion = variacion_pct(costo_actual, costo_final) if detalle.cantidad else None
     return {
         'costo_actual': str(costo_actual.quantize(Decimal('0.000001'))),

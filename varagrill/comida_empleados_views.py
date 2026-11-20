@@ -26,8 +26,10 @@ from .api_views import (
     HIDDEN_INGREDIENT_IDS,
     _add_preparation_needs,
     _costo_unitario_efectivo,
+    _factor_merma_de,
     _load_preparation_structure,
     _product_recipe_components,
+    _texto_merma,
 )
 from .auth_helpers import _auth_response, _get_role_name, _is_admin_user
 from .models import (
@@ -135,21 +137,32 @@ def _necesidades(tipo, objeto, cantidad):
     return needs
 
 
-def _lineas(necesidades, ingredientes_por_id):
-    """Las cantidades redondeadas al centavo (como se guarda el stock), con stock, costo y si alcanza."""
+def _lineas(necesidades, ingredientes_por_id, aplica_merma=True):
+    """
+    Las cantidades redondeadas al centavo (como se guarda el stock), con stock, costo y si alcanza.
+
+    `necesidades` viene en la cantidad de la receta (gramos aprovechables). Para recetas y subrecetas
+    (`aplica_merma`), los ingredientes con descuento de merma encendido descuentan del stock lo que de verdad se
+    consume (receta x contenido del envase / peso real); el costo sigue siendo cantidad de receta x costo por gramo
+    aprovechable, y el costo unitario de la linea se guarda por unidad de inventario (costo / factor) para que
+    cantidad x costo_unitario siga dando ese mismo costo. Un ingrediente elegido directo se descuenta tal cual.
+    """
     lineas = []
     for ingrediente_id in sorted(necesidades, key=lambda i: ingredientes_por_id[i].nombre.lower()):
         ingrediente = ingredientes_por_id[ingrediente_id]
-        cantidad = necesidades[ingrediente_id].quantize(CENTAVO, rounding=ROUND_HALF_UP)
-        if cantidad <= 0:
+        util = necesidades[ingrediente_id].quantize(CENTAVO, rounding=ROUND_HALF_UP)
+        if util <= 0:
             continue
-        costo_unitario = _costo_unitario_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
+        factor = _factor_merma_de(ingrediente) if aplica_merma else Decimal('1')
+        cantidad = (util * factor).quantize(CENTAVO, rounding=ROUND_HALF_UP)
+        costo_efectivo = _costo_unitario_efectivo(ingrediente.costo_unitario, ingrediente.precio_compra, ingrediente.peso_real)
         stock = Decimal(str(ingrediente.stock_actual))
         lineas.append({
             'ingrediente': ingrediente,
             'cantidad': cantidad,
-            'costo_unitario': costo_unitario,
-            'costo': cantidad * costo_unitario,
+            'merma': cantidad - util,
+            'costo_unitario': costo_efectivo / factor,
+            'costo': util * costo_efectivo,
             'stock_actual': stock,
             'stock_despues': stock - cantidad,
         })
@@ -303,7 +316,7 @@ def comida_empleados_previsualizar_view(request):
 
     necesidades = _necesidades(tipo, objeto, cantidad)
     ingredientes = VGIngrediente.objects.in_bulk(list(necesidades))
-    lineas = _lineas(necesidades, ingredientes)
+    lineas = _lineas(necesidades, ingredientes, aplica_merma=(tipo != 'ingrediente'))
     if not lineas:
         return _auth_response({
             'ok': False,
@@ -378,7 +391,7 @@ def _registrar(request):
         ingredientes = {
             i.id: i for i in VGIngrediente.objects.select_for_update().filter(id__in=list(necesidades)).order_by('id')
         }
-        lineas = _lineas(necesidades, ingredientes)
+        lineas = _lineas(necesidades, ingredientes, aplica_merma=(tipo != 'ingrediente'))
         if not lineas:
             return _auth_response({'ok': False, 'message': 'Esa selección no descuenta ningún ingrediente.'}, status=400)
 
@@ -421,7 +434,7 @@ def _registrar(request):
                 ingrediente=ingrediente,
                 tipo_movimiento='salida',
                 cantidad=linea['cantidad'],
-                motivo=motivo,
+                motivo=f"{motivo}{_texto_merma(linea['merma'], ingrediente.unidad_medida)}"[:255],
                 id_referencia=comida.id,
                 creado_por=request.user,
             ))

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import Toast from './Toast';
 import useToast from '../hooks/useToast';
 
-function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
+function AnalystConfiguracionCosteoPage({ isMobile, onBack, onMerma }) {
   const [rendimiento, setRendimiento] = useState('0');
   const [margenDefecto, setMargenDefecto] = useState('50');
   const [umbralAlerta, setUmbralAlerta] = useState('30');
@@ -67,6 +67,11 @@ function AnalystConfiguracionCosteoPage({ isMobile, onBack }) {
         <button type="button" onClick={onBack} style={backButtonStyle}>
           ← Volver al panel de configuración
         </button>
+        {onMerma ? (
+          <button type="button" onClick={onMerma} style={mermaButtonStyle}>
+            Configuración de merma
+          </button>
+        ) : null}
       </div>
 
       <div>
@@ -141,6 +146,7 @@ const inputStyle = { borderRadius: 12, border: '1px solid rgba(var(--vg-ink), 0.
 const hintStyle = { margin: 0, color: 'var(--vg-f-aa9999)', fontSize: 12.5, lineHeight: 1.5 };
 const emptyStyle = { minHeight: 80, display: 'grid', placeItems: 'center', borderRadius: 14, border: '1px dashed rgba(var(--vg-ink), 0.12)', color: 'var(--vg-f-c8bbbb)' };
 const saveButtonStyle = { justifySelf: 'start', border: 'none', borderRadius: 999, padding: '11px 22px', background: 'linear-gradient(90deg, #d81d1d 0%, #ff5252 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const mermaButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.18)', borderRadius: 999, padding: '11px 18px', background: 'rgba(var(--vg-ink), 0.05)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer' };
 const backButtonStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, width: 'fit-content', border: 'none', borderRadius: 999, padding: '11px 18px', background: 'linear-gradient(90deg, #1d4ed8 0%, #3b82f6 100%)', color: '#fff', fontWeight: 700, cursor: 'pointer', boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)' };
 
 export default AnalystConfiguracionCosteoPage;

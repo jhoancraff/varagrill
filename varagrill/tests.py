@@ -8039,3 +8039,297 @@ class AlertaStockMinimoTests(TestCase):
             with self.assertRaises(CommandError) as ctx:
                 call_command('alertas_stock_minimo', stdout=io.StringIO())
         self.assertIn('Unauthorized', str(ctx.exception))
+
+
+class MermaIngredientesTests(TestCase):
+    """
+    Descuento de merma: un ingrediente con peso real menor al envase y el interruptor encendido descuenta del
+    inventario lo que de verdad se consume (receta x envase / peso real). El costo no se toca.
+    """
+
+    URL = '/api/admin/merma-ingredientes/'
+
+    def setUp(self):
+        self.admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        self.cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='merma_admin', password='claveAdmin123', cedula='97000001',
+            email='merma_admin@varagrill.test', id_role=self.admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='merma_cajera', password='claveCajera123', cedula='97000002',
+            email='merma_cajera@varagrill.test', id_role=self.cajera_role,
+        )
+        self.categoria = VGCategoriaProducto.objects.create(nombre='Platos MM')
+        self.metodo_pago, _ = VGMetodoPago.objects.get_or_create(nombre='Efectivo', defaults={'es_efectivo': True})
+        # Envase de 1000 g del que solo se aprovechan 500 g: cada gramo de receta consume 2 g del inventario.
+        self.aguacate = VGIngrediente.objects.create(
+            nombre='Aguacate MM', unidad_medida='g', stock_actual='100000', costo_unitario='0.004',
+            contenido_envase='1000', peso_real='500', precio_compra='2.00',
+        )
+        self.aguacate.refresh_from_db()  # valores como Decimal, igual que cuando lo carga el sistema
+
+    def _plato_con(self, ingrediente, cantidad, nombre='Plato MM'):
+        plato = VGProducto.objects.create(nombre=nombre, categoria=self.categoria, precio_venta='5.00', disponible=True)
+        VGRecetaProducto.objects.create(producto=plato, ingrediente=ingrediente, cantidad_requerida=cantidad)
+        return plato
+
+    def _pedido(self, plato, cantidad=1):
+        pedido = VGPedido.objects.create(
+            usuario=self.cajera, tipo_pedido='local', estado='entregado', subtotal='5.00', total='5.00',
+        )
+        VGDetallePedido.objects.create(
+            pedido=pedido, producto=plato, cantidad=cantidad, precio_unitario='5.00', estado='entregado',
+        )
+        return pedido
+
+    def _cobrar(self, pedido):
+        self.client.force_login(self.cajera)
+        return self.client.post(
+            '/api/pedidos/cobro/',
+            data=json.dumps({
+                'pedido_ids': [pedido.id], 'metodo_pago_id': self.metodo_pago.id,
+                'cliente_numero_documento': '99000111', 'cliente_nombre': 'Cliente Test',
+            }),
+            content_type='application/json',
+        )
+
+    def _encender(self, *ingredientes):
+        VGIngrediente.objects.filter(pk__in=[i.pk for i in ingredientes]).update(descuenta_merma=True)
+
+    # --- el descuento al cobrar ---------------------------------------------------------------------------------
+
+    def test_apagado_descuenta_lo_que_dice_la_receta_como_siempre(self):
+        pedido = self._pedido(self._plato_con(self.aguacate, '500.000'))
+        self.assertEqual(self._cobrar(pedido).status_code, 201)
+        self.aguacate.refresh_from_db()
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99500.00'))
+
+    def test_encendido_descuenta_receta_por_envase_entre_peso_real(self):
+        self._encender(self.aguacate)
+        pedido = self._pedido(self._plato_con(self.aguacate, '500.000'))
+        self.assertEqual(self._cobrar(pedido).status_code, 201)
+        self.aguacate.refresh_from_db()
+        # 500 g de receta -> 1000 g del inventario (500 g aprovechados + 500 g de merma).
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99000.00'))
+        movimiento = VGMovimientoInventario.objects.get(ingrediente=self.aguacate, id_referencia=pedido.id)
+        self.assertEqual(movimiento.cantidad, Decimal('1000.00'))
+        self.assertIn('incluye 500 g de merma', movimiento.motivo)
+
+    def test_encendido_multiplica_por_la_cantidad_de_platos(self):
+        self._encender(self.aguacate)
+        pedido = self._pedido(self._plato_con(self.aguacate, '90.000'), cantidad=3)
+        self.assertEqual(self._cobrar(pedido).status_code, 201)
+        self.aguacate.refresh_from_db()
+        # 90 g x 3 platos = 270 g de receta -> 540 g del inventario.
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99460.00'))
+
+    def test_encendido_tambien_aplica_dentro_de_una_subreceta_prorrateada(self):
+        from varagrill.models import VGPreparacion, VGRecetaPreparacion
+        self._encender(self.aguacate)
+        salsa = VGPreparacion.objects.create(nombre='Salsa MM', rendimiento_cantidad=Decimal('1000'), rendimiento_unidad='g')
+        VGRecetaPreparacion.objects.create(preparacion=salsa, ingrediente=self.aguacate, cantidad_requerida=Decimal('270'))
+        plato = VGProducto.objects.create(nombre='Plato salsa MM', categoria=self.categoria, precio_venta='5.00', disponible=True)
+        VGRecetaProducto.objects.create(producto=plato, preparacion=salsa, cantidad_requerida=Decimal('200'))
+        pedido = self._pedido(plato)
+        self.assertEqual(self._cobrar(pedido).status_code, 201)
+        self.aguacate.refresh_from_db()
+        # 200 g de salsa de un lote de 1000 g -> 54 g de aguacate de receta -> 108 g del inventario.
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99892.00'))
+
+    def test_el_costo_de_la_venta_no_cambia_con_el_interruptor(self):
+        from varagrill.models import VGDetallePedido
+        costos = {}
+        for encendido in (False, True):
+            VGIngrediente.objects.filter(pk=self.aguacate.pk).update(descuenta_merma=encendido, stock_actual='100000')
+            pedido = self._pedido(self._plato_con(self.aguacate, '500.000', nombre=f'Plato costo {encendido}'))
+            self.assertEqual(self._cobrar(pedido).status_code, 201)
+            detalle = VGDetallePedido.objects.get(pedido=pedido)
+            costos[encendido] = detalle.costo_unitario_venta
+        self.assertGreater(costos[False], 0)
+        self.assertEqual(costos[False], costos[True])
+
+    def test_no_aplica_a_ingredientes_por_unidad_ni_sin_merma(self):
+        lata = VGIngrediente.objects.create(
+            nombre='Lata MM', unidad_medida='unidad', stock_actual='100', costo_unitario='1',
+            contenido_envase='355', peso_real='300', descuenta_merma=True,
+        )
+        sal = VGIngrediente.objects.create(
+            nombre='Sal MM', unidad_medida='g', stock_actual='1000', costo_unitario='0.002',
+            contenido_envase='1000', peso_real='1000', descuenta_merma=True,
+        )
+        sin_peso = VGIngrediente.objects.create(
+            nombre='Sin peso MM', unidad_medida='g', stock_actual='1000', costo_unitario='0.002', descuenta_merma=True,
+        )
+        plato = VGProducto.objects.create(nombre='Plato varios MM', categoria=self.categoria, precio_venta='5.00', disponible=True)
+        for ingrediente, cantidad in ((lata, '2'), (sal, '100'), (sin_peso, '100')):
+            VGRecetaProducto.objects.create(producto=plato, ingrediente=ingrediente, cantidad_requerida=cantidad)
+        self.assertEqual(self._cobrar(self._pedido(plato)).status_code, 201)
+        for ingrediente, esperado in ((lata, '98'), (sal, '900'), (sin_peso, '900')):
+            ingrediente.refresh_from_db()
+            self.assertEqual(ingrediente.stock_actual, Decimal(esperado))
+
+    def test_helper_devuelve_la_merma_por_ingrediente(self):
+        from varagrill.api_views import _aplicar_merma_a_necesidades, _texto_merma
+        self._encender(self.aguacate)
+        sal = VGIngrediente.objects.create(nombre='Sal H MM', unidad_medida='g', stock_actual='10', costo_unitario='0.002')
+        ajustadas, merma = _aplicar_merma_a_necesidades({self.aguacate.id: Decimal('500'), sal.id: Decimal('30')})
+        self.assertEqual(ajustadas, {self.aguacate.id: Decimal('1000'), sal.id: Decimal('30')})
+        self.assertEqual(merma, {self.aguacate.id: Decimal('500')})
+        self.assertEqual(_texto_merma(Decimal('500'), 'g'), ' (incluye 500 g de merma)')
+        self.assertEqual(_texto_merma(Decimal('415.384615'), 'g'), ' (incluye 415.38 g de merma)')
+        self.assertEqual(_texto_merma(Decimal('0'), 'g'), '')
+        self.assertEqual(_texto_merma(None, 'g'), '')
+
+    # --- factura y comida de empleados ---------------------------------------------------------------------------
+
+    def test_la_factura_tambien_descuenta_la_merma(self):
+        from django.db import transaction
+        from varagrill.facturacion_views import _emitir_factura
+        from varagrill.models import VGCliente
+        self._encender(self.aguacate)
+        _set_tasa_actual('100.0000')
+        pedido = self._pedido(self._plato_con(self.aguacate, '500.000'))
+        cliente = VGCliente.objects.create(tipo_documento='V', numero_documento='99000222', nombre='Cliente', apellido='Factura')
+        with transaction.atomic():
+            _emitir_factura([pedido], cliente, self.admin)
+        self.aguacate.refresh_from_db()
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99000.00'))
+        movimiento = VGMovimientoInventario.objects.get(ingrediente=self.aguacate, id_referencia=pedido.id)
+        self.assertIn('incluye 500 g de merma', movimiento.motivo)
+
+    def _comida(self, tipo, origen_id, cantidad):
+        self.client.force_login(self.admin)
+        return self.client.post(
+            '/api/admin/comida-empleados/',
+            data=json.dumps({'tipo': tipo, 'origen_id': origen_id, 'cantidad': cantidad}),
+            content_type='application/json',
+        )
+
+    def test_comida_de_empleados_con_receta_descuenta_la_merma_pero_cuesta_lo_mismo(self):
+        _set_tasa_actual('100.0000')
+        receta_cat = VGCategoriaProducto.objects.get_or_create(nombre='Recetas')[0]
+        receta = VGProducto.objects.create(
+            nombre='Ensalada MM', categoria=receta_cat, precio_venta='0', disponible=False, apta_comida_empleados=True,
+        )
+        VGRecetaProducto.objects.create(producto=receta, ingrediente=self.aguacate, cantidad_requerida=Decimal('100'))
+        costos = []
+        for encendido in (False, True):
+            VGIngrediente.objects.filter(pk=self.aguacate.pk).update(descuenta_merma=encendido, stock_actual='100000')
+            respuesta = self._comida('receta', receta.id, '2')
+            self.assertEqual(respuesta.status_code, 201, respuesta.content)
+            costos.append(Decimal(respuesta.json()['comida']['costo_total']))
+            self.aguacate.refresh_from_db()
+            # 100 g x 2 porciones = 200 g de receta; encendido consume 400 g del inventario.
+            self.assertEqual(self.aguacate.stock_actual, Decimal('99600.00') if encendido else Decimal('99800.00'))
+        # El costo es el de 200 g aprovechables: 200 x (2.00 / 500) = 0.80, con o sin interruptor.
+        self.assertEqual(costos, [Decimal('0.80'), Decimal('0.80')])
+
+    def test_comida_de_empleados_con_un_ingrediente_directo_no_aplica_merma(self):
+        _set_tasa_actual('100.0000')
+        self._encender(self.aguacate)
+        respuesta = self._comida('ingrediente', self.aguacate.id, '300')
+        self.assertEqual(respuesta.status_code, 201, respuesta.content)
+        self.aguacate.refresh_from_db()
+        # Lo que se saca del stock se descuenta tal cual: ya es cantidad de inventario, no de receta.
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99700.00'))
+
+    # --- la compra por lote manual -------------------------------------------------------------------------------
+
+    def test_precio_de_envase_de_la_compra_manual_lleva_la_merma_solo_si_esta_encendido(self):
+        from varagrill.compras_views import _precio_envase_de_compra
+        costo = Decimal('0.003')  # lo que dice la factura por gramo comprado
+        self.assertEqual(_precio_envase_de_compra(costo, self.aguacate), Decimal('1.50'))  # x peso real (sin merma)
+        self.aguacate.descuenta_merma = True
+        self.assertEqual(_precio_envase_de_compra(costo, self.aguacate), Decimal('3.00'))  # x envase (con merma)
+
+    # --- la pantalla --------------------------------------------------------------------------------------------
+
+    def test_solo_el_administrador_entra_a_la_pantalla(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.assertEqual(self.client.post(
+            self.URL, data=json.dumps({'action': 'actualizar', 'ids': [self.aguacate.id], 'descuenta_merma': True}),
+            content_type='application/json',
+        ).status_code, 401)
+        self.aguacate.refresh_from_db()
+        self.assertFalse(self.aguacate.descuenta_merma)
+
+    def test_el_listado_trae_solo_los_que_tienen_merma_con_su_factor_y_sus_usos(self):
+        VGIngrediente.objects.create(
+            nombre='Sal L MM', unidad_medida='g', stock_actual='10', costo_unitario='0.002',
+            contenido_envase='1000', peso_real='1000',
+        )
+        VGIngrediente.objects.create(
+            nombre='Lata L MM', unidad_medida='unidad', stock_actual='10', costo_unitario='1',
+            contenido_envase='355', peso_real='300',
+        )
+        self._plato_con(self.aguacate, '90.000', nombre='Guacamole MM')
+        self.client.force_login(self.admin)
+        datos = self.client.get(self.URL).json()
+        self.assertTrue(datos['ok'])
+        self.assertEqual([i['nombre'] for i in datos['ingredientes']], ['Aguacate MM'])
+        fila = datos['ingredientes'][0]
+        self.assertEqual((fila['merma_pct'], fila['factor'], fila['descuenta_merma'], fila['aplica']), ('50.0', '2.00', False, False))
+        self.assertEqual(fila['usos_total'], 1)
+        self.assertEqual(fila['usos'][0], {'tipo': 'receta', 'nombre': 'Guacamole MM', 'cantidad': '90'})
+        self.assertEqual(datos['resumen'], {'con_merma': 1, 'activos': 0})
+
+    def test_encender_y_apagar_desde_la_pantalla(self):
+        self.client.force_login(self.admin)
+        cuerpo = {'action': 'actualizar', 'ids': [self.aguacate.id], 'descuenta_merma': True}
+        respuesta = self.client.post(self.URL, data=json.dumps(cuerpo), content_type='application/json')
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        datos = respuesta.json()
+        self.assertEqual(datos['cambiados'], 1)
+        self.assertTrue(datos['ingredientes'][0]['aplica'])
+        self.assertEqual(datos['resumen']['activos'], 1)
+        self.aguacate.refresh_from_db()
+        self.assertTrue(self.aguacate.descuenta_merma)
+        # Repetir no cambia nada.
+        self.assertEqual(self.client.post(self.URL, data=json.dumps(cuerpo), content_type='application/json').json()['cambiados'], 0)
+        cuerpo['descuenta_merma'] = False
+        self.assertEqual(self.client.post(self.URL, data=json.dumps(cuerpo), content_type='application/json').json()['cambiados'], 1)
+        self.aguacate.refresh_from_db()
+        self.assertFalse(self.aguacate.descuenta_merma)
+
+    def test_no_se_puede_encender_un_ingrediente_sin_merma(self):
+        sal = VGIngrediente.objects.create(
+            nombre='Sal E MM', unidad_medida='g', stock_actual='10', costo_unitario='0.002',
+            contenido_envase='1000', peso_real='1000',
+        )
+        self.client.force_login(self.admin)
+        respuesta = self.client.post(
+            self.URL, data=json.dumps({'action': 'actualizar', 'ids': [sal.id, self.aguacate.id], 'descuenta_merma': True}),
+            content_type='application/json',
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn('Sal E MM', respuesta.json()['message'])
+        self.aguacate.refresh_from_db()
+        self.assertFalse(self.aguacate.descuenta_merma)  # no se aplico nada a medias
+
+    def test_un_ingrediente_encendido_que_perdio_la_merma_sigue_en_la_lista_para_poder_apagarlo(self):
+        self._encender(self.aguacate)
+        VGIngrediente.objects.filter(pk=self.aguacate.pk).update(peso_real='1000')
+        self.client.force_login(self.admin)
+        fila = self.client.get(self.URL).json()['ingredientes'][0]
+        self.assertTrue(fila['descuenta_merma'])
+        self.assertFalse(fila['aplica'])
+        # Y ya no descuenta nada de mas al vender.
+        pedido = self._pedido(self._plato_con(self.aguacate, '500.000'))
+        self.assertEqual(self._cobrar(pedido).status_code, 201)
+        self.aguacate.refresh_from_db()
+        self.assertEqual(self.aguacate.stock_actual, Decimal('99500.00'))
+
+    def test_validaciones_de_la_peticion(self):
+        self.client.force_login(self.admin)
+
+        def enviar(cuerpo):
+            return self.client.post(self.URL, data=json.dumps(cuerpo), content_type='application/json')
+
+        self.assertEqual(enviar({'action': 'otra'}).status_code, 400)
+        self.assertEqual(enviar({'action': 'actualizar', 'ids': [self.aguacate.id]}).status_code, 400)
+        self.assertEqual(enviar({'action': 'actualizar', 'ids': [], 'descuenta_merma': True}).status_code, 400)
+        self.assertEqual(enviar({'action': 'actualizar', 'ids': ['x'], 'descuenta_merma': True}).status_code, 400)
+        self.assertEqual(enviar({'action': 'actualizar', 'ids': [999999], 'descuenta_merma': True}).status_code, 400)

@@ -333,6 +333,16 @@ class VGIngrediente(VGAuditoria):
             "calcula con la cantidad comprada tal cual, sin ajustar por merma."
         ),
     )
+    descuenta_merma = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si está activo, al vender se descuenta del inventario lo que realmente se consumió: la cantidad de la "
+            "receta (en gramos aprovechables) x contenido del envase / peso real. Ej.: 500 g de aguacate en la receta, "
+            "con envase de 1000 g y peso real de 500 g, descuentan 1000 g. Solo aplica a g/ml con peso real menor al "
+            "envase. Se activa en Costeo > Configuración de merma, cuando las recetas de este ingrediente están "
+            "escritas en gramos ya limpios (no en gramos tal como se compran)."
+        ),
+    )
     precio_compra = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True,
         help_text=(

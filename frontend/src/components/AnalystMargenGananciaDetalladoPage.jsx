@@ -120,6 +120,20 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
   // Totales de lo que se ve (todas las ventas del rango, o las del plato elegido): se suman linea por
   // linea, asi que un plato que se repite cuenta cada vez que se vendio.
   const totalesVisibles = useMemo(() => {
+    // Sin filtro de plato se usan los totales del servidor, que suman las ventas sin redondear y redondean una sola
+    // vez. Sumar aqui los totales ya redondeados de cada plato arrastraba centavos de diferencia (cada plato redondea
+    // a su centavo) y el costo no coincidia con el del Estado de resultados.
+    if (!productoSeleccionado && data?.totales) {
+      const t = data.totales;
+      return {
+        lineas: Number(data.total_lineas || 0),
+        ingreso: Number(t.ingreso_total),
+        costo: Number(t.costo_total),
+        costoConMargen: Number(t.costo_con_margen_total),
+        ganancia: Number(t.ganancia_monto),
+        gananciaPct: Number(t.ganancia_pct),
+      };
+    }
     const acumulado = { lineas: 0, ingreso: 0, costo: 0, costoConMargen: 0 };
     seccionesFiltradas.forEach((seccion) => {
       acumulado.lineas += Number(seccion.total_lineas || 0);
@@ -129,7 +143,7 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
     });
     const ganancia = acumulado.ingreso - acumulado.costoConMargen;
     return { ...acumulado, ganancia, gananciaPct: acumulado.ingreso > 0 ? (ganancia / acumulado.ingreso) * 100 : 0 };
-  }, [seccionesFiltradas]);
+  }, [seccionesFiltradas, productoSeleccionado, data]);
 
   return (
     <section style={containerStyle(isMobile)}>

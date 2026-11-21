@@ -46,7 +46,7 @@ def ingredientes_en_minimo():
         VGIngrediente.objects.exclude(id__in=HIDDEN_INGREDIENT_IDS)
         .filter(stock_minimo__gt=0, stock_actual__lte=F('stock_minimo'))
         .order_by('nombre')
-        .values('nombre', 'unidad_medida', 'stock_actual', 'stock_minimo')
+        .values('id', 'nombre', 'unidad_medida', 'stock_actual', 'stock_minimo', 'categoria__nombre')
     )
 
 

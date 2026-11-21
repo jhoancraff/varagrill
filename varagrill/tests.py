@@ -8413,3 +8413,98 @@ class MermaIngredientesTests(TestCase):
         self.assertEqual(enviar({'action': 'actualizar', 'ids': [], 'descuenta_merma': True}).status_code, 400)
         self.assertEqual(enviar({'action': 'actualizar', 'ids': ['x'], 'descuenta_merma': True}).status_code, 400)
         self.assertEqual(enviar({'action': 'actualizar', 'ids': [999999], 'descuenta_merma': True}).status_code, 400)
+
+
+class StockMinimoPantallaTests(TestCase):
+    """Inventario -> Stock minimo: el mismo reporte del aviso de Telegram, con lo que falta y el estado de cada uno."""
+
+    URL = '/api/admin/stock-minimo/'
+
+    def setUp(self):
+        admin_role, _ = VGRol.objects.get_or_create(nombre_role='Administrador')
+        cajera_role, _ = VGRol.objects.get_or_create(nombre_role='Cajera')
+        self.admin = VGUsuario.objects.create_superuser(
+            username='sm_admin', password='claveAdmin123', cedula='96500001', email='sm_admin@varagrill.test', id_role=admin_role,
+        )
+        self.cajera = VGUsuario.objects.create_user(
+            username='sm_cajera', password='claveCajera123', cedula='96500002', email='sm_cajera@varagrill.test', id_role=cajera_role,
+        )
+        self.client.force_login(self.admin)
+
+    def _ingrediente(self, nombre, stock, minimo, unidad='g', **extra):
+        from varagrill.models import VGIngrediente
+        return VGIngrediente.objects.create(
+            nombre=nombre, unidad_medida=unidad, stock_actual=stock, stock_minimo=minimo, costo_unitario='0.01', **extra,
+        )
+
+    def test_solo_el_administrador_lo_ve_y_solo_por_get(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.client.force_login(self.cajera)
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.get(self.URL).status_code, 200)
+        self.assertEqual(self.client.post(self.URL).status_code, 405)
+
+    def test_trae_los_mismos_ingredientes_que_el_aviso_de_telegram_en_el_mismo_orden(self):
+        from varagrill import alertas_stock
+        self._ingrediente('Sal SM', '500', '500')            # justo en el minimo
+        self._ingrediente('Pollo SM', '800', '2000')         # por debajo
+        self._ingrediente('Arroz SM', '900', '500')          # por encima: no entra
+        self._ingrediente('Sin minimo SM', '0', '0')         # sin minimo definido: no entra
+        self._ingrediente('Negativo SM', '-1', '5', unidad='unidad')
+        self._ingrediente('Oculto SM', '1', '9', id=285)     # ingrediente oculto del sistema: no entra
+        datos = self.client.get(self.URL).json()
+        self.assertTrue(datos['ok'])
+        nombres = [i['nombre'] for i in datos['ingredientes']]
+        self.assertEqual(nombres, ['Negativo SM', 'Pollo SM', 'Sal SM'])
+        self.assertEqual(nombres, [i['nombre'] for i in alertas_stock.ingredientes_en_minimo()])
+
+    def test_calcula_lo_que_falta_y_el_estado_de_cada_ingrediente(self):
+        self._ingrediente('Pollo SM', '800', '2000', categoria=None)
+        self._ingrediente('Sal SM', '500', '500')
+        self._ingrediente('Agotado SM', '0', '100')
+        self._ingrediente('Negativo SM', '-40', '100')
+        por_nombre = {i['nombre']: i for i in self.client.get(self.URL).json()['ingredientes']}
+        self.assertEqual((por_nombre['Pollo SM']['estado'], por_nombre['Pollo SM']['faltante']), ('bajo', '1200.00'))
+        self.assertEqual((por_nombre['Sal SM']['estado'], por_nombre['Sal SM']['faltante']), ('en_minimo', '0.00'))
+        self.assertEqual((por_nombre['Agotado SM']['estado'], por_nombre['Agotado SM']['faltante']), ('sin_stock', '100.00'))
+        # En negativo falta lo que haga falta para llegar al minimo: el minimo mas lo que se debe.
+        self.assertEqual((por_nombre['Negativo SM']['estado'], por_nombre['Negativo SM']['faltante']), ('sin_stock', '140.00'))
+        self.assertEqual(por_nombre['Pollo SM']['unidad'], 'g')
+
+    def test_el_resumen_cuenta_cada_estado_y_trae_la_categoria(self):
+        from varagrill.models import VGCategoriaIngrediente
+        carnes = VGCategoriaIngrediente.objects.create(nombre='Carnes SM')
+        self._ingrediente('Pollo SM', '800', '2000', categoria=carnes)
+        self._ingrediente('Sal SM', '500', '500')
+        self._ingrediente('Agotado SM', '0', '100')
+        datos = self.client.get(self.URL).json()
+        self.assertEqual(datos['resumen'], {'total': 3, 'sin_stock': 1, 'bajo': 1, 'en_minimo': 1})
+        pollo = next(i for i in datos['ingredientes'] if i['nombre'] == 'Pollo SM')
+        self.assertEqual(pollo['categoria'], 'Carnes SM')
+        self.assertEqual(next(i for i in datos['ingredientes'] if i['nombre'] == 'Sal SM')['categoria'], '')
+
+    def test_sin_ingredientes_en_su_minimo_la_lista_viene_vacia(self):
+        self._ingrediente('Arroz SM', '900', '500')
+        datos = self.client.get(self.URL).json()
+        self.assertEqual(datos['ingredientes'], [])
+        self.assertEqual(datos['resumen']['total'], 0)
+
+    def test_informa_como_le_fue_al_aviso_de_telegram(self):
+        from datetime import timedelta
+        from varagrill.models import VGEjecucionAlertaStock
+        hoy = timezone.localdate()
+        self.assertIsNone(self.client.get(self.URL).json()['ultimo_aviso'])
+
+        VGEjecucionAlertaStock.objects.create(fecha=hoy - timedelta(days=1), estado='enviado', cantidad_ingredientes=2, intentos=1)
+        aviso = self.client.get(self.URL).json()['ultimo_aviso']
+        self.assertEqual((aviso['estado'], aviso['es_de_hoy']), ('enviado', False))
+
+        VGEjecucionAlertaStock.objects.create(
+            fecha=hoy, estado='fallido', cantidad_ingredientes=3, intentos=2, ultimo_error='sin internet',
+        )
+        aviso = self.client.get(self.URL).json()['ultimo_aviso']
+        self.assertEqual((aviso['estado'], aviso['es_de_hoy'], aviso['intentos']), ('fallido', True, 2))
+        self.assertEqual(aviso['ultimo_error'], 'sin internet')
+        self.assertEqual(aviso['estado_label'], 'Fallido')

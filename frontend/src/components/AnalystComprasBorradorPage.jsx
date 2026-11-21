@@ -6,6 +6,7 @@ import useToast from '../hooks/useToast';
 import useUnsavedChangesGuard from '../hooks/useUnsavedChangesGuard';
 import useConfirmacionesFecha from '../hooks/useConfirmacionesFecha';
 import { formatearFecha, hoyIso } from '../utils/fechas';
+import { guardarSugeridos, leerSugeridos, limpiarSugeridos } from '../utils/comprasSugeridas';
 
 const emptyItemForm = { nombre: '', unidad: 'g', cantidad: '', precio_total: '' };
 // fecha_factura: el dia en que de verdad se hizo la compra (hoy por defecto; se puede cambiar si se cargo con atraso).
@@ -41,6 +42,8 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const { confirmarFecha, modales } = useConfirmacionesFecha();
   const [summary, setSummary] = useState(null);
+  // Ingredientes por reponer que mando la pantalla de Stock minimo: atajos para llenar la linea (ver comprasSugeridas.js).
+  const [sugeridos, setSugeridos] = useState(() => leerSugeridos());
   // El borrador en sí ya queda guardado en el servidor apenas se agrega cada
   // ingrediente (ver el docstring de arriba) — lo único que se perdería si el
   // usuario sale sin darse cuenta es lo que esté a medio escribir: una fila
@@ -87,6 +90,25 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
     [inventory, nameQuery],
   );
 
+  // Los que todavia no estan en la compra: al agregar uno, deja de aparecer en la lista.
+  const pendientesDeReponer = useMemo(() => {
+    const enLaCompra = new Set((borrador.detalles || []).map((detalle) => detalle.ingrediente_id));
+    return sugeridos.filter((item) => !enLaCompra.has(item.id));
+  }, [sugeridos, borrador.detalles]);
+
+  const usarSugerido = (item) => {
+    setItemForm((current) => ({
+      ...current,
+      nombre: item.nombre,
+      cantidad: Number(item.faltante) > 0 ? item.faltante : '',
+    }));
+  };
+
+  const quitarListaSugerida = () => {
+    limpiarSugeridos();
+    setSugeridos([]);
+  };
+
   const handleSelectExisting = (item) => {
     setItemForm((current) => ({ ...current, nombre: item.nombre }));
     setIsNameFocused(false);
@@ -119,6 +141,12 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
         throw new Error(data.message || 'No se pudo agregar el ingrediente al borrador.');
       }
       setBorrador(data.borrador);
+      const nombreAgregado = itemForm.nombre.trim().toLowerCase();
+      setSugeridos((actuales) => {
+        const restantes = actuales.filter((item) => item.nombre.trim().toLowerCase() !== nombreAgregado);
+        guardarSugeridos(restantes);
+        return restantes;
+      });
       setItemForm(emptyItemForm);
       markClean({ itemForm: emptyItemForm, lote });
       if (!exactMatch) {
@@ -282,6 +310,25 @@ function AnalystComprasBorradorPage({ isMobile, onBack }) {
         <div style={emptyStyle}>Cargando...</div>
       ) : (
         <>
+          {pendientesDeReponer.length > 0 ? (
+            <section style={panelStyle} aria-label="Ingredientes por reponer">
+              <div style={sectionTitleStyle}>Por reponer (stock mínimo)</div>
+              <p style={hintStyle}>
+                Pulsa un ingrediente para llenar su nombre y la cantidad que falta para llegar al mínimo; luego escribe el
+                precio pagado. Cada uno sale de esta lista cuando lo agregas a la compra.
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {pendientesDeReponer.map((item) => (
+                  <button key={item.id} type="button" onClick={() => usarSugerido(item)} style={sugeridoChipStyle}>
+                    {item.nombre}
+                    {Number(item.faltante) > 0 ? ` · faltan ${Number(item.faltante).toLocaleString('es-ES', { maximumFractionDigits: 2 })} ${item.unidad}` : ''}
+                  </button>
+                ))}
+                <button type="button" onClick={quitarListaSugerida} style={smallSecondaryButtonStyle}>Quitar lista</button>
+              </div>
+            </section>
+          ) : null}
+
           <section style={panelStyle}>
             <div style={sectionTitleStyle}>Agregar ingrediente</div>
             <form onSubmit={handleAddItem} style={itemFormStyle(isMobile)}>
@@ -558,6 +605,7 @@ const primaryButtonStyle = { border: 'none', borderRadius: 999, padding: '10px 1
 const secondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '10px 16px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', width: 'fit-content' };
 const dangerButtonStyle = { border: '1px solid var(--vg-f-ff7e7e-a400)', borderRadius: 999, padding: '6px 12px', background: 'rgba(145,33,33,0.25)', color: 'var(--vg-f-ffd3d3)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 const smallActionButtonStyle = { border: 'none', borderRadius: 999, padding: '6px 12px', background: 'linear-gradient(90deg, #1f7a3f 0%, #34d399 100%)', color: '#04140a', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
+const sugeridoChipStyle = { border: '1px solid rgba(var(--vg-accent-rgb), 0.35)', borderRadius: 999, padding: '7px 14px', background: 'rgba(var(--vg-accent-rgb), 0.1)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 13 };
 const smallSecondaryButtonStyle = { border: '1px solid rgba(var(--vg-ink), 0.14)', borderRadius: 999, padding: '6px 12px', background: 'rgba(var(--vg-ink), 0.04)', color: 'var(--vg-text-strong)', fontWeight: 700, cursor: 'pointer', fontSize: 12 };
 
 export default AnalystComprasBorradorPage;

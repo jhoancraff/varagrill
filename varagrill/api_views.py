@@ -1047,8 +1047,11 @@ def reporte_margen_ganancia_view(request):
     reporte_movimiento_productos_view, para poder rastrear cualquier fila
     hasta el documento de venta real.
 
-    Solo incluye pedidos pagados (mismo criterio de "venta real" que el resto
-    de los reportes de contabilidad).
+    Solo incluye ventas COBRADAS, con la misma base que el estado de resultados para que los dos den el
+    mismo costo de ventas: las lineas de las notas de entrega pagadas o abonadas parcialmente, por la fecha
+    de emision de la nota. Una nota pendiente de pago no entra hasta que se abona; una nota abonada a
+    medias cuenta solo la parte cobrada (ingreso, costo y cantidades en la misma proporcion; la fila lo
+    indica en `fraccion_cobrada`).
     """
     if request.method != 'GET':
         return _auth_response({'ok': False, 'message': 'Metodo no permitido.'}, status=405)
@@ -1079,17 +1082,21 @@ def armar_margen_ganancia_detallado(desde, hasta):
     Los datos de reporte_margen_ganancia_view para el rango [desde, hasta] (fechas): una seccion por
     producto con sus ventas linea por linea y los totales del periodo. Lo usan la pantalla (JSON) y el
     PDF del reporte, para que los dos muestren exactamente los mismos numeros. Ver el docstring de la
-    vista para el criterio de costo (historico, congelado al cobrar).
+    vista para el criterio de costo (historico, congelado al cobrar) y de que ventas entran (las cobradas,
+    igual que el estado de resultados).
     """
-    detalles = (
-        VGDetallePedido.objects
+    # Misma base que reporte_estado_resultados_view: notas pagadas o abonadas parcialmente, por fecha de
+    # emision. Un pedido queda "pagado" apenas se cobra en caja aunque el dinero de la nota aun no se haya
+    # abonado; contar esos pedidos hacia que este reporte diera mas costo que el estado de resultados.
+    notas_cobradas = (
+        VGNotaEntrega.objects
         .filter(
-            pedido__estado='pagado',
-            pedido__fecha_creacion__date__gte=desde,
-            pedido__fecha_creacion__date__lte=hasta,
+            fecha_emision__date__gte=desde,
+            fecha_emision__date__lte=hasta,
+            estado__in=['pagada', 'abonada_parcial'],
         )
-        .select_related('producto__categoria', 'pedido')
-        .prefetch_related('pedido__notas_entrega')
+        .order_by('fecha_emision', 'id')
+        .prefetch_related('pedidos__detalles__producto__categoria')
     )
 
     # Costos de ingredientes/preparaciones ACTUALES — solo se usan como ultimo
@@ -1107,7 +1114,16 @@ def armar_margen_ganancia_detallado(desde, hasta):
     cien = Decimal('100')
 
     secciones_por_producto = {}
-    for detalle in detalles:
+    lineas_cobradas = []
+    for nota in notas_cobradas:
+        # Una nota abonada a medias cuenta solo la parte cobrada de la venta: el costo, la misma parte.
+        monto_cobrado = nota.total - nota.saldo_pendiente
+        fraccion_cobrada = min(Decimal('1'), monto_cobrado / nota.total) if nota.total > 0 else Decimal('1')
+        for pedido in nota.pedidos.all():
+            for detalle in pedido.detalles.all():
+                lineas_cobradas.append((nota, fraccion_cobrada, pedido, detalle))
+
+    for nota, fraccion_cobrada, pedido, detalle in lineas_cobradas:
         producto = detalle.producto
         seccion = secciones_por_producto.setdefault(producto.id, {
             'producto_id': producto.id,
@@ -1123,7 +1139,7 @@ def armar_margen_ganancia_detallado(desde, hasta):
         })
 
         peso_factor = (detalle.peso_gramos / Decimal('1000')) if detalle.peso_gramos else Decimal('1')
-        cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor
+        cantidad_equivalente = Decimal(detalle.cantidad) * peso_factor * fraccion_cobrada
 
         if detalle.costo_unitario_venta is not None:
             costo_estimado = False
@@ -1155,7 +1171,7 @@ def armar_margen_ganancia_detallado(desde, hasta):
 
         costo_con_margen_unitario = costo_unitario * (Decimal('1') + margen_pct / cien)
 
-        ingreso_linea = detalle.subtotal
+        ingreso_linea = detalle.subtotal * fraccion_cobrada
         costo_linea = costo_unitario * cantidad_equivalente
         costo_con_margen_linea = costo_con_margen_unitario * cantidad_equivalente
         ganancia_linea = ingreso_linea - costo_con_margen_linea
@@ -1169,15 +1185,15 @@ def armar_margen_ganancia_detallado(desde, hasta):
         seccion['total_costo'] += costo_linea
         seccion['total_costo_con_margen'] += costo_con_margen_linea
 
-        notas_entrega_pedido = list(detalle.pedido.notas_entrega.all())
-        nota_entrega = notas_entrega_pedido[0] if notas_entrega_pedido else None
-
         seccion['filas'].append({
             'detalle_id': detalle.id,
             'pedido_id': detalle.pedido_id,
-            'nota_entrega_id': nota_entrega.id if nota_entrega else None,
-            'nota_entrega_codigo': nota_entrega.codigo if nota_entrega else None,
-            'fecha_hora': timezone.localtime(detalle.pedido.fecha_creacion).isoformat(),
+            'nota_entrega_id': nota.id,
+            'nota_entrega_codigo': nota.codigo,
+            # Cuando se cobro: la fecha de emision de la nota, la misma por la que se filtra el rango.
+            'fecha_hora': timezone.localtime(nota.fecha_emision).isoformat(),
+            'cobro_parcial': fraccion_cobrada < 1,
+            'fraccion_cobrada': str(fraccion_cobrada.quantize(Decimal('0.0001'))),
             'cantidad': str(detalle.cantidad),
             'peso_gramos': str(detalle.peso_gramos) if detalle.peso_gramos is not None else None,
             'unidad': 'kg' if producto.venta_por_peso else 'unidad',

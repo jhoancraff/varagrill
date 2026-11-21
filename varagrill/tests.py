@@ -3257,14 +3257,28 @@ class MargenDetalladoReporteTests(TestCase):
             nombre='Plato con subreceta MD test', categoria=categoria, precio_venta='4.00', subreceta_vinculada=sub,
         )
         self.client.force_login(self.admin)
+        self.metodo = VGMetodoPago.objects.create(nombre='Efectivo MD', moneda='USD', es_efectivo=True)
+        _set_tasa_actual('100.0000')  # sin salir a internet a buscar la tasa del BCV
 
-    def venta(self, producto, cantidad=1, costo=None, margen=None, precio='4.00'):
-        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='local', estado='pagado', subtotal=precio, total=precio)
-        return VGDetallePedido.objects.create(
+    def venta(self, producto, cantidad=1, costo=None, margen=None, precio='4.00', estado_nota='pagada', saldo='0'):
+        """
+        Una venta cobrada: el pedido ya esta 'pagado' y tiene su nota de entrega. El reporte solo cuenta las
+        notas pagadas o abonadas (`estado_nota` y `saldo` permiten probar las pendientes, anuladas y a medias).
+        """
+        total = Decimal(precio) * cantidad
+        pedido = VGPedido.objects.create(usuario=self.admin, tipo_pedido='local', estado='pagado', subtotal=total, total=total)
+        detalle = VGDetallePedido.objects.create(
             pedido=pedido, producto=producto, cantidad=cantidad, precio_unitario=precio, estado='entregado',
             costo_unitario_venta=Decimal(costo) if costo is not None else None,
             margen_produccion_pct_venta=Decimal(margen) if margen is not None else None,
         )
+        nota = VGNotaEntrega.objects.create(
+            metodo_pago=self.metodo, total=total, saldo_pendiente=Decimal(saldo), estado=estado_nota,
+            tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        nota.pedidos.set([pedido])
+        detalle.nota = nota
+        return detalle
 
     def reporte(self, desde=None, hasta=None):
         hoy = timezone.localdate().isoformat()
@@ -3338,7 +3352,7 @@ class MargenDetalladoReporteTests(TestCase):
     def test_respeta_las_fechas_elegidas(self):
         detalle = self.venta(self.receta_producto, costo='1.47', margen='50')
         ayer = timezone.now() - timedelta(days=3)
-        VGPedido.objects.filter(pk=detalle.pedido_id).update(fecha_creacion=ayer)
+        VGNotaEntrega.objects.filter(pk=detalle.nota.pk).update(fecha_emision=ayer)
         hoy = timezone.localdate()
         self.assertEqual(self.reporte()['total_lineas'], 0)
         rango = self.reporte(desde=(hoy - timedelta(days=5)).isoformat(), hasta=hoy.isoformat())
@@ -3358,6 +3372,65 @@ class MargenDetalladoReporteTests(TestCase):
         self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))
         self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))
         self.assertFalse(f['margen_estimado'])
+
+
+    # --- solo ventas cobradas, igual que el estado de resultados -------------------------------------------------
+
+    def test_una_nota_pendiente_de_pago_no_cuenta_hasta_que_se_abona(self):
+        self.venta(self.receta_producto, cantidad=2, costo='1.47', margen='50', estado_nota='pendiente_pago', saldo='8.00')
+        data = self.reporte()
+        self.assertEqual(data['total_lineas'], 0)
+        self.assertEqual(Decimal(data['totales']['costo_con_margen_total']), Decimal('0'))
+
+    def test_una_nota_anulada_no_cuenta(self):
+        self.venta(self.receta_producto, costo='1.47', margen='50', estado_nota='anulada')
+        self.assertEqual(self.reporte()['total_lineas'], 0)
+
+    def test_una_nota_abonada_a_medias_cuenta_la_parte_cobrada(self):
+        # 2 platos a 4.00 = 8.00; se abonaron 4.00 (la mitad): entra la mitad del ingreso, del costo y de las unidades.
+        detalle = self.venta(
+            self.receta_producto, cantidad=2, costo='1.47', margen='50', estado_nota='abonada_parcial', saldo='4.00',
+        )
+        data = self.reporte()
+        f = self.fila(data, self.receta_producto)
+        self.assertTrue(f['cobro_parcial'])
+        self.assertEqual(Decimal(f['fraccion_cobrada']), Decimal('0.5'))
+        self.assertEqual(Decimal(f['ingreso']), Decimal('4.00'))
+        self.assertEqual(Decimal(f['costo']), Decimal('0.98'))                 # 0.98 x 2 x 0.5
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('1.47'))     # 1.47 x 2 x 0.5
+        self.assertEqual(Decimal(f['costo_unitario']), Decimal('0.98'))       # el costo de UN plato no se toca
+        self.assertEqual(f['nota_entrega_id'], detalle.nota.id)
+        seccion = data['secciones'][0]
+        self.assertEqual(Decimal(seccion['total_unidades']), Decimal('1.00'))
+        self.assertEqual(Decimal(data['totales']['ingreso_total']), Decimal('4.00'))
+        self.assertEqual(Decimal(data['totales']['ganancia_monto']), Decimal('2.53'))   # 4.00 - 1.47
+
+    def test_una_nota_pagada_cuenta_completa(self):
+        self.venta(self.receta_producto, cantidad=2, costo='1.47', margen='50')
+        f = self.fila(self.reporte(), self.receta_producto)
+        self.assertFalse(f['cobro_parcial'])
+        self.assertEqual(Decimal(f['fraccion_cobrada']), Decimal('1'))
+        self.assertEqual(Decimal(f['costo_con_margen']), Decimal('2.94'))
+
+    def test_el_rango_se_filtra_por_la_fecha_de_emision_de_la_nota(self):
+        # El pedido se hizo ayer pero la nota se emitio hoy: cuenta hoy, igual que en el estado de resultados.
+        detalle = self.venta(self.receta_producto, costo='1.47', margen='50')
+        VGPedido.objects.filter(pk=detalle.pedido_id).update(fecha_creacion=timezone.now() - timedelta(days=3))
+        self.assertEqual(self.reporte()['total_lineas'], 1)
+
+    def test_el_costo_total_coincide_con_el_estado_de_resultados(self):
+        # Con notas pagadas, pendientes y abonadas a medias, las dos pantallas dan el mismo costo de ventas.
+        self.venta(self.receta_producto, cantidad=3, costo='1.47', margen='50')
+        self.venta(self.sub_producto, cantidad=1, costo='0.98', margen='50')
+        self.venta(self.receta_producto, cantidad=2, costo='1.47', margen='50', estado_nota='pendiente_pago', saldo='8.00')
+        self.venta(self.receta_producto, cantidad=2, costo='1.47', margen='50', estado_nota='abonada_parcial', saldo='4.00')
+        self.venta(self.sub_producto, cantidad=1, costo='0.98', margen='50', estado_nota='anulada')
+        hoy = timezone.localdate().isoformat()
+        estado = self.client.get(f'/api/admin/reportes/estado-resultados/?desde={hoy}&hasta={hoy}').json()
+        margen = self.reporte()
+        self.assertEqual(estado['costo_ventas'], margen['totales']['costo_con_margen_total'])
+        # 3 platos (4.41) + subreceta (1.47) + la mitad de 2 platos (1.47) = 7.35
+        self.assertEqual(estado['costo_ventas'], '7.35')
 
 
 class ReporteInventarioPdfTests(TestCase):
@@ -4774,6 +4847,13 @@ class ReporteMargenPorPlatoPdfTests(TestCase):
             pedido=pedido, producto=producto, cantidad=cantidad, precio_unitario=Decimal(precio), estado='entregado',
             costo_unitario_venta=Decimal(costo), margen_produccion_pct_venta=Decimal('0'),
         )
+        # El reporte solo cuenta ventas cobradas: el pedido tiene su nota de entrega pagada.
+        metodo, _ = VGMetodoPago.objects.get_or_create(nombre='Efectivo MPDF', defaults={'moneda': 'USD', 'es_efectivo': True})
+        nota = VGNotaEntrega.objects.create(
+            metodo_pago=metodo, total=subtotal, saldo_pendiente=Decimal('0'), estado='pagada',
+            tasa_cambio_referencia=Decimal('100.0000'),
+        )
+        nota.pedidos.set([pedido])
 
     def pedir(self, usuario=None, **params):
         from unittest import mock

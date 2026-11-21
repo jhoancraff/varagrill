@@ -158,7 +158,7 @@ def generar_pdf_margen_por_plato(secciones, totales, total_lineas, desde, hasta,
         else f'Ventas del {desde.strftime("%d/%m/%Y")} al {hasta.strftime("%d/%m/%Y")}'
     )
     estimado = any(s['tiene_costo_estimado'] or s['tiene_margen_estimado'] for s in secciones)
-    subtitulo = rango + ' · Costo histórico, congelado al cobrar, más el margen de producción'
+    subtitulo = rango + ' · Solo ventas cobradas (notas pagadas o abonadas) · Costo histórico, congelado al cobrar, más el margen de producción'
     if estimado:
         subtitulo += ' · * estimado con el costo de la receta o el margen de producción de hoy (venta anterior al costo histórico)'
 

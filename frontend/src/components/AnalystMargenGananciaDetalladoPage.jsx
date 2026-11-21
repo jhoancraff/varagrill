@@ -149,6 +149,10 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
 
       <div>
         <h2 style={titleStyle(isMobile)}>Detalles de margen de ganancia por plato</h2>
+        <p style={subtitleStyle}>
+          Solo ventas cobradas, igual que el Estado de resultados: notas de entrega pagadas o abonadas, por su fecha de
+          emisión. Una nota pendiente de pago no entra hasta que se abona, y una abonada a medias cuenta la parte cobrada.
+        </p>
       </div>
 
       <RangoFechas
@@ -277,7 +281,17 @@ function AnalystMargenGananciaDetalladoPage({ isMobile, onBack }) {
                           <div style={{ ...cellStyle, fontWeight: 700, color: 'var(--vg-f-8fffb0)' }}>{formatCantidadFila(fila)}</div>
                           <div style={cellStyle}>{formatHora(fila.fecha_hora)}</div>
                           <div style={cellStyle}>#{fila.pedido_id}</div>
-                          <div style={cellStyle}>{fila.nota_entrega_codigo || '—'}</div>
+                          <div style={cellStyle}>
+                            {fila.nota_entrega_codigo || '—'}
+                            {fila.cobro_parcial ? (
+                              <span
+                                style={estimadoBadgeInlineStyle}
+                                title="Nota abonada a medias: el ingreso, el costo y la cantidad cuentan solo la parte cobrada, igual que en el Estado de resultados."
+                              >
+                                cobrado {Math.round(Number(fila.fraccion_cobrada) * 100)}%
+                              </span>
+                            ) : null}
+                          </div>
                           <div style={cellStyle}>
                             ${formatMonto(fila.ingreso)}
                             <BsAmount amountUsd={fila.ingreso} tasa={tasaCambio} />
